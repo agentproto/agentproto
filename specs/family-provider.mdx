@@ -1,0 +1,50 @@
+---
+title: Provider family
+description:
+  The PROVIDER family — AIP-30 abstract supertype plus its concrete
+  subtypes (CLI, and the planned HTTP/MCP/SDK). Catalog page that
+  groups related AIPs whose ordinal proximity isn't enforced by
+  monotonic numbering. The family is the navigation surface; numbers
+  are identifiers.
+---
+
+# Provider family
+
+The PROVIDER family is the layer that **binds abstract TOOL contracts
+to concrete backends**. AIP-30 defines the supertype every provider
+shares (identity, kind, install, auth, sandbox primitive, region,
+policy tags, multi-tool `implements[]`); each subtype AIP adds
+kind-specific fields on top.
+
+This page exists because AIP numbering is monotonic at PR-open time
+(per [AIP-1](/docs/aip-1)) — the family's members may not end up
+adjacent in the registry, and that's fine. The family page is the
+navigation surface; numbers are identifiers.
+
+<ProviderFamily />
+
+## How members compose
+
+Each subtype is a specialisation: it inherits the universal frontmatter
+from AIP-30 PROVIDER and adds its own kind-specific block.
+
+| Layer | Universal | Subtype-specific |
+|---|---|---|
+| Identity | `id`, `name`, `description`, `version`, `kind` | — |
+| Tool dispatch | `implements[]` (per-tool ref + mapping + narrowing) | per-kind `metadata.<kind>` (argv / endpoint / mcp_tool_name / function_ref) |
+| Lifecycle | `install`, `version_check` | (CLI/SDK use; HTTP/MCP/builtin omit) |
+| Auth | `auth` (state, login, refresh, expiry) | — |
+| Sandbox | `network.egress` | CLI adds `sandbox.fs/exec/tty` and `output.exit_codes/json_flag` |
+| Routing policy | `region`, `policy_tags`, `cost_override` | — |
+
+Adding a new subtype (e.g. a future `kind: gRPC`) means writing a new
+AIP that references AIP-30 in its `requires:` chain and declares the
+gRPC-specific fields. The supertype doesn't grow.
+
+## See also
+
+- [AIP-30 — PROVIDER.md](/docs/aip-30) — abstract supertype
+- [AIP-29 — CLI.md](/docs/aip-29) — `kind: cli` specialisation
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts the family
+  implements
+- [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above TOOL

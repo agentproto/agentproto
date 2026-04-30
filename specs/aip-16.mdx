@@ -1,0 +1,358 @@
+---
+title: "AIP-16: IO.md — shared input/output schema blocks"
+description: A composable schema block defining `inputs`, `outputs`, `inputsFiles`, and `outputsFiles` — the data-shape primitives reused by every manifest format that needs to declare what flows in and out of a runnable unit.
+aip: 16
+status: Draft
+type: Schema
+created: 2026-04-29
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+resources: ./resources/aip-16/draft
+discussions-to: https://github.com/agentproto/specs/discussions/16
+---
+
+| Field | Value |
+|---|---|
+| AIP | 16 |
+| Title | IO.md — shared input/output schema blocks |
+| Status | Draft |
+| Type | Schema |
+| Domain | io.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Resources | [`./resources/aip-16`](./resources/aip-16/draft) — [`SKILL.md`](./resources/aip-16/draft/skills/use-io-blocks/SKILL.md), [`ADAPTER.md`](./resources/aip-16/draft/ADAPTER.md), [`IO.schema.json`](./resources/aip-16/draft/IO.schema.json) |
+
+## Abstract
+
+This AIP defines a small set of **schema blocks** —
+`inputs`, `outputs`, `inputsFiles`, `outputsFiles` — and the standard
+entry-point function **`defineIO(...)`** that consumes them. The
+blocks are the data-shape primitives any manifest format MUST use
+when it needs to declare what arguments a runnable unit accepts,
+what result it produces, and what workspace files flow in or out
+around the run.
+
+This is a **schema-block AIP**, not a file format users author
+directly. There is no `IO.md` file checked into a repo. The blocks
+are referenced by other manifest specs (TOOL.md
+[AIP-14](/docs/aip-14), WORKFLOW.md [AIP-15](/docs/aip-15), and
+future formats like PROCEDURE.md, AGENT.md) via JSON Schema `$ref`.
+Naming this spec `IO.md` is convention so it sits alongside the
+other agentproto building blocks; the deliverable is the schema +
+contract, not a markdown file.
+
+## Motivation
+
+Three classes of manifests already need to say "this is what comes
+in, this is what goes out":
+
+- **TOOL.md** — argument shape + return shape of one tool call.
+- **WORKFLOW.md** — workflow-level inputs/outputs + per-run
+  workspace files staged in / synced out.
+- Forthcoming: **PROCEDURE.md**, **AGENT.md**, sub-workflow
+  fragments, etc.
+
+Each spec re-declaring the same fields invites drift: one tightens
+`inputsFiles` semantics, another doesn't, schemas diverge, host
+implementations branch. Extracting the blocks into a single spec
+gives every manifest format one source of truth for "what does I/O
+look like."
+
+The blocks are pure data-shape — they say what a runnable unit
+*accepts* and *produces*. They deliberately do NOT cover *how* it
+runs (isolation, env, network — that's runtime concerns), *who*
+gets to run it (governance, approval), or *when* it runs (triggers).
+Those are separate AIPs, separately reviewable.
+
+## Design principles
+
+1. **Composable, not inheritable.** The blocks are JSON Schema
+   `$def`s and `$ref` targets. Manifests inline-reference each
+   block; they don't extend an "IO base class." Schema-level
+   composition only.
+
+2. **Pure data-shape.** Inputs/outputs describe what flows; not
+   when, not where, not who. Other AIPs cover those.
+
+3. **File contract is a peer of structured I/O, not a sub-case.**
+   Some runnables only have structured args; some only have files;
+   most have both. The four fields are independent — declaring
+   `inputsFiles` does not require a non-empty `inputs`.
+
+4. **Host stages files; bodies use plain paths.** Bodies never
+   import a host-specific filesystem provider. The host materialises
+   declared files at known paths under a per-run scratch root and
+   syncs declared outputs back. Same body, any host.
+
+5. **One reserved input field.** `_workflowFsRoot` is the only
+   reserved key in the structured input. Hosts MUST inject it when
+   `inputsFiles` or `outputsFiles` is non-empty; bodies access it
+   via `inputData._workflowFsRoot`.
+
+## Specification
+
+### The four blocks
+
+A manifest that imports IO declares any subset of:
+
+| Block | Type | Purpose |
+|---|---|---|
+| `inputs` | JSON Schema (Draft 2020-12) | Structured arguments. Validated by the host before the body runs. |
+| `outputs` | JSON Schema (Draft 2020-12) | Structured success-case return. Errors are out-of-band per the importing manifest's error model. |
+| `inputsFiles` | object | Map `<key>` → `{ path, mode?, contentType? }`. The host stages each from the workspace at `path` to the per-run scratch root at `<fsRoot>/<key>` BEFORE the body runs. |
+| `outputsFiles` | object | Map `<key>` → `{ path, mode?, contentType? }`. The host syncs each from `<fsRoot>/<key>` to the workspace at `path` AFTER the body completes. `path` supports interpolation tokens (see [Path interpolation](#path-interpolation)). |
+
+Importing manifests MAY restrict the four blocks (e.g. forbid
+`inputsFiles` for stateless tools), but MUST NOT add fields named
+`inputs`, `outputs`, `inputsFiles`, or `outputsFiles` with different
+semantics.
+
+### `inputsFiles` / `outputsFiles` entry shape
+
+```yaml
+inputsFiles:
+  <key>:                       # arbitrary author-chosen identifier
+    path: "<workspace-path>"   # required — workspace-relative
+    mode: "ro" | "rw"          # optional — convention only, not enforced
+    contentType: "<mime>"      # optional — informational
+
+outputsFiles:
+  <key>:
+    path: "<workspace-path>"   # required — supports interpolation
+    mode: "ro" | "rw"          # optional
+    contentType: "<mime>"      # optional
+```
+
+### File contract lifecycle
+
+```
+1. Run start
+     ↓
+2. Host creates a per-run scratch root (a fresh temp dir, unique per runId).
+     ↓
+3. For each (key, entry) in inputsFiles:
+     read workspace:<entry.path> → write <fsRoot>/<key>
+     ↓
+4. Host injects the scratch root path into the structured input as
+   the reserved field `_workflowFsRoot: string`.
+     ↓
+5. Body runs. It reads/writes at `<fsRoot>/<key>` for each declared
+   file. It MAY also create scratch files inside `<fsRoot>/` that
+   aren't declared in outputsFiles — those are discarded at run end.
+     ↓
+6. For each (key, entry) in outputsFiles:
+     if <fsRoot>/<key> exists → write workspace:<entry.path>
+     (path interpolation: <runId>, <workflowId>, <isoDate>)
+     ↓
+7. Host removes the scratch root (best effort).
+     ↓
+8. Run end
+```
+
+### Reserved input field: `_workflowFsRoot`
+
+When `inputsFiles` or `outputsFiles` is non-empty, the host MUST
+inject `_workflowFsRoot: string` into the structured input before
+the body's input validation runs. The body's `inputs` schema MUST
+allow this field (typically as an optional `string`).
+
+Bodies access it via `inputData._workflowFsRoot` (or the language-
+local equivalent). Hosts MAY also expose the path through host-
+specific channels (env var, request context) but the canonical
+access is via the structured input — this is what makes bodies
+portable across runtimes.
+
+The name is fixed (`_workflowFsRoot`) to keep the contract uniform
+across importing manifests; even a TOOL.md tool that declares
+`inputsFiles` injects under the same key. The `workflow` prefix is
+historical and stays for compatibility with the first
+implementations.
+
+### Path interpolation
+
+`outputsFiles.<key>.path` accepts these tokens, replaced by the host
+at sync time:
+
+| Token | Replaced with |
+|---|---|
+| `<runId>` | The current run's identifier. |
+| `<workflowId>` / `<toolId>` | The importing manifest's `id`. |
+| `<isoDate>` | Today's date in `YYYY-MM-DD` (UTC). |
+
+`inputsFiles.<key>.path` MAY also use these tokens for runs that
+read from per-run-named files (rare).
+
+Hosts MAY support additional tokens; portable manifests SHOULD stay
+within the listed set.
+
+### Concurrency
+
+Each run gets its own private scratch root keyed by the importing
+manifest's run identifier. Concurrent runs of the same unit MUST NOT
+see each other's files through the contract. Bodies that need
+cross-run state MUST use a tool, not file state.
+
+### Error handling
+
+- **Missing input file.** If `inputsFiles.<key>` references a
+  workspace path that doesn't exist, the host MUST throw before the
+  run starts. The audit log records the failure; no run kicks off.
+- **Output declared but not produced.** If `outputsFiles.<key>` is
+  declared but `<fsRoot>/<key>` does not exist when the body
+  finishes, the host MUST log a warning and continue. The body's
+  structured `outputs` is the source of truth for what's mandatory;
+  `outputsFiles` is "nice to have" by default.
+- **Sync failure.** If the workspace write fails (permission, disk
+  full, etc.), the host MUST log but MUST NOT fail the run — by the
+  time sync runs, the body has already returned. Importing manifests
+  that need transactional writes SHOULD model the write as a tool
+  step, not a declared output.
+
+### Why a contract instead of direct workspace access
+
+Three reasons:
+
+1. **Portability.** Bodies don't import host-specific providers.
+   Same body runs under any conforming host.
+2. **Auditability.** The host logs every staged read and every
+   synced write through the standard audit channel
+   ([AIP-7](/docs/aip-7)) without inspecting body code.
+3. **Sandboxing.** A host that runs bodies in isolated containers
+   (Docker, Firecracker, microVM, E2B) implements the same contract
+   by mounting volumes — no body changes, no manifest changes.
+
+## The `defineIO` standard signature
+
+Every implementation that consumes IO blocks MUST expose a function
+whose signature matches the contract below. `defineIO` is a *helper*
+that returns the four blocks in the canonical shape; manifest
+adapters call it from inside `defineTool` / `defineWorkflow` /
+similar to set up IO uniformly.
+
+### `defineIO` (TypeScript notation, normative)
+
+```ts
+defineIO(definition: IODefinition): IOHandle
+
+interface IODefinition {
+  inputs?:        JSONSchema | unknown   // zod / pydantic / schemars all work
+  outputs?:       JSONSchema | unknown
+  inputsFiles?:   Record<string, FileContractEntry>
+  outputsFiles?:  Record<string, FileContractEntry>
+}
+
+interface FileContractEntry {
+  path:         string                   // required
+  mode?:        "ro" | "rw"              // optional
+  contentType?: string                   // optional
+}
+
+interface IOHandle {
+  inputs:        JSONSchema
+  outputs:       JSONSchema
+  inputsFiles:   Record<string, FileContractEntry>   // never undefined; defaults to {}
+  outputsFiles:  Record<string, FileContractEntry>   // never undefined; defaults to {}
+
+  /**
+   * Validate a candidate input against `inputs` PLUS the reserved
+   * `_workflowFsRoot` field rules. Adapters call this before running
+   * a step body so step code doesn't re-validate.
+   */
+  validateInput(value: unknown): { ok: true; value: unknown } | { ok: false; error: string }
+}
+```
+
+### Conformance rules
+
+1. **Canonical name.** The export MUST be named `defineIO`.
+   Implementations MAY also re-export under host-specific aliases
+   but the canonical name is what other AIPs reference.
+
+2. **Schemas validated at boundaries.** The host MUST validate
+   inputs against `inputs` before the body runs. Bodies MUST NOT
+   re-validate; they receive parsed input. Outputs MAY be validated
+   on the way out — implementations vary, but failure to match
+   `outputs` MUST be surfaced as a host error, not silently
+   coerced.
+
+3. **`inputsFiles` and `outputsFiles` are independent.** A manifest
+   MAY declare one without the other. Empty maps and absent fields
+   are equivalent.
+
+4. **`_workflowFsRoot` is host-injected.** Bodies MUST treat it as
+   an input value, not derive it themselves. Hosts MUST NOT honour
+   a `_workflowFsRoot` value the caller pre-supplied — the host
+   overwrites it.
+
+5. **Path interpolation is one-pass.** Tokens are replaced once at
+   sync time. Tokens inside replaced values are NOT re-expanded.
+
+6. **No I/O at module load.** Same rule as `defineTool` /
+   `defineWorkflow` — the module containing `defineIO(...)` MUST be
+   safely importable without side effects.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineIO` implementation
+in a specific language or framework, see
+[`./resources/aip-16/draft/ADAPTER.md`](./resources/aip-16/draft).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Compatibility
+
+This AIP is greenfield — it formalises blocks that AIP-14 and
+AIP-15 already use, but it is the first AIP that declares them
+canonically. The migration:
+
+1. AIP-14 (TOOL.md) keeps `inputs` and `outputs` as today; in the
+   next revision, the schema `$ref`s into IO.schema.json.
+2. AIP-15 (WORKFLOW.md) does the same for `inputs`, `outputs`,
+   `inputsFiles`, `outputsFiles`.
+3. Future manifest types (PROCEDURE.md, AGENT.md, …) reference
+   IO.schema.json from day one.
+
+No author-facing change: the four field names, the file contract
+lifecycle, the `_workflowFsRoot` reserved key, and the path
+interpolation tokens are unchanged from their AIP-15 origin.
+
+## Security considerations
+
+The IO blocks are declarative — a malicious manifest can lie about
+what files it reads or writes. The contract is therefore the
+*minimum* the host stages and syncs; the host's runtime isolation
+(separate AIP) decides what files a body can read or write OUTSIDE
+the declared set.
+
+Path interpolation is constrained to a fixed token set so manifests
+cannot construct arbitrary workspace paths from user input via the
+contract. Manifests that need user-input-derived paths MUST do that
+through a tool, with the workspace tool enforcing path scoping.
+
+`_workflowFsRoot` exposes an absolute filesystem path to the body.
+Bodies MUST treat it as a scoped scratch directory; reads or writes
+outside MUST be denied by the host's isolation layer.
+
+## Open questions
+
+1. **Streaming inputs/outputs.** Some runnables produce results
+   incrementally (workflow step progress, agent token streams).
+   IO doesn't model streaming today; that would require a separate
+   block (`streamingOutputs`?) or live in the runtime AIP.
+2. **Binary input shapes.** `inputs` is JSON Schema today, which
+   covers structured data well but punts on bytes. Inline base64
+   in JSON Schema works; whether to define a `binary` shape
+   primitive is open.
+3. **Multi-file outputs from one key.** Today one key = one file.
+   Whether to allow a key to produce a directory tree (zip / tar
+   on sync) is open — depends on real demand.
+4. **Hash + size attestation.** Whether the host should record
+   content-hash + byte-size for every staged file, for replay /
+   audit. Probably yes; left unspecified for now.
+
+## See also
+
+- [AIP-14 — TOOL.md](/docs/aip-14) — primary consumer
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — primary consumer
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [`./IO.schema.json`](./resources/aip-16/draft) — schema validator
+- [`./ADAPTER.md`](./resources/aip-16/draft) — implementer's guide

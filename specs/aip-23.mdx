@@ -1,0 +1,1124 @@
+---
+title: "AIP-23: IDENTITY.md — agentidentity/v1 (layered identity workspace on AIP-18 collections)"
+description: A workspace AIP that defines layered, composable agent identity — typed layers as AIP-18 collections, confidence-scored items, optional temporal entries, and compression-artifact tiers — owning only the workspace root manifest, layer registry, compression policy, junction rules, and cross-AIP composition.
+aip: 23
+status: Draft
+type: Schema
+created: 2026-04-28
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 18]
+resources: ./resources/aip-23/draft
+discussions-to: https://github.com/agentproto/specs/discussions/23
+---
+
+| Field | Value |
+|---|---|
+| AIP | 23 |
+| Title | IDENTITY.md — agentidentity/v1 (layered identity workspace on AIP-18 collections) |
+| Status | Draft |
+| Type | Schema |
+| Domain | identities.sh |
+| Doctypes | `identity.workspace/v1` (workspace manifest + view, written as `IDENTITY.md`); per-layer items via [AIP-18](/docs/aip-18) `COLLECTION.md` / `ITEM.md` |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-18](/docs/aip-18) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work), [AIP-22](/docs/aip-22) (companies), [AIP-24](/docs/aip-24) (assembly), [AIP-25](/docs/aip-25) (personas) |
+| Resources | [`./resources/aip-23`](./resources/aip-23/draft) — [`IDENTITY.schema.json`](./resources/aip-23/draft/IDENTITY.schema.json), [`ADAPTER.md`](./resources/aip-23/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-23/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-23/draft/skills/author-identity-workspace/SKILL.md), [`starters/`](./resources/aip-23/draft/starters/identitykit-compagnon) |
+
+## Abstract
+
+`agentidentity/v1` is a **workspace AIP** that defines layered,
+composable agent identity. It declares a single doctype —
+`identity.workspace/v1`, written as `IDENTITY.md` — that names
+which **layer collections** an identity tracks, how the layers
+**compose** into a single effective identity at runtime, what
+**compression artifacts** the host caches for token-budget
+management, and which **entities** (operators, companies,
+personas, users) may bind layer items as their identity.
+Per-layer fields, status state machines, ownership cardinality,
+and item-level lints are delegated to [AIP-18](/docs/aip-18) —
+each layer kind (soul, mind, personality, role-context,
+emotional-bond, voice, world, shadow, …) is just an
+[AIP-18](/docs/aip-18) `COLLECTION.md`. AIP-23 owns only what
+sits *above* the layer schemas: the **layer registry**, the
+**confidence floor**, the **temporal-entry contract**, the
+**compression-tier policy** (short / medium / full token budgets,
+locale fan-out, refresh policy), the **junction policy**
+(allowed bearer entities, exclusivity per (entity, layer)), and
+the **cross-AIP bindings** that let an identity plug into an
+operator ([AIP-9](/docs/aip-9)), a company
+([AIP-22](/docs/aip-22)), a knowledge wiki
+([AIP-10](/docs/aip-10)), a governance pack
+([AIP-7](/docs/aip-7)), a work tracker
+([AIP-20](/docs/aip-20)), or a persona
+([AIP-25](/docs/aip-25)). The same doctype, used recursively via
+`extends:`, also expresses **per-context views** — a
+per-operator lens, a per-locale view, a council overlay — so a
+single identity manifest fans out into many trustworthy lenses
+without forking. AIP-23 ships a starter library
+(`starters/identitykit-compagnon/`) of five canonical layer
+collections (`soul`, `mind`, `personality`, `emotional-bond`,
+`role-context`) drawn directly from a working reference
+implementation, so identity-shaped workspaces have a sensible
+floor to build on.
+
+## Motivation
+
+The hard lesson from a generation of LLM systems was that
+**monolithic identity prompts do not scale**. An agent's
+identity — its values, decision style, communication patterns,
+relationship history, role context — is rich, evolving, and
+heterogeneous. Stuffing all of it into a single system prompt
+loses three properties simultaneously: **auditability** (which
+field came from where; who set what; when), **composability**
+(swap the org's voice without rewriting the personality block),
+and **observability** (was this trait *configured* by the
+designer or *inferred* from a single conversation). Layered
+identity treats each facet as a typed, structured record with
+explicit provenance. Soul (values, mission) is one layer.
+Personality (traits, communication style) is another. Role
+context (decisions, delegation) is another. Each layer is
+authored, validated, and merged independently; the prompt that
+reaches the model is *assembled* from the layers, not
+hand-written from scratch. The benefit shows up the first time a
+designer asks "why does this agent suddenly mention humility?"
+and the audit log answers: *the emotional-bond layer was updated
+last Tuesday with confidence 0.6 from an inference signal*.
+
+The hard lesson from a generation of identity systems built into
+specific platforms was that **the layer schemas themselves do
+not belong on the workspace AIP**. Hardcoding `soul`, `mind`,
+`personality` as first-class doctypes would run out of room the
+moment a design organisation reached for a fourth concept. A
+psychological-research org wants `attachment-style` and
+`self-narrative` layers; a clinical organisation wants
+`therapeutic-frame` and `transference-pattern` layers; a
+voice-product team wants `prosody` and `phonetic-preferences`
+layers. With monolithic doctypes, every new concept requires
+either a fork of the workspace AIP or a smuggled-in
+`metadata.<vendor>` extension that the spec cannot validate.
+The fix is the same separation [AIP-22](/docs/aip-22) and
+[AIP-20](/docs/aip-20) carved out: workspace concerns live on the
+workspace AIP; per-item-kind concerns live on
+[AIP-18](/docs/aip-18) collections. **Two AIPs, two surfaces, one
+mental model.** A team that needs an `attachment-style` layer
+writes a fourth `COLLECTION.md` (an authoring problem), not a
+revision to AIP-23 (a registry problem).
+
+The temporal-entries and compression-artifact subsystems are the
+**distinctive contributions** of AIP-23. Identity is a *time
+series*. A trustLevel observed at one moment is not the same as a
+trustLevel established by configuration. AIP-23 lifts the
+temporal-entry contract to the workspace level: layers may be
+declared `temporal: true`, in which case a sibling AIP-18
+collection (typically `temporal-entry`) carries observations
+linked back to the layer item, each entry carrying `intensity`
+(0..1), `observedAt`, `validUntil`, and a controlled-vocabulary
+`source` (`configured`, `observed`, `inferred`, `self-reported`).
+The host walks expiry on read; the design surface displays the
+provenance graph. The compression-artifact subsystem solves the
+other end of the problem: identity layers are rich (a
+personality block can run to 800 tokens), but agents under load
+need compact representations. AIP-23 declares **three tiers**
+(`short` ≤80 tokens, `medium` ≤300 tokens, `full` ≤1024 tokens
+typical) with locale fan-out and a refresh policy. The host
+generates artifacts on layer write, evicts on layer mutation,
+and falls back through the tier ladder when the budget is
+tight.
+
+The persona / identity distinction is delicate and central.
+**Identity** is the structured, layered, confidence-scored
+description of *who an agent is* — an operator's values, a
+company's mission, a council mentor's frame. **Persona** is the
+**reference frame** an operator may borrow: "for the next
+exchange, behave as if you were the auditor", "for the next
+session, narrate from the founder persona". A persona is
+lightweight (name, prompt, optional avatar) and exists primarily
+as a *binding target*; the substantive content lives on the
+identity layers a persona references. AIP-23 treats personas as
+one of several **bearer entities** (alongside operators,
+companies, users) that may bind layer items via the workspace's
+junction policy. The persona doctype itself lives on
+[AIP-25](/docs/aip-25); AIP-23 carries the binding rules. The
+two AIPs compose: a persona binds to an identity workspace's
+layers; an identity workspace declares which personas are
+allowed bearers.
+
+This is the same registry-of-views pattern codified in
+[AIP-2](/docs/aip-2) and applied to wikis in
+[AIP-10](/docs/aip-10), to governance in [AIP-7](/docs/aip-7), to
+work in [AIP-20](/docs/aip-20), to commercial agencies in
+[AIP-21](/docs/aip-21), and to companies in
+[AIP-22](/docs/aip-22). One workspace doctype, two modes:
+
+- **Workspace-root mode** (`<identity-root>/IDENTITY.md`, no
+  `extends:`) declares the BASE shape — enabled layer
+  collections, compression tiers, junction policy, confidence
+  defaults.
+- **View mode** (`<consumer>/IDENTITY.md`, `extends:` set) adapts
+  the base for a specific operator, locale, or persona —
+  narrowing the visible layers, switching the locale of
+  artifacts, rebinding the executor for that lens. The identity
+  is one; the views are many.
+
+## Specification
+
+A conforming `agentidentity/v1` deployment is a single doctype:
+`identity.workspace/v1`, written as `IDENTITY.md`. The identity's
+layer instances live under [AIP-18](/docs/aip-18) collections —
+AIP-23 does NOT define an item doctype of its own. Every
+per-layer-kind concern is deferred to [AIP-18](/docs/aip-18).
+Every workspace-level concern is owned by this AIP.
+
+### File location
+
+The filename `IDENTITY.md` is normative — discovery, install, and
+toolchains key off it. The path is conventional, not normative.
+Conventional layout:
+
+```
+<identity-root>/
+├── IDENTITY.md                          # workspace manifest (REQUIRED at the identity root)
+├── collections/                         # AIP-18 collections — one per enabled layer
+│   ├── soul/
+│   │   └── COLLECTION.md
+│   ├── mind/
+│   │   └── COLLECTION.md
+│   ├── personality/
+│   │   └── COLLECTION.md
+│   ├── emotional-bond/
+│   │   └── COLLECTION.md
+│   ├── role-context/
+│   │   └── COLLECTION.md
+│   └── temporal-entry/
+│       └── COLLECTION.md                # OPTIONAL — companion collection for temporal layers
+└── items/                               # AIP-18 ITEM.md records, filed by collection
+    ├── soul/<slug>.md
+    ├── personality/<slug>.md
+    ├── emotional-bond/<slug>.md
+    └── temporal-entry/<slug>.md
+```
+
+**Per-context views** live alongside their consumer:
+
+```
+operators/eng-mentor/IDENTITY.md          # extends ../../<identity-root>/IDENTITY.md
+locales/fr/IDENTITY.md                    # extends ../../<identity-root>/IDENTITY.md
+personas/auditor/IDENTITY.md              # extends ../../<identity-root>/IDENTITY.md
+```
+
+A view's `extends:` field points to a parent `IDENTITY.md`
+(workspace root OR another view). `appliesTo:` binds the view to
+one or more operator / company / persona / skill workspace refs.
+The host resolves the chain on load and exposes the merged
+effective config to the consumer.
+
+### `IDENTITY.md` — frontmatter shape
+
+```yaml
+---
+schema: identity.workspace/v1
+name: <kebab-case-id>                       # required
+title: <human-readable identity name>       # required
+description: <one-paragraph purpose>        # required
+version: <semver>                           # required, the WORKSPACE version
+
+# Composition (view mode)
+extends: ../path/to/parent/IDENTITY.md      # OPTIONAL — turns this manifest into a VIEW
+appliesTo:                                  # OPTIONAL — bind this view to consumers
+  - ws://operators/<slug>                   #   AIP-9 operator
+  - ws://companies/<slug>                   #   AIP-22 company
+  - ws://personas/<slug>                    #   AIP-25 persona
+  - ws://skills/<slug>                      #   AIP-3 skill
+
+# Cross-AIP composition (the centre of gravity)
+executor: ws://operators/<slug>             # OPTIONAL — AIP-9 operator the identity activates against
+governance: <path-or-ref>                   # OPTIONAL — AIP-7 governance binding
+work: ws://workspaces/<slug>                # OPTIONAL — AIP-20 work tracker
+knowledge: ws://wikis/<slug>/KNOWLEDGE.md   # OPTIONAL — AIP-10 wiki
+
+# Layer collections — each is an AIP-18 COLLECTION.md describing ONE layer kind
+collections:                                # array; merge-by-name/alias
+  # 1. Inline declaration:
+  - inline:
+      schema: collection.schema/v1
+      name: soul
+      title: Soul
+      description: Core values, mission, energy sources.
+      version: 1.0.0
+      fields:
+        - { name: values, type: array, items: { type: array, items: { type: string } } }
+        - { name: mission, type: string }
+        - { name: energySources, type: array, items: { type: string } }
+        - { name: energyDrains, type: array, items: { type: string } }
+      ownership: { cardinality: single, role: bearer, required: true }
+  # 2. File ref:
+  - ref: ./collections/personality/COLLECTION.md
+  # 3. Registry import:
+  - ref: ws://collections/emotional-bond
+    alias: bond                              # workspace-local rename
+    version: "1.x"
+
+# Layer behaviour at the workspace level
+layers:
+  defaultConfidence: 1.0                     # 0..1 floor for new entries; configured = 1.0
+  versioning: enabled                        # enabled | disabled — increment item version on update?
+  temporal:
+    enabled: true                            # are temporal-entry companion items supported?
+    field: validUntil                        # which field on temporal-entry items carries expiry
+    sourceVocabulary:                        # controlled vocabulary for temporal-entry.source
+      - configured
+      - observed
+      - inferred
+      - self-reported
+
+# Compression artifact policy — workspace decides tier thresholds
+artifacts:
+  enabled: true
+  tiers:
+    - id: short
+      maxTokens: 80                          # ~50-80-token compact AAAK-style line
+      strategy: aaak                         # aaak | bullet-list | <custom-id>
+    - id: medium
+      maxTokens: 300                         # labelled sections
+      strategy: bullet-list
+    - id: full
+      maxTokens: 1024                        # markdown headers + bodies
+      strategy: markdown
+  locales: [en, fr]                          # locale fan-out for translations
+  refreshPolicy: on-write                    # on-write | scheduled | manual
+
+# Junction policy — which entities may bind layer items as their identity
+binding:
+  allowedEntities: [operator, company, persona, user]
+  exclusivity: per-entity-and-layer          # max one item per (entity, layer) pair
+  verifyExistence: true                      # host MUST verify entity exists before binding
+
+# Workspace-spanning lints (AIP-18 lints are per-collection; these span layers)
+lints:                                       # array; merge-by-id with parent
+  - id: <kebab-id>
+    kind: orphan-layer | low-confidence-pinned | stale-temporal | unbound-layer | custom
+    severity: error | warn | info
+    params: { <key>: <value> }
+
+# Defaults
+defaults:
+  approvalClass: auto | always | on-mutate | policy:<ref>
+  auditMutations: true | false               # ONE-WAY SWITCH
+
+# Display / UX hints
+display:
+  homePage: <slug>
+  defaultGrouping: layer | entity
+
+metadata: {}                                 # vendor extensions, namespaced under <vendor>
+---
+
+# <body — markdown prose>
+```
+
+The body is free-form markdown. The frontmatter is the contract.
+
+### Layer collections
+
+The `collections:` array is the bridge between AIP-23 and
+[AIP-18](/docs/aip-18). **Every layer kind is an AIP-18
+collection.** A workspace declares its enabled layers by listing
+collection refs (or inline schemas) in `collections:`; the host
+delegates field validation, status state-machine enforcement,
+ownership cardinality, and item-level lints to AIP-18.
+
+Each entry MUST be one of three forms (mirroring
+[AIP-22](/docs/aip-22)):
+
+**1. Inline declaration.** A full `collection.schema/v1`
+frontmatter, parsed in-place. Useful for small, single-tenant
+identities where the layer schema is private and co-located:
+
+```yaml
+collections:
+  - inline:
+      schema: collection.schema/v1
+      name: voice
+      title: Voice
+      description: Communication style, tone, patterns.
+      version: 1.0.0
+      fields:
+        - { name: tone, type: array, items: { type: string } }
+        - { name: patterns, type: array, items: { type: string } }
+        - { name: avoids, type: array, items: { type: string } }
+        - { name: languages, type: array, items: { type: string } }
+      ownership: { cardinality: single, role: bearer, required: true }
+```
+
+**2. File ref.** A relative path to a `COLLECTION.md`. Useful when
+the layer schema is shared with peer identities:
+
+```yaml
+collections:
+  - ref: ./collections/personality/COLLECTION.md
+```
+
+**3. Registry import.** A `ws://collections/<slug>` URI resolved
+against the host's collection registry. Useful for cross-team
+sharing:
+
+```yaml
+collections:
+  - ref: ws://collections/emotional-bond
+    alias: bond
+    version: "1.x"
+```
+
+**Aliasing.** Any ref form MAY carry an `alias:` to expose the
+collection in this workspace under a different name. The host
+MUST refuse a workspace whose two entries resolve to the same
+effective name with `identity_collection_alias_conflict` (HARD).
+
+#### Worked example — the `soul` layer as an AIP-18 collection
+
+```yaml
+# <identity-root>/collections/soul/COLLECTION.md
+---
+schema: collection.schema/v1
+name: soul
+title: Soul
+description: |
+  Core values, mission, and energy sources — what drives someone.
+  The soul layer is the most stable layer in an identity; it
+  changes rarely once configured.
+version: 1.0.0
+
+fields:
+  - name: values
+    type: array
+    description: |
+      Ordered value pairs [preferred, over]. e.g. ["innovation",
+      "tradition"] expresses the bearer prefers innovation over
+      tradition when forced to choose.
+    items:
+      type: array
+      items: { type: string }
+  - name: mission
+    type: string
+    description: One-paragraph mission statement.
+  - name: energySources
+    type: array
+    items: { type: string }
+  - name: energyDrains
+    type: array
+    items: { type: string }
+  - name: confidence
+    type: number
+    description: |
+      RESERVED at AIP-23 workspace level. Range 0..1; 1.0 =
+      configured by author; lower = inferred from observation.
+    minimum: 0
+    maximum: 1
+
+ownership:
+  cardinality: single
+  role: bearer
+  required: true
+
+identity:
+  slugSource: title
+  filingPath: items/{collection}/{slug}.md
+---
+
+# Soul
+
+## Purpose
+
+The soul layer captures values, mission, and energy sources. It
+is the most stable layer in an identity; configured at design
+time, rarely updated. When updated, the change typically signals
+a major life event (founder pivot, role transition, organisation
+re-founding).
+
+## Examples
+
+```yaml
+---
+schema: collection.item/v1
+collection: soul
+id: SOUL-acme-founder
+title: Acme Founder soul
+status: active
+bearer: ws://operators/founder
+values:
+  - [innovation, tradition]
+  - [impact, money]
+mission: Build the most useful AI products on the planet.
+energySources: [hard-problems, teaching, deep-work]
+energyDrains: [bureaucracy, status-meetings]
+confidence: 1.0
+---
+```
+```
+
+The host registers the `soul` collection under its effective
+name; an `ITEM.md` in `items/soul/` is one *bearer's* soul. The
+soul's bearer is identified via the AIP-18 ownership axis
+(`ownership.role: bearer`); the workspace's junction policy
+(below) governs which kinds of bearer (operator, company,
+persona, user) are allowed.
+
+### Compression artifacts
+
+Compression artifacts are AIP-23's **first distinctive
+contribution**. Identity layers can be rich (a populated
+personality layer easily runs 600+ tokens), but every prompt that
+includes the identity competes with every other context the agent
+needs. The compression-artifact subsystem solves the
+token-budget problem by caching pre-computed representations of
+each layer at three sizes.
+
+```yaml
+artifacts:
+  enabled: true
+  tiers:
+    - { id: short,  maxTokens: 80,    strategy: aaak }
+    - { id: medium, maxTokens: 300,   strategy: bullet-list }
+    - { id: full,   maxTokens: 1024,  strategy: markdown }
+  locales: [en, fr]
+  refreshPolicy: on-write
+```
+
+**Tier semantics.** Each tier names a target token budget.
+Tiers MUST be monotonic: each tier's `maxTokens` is strictly
+greater than the previous tier's. Hosts MAY add custom tiers
+between or beyond the canonical three; the canonical
+`short / medium / full` ids are conventions, not normative.
+
+**Strategy.** A short string identifying the compression
+algorithm. Conventional values:
+
+- `aaak` — AAAK-inspired single-line key-value packing. Best for
+  the `short` tier. Example: `SOUL: innovation>tradition |
+  impact>money | "accessible AI"`.
+- `bullet-list` — labelled sections with bullet points. Best for
+  `medium`.
+- `markdown` — full markdown with headers and prose. Best for
+  `full`.
+- `<custom-id>` — host-defined.
+
+**Locale fan-out.** When `locales:` is non-empty, the host MUST
+generate one artifact per (layer, tier, locale) triple. A
+`personality` layer with `[short, medium, full]` tiers and
+`[en, fr]` locales produces six artifacts. The active locale at
+prompt-assembly time selects which artifact to consume.
+
+**Refresh policy.**
+
+- `on-write` (default) — the host regenerates artifacts
+  immediately after a layer item is mutated. Highest correctness;
+  spends LLM tokens on every write.
+- `scheduled` — the host regenerates on a host-defined cadence
+  (cron, queue). Cheapest; eventually consistent.
+- `manual` — the host never regenerates automatically;
+  regeneration is an explicit operator action.
+
+**Eviction.** When a layer item is mutated, the host MUST mark
+all artifacts derived from that layer as stale; on read, stale
+artifacts MAY be served (with a warning) or refused depending on
+host policy.
+
+**Tier-ladder fallback.** When prompt-assembly time is given a
+budget, the host walks the tier ladder picking the largest
+artifact that fits the remaining budget. If no artifact fits at
+any tier (e.g. the budget is below `short.maxTokens`), the layer
+is silently dropped from the assembled prompt and an
+`identity_layer_dropped_for_budget` warning is emitted.
+
+### Temporal entries
+
+Temporal entries are AIP-23's **second distinctive contribution**.
+Some identity layers (notably emotional-bond, shadow) are
+*observed* over time rather than *configured* up front. A trust
+level today is not a trust level yesterday; a fear that surfaced
+in one conversation may not still be active a week later. AIP-23
+lifts temporal observations to a first-class workspace concept.
+
+```yaml
+layers:
+  temporal:
+    enabled: true
+    field: validUntil
+    sourceVocabulary: [configured, observed, inferred, self-reported]
+```
+
+**The temporal-entry contract.** A layer marked `temporal: true`
+on its own collection (the AIP-18 schema) is paired with a
+companion collection — by convention named `temporal-entry` —
+whose ITEMs carry observations linked back to the parent layer
+item. The contract:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `parentLayer` | ref | YES | AIP-18 ref to the parent layer item. |
+| `content` | object | YES | Structured content of the observation (the layer's domain — e.g. `{ trustLevel: 0.7 }` for emotional-bond). |
+| `observedAt` | datetime | YES | When this was observed. Drives temporal sort. |
+| `intensity` | number | YES | Signal strength, 0..1. |
+| `validUntil` | datetime | NO | Null = still active. Otherwise the entry is auto-expired by the host's expiry walk. |
+| `source` | enum | YES | One of the values in `layers.temporal.sourceVocabulary`. |
+
+**Expiry walk.** On every read of a temporal-layered item, the
+host walks the temporal-entry index for that parent and excludes
+entries whose `validUntil` is in the past. The walk is cheap (an
+indexed range scan); hosts SHOULD cache the result per-request.
+
+**Source vocabulary.** The vocabulary is **additive across
+ancestors**: a child's `sourceVocabulary` extends the parent's;
+values cannot be removed. A descendant MAY add new sources
+(e.g. `clinical-assessment` for a therapy-domain workspace) but
+MUST NOT shadow or remove the canonical four.
+
+**Why a sibling collection (not a property of the layer item).**
+A judgement call. The codebase's reference implementation models
+temporal entries as their own table joined back to the layer.
+The alternative — embedding entries as an array on the layer
+item — was considered and rejected because (a) AIP-18's
+field-typed schema cannot express variable-length time-series
+without sacrificing per-entry indexing and validation; (b) the
+sibling collection lets each entry carry its own status, audit
+trail, and `confidence`; (c) lints (`stale-temporal`,
+`low-intensity-pinned`) compose more naturally on a collection
+than on an array property. The cost is one extra collection per
+identity that uses temporal layers; the benefit is that
+temporal-entry items participate in the same AIP-18 / AIP-23
+machinery as everything else (filing path, governance, audit
+log).
+
+### Confidence semantics
+
+**Every item in a layer collection MUST carry `confidence: 0..1`.**
+This is a reserved field at the AIP-23 workspace level: AIP-18
+collection schemas MAY declare it explicitly (recommended for
+clarity), but the host MUST treat the field as required at
+identity-load time regardless. Missing-confidence rejection:
+`identity_layer_confidence_missing` (HARD per-item).
+
+**Default values.** Configured items (manually authored) MUST
+carry `confidence: 1.0`. Inferred items (extracted from
+observation, conversation, or LLM analysis) MUST carry a value
+strictly less than 1.0; conventional ranges:
+
+- `0.9` — explicit statement ("I value innovation over
+  tradition" said directly).
+- `0.7` — clear behavioural signal across multiple exchanges.
+- `0.5` — single-exchange clear signal.
+- `0.3` — weak hint, single mention.
+- `<0.3` — speculative; SHOULD NOT be promoted to the layer
+  without further confirmation.
+
+**Confidence floor.** `layers.defaultConfidence` declares the
+*minimum* confidence the workspace will store. A new item below
+the floor is refused with `identity_confidence_below_floor`
+(HARD). The default is 0.0 (no floor). Workspaces with strict
+identity standards SHOULD set this to 0.5 or higher.
+
+**No retroactive elevation.** Once an item's confidence is set,
+the host SHOULD NOT permit a mutation that *increases* the
+confidence without an audit-log entry justifying the elevation.
+This prevents *confidence laundering* — an attacker rewriting
+inferred-then-stored entries to look configured. See [Security
+Considerations](#security-considerations) for the threat model.
+
+### Junction policy
+
+**Layer items are not standalone.** Each is bound to a *bearer*
+entity — the operator, company, persona, or user the identity
+*describes*. The junction policy declares which bearer kinds are
+allowed and how exclusive the binding is.
+
+```yaml
+binding:
+  allowedEntities: [operator, company, persona, user]
+  exclusivity: per-entity-and-layer
+  verifyExistence: true
+```
+
+**`allowedEntities`** is the controlled vocabulary. Currently:
+
+| Value | Meaning | Cross-AIP |
+|---|---|---|
+| `operator` | An [AIP-9](/docs/aip-9) operator. | `ws://operators/<slug>` |
+| `company` | An [AIP-22](/docs/aip-22) company. | `ws://companies/<slug>` |
+| `persona` | An [AIP-25](/docs/aip-25) persona. | `ws://personas/<slug>` |
+| `user` | An end-user (host-defined; not an agentproto AIP). | host-defined |
+| `skill` | An [AIP-3](/docs/aip-3) skill. | `ws://skills/<slug>` |
+
+Workspaces narrow the vocabulary to fit their domain. A
+companion-app identity (Simone-style) typically allows
+`[user, persona]`. An operator-fleet identity (Guilde-style)
+typically allows `[operator, company]`.
+
+**`exclusivity: per-entity-and-layer`** (the only currently
+supported value) means the host MUST refuse an attempt to bind
+two layer items of the same kind to the same entity. An
+operator has at most one `personality` layer item, at most one
+`soul` layer item. The host enforces via a junction-table unique
+constraint or equivalent on `(entity_kind, entity_id,
+layer_kind)`.
+
+**`verifyExistence: true`** (the default) requires the host to
+verify the bearer entity exists before allowing the binding to
+land. This is a HARD check — `identity_binding_target_missing`.
+Setting `false` is permitted (for ephemeral / sandbox
+deployments) but SHOULD never be used in production.
+
+### Composition (`extends:` chain)
+
+When a host loads an `IDENTITY.md` whose `extends:` is set, it
+MUST follow the same algorithm as
+[AIP-20](/docs/aip-20)/[AIP-22](/docs/aip-22):
+
+1. **Walk the parent chain.** Recursively load the parent;
+   maximum chain depth eight; cycle detection by visited
+   absolute paths.
+2. **Treat depth overflow and cycle detection as warnings**, not
+   errors.
+3. **Tolerate a missing parent.** Surface
+   `identity_extends_missing` as a warning; use the local
+   manifest only.
+4. **Merge bottom-up.** Walk the chain from workspace root toward
+   the leaf view, merging each manifest into the accumulator
+   using the strategy below.
+
+**Merge strategy** (child wins on conflicts):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins. |
+| `extends` | local-only | Not inherited. |
+| `appliesTo` | local-only | Not inherited. |
+| `executor`, `governance`, `work`, `knowledge` | override | Child can rebind. Subject to one-way switches. |
+| `collections` | merge-by-effective-name | Child entry with same alias-or-name → child replaces parent's; new effective names appended. |
+| `layers.defaultConfidence` | override | Child MAY raise the floor (stricter); child SHOULD NOT lower it. |
+| `layers.versioning` | child wins (one-way on disable) | Once `enabled` at any ancestor, child cannot set `disabled`. HARD: `identity_versioning_disable`. |
+| `layers.temporal.enabled` | override | |
+| `layers.temporal.field` | override | |
+| `layers.temporal.sourceVocabulary` | append-only | Vocabulary is additive across ancestors; descendants MAY add but MUST NOT remove. |
+| `artifacts.enabled` | override | |
+| `artifacts.tiers` | merge-by-id | Child tier with same `id` → child replaces parent's; monotonic ordering re-validated after merge. |
+| `artifacts.locales` | merge-by-value | Set union. |
+| `artifacts.refreshPolicy` | override | |
+| `binding.allowedEntities` | merge-by-value | Set union; child MAY narrow at the workspace level via lints, but the spec preserves the union. |
+| `binding.exclusivity` | child wins (one-way on relax) | A more permissive `exclusivity` cannot replace a stricter one. HARD: `identity_binding_loosen`. |
+| `binding.verifyExistence` | child wins (one-way on disable) | Once `true` at any ancestor, child cannot set `false`. HARD on relaxing. |
+| `lints` | merge-by-id | Same `id` → child replaces parent's; new ids appended. |
+| `defaults.approvalClass` | override | |
+| `defaults.auditMutations` | child wins (one-way) | Once `true` at any ancestor, descendants MUST NOT set `false`. HARD: `identity_audit_downgrade`. |
+| `display.*` | leaf-field override | |
+| `metadata` | deep-merge | Vendor namespaces accumulate. |
+
+The host MUST expose **both** the merged effective config AND
+the resolution chain (ordered list of absolute paths consumed
+during merge) on its debug surface.
+
+#### One-way switches (HARD refusals)
+
+Three fields are one-way switches. Once enabled or set at any
+ancestor, descendants MUST NOT relax them. Attempting to relax
+surfaces a HARD refusal — the view does NOT degrade to
+local-only.
+
+| Field | Switch direction | Refusal code |
+|---|---|---|
+| `defaults.auditMutations: true` | Once true at any ancestor, child cannot set false. | `identity_audit_downgrade` |
+| `binding.exclusivity` | Once `per-entity-and-layer` (or stricter) at any ancestor, child cannot replace with a more permissive value. | `identity_binding_loosen` |
+| `layers.versioning: enabled` | Once enabled at any ancestor, child cannot set disabled. | `identity_versioning_disable` |
+
+These three rules are why a deployed v1 identity is trustworthy:
+an auditor inspecting any view can verify the audit posture, the
+binding exclusivity, and the versioning posture hold across all
+descendants.
+
+#### `appliesTo` enforcement
+
+`appliesTo` is **not inherited**. A view's bindings are local;
+the parent's bindings do not leak into the child. Cross-field
+constraint: **`appliesTo` present ⇒ `extends` REQUIRED**. A
+workspace that binds to a consumer must extend a parent — a
+binding without an extension is semantically a workspace-root
+with a consumer claim, which the registry-of-views pattern
+rejects as ill-formed.
+
+Hosts MUST refuse a view whose `appliesTo` references a
+non-existent consumer with `identity_appliesto_unresolvable`
+(HARD).
+
+### Cross-AIP composition
+
+| Field | Target AIP | Purpose |
+|---|---|---|
+| `executor` | [AIP-9](/docs/aip-9) operator | The operator the identity is *about* (or activates against). The default operator the host loads when this identity is opened. |
+| `governance` | [AIP-7](/docs/aip-7) | Identity-level approvals (layer mutations, confidence elevation, persona binding). Workspace-root manifests usually set this. |
+| `work` | [AIP-20](/docs/aip-20) | Work tracker the identity participates in (an operator's task queue, a company's program plan). |
+| `knowledge` | [AIP-10](/docs/aip-10) | Knowledge wiki — the identity's narrative, dossier, exemplars. |
+| `collections[].ref` / `inline` | [AIP-18](/docs/aip-18) | Per-layer schemas. EVERY layer-schema concern is delegated here. |
+| `binding.allowedEntities` | [AIP-9](/docs/aip-9) / [AIP-22](/docs/aip-22) / [AIP-25](/docs/aip-25) / [AIP-3](/docs/aip-3) | Bearer entities the identity may bind to. |
+| `appliesTo` | [AIP-3](/docs/aip-3) / [AIP-9](/docs/aip-9) / [AIP-22](/docs/aip-22) / [AIP-25](/docs/aip-25) | View binding targets. |
+| `extends` | another `IDENTITY.md` | Composition. |
+
+A host MUST verify that every cross-AIP ref it loads resolves —
+unresolvable refs surface as `identity_xref_unresolvable` (HARD
+for `executor` / `governance` / `knowledge`; warn for `work`).
+
+### Body conventions
+
+The frontmatter ends; the body is markdown. Conventional sections:
+
+- `## Purpose` — what this identity captures and why.
+- `## Layers active` — human-readable rendering of the enabled
+  layers.
+- `## Conventions` — when to file under `personality` vs
+  `voice`; when to add a temporal entry vs update the layer
+  directly.
+- `## What this identity does NOT model` — set boundaries
+  explicitly. Tasks belong on AIP-20. Documents belong on
+  AIP-10. Ephemeral mood does not belong here.
+- `## When to extend vs replace` — composition guidance for
+  downstream view authors.
+
+The body is free-form. The contract lives in the frontmatter.
+
+## Workspace root manifest (IDENTITY.md)
+
+Per the convention codified in [AIP-2](/docs/aip-2), every
+Workspace AIP MUST define a root manifest doctype. AIP-23's root
+manifest is the same `identity.workspace/v1` doctype used in two
+modes:
+
+- **Workspace-root mode** — `<identity-root>/IDENTITY.md`, no
+  `extends:`. Declares the BASE shape: enabled layer collections,
+  artifact tiers, junction policy, governance binding.
+- **View mode** — `<consumer>/IDENTITY.md`, `extends:` set.
+  Adapts the base for a specific operator, locale, or persona —
+  narrows the visible layers, switches the locale of artifacts,
+  rebinds governance.
+
+The same schema validates both modes; the host distinguishes by
+checking whether `extends:` is set. The same merge algorithm
+applies recursively.
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<identity-root>/IDENTITY.md` | `<consumer>/IDENTITY.md` |
+| `extends:` | absent | required |
+| `appliesTo:` | absent | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins |
+| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the identity |
+| Use cases | identity author, design lead | per-operator lenses, per-locale views, council overlays |
+| Validation | full schema check | schema check + chain validation + one-way-switch check |
+| Lifecycle | versioned with the identity | versioned with the consumer |
+
+## Rationale
+
+**Why layered structured data over a monolithic prompt.** A
+monolithic identity prompt collapses every facet of "who the
+agent is" into one block of text. The cost is borne every time
+something changes: a designer wants to swap the voice without
+touching the values, a clinician wants to update the
+emotional-bond layer without re-authoring the personality, a
+reviewer wants to know which field came from where. Layered
+identity preserves authoring locality (the soul author edits
+soul; the voice author edits voice), provenance (each layer
+carries confidence and version), and observability (the audit
+log shows which layer mutated when). The prompt that reaches the
+model is *assembled* from the layers, not hand-written. The
+existing reference implementation in `packages/core/src/domain/
+identity` shows the model in production: 8 starter layers
+(soul / mind / body / voice / world / shadow / personality /
+role-context / emotional-bond), composed via `composeIdentity
+Prompt(layerSets, artifacts)`, deployed across two products
+(Simone, Guilde) with different layer subsets per product.
+
+**Why per-layer typed schemas (AIP-18 collections).** Once
+identity is layered, the question is whether the layer schemas
+live on the workspace AIP (hardcoded) or on per-collection AIPs
+(extensible). Hardcoding works until the fourth layer kind
+appears — and the fourth layer kind always appears. A clinical
+team wants `attachment-style`; a voice team wants `prosody`; a
+council overlay wants `mentor-frame`. AIP-23 takes the same
+seam [AIP-22](/docs/aip-22) carved out: workspace concerns on the
+workspace AIP, item-schema concerns on
+[AIP-18](/docs/aip-18). A team that needs an `attachment-style`
+layer writes a `COLLECTION.md` (an authoring problem); they do
+not amend AIP-23 (a registry problem).
+
+**Why confidence as first-class.** Identity in production blends
+*configured* truths (the designer set this) with *inferred*
+guesses (the LLM extracted this from a conversation). Without
+provenance, the two collapse: a half-confident inference and a
+fully-asserted configuration look identical at prompt-assembly
+time. The result is over-confident agents that misrepresent
+themselves. Lifting `confidence` to a reserved workspace-level
+field forces every author to think about provenance; lifting it
+to a HARD validation forces hosts to enforce. The downstream
+benefits are large: lints can flag low-confidence-but-pinned
+entries; the audit log can highlight confidence elevation;
+prompt-assembly can drop low-confidence layers under budget
+pressure.
+
+**Why temporal entries as a sibling collection.** A working
+implementation tried both options (entries-as-array and
+entries-as-collection) and the collection model won three ways.
+First, AIP-18's schema is field-typed: variable-length
+time-series with per-entry validation is awkward as an array
+property. Second, lints compose more naturally on collections —
+a `stale-temporal` lint that walks all temporal entries across
+all layers is one query against one collection, not a tree-walk
+through every layer item's array. Third, the per-entry audit
+trail (who added what observation when) reuses AIP-18's
+ownership and approval machinery. The cost is one extra
+collection per identity that uses temporal layers; the benefit
+is that temporal entries participate in the same AIP-18 / AIP-23
+machinery as every other item. The reference implementation's
+`identity_temporal` table is exactly this sibling-collection
+pattern.
+
+**Why three compression tiers.** The choice of three
+(`short / medium / full`) emerged from production usage. One
+tier is too coarse — every prompt either gets the full layer
+(burns tokens) or no layer (loses fidelity). Two tiers
+(`short / full`) leaves a gap — many prompts have a budget
+between 80 and 1024 tokens where neither tier fits. Three is the
+sweet spot: short for the *background* identity blocks always
+included; medium for the *foreground* layer the agent is acting
+on; full for layers under deep introspection. The token budgets
+(80 / 300 / 1024) are conventions drawn from the reference
+implementation's `compressShort / compressMedium /
+compressFull` functions; hosts MAY tune them per deployment.
+
+**Why persona is a separate AIP.** A persona is a *reference
+frame*, not an identity. "Behave as the auditor for the next
+exchange" is a persona binding; "the auditor's values are X, Y,
+Z" is an identity. Conflating them produces two failure modes:
+the persona record bloats with structured layer data it doesn't
+need, or the identity layer loses its independence from the
+persona's prompt-shape. AIP-23 carries the layered identity;
+[AIP-25](/docs/aip-25) carries the persona doctype; the two
+compose via the junction policy (a persona is one of the
+allowed bearer entities). The reference implementation's
+`personas` table is light (name, prompt, slug, avatar) — exactly
+what AIP-25 expects — and identity layers attach via a join
+table. The split keeps each AIP small and lets workspaces opt
+into one without the other.
+
+**Why this pattern mirrors AIP-20 / AIP-21 / AIP-22.** The
+agentproto family converges on a shared mechanic: one
+`<NAMESPACE>.md` doctype, two modes (workspace root / view),
+`extends:` for composition, `appliesTo:` for binding,
+merge-by-id for arrays of objects, hard-refusal on bindings to
+non-existent consumers, soft-warning on malformed chains. AIP-10
+codified it for wikis, AIP-7 for governance, AIP-13 for the v1
+work tracker. AIP-20 distilled the workspace-only shape; AIP-21
+applied it to the agency domain; AIP-22 applied it to the
+organisational domain; AIP-23 applies it to identity. A host
+implementing one Workspace AIP gets the others structurally for
+free — same loader, same merge algorithm, same effective-config
+exposure surface. The convergence is deliberate.
+
+**On a confused-name choice in the codebase.** The reference
+implementation calls the bearer of a layer item the *holder*
+(via `ownership.role: holder`) in some places and the *bearer*
+in others; some places use *subject*. AIP-23 standardises on
+**bearer** at the workspace level (the entity that *bears* the
+identity) and lets per-collection schemas override the ownership
+field name as they see fit. This is the cleanest term: an
+operator *bears* a personality, a company *bears* a soul, a
+persona *bears* a voice. The field name on the AIP-18 collection
+side stays flexible; the workspace-level junction policy speaks
+in *bearer*.
+
+## Reference Implementation
+
+The reference implementation lives in this monorepo and was the
+basis for this AIP:
+
+- [`packages/core/src/domain/identity/identity.schema.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/identity.schema.ts) —
+  the canonical domain schema (layer rows, artifacts, temporal
+  entries) translated faithfully into the AIP-23 frontmatter
+  shape.
+- [`packages/core/src/domain/identity/adapter.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/adapter.ts) —
+  `composeIdentityPrompt(layerSets, artifacts)`, the
+  deterministic merge function that powers prompt assembly.
+- [`packages/core/src/domain/identity/compress.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/compress.ts) —
+  `compressLayer(layerId, data, tokenLimit)` and
+  `assembleCompressed(layers, artifacts, totalBudget,
+  priority)`, the AAAK-inspired three-tier compression pipeline.
+- [`packages/core/src/domain/identity/registry.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/registry.ts) —
+  `IdentityLayerRegistry`, the registry primitive.
+- [`packages/core/src/domain/identity/presets/`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/presets) —
+  the eight preset layer definitions (`soul`, `mind`, `body`,
+  `voice`, `world`, `shadow`, plus extensions in app packages).
+- [`packages/simone/src/domain/identity/layers.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/simone/src/domain/identity/layers.ts) —
+  Simone's `emotional-bond` layer (the canonical temporal-layered
+  example).
+- [`packages/guilde/src/domain/identity/layers.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/guilde/src/domain/identity/layers.ts) —
+  Guilde's `personality` and `role-context` layers.
+- [`packages/core/src/services/identity/identity-ingestion.service.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/services/identity/identity-ingestion.service.ts) —
+  the ingestion service that extracts confidence-scored signals
+  from conversation messages.
+
+The implementation has been in production across two products
+(Simone, Guilde) for several months. AIP-23 codifies the
+filesystem-portable form of the same model. The DB schema
+(`identity_layers`, `identity_artifacts`, `identity_temporal`)
+maps onto AIP-18 ITEM.md records under their respective layer
+collections; the `confidence` column maps to the workspace-level
+reserved field; the `temporal` flag on a layer definition maps
+to a `temporal: true` declaration on the layer's
+COLLECTION.md.
+
+## Backwards Compatibility
+
+AIP-23 is a new spec; it does not replace a predecessor. The
+working DB-resident implementation (`packages/core/src/domain/
+identity`) maps onto AIP-23 cleanly:
+
+- The `identity_layers` table → AIP-18 `ITEM.md` records under
+  per-layer collections. Each row's `data` column → the item's
+  layer-specific fields. The `layer_id` column → the
+  collection name. The `confidence` column → the workspace-level
+  reserved `confidence` field on every item. The `version`
+  column → the AIP-18 item version.
+- The `identity_artifacts` table → host-side artifact cache
+  conformant with `artifacts.tiers[]` and `artifacts.locales`.
+  No filesystem materialisation is required (artifacts may stay
+  in DB), but hosts MAY persist artifacts to disk for
+  deterministic builds.
+- The `identity_temporal` table → AIP-18 `ITEM.md` records under
+  the companion `temporal-entry` collection, with `parentLayer`
+  ref pointing at the layer item.
+- App-specific junction tables (`operator_identities`,
+  `persona_identities`, `user_identities`) → host-side junction
+  layer enforcing the workspace's `binding.exclusivity`. The
+  filesystem form expresses bindings via the AIP-18 ownership
+  axis on each layer item (e.g. `bearer:
+  ws://operators/founder`).
+
+A team running the DB-resident form can opt into the
+filesystem-portable form by emitting per-collection
+`COLLECTION.md` files for each registered layer kind, then
+emitting per-item `ITEM.md` files for each existing layer row.
+The DB-side data remains the source of truth at runtime; the
+filesystem form is for portability, audit, version control, and
+cross-team sharing.
+
+## Security Considerations
+
+Identity manifests are the *write surface* for who-the-agent-is.
+Threats:
+
+- **Identity poisoning.** A malicious actor introduces a
+  low-confidence inferred entry, then promotes it to
+  `confidence: 1.0` to make it look configured. Mitigation:
+  hosts SHOULD treat any confidence elevation as an audit-log
+  event; governance ([AIP-7](/docs/aip-7)) policies SHOULD
+  require approval for elevations above a threshold. The
+  `low-confidence-pinned` lint surfaces inferred-but-promoted
+  entries during routine review.
+
+- **Confidence laundering.** An attacker rewrites the
+  `confidence` field on an existing item to elevate a
+  speculative inference to a configured truth. Mitigation: when
+  `defaults.auditMutations: true` (the recommended posture for
+  any production identity), every mutation is audit-logged; the
+  audit log SHOULD record the field-level diff including
+  confidence changes. Signed manifests ([AIP-1](/docs/aip-1) hash
+  mechanism) prevent silent rewrites.
+
+- **Junction forgery.** A malicious view binds a layer item to
+  the wrong operator (e.g. inserts a layer item with
+  `bearer: ws://operators/ceo`). Mitigation: the junction
+  policy's `verifyExistence: true` requires the host to verify
+  the bearer exists at write time; governance approvals
+  ([AIP-7](/docs/aip-7)) SHOULD gate cross-bearer writes.
+  `binding.exclusivity: per-entity-and-layer` limits the blast
+  radius — only one item per bearer per layer can land.
+
+- **Temporal entry forgery.** A malicious actor inserts
+  temporal-entry items with fabricated `observedAt` timestamps
+  to make a recent inference look like a long-standing
+  observation. Mitigation: hosts SHOULD verify `observedAt`
+  against the request's clock skew (refuse far-future or
+  far-past timestamps); the `source` field's controlled
+  vocabulary makes provenance explicit; `configured` entries
+  SHOULD always be reviewable in the audit log.
+
+- **Cross-tenant leakage.** A view declares
+  `executor: ws://operators/<slug>` for an operator owned by
+  another tenant. Mitigation: hosts MUST resolve cross-AIP refs
+  inside the same tenant scope as the view file; cross-tenant
+  bindings are rejected with `identity_xref_unresolvable`. The
+  same rule applies to `governance`, `work`, `knowledge`, and
+  every `appliesTo` ref.
+
+- **Locked traits enforcement.** Some identities (notably
+  council mentors, regulated personas, brand voices) want
+  certain traits to be IMMUTABLE — once configured, they cannot
+  be overwritten or relaxed by a view. AIP-23 does NOT itself
+  carry trait-locking semantics; that's the
+  [AIP-24](/docs/aip-24) ASSEMBLY layer's responsibility.
+  AIP-23's `binding.exclusivity` and one-way switches are the
+  invariants that hold *across* views; per-trait locking is a
+  composition-time concern AIP-24 layers on top.
+
+- **Audit downgrade.** A view sets `defaults.auditMutations:
+  false` to silence the audit log for one consumer's session.
+  Mitigation: `identity_audit_downgrade` HARD refusal. Once a
+  parent enables audit, no descendant can disable it.
+
+- **Versioning disable.** A view sets `layers.versioning:
+  disabled` to suppress version increments and prevent
+  audit-log entries. Mitigation: `identity_versioning_disable`
+  HARD refusal.
+
+- **Binding loosening.** A view replaces
+  `binding.exclusivity: per-entity-and-layer` with a more
+  permissive value to allow multiple layer items per bearer
+  (e.g. for an attack that adds a shadow personality alongside
+  the legitimate one). Mitigation: `identity_binding_loosen`
+  HARD refusal.
+
+- **Vendor metadata as policy bypass.** A vendor extension under
+  `metadata.<vendor>` carries a flag the host honours that
+  softens one-way switches or skips confidence enforcement.
+  Mitigation: hosts MUST treat vendor metadata as advisory.
+  Nothing under `metadata.*` may change the meaning of any
+  field defined in this AIP. The three one-way switches are
+  spec-level invariants; vendor namespaces cannot bypass them.
+
+The threat model assumes the filesystem itself is trusted (or
+verified through [AIP-1](/docs/aip-1)'s hash/signature
+mechanisms). Per-collection threats (item-schema attacks,
+status-removal attacks) are documented in
+[AIP-18](/docs/aip-18) and not duplicated here. Per-trait
+locking and council-overlay threats are documented in
+[AIP-24](/docs/aip-24).
+
+## See also
+
+- [AIP-1 — agent.json](/docs/aip-1)
+- [AIP-2 — AIP template & registry-of-views pattern](/docs/aip-2)
+- [AIP-3 — SKILL.md](/docs/aip-3)
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-9 — agentoperators/v1](/docs/aip-9) — operator workspace
+  that binds identity layers
+- [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace
+  AIP, mirror composition mechanic
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate
+  this AIP composes on
+- [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP
+- [AIP-22 — agentoffice/v1](/docs/aip-22) — sibling Workspace
+  AIP for organisations
+- [AIP-24 — ASSEMBLY.md](/docs/aip-24) — assembly / council
+  overlay (forthcoming)
+- [AIP-25 — agentpersonas/v1](/docs/aip-25) — persona doctype
+  (forthcoming)
+- [`./resources/aip-23/draft/IDENTITY.schema.json`](./resources/aip-23/draft/IDENTITY.schema.json) — frontmatter validator
+- [`./resources/aip-23/draft/ADAPTER.md`](./resources/aip-23/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-23/draft/EXAMPLES.md`](./resources/aip-23/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-23/draft/skills/author-identity-workspace/SKILL.md`](./resources/aip-23/draft/skills/author-identity-workspace/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-23/draft/starters/identitykit-compagnon/`](./resources/aip-23/draft/starters/identitykit-compagnon) — five canonical layer collections

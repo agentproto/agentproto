@@ -1,0 +1,850 @@
+---
+title: "AIP-22: OFFICE.md — agentoffice/v1 (operating workspace for org-level coordination)"
+description: A live operating workspace for an organisation — declares which collections (roles, objectives, departments, teams, policies) are tracked, the org-tree containment, reporting hierarchy, and cross-AIP composition with governance, work, knowledge, and agency. Distinct from AIP-6's static company profile (companies.sh community standard).
+aip: 22
+status: Draft
+type: Schema
+created: 2026-04-28
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 18]
+resources: ./resources/aip-22/draft
+discussions-to: https://github.com/agentproto/specs/discussions/22
+---
+
+| Field | Value |
+|---|---|
+| AIP | 22 |
+| Title | OFFICE.md — agentoffice/v1 (operating workspace for org-level coordination) |
+| Status | Draft |
+| Type | Schema |
+| Domain | office.sh |
+| Doctypes | `office.workspace/v1` (workspace manifest + view, written as `OFFICE.md`) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-18](/docs/aip-18) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work), [AIP-21](/docs/aip-21) (agencies) |
+| Resources | [`./resources/aip-22`](./resources/aip-22/draft) — [`OFFICE.schema.json`](./resources/aip-22/draft/OFFICE.schema.json), [`ADAPTER.md`](./resources/aip-22/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-22/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-22/draft/skills/author-office-workspace/SKILL.md), [`starters/`](./resources/aip-22/draft/starters/office-starters) |
+
+## Abstract
+
+`agentoffice/v1` is a **workspace-only** successor to
+[AIP-6](/docs/aip-6). It defines a single doctype —
+`office.workspace/v1`, written as `OFFICE.md` — that declares the
+shape of an organisation without baking the per-item-kind schemas
+into the spec. Where AIP-6 hardcoded `company`, `role`, and
+`objective` as first-class doctypes, AIP-22 lifts every per-item-kind
+concern (fields, status state machine, ownership cardinality,
+identity rules, lints) to [AIP-18](/docs/aip-18) `COLLECTION.md`
+files and keeps only the **workspace-level** concerns at the
+`OFFICE.md` layer: organisation identity (legal entity,
+jurisdiction, mission), the org-tree containment model (which kinds
+nest under which, how deep the tree goes, how reporting lines
+resolve), workspace-spanning lints, and the cross-AIP bindings that
+let a company plug into a work tracker (AIP-20), an agency
+([AIP-21](/docs/aip-21)), a governance pack ([AIP-7](/docs/aip-7)),
+a knowledge wiki ([AIP-10](/docs/aip-10)), a playbook
+([AIP-12](/docs/aip-12)), and a default operator
+([AIP-9](/docs/aip-9)). The same doctype, used recursively via
+`extends:`, also expresses **per-context views** — a division, a
+jurisdictional subsidiary, an operator-specific lens — so a single
+organisation manifest fans out into many trustworthy views without
+forking. AIP-22 ships a starter library
+(`starters/office-starters/`) of [AIP-18](/docs/aip-18)
+collections — `role`, `objective`, plus three new starters
+(`department`, `team`, `policy`) — so existing v1 packages remain
+loadable under v2 and so org-shaped workspaces have a sensible floor
+to build on.
+
+## Motivation
+
+The hard lesson from [AIP-6](/docs/aip-6) was that **the per-item-kind
+schema does not belong on the workspace AIP**. AIP-6's three
+hardcoded doctypes — `company`, `role`, `objective` — were the right
+call for shipping v1 (concrete, debuggable, narrow), but they ran out
+of room the moment an organisation reached for a fourth concept. A
+small founder-led company wants `founder` as a first-class role
+shape; a clinical organisation wants `surgeon` and `clearance` as
+first-class fields on its role records; a customer-led org wants a
+`customer-lead` role type with its own status ladder; a hospital
+wants a `clinical-protocol` policy distinct from an HR `policy`. With
+v1, every additional kind required either a fork of the workspace
+AIP or a smuggled-in `metadata.<vendor>` extension that the spec
+cannot validate. The cost of mixing workspace concerns with
+item-schema concerns is the same here as it was on AIP-13 for work:
+the spec stops scaling the moment more than one organisation needs to
+extend it.
+
+The fix is to **separate workspace concerns from item-schema
+concerns** along the seam that [AIP-18](/docs/aip-18) carved out and
+that [AIP-20](/docs/aip-20) and [AIP-21](/docs/aip-21) have already
+adopted for their respective domains. AIP-18 owns the type system: a
+`COLLECTION.md` declares the schema for a class of records (fields,
+statuses, ownership, lints, identity); an `ITEM.md` is a single
+record validated against a named collection. AIP-22 owns everything
+*above* the type system: which collections an organisation tracks,
+how its org tree nests, who reports to whom, what lints span the
+whole company, and how the company binds to operators, governance,
+work tracking, knowledge, agencies, and playbooks. **Two AIPs, two
+surfaces, one mental model.** A team that needs a `customer-lead`
+role writes a fourth `COLLECTION.md` (an authoring problem), not a
+revision to AIP-22 (a registry problem).
+
+The org-tree containment model is the **distinctive contribution** of
+AIP-22. AIP-20 has scope axes (containment, applicability,
+ownership) that govern work items uniformly. AIP-21 has a service
+catalogue and engagement lifecycle that governs commercial work.
+AIP-22's centre of gravity is different: a company is, structurally,
+a *tree* — divisions contain departments, departments contain teams,
+teams contain roles, roles report up the hierarchy. v1 modelled this
+implicitly, via parent refs that the spec didn't validate, and via
+informal conventions the runtime was free to break. AIP-22 lifts the
+tree to a first-class workspace declaration: `orgTree.containment`
+declares which kinds may nest under which (the *containment
+matrix*), how deep the tree may go (a one-way switch on `maxDepth`),
+and which collection kinds participate at all. The reporting
+hierarchy is a parallel declaration: `orgTree.reporting` says that
+roles report to other roles, that the cardinality is single (one
+manager) or multiple (matrixed), and that the resulting graph MUST
+NOT contain cycles.
+
+This is the same registry-of-views pattern codified in
+[AIP-2](/docs/aip-2) and applied to wikis in [AIP-10](/docs/aip-10),
+to governance in [AIP-7](/docs/aip-7), to work in
+[AIP-20](/docs/aip-20), and to agencies in [AIP-21](/docs/aip-21).
+One workspace doctype, two modes:
+
+- **Workspace-root mode** (`<company-root>/OFFICE.md`, no
+  `extends:`) declares the BASE shape — identity, enabled
+  collections, org-tree rules, reporting graph, governance binding.
+- **View mode** (`<consumer>/OFFICE.md`, `extends:` set) adapts the
+  base for a specific division, jurisdiction, or operator —
+  narrowing the visible collections, overriding `identity.jurisdiction`,
+  rebinding `governance` for that subsidiary. The organisation is
+  one; the views are many.
+
+This composability is what makes the registry trustworthy: every
+view is just another `OFFICE.md`, validated against the same
+schema, merged via the same algorithm. A reviewer auditing a
+deployed organisation hashes the merged effective config; a
+third-party importer follows `extends:` to its terminal root; a
+runtime swap re-derives the same lens from disk. The same author
+moving between an AIP-20 work workspace, an AIP-21 agency workspace,
+and an AIP-22 company workspace re-uses the same authoring skill
+shape, the same merge algorithm, and the same one-way-switch posture
+on the fields where invariants matter.
+
+[AIP-6](/docs/aip-6) (`agentcompanies/v1`) is **complementary**, not
+superseded. AIP-6 is a community standard
+([companies.sh](https://companies.sh)) for the *static company
+profile* — what the organisation IS (legal name, jurisdiction,
+mission, founding date, the conceptual identity card). AIP-22 is the
+*live operating workspace* — where the org's collections, org-tree,
+reporting hierarchy, and cross-AIP bindings actually evolve. An
+organisation typically has BOTH: a `COMPANY.md` (AIP-6) for the
+identity card, and an `OFFICE.md` (AIP-22) that references the
+company profile via the `company:` field and carries the operating
+state on top. AIP-22 ships a starter library
+([`starters/office-starters/`](./resources/aip-22/draft/starters/office-starters))
+containing five [AIP-18](/docs/aip-18) collections — `role`,
+`objective`, `department`, `team`, and `policy` — as opinionated
+defaults; teams are free to extend, replace, or omit them.
+
+## Specification
+
+A conforming `agentoffice/v1` deployment is a single doctype:
+`office.workspace/v1`, written as `OFFICE.md`. The organisation's
+items live under [AIP-18](/docs/aip-18) collections — AIP-22 does
+NOT define an item doctype of its own. Every per-item-kind concern
+is deferred to AIP-18. Every workspace-level concern is owned by
+this AIP.
+
+### File location
+
+The filename `OFFICE.md` is normative — discovery, install, and
+toolchains key off it. The path is conventional, not normative.
+Conventional layout:
+
+```
+<company-root>/
+├── OFFICE.md                          # workspace manifest (REQUIRED at the company root)
+├── collections/                        # AIP-18 collections enabled by this organisation
+│   ├── role/
+│   │   └── COLLECTION.md               # AIP-18 collection definition
+│   ├── objective/
+│   │   └── COLLECTION.md
+│   ├── department/
+│   │   └── COLLECTION.md
+│   ├── team/
+│   │   └── COLLECTION.md
+│   └── policy/
+│       └── COLLECTION.md
+└── items/                              # AIP-18 ITEM.md records, filed by collection
+    ├── role/
+    │   └── <slug>.md
+    ├── objective/
+    │   └── <slug>.md
+    ├── department/
+    │   └── <slug>.md
+    ├── team/
+    │   └── <slug>.md
+    └── policy/
+        └── <slug>.md
+```
+
+**Per-context views** live alongside their consumer, not under the
+company root:
+
+```
+divisions/research/OFFICE.md          # extends ../../<company-root>/OFFICE.md
+jurisdictions/us/OFFICE.md            # extends ../../<company-root>/OFFICE.md
+operators/eng-lead/OFFICE.md          # extends ../../<company-root>/OFFICE.md
+```
+
+A view's `extends:` field points to a parent `OFFICE.md` (workspace
+root OR another view). `appliesTo:` binds the view to one or more
+operator/skill workspace refs. The host resolves the chain on load
+and exposes the merged effective config to the consumer.
+
+### `OFFICE.md` — frontmatter shape
+
+```yaml
+---
+schema: office.workspace/v1
+name: <kebab-case-id>                       # required
+title: <human-readable company name>        # required
+description: <one-paragraph purpose>        # required
+version: <semver>                           # required, the WORKSPACE version
+
+# Composition (view mode)
+extends: ../path/to/parent/OFFICE.md       # OPTIONAL
+appliesTo:                                  # OPTIONAL — bind this view to consumers
+  - ws://operators/<slug>                   #   AIP-9 operator
+  - ws://skills/<slug>                      #   AIP-3 skill
+
+# Identity (org-flavored — AIP-22 specific)
+identity:
+  legalName: <string>                       # OPTIONAL — registered legal name
+  legalEntity: ws://companies/<slug>        # OPTIONAL — self-ref or parent-entity ref
+  jurisdiction: <ISO 3166-1 alpha-2>        # OPTIONAL — primary jurisdiction
+  foundedAt: <ISO date>                     # OPTIONAL
+  mission: <string>                         # OPTIONAL — one-paragraph mission
+  defaultCurrency: <ISO 4217>               # OPTIONAL — e.g. USD, EUR
+  taxId: <string>                           # OPTIONAL — tax / VAT identifier
+
+# Cross-AIP composition (the centre of gravity)
+executor: ws://operators/<slug>             # OPTIONAL — AIP-9 default org operator
+governance: <path-or-ref>                   # OPTIONAL — AIP-7 governance binding
+work: ws://workspaces/<slug>                # OPTIONAL — AIP-20 work tracker
+agency: ws://agencies/<slug>                # OPTIONAL — AIP-21 agency context
+knowledge: ws://wikis/<slug>/KNOWLEDGE.md   # OPTIONAL — AIP-10 wiki binding
+playbook: ws://playbooks/<slug>             # OPTIONAL — AIP-12 culture / values playbook
+
+# Collections this organisation tracks. Three forms supported.
+collections:                                # array; merge-by-name/alias
+  # 1. Inline declaration (small organisations, no sharing):
+  - inline:
+      schema: collection.schema/v1
+      name: role
+      title: Role
+      description: A role within the company.
+      version: 1.0.0
+      fields: [...]
+      statuses: [...]
+      ownership: { cardinality: single, role: holder, required: false }
+  # 2. File ref (shared with peers):
+  - ref: ./collections/objective/COLLECTION.md
+  # 3. Registry import:
+  - ref: ws://collections/department
+    alias: division                         # workspace-local rename
+    version: "1.x"
+
+# Org-tree (AIP-22's distinctive concept)
+orgTree:
+  containment:
+    enabled: true                           # ONE-WAY SWITCH: descendants cannot disable
+    field: parent                           # which item field carries the org-parent ref
+    rules:
+      allowedKinds: [department, team, role]   # which collection kinds participate
+      allowedParentKinds:                       # nested-allowed matrix
+        team: [department]                       # a team's parent MUST be a department
+        role: [team, department]                  # a role MAY parent under team or department
+        department: [department]                  # departments MAY nest as sub-departments
+      maxDepth: 6                               # ONE-WAY SWITCH on widening
+  reporting:
+    enabled: true
+    field: reportsTo                          # ref to a role acting as manager
+    cardinality: single | multiple             # single line of report (typical) or matrixed
+    rules:
+      mustResolveTo: role                      # the report target MUST be a role
+      circularBan: true                        # MUST NOT have reporting cycles
+
+# Workspace-spanning lints (AIP-18 lints are per-collection; these span collections)
+lints:                                        # array; merge-by-id with parent
+  - id: <kebab-id>
+    kind: orphan-role | broken-report | missing-manager | unassigned-objective | stale-objective | custom
+    severity: error | warn | info
+    params: { <key>: <value> }
+
+# Routine workflow defaults (composes with AIP-15)
+defaults:
+  workflow: <ref>                            # OPTIONAL — default WORKFLOW.md path or ref
+  approvalClass: auto | always | on-mutate | policy:<ref>
+  auditMutations: true | false               # ONE-WAY SWITCH
+
+# Display / UX hints
+display:
+  homePage: <slug>
+  defaultGrouping: kind | department | parent
+  defaultView: list | tree | board
+
+metadata:                                    # vendor extensions, namespaced under <vendor>
+  <vendor>:
+    <field>: <value>
+---
+
+# <body — markdown prose>
+```
+
+The body is free-form markdown. The frontmatter is the contract.
+
+### Collection declaration
+
+The `collections:` array is the bridge between AIP-22 and
+[AIP-18](/docs/aip-18). Each entry MUST be one of three forms:
+
+**1. Inline declaration.** A full `collection.schema/v1`
+frontmatter, parsed in-place. The host registers the collection
+directly via [AIP-18](/docs/aip-18)'s `defineCollection` without
+loading a separate file. Useful for small, single-tenant
+organisations where the collection is not shared:
+
+```yaml
+collections:
+  - inline:
+      schema: collection.schema/v1
+      name: role
+      title: Role
+      description: A role within the company.
+      version: 1.0.0
+      fields:
+        - { name: clearance, type: enum, enum: [public, internal, confidential] }
+      statuses:
+        - { id: proposed, label: Proposed }
+        - { id: active, label: Active }
+        - { id: archived, label: Archived, terminal: true }
+      ownership: { cardinality: single, role: holder, required: false }
+```
+
+**2. File ref.** A relative path to a `COLLECTION.md` on disk.
+Useful when the collection is shared with peer organisations or when
+the collection's version is managed independently:
+
+```yaml
+collections:
+  - ref: ./collections/objective/COLLECTION.md
+```
+
+**3. Registry import.** A `ws://collections/<slug>` URI resolved
+against the host's collection registry. Useful for cross-organisation
+sharing and for installing third-party collection definitions:
+
+```yaml
+collections:
+  - ref: ws://collections/department
+```
+
+**Aliasing.** Any ref form MAY carry an `alias:` to expose the
+collection in this organisation under a different name. This is the
+escape hatch for ref-name conflicts (two registry collections both
+named `team`) and for workspace-local naming preferences (`division`
+locally, `department` upstream):
+
+```yaml
+collections:
+  - ref: ws://collections/department
+    alias: division
+    version: "1.x"
+```
+
+When `alias:` is set, items in this organisation MUST reference the
+alias, not the upstream name. The host MUST refuse a workspace whose
+two entries resolve to the same effective name with
+`office_collection_alias_conflict` (HARD).
+
+The `collections:` array merges across the `extends:` chain by
+**effective name** (alias if set, otherwise the collection's `name`).
+A child entry with the same effective name replaces the parent's
+ref or inline; new effective names are appended.
+
+### Org-tree containment
+
+Org-tree containment is AIP-22's distinctive contribution. Where
+[AIP-20](/docs/aip-20) keeps three orthogonal scope axes
+(containment / applicability / ownership) flat across collections,
+AIP-22's centre of gravity is the *organisational structure itself*:
+a company is shaped like a tree, and the workspace declares the rules
+of that tree.
+
+**Why a dedicated declaration.** v1 expressed parent links via free-form
+`parent` refs that the spec didn't validate. A `team` could have a
+`role` as its parent; a `department` could have a `team` as its
+parent; the resulting graph could (and did) cycle. AIP-22 lifts the
+tree to a first-class declaration so the host can validate it at
+write time and refuse mis-shaped items before they corrupt the
+graph.
+
+```yaml
+orgTree:
+  containment:
+    enabled: true
+    field: parent
+    rules:
+      allowedKinds: [department, team, role]
+      allowedParentKinds:
+        team: [department]
+        role: [team, department]
+        department: [department]
+      maxDepth: 6
+  reporting:
+    enabled: true
+    field: reportsTo
+    cardinality: single
+    rules:
+      mustResolveTo: role
+      circularBan: true
+```
+
+**`containment.allowedKinds`** declares which collection kinds
+participate in the tree at all. A `policy` or `objective` item is
+typically NOT in `allowedKinds` — it lives outside the tree, attached
+by reference rather than by containment.
+
+**`containment.allowedParentKinds`** is a matrix. The keys are
+*child* collection names; the values are arrays of *allowed parent*
+collection names. The example above says: a `team` may parent only
+under a `department`; a `role` may parent under a `team` or a
+`department`; a `department` may parent under another `department`
+(sub-departments). The host MUST refuse an item write whose parent's
+collection is not in the child's allowed list with
+`office_orgtree_invalid_parent_kind` (HARD).
+
+**`containment.maxDepth`** caps recursion at the organisation level.
+Once any ancestor in the `extends:` chain sets a value, descendants
+MAY narrow it (smaller maxDepth) but MUST NOT widen it. Widening
+attempts trigger `office_orgtree_depth_widen` (HARD) — a one-way
+switch in the *narrowing* direction.
+
+**`containment.enabled: true`** is itself a one-way switch in the
+disable direction. Once an ancestor enables containment, no
+descendant may turn it off. Disabling would orphan the items whose
+`parent` fields were validated under the parent's rules.
+
+**Reporting graph.** `orgTree.reporting` declares the manager-line.
+The field (default `reportsTo`) is a ref that MUST resolve to an
+item of the kind listed in `rules.mustResolveTo` (typically `role`).
+`cardinality: single` is the common case (one manager per role);
+`multiple` covers matrixed organisations. `circularBan: true`
+enforces an acyclic reporting graph — a role X reporting to Y
+reporting to X is refused at item-write time with
+`office_orgtree_circular_report` (HARD). The host MUST detect
+cycles by walking the `reportsTo` chain from each affected role on
+write; for `cardinality: multiple`, the cycle check expands to a DAG
+walk across all reporting parents.
+
+The reporting graph is **logically separate** from the containment
+tree. A role's containment parent (which department it sits in) and
+its reporting parent (which role it reports to) are independent
+concepts. A role MAY report to a manager in another department; the
+containment tree groups by org structure, the reporting graph
+expresses authority.
+
+### Composition (`extends:` chain)
+
+When a host loads a `OFFICE.md` whose `extends:` is set, it MUST:
+
+1. **Walk the parent chain.** Recursively load the parent referenced
+   by `extends:`; that parent's parent if it has one; until a
+   manifest with no `extends:` is reached. Maximum chain depth is
+   eight. Hosts MUST detect cycles by tracking visited absolute
+   paths.
+2. **Treat depth overflow and cycle detection as warnings**, not
+   errors. A view whose chain is malformed MUST still load — the
+   runtime falls back to the local manifest only and surfaces
+   `office_extends_cycle` (or `company_extends_depth_exceeded`) as
+   a warning to the consumer's debug surface.
+3. **Tolerate a missing parent.** If `extends:` points to a path
+   that does not exist, the host emits `office_extends_missing` as
+   a warning and uses the local manifest only.
+4. **Merge bottom-up.** Walk the chain from the workspace root
+   toward the leaf view, merging each manifest into the accumulator
+   using the strategy below.
+
+**Merge strategy** (child wins on conflicts):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins. |
+| `extends` | local-only | Not inherited. |
+| `appliesTo` | local-only | Not inherited. Each view declares its own scope. |
+| `identity.*` | leaf-field deep-merge | `legalName`, `jurisdiction`, etc. each override independently. A division MAY narrow `jurisdiction` to its own country. |
+| `executor`, `governance`, `work`, `agency`, `knowledge`, `playbook` | override | Child can rebind. Subject to one-way switches and governance gating. |
+| `collections` | merge-by-effective-name | Child entry with same alias-or-name → child replaces parent's; new effective names appended. |
+| `orgTree.containment.enabled` | child wins (one-way) | Once `true` at any ancestor, descendants MUST NOT set `false`. HARD: `office_orgtree_disable`. |
+| `orgTree.containment.field` | override | |
+| `orgTree.containment.rules.allowedKinds` | override | A child MAY narrow (subset). |
+| `orgTree.containment.rules.allowedParentKinds` | deep-merge by child kind | Child entries override parent's per child-kind. |
+| `orgTree.containment.rules.maxDepth` | child wins (one-way on widen) | Child MAY narrow (smaller value); MUST NOT widen. HARD: `office_orgtree_depth_widen`. |
+| `orgTree.reporting.*` | leaf-field override | `enabled`, `field`, `cardinality`, `rules.*` each override independently. |
+| `lints` | merge-by-id | Child lint with same `id` → child replaces parent's. New ids appended. |
+| `lints[].severity` | child wins | Subject to governance. |
+| `defaults.*` | leaf-field override | `workflow`, `approvalClass`, `auditMutations` each override independently. ONE-WAY: `auditMutations: true` cannot be downgraded. |
+| `display.*` | leaf-field override | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+The host MUST expose **both** the merged effective config AND the
+resolution chain (ordered list of absolute paths consumed during
+merge) on its debug surface.
+
+#### One-way switches (HARD refusals)
+
+Four fields are **one-way switches**: once enabled or set at any
+ancestor in the `extends:` chain, descendants MUST NOT relax them.
+Attempting to relax surfaces a HARD refusal — the view does NOT
+degrade to local-only, it fails to load.
+
+| Field | Switch direction | Refusal code |
+|---|---|---|
+| `defaults.auditMutations: true` | Once true at any ancestor, child cannot set false. | `office_audit_downgrade` |
+| `governance.signing.required: true` | Once true at any ancestor, child cannot set false (would silently relax org-level signing). | `office_signing_downgrade` |
+| `orgTree.containment.enabled: true` | Once true at any ancestor, child cannot set false (would orphan items). | `office_orgtree_disable` |
+| `orgTree.containment.rules.maxDepth: <N>` | Once set at any ancestor, child can only narrow (smaller); not widen. | `office_orgtree_depth_widen` |
+
+These four rules are why a deployed v2 organisation is trustworthy:
+an auditor inspecting any view can verify that the organisation's
+audit trail, signing posture, containment integrity, and depth
+invariant hold across every descendant. Without the one-way
+invariants, a malicious or careless view could silently relax the
+audit trail or break the org-tree by widening depth.
+
+#### `appliesTo` enforcement
+
+`appliesTo` is **not inherited**. A view's bindings are local; the
+parent's bindings do not leak into the child. Cross-field constraint:
+**`appliesTo` present ⇒ `extends` REQUIRED**. A workspace that binds
+to a consumer must extend a parent — a binding without an extension
+is semantically a workspace-root with a consumer claim, which the
+registry-of-views pattern rejects as ill-formed.
+
+Hosts MUST refuse a view whose `appliesTo` references a non-existent
+consumer with `office_appliesto_unresolvable`. This is a HARD
+failure, not a warning.
+
+### Cross-AIP composition
+
+`OFFICE.md` is the centre of gravity for organisation-level
+AIP-family composition. The table below lists every cross-AIP ref and
+the AIP that owns the binding's semantics.
+
+| Field | Target AIP | Purpose |
+|---|---|---|
+| `executor` | [AIP-9](/docs/aip-9) operator | Default org-level operator — the operator the host activates for company-level prompts (e.g. quarterly objective check-ins) when no more-specific operator applies. |
+| `governance` | [AIP-7](/docs/aip-7) policy / audit | Org-level approvals (role creation, reporting reassignment, jurisdiction change). Workspace-root manifests usually set this; views may override only if the parent's policy permits. |
+| `work` | [AIP-20](/docs/aip-20) `WORK.md` | Work tracker the company runs. Cross-references on items (a role's open tasks, an objective's tracked initiatives) resolve against the bound work workspace. |
+| `agency` | [AIP-21](/docs/aip-21) `AGENCY.md` | Agency workspace — set when the company also operates as a commercial agency selling services to external counterparties. |
+| `knowledge` | [AIP-10](/docs/aip-10) `KNOWLEDGE.md` | Institutional knowledge wiki. The company's playbook, runbooks, and onboarding docs live here. |
+| `playbook` | [AIP-12](/docs/aip-12) playbook | Culture / values / operating-rhythm playbook governing how the company makes decisions. |
+| `defaults.workflow` | [AIP-15](/docs/aip-15) `WORKFLOW.md` | Default routine workflow that runs against company items (e.g. monthly reporting-graph integrity sweep). |
+| `collections[].ref` / `collections[].inline` | [AIP-18](/docs/aip-18) `COLLECTION.md` | Per-item-kind schema. EVERY item-schema concern is delegated here. |
+| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-9](/docs/aip-9) operator | View binding. |
+| `extends` | another `OFFICE.md` | Composition. |
+
+A host MUST verify that every cross-AIP ref it loads resolves —
+unresolvable refs surface as `office_xref_unresolvable` (HARD for
+`executor`/`governance`/`work`/`agency`/`knowledge`/`playbook`; warn
+for `defaults.workflow` since the workflow may be intentionally
+provisioned later).
+
+### Body conventions
+
+The frontmatter ends; the body is markdown. Conventional sections:
+
+- `## Purpose` — what this organisation is, who it serves.
+- `## Org structure` — the human-readable rendering of the tree.
+- `## Conventions` — when an item belongs in `department` vs `team`;
+  when a role has its own collection vs extends `role`.
+- `## What this workspace does NOT model` — set boundaries
+  explicitly.
+- `## When to extend vs replace` — composition guidance for downstream
+  view authors.
+
+The body is free-form. The contract lives in the frontmatter.
+
+## Workspace root manifest (OFFICE.md)
+
+Per the convention codified in [AIP-2](/docs/aip-2), every Workspace
+AIP MUST define a root manifest doctype. AIP-22's root manifest is
+the same `office.workspace/v1` doctype used in two modes:
+
+- **Workspace-root mode** — `<company-root>/OFFICE.md`, no
+  `extends:`. Declares the BASE shape: identity, enabled
+  collections, org-tree rules, reporting graph, governance binding.
+- **View mode** — `<consumer>/OFFICE.md`, `extends:` set. Adapts
+  the base for a specific division, jurisdiction, or operator —
+  narrows the visible collections, narrows `identity.jurisdiction`,
+  rebinds governance for that subsidiary.
+
+The same schema validates both modes; the host distinguishes by
+checking whether `extends:` is set. The same merge algorithm applies
+recursively.
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<company-root>/OFFICE.md` | `<consumer>/OFFICE.md` |
+| `extends:` | absent | required |
+| `appliesTo:` | absent | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins |
+| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the company |
+| Use cases | org founders, head of people | division leads, jurisdictional subsidiaries, per-operator views |
+| Validation | full schema check | schema check + chain validation + one-way-switch check |
+| Lifecycle | versioned with the company | versioned with the consumer |
+
+## Rationale
+
+**Why split workspace concerns from item-schema concerns.**
+[AIP-6](/docs/aip-6) collapsed both layers into one AIP. The
+workspace AIP owned both "what kinds exist" and "what a single role
+or objective looks like", and the cost showed up the moment a fourth
+role shape (founder, surgeon, customer-lead) appeared. AIP-18 carved
+out the item-schema layer; AIP-22 keeps only the workspace layer.
+This is the same separation [AIP-2](/docs/aip-2) codifies as the
+registry-of-views pattern: *one file, one identity, one importable
+unit*. An organisation is its shape; a collection is a shape; an
+item is an instance. Three distinct layers, three distinct AIPs, one
+composition mechanic.
+
+**Why org-tree containment is the AIP-22 distinctive concept.**
+AIP-20 has scope axes that uniformly govern work items. AIP-21 has
+the engagement lifecycle and service catalogue. AIP-22's centre of
+gravity is the organisational structure itself: a company is, at the
+spec level, a tree of containment with a parallel reporting graph.
+Where AIP-20's containment is a single axis among three, AIP-22's
+containment is the axis the whole AIP is organised around. Lifting
+the containment matrix (`allowedParentKinds`) and the reporting
+rules (`circularBan`, `mustResolveTo`) to a workspace-level
+declaration prevents the most common org-modelling mistakes —
+inverted reporting lines, sub-teams parented under roles, infinitely
+deep recursive divisions — from ever reaching item-write time.
+
+**Why allow inline + ref + aliased collection declarations.** Three
+forms cover three real authoring postures. *Inline* is for small
+single-tenant organisations where the collection schema is private
+and co-located. *File ref* is for shared-on-disk collections where
+peer organisations import the same `COLLECTION.md` (the cross-team
+publishing case). *Registry import* (`ws://collections/...`) is for
+third-party collections installed via `agentproto install`.
+*Aliasing* is the escape hatch for ref-name conflicts and
+workspace-local renaming. The host's three-step resolution order
+(inline → local file → registry) means authors can prototype inline,
+graduate to file ref when sharing emerges, and only reach for
+registry import when third-party collections enter the picture.
+
+**Why four one-way switches instead of three.** AIP-20 has three
+one-way switches (audit, containment-enable, applicability-value-class).
+AIP-22 has four: audit, signing, containment-enable, and
+containment-depth-widen. The two new ones reflect organisation-flavored
+threats. Signing downgrade — a view silencing the org-level signature
+requirement on role mutations — invalidates the chain of trust that
+external auditors and counterparties rely on. Depth widening — a view
+allowing a six-level org tree to become a ten-level one — silently
+breaks invariants that compliance tooling and reporting walks rely
+on. Both are HARD refusals on the same posture as AIP-20's audit
+downgrade: once any ancestor has tightened the screw, descendants may
+narrow further but never relax.
+
+**Why this pattern mirrors AIP-20 / AIP-21 / AIP-10.** The agentproto
+family converges on a shared mechanic: one `<NAMESPACE>.md` doctype,
+two modes (workspace root / view), `extends:` for composition,
+`appliesTo:` for binding, merge-by-id for arrays of objects,
+hard-refusal on bindings to non-existent consumers, soft-warning on
+malformed chains. AIP-10 codified it for wikis, AIP-7 for governance,
+AIP-13 for the v1 work tracker. AIP-20 distilled the workspace-only
+shape; AIP-21 applied it to the agency domain; AIP-22 applies it to
+the organisational domain. A host implementing one Workspace AIP gets
+the others structurally for free — same loader, same merge algorithm,
+same effective-config exposure surface. The cost of inventing a
+per-AIP composition mechanic would have been shipping four subtly
+different loaders; the cost of converging is one paragraph of "see
+AIP-20 for the merge strategy" per AIP. The convergence is
+deliberate.
+
+**Why AIP-22 is complementary, not a successor to AIP-6.** AIP-6 is
+a community standard ([companies.sh](https://companies.sh)) defining
+the *static company profile* — the identity card any party can read
+to know what the company is. AIP-22 covers a different concern:
+*how* the organisation operates — the live workspace where roles,
+objectives, departments, reporting, and cross-AIP composition
+evolve. The two file types model orthogonal facts. An organisation
+typically ships both: a `COMPANY.md` for "what we are" and an
+`OFFICE.md` for "where we work from". Trying to fold them into one
+manifest would conflate identity (mostly stable, externally
+verifiable) with operations (constantly moving, internal). Keeping
+them separate also lets AIP-6 evolve under its own governance
+process without coupling our operating-workspace cadence to it.
+
+## Reference Implementation
+
+Reference implementation in progress. The spec leads the
+implementation; once the in-flight `packages/companies/v2` package
+lands, this AIP will absorb the working schema in full as part of
+moving Draft → Review.
+
+The implementation will compose with [AIP-18](/docs/aip-18)'s
+`packages/collection/core` (also in flight) — `OFFICE.md`
+validation delegates per-item-kind validation to AIP-18; both
+packages share the same merge algorithm and resolution-chain
+exposure surface. It will also share infrastructure with the
+in-flight AIP-20 work-workspace package and AIP-21 agency-workspace
+package: a single workspace-runtime base class loads any of the
+three doctypes, distinguishes by the `schema:` discriminator, and
+delegates to the AIP-specific merge tables.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec. AIP-22 is
+**complementary** to [AIP-6](/docs/aip-6) (`agentcompanies/v1` —
+the [companies.sh](https://companies.sh) community standard for
+static company profiles), not a successor. The two AIPs cover
+distinct concerns: AIP-6 is the identity card (what the company
+is), AIP-22 is the operating workspace (how the company runs).
+
+**Composition.** An `OFFICE.md` (AIP-22) MAY reference a
+`COMPANY.md` (AIP-6) via its `company:` cross-AIP binding to
+inherit the static profile (legal entity, jurisdiction, founding
+date, mission). The host resolves the ref at load time and exposes
+both layers — operating workspace + company profile — through the
+same effective-config surface. An organisation that wants only one
+or the other is free to ship just `COMPANY.md` (no operating
+workspace) or just `OFFICE.md` (operating workspace without a
+formal company profile, e.g. an internal team or a research
+collective).
+
+**Starter library.** AIP-22 ships
+[`./resources/aip-22/draft/starters/office-starters/`](./resources/aip-22/draft/starters/office-starters)
+with five [AIP-18](/docs/aip-18) collections (`role`, `objective`,
+`department`, `team`, `policy`) as opinionated defaults. They are
+*examples*, not normative — teams MAY extend them
+([AIP-18](/docs/aip-18) `extends:`) with organisation-specific
+fields (`role.clearance`, `objective.kr_count`, `department.headcount`),
+or replace them entirely. The five starters cover the most common
+operating concerns (who does what, what they aim for, how they
+group, how they report); shipping them lowers the bootstrap cost
+without locking authors into a particular org topology.
+
+**Deprecation window.** AIP-6 stays Draft until AIP-22 reaches Final.
+Once AIP-22 is Final, AIP-6 moves to Superseded; hosts SHOULD
+continue supporting v1 for at least one minor-version cycle to give
+live deployments time to migrate.
+
+## Security Considerations
+
+Organisation manifests are the *write surface* for who-does-what
+authority. Threats:
+
+- **Reporting cycle attack.** A malicious view rewires the reporting
+  graph so role A reports to role B reports to role A, breaking
+  authority chains and enabling self-approval loops. Mitigation:
+  `orgTree.reporting.rules.circularBan: true` (the default for the
+  starter library) is enforced at item-write time. The host MUST
+  walk the `reportsTo` chain on every write and refuse a write that
+  would close a cycle (`office_orgtree_circular_report`, HARD).
+
+- **Role escalation through containment** — a view inserts a `role`
+  item whose containment parent is a `team`, but whose `reportsTo`
+  bypasses the team lead and points at a higher-up role. Mitigation:
+  containment and reporting are *logically separate* on purpose, but
+  governance ([AIP-7](/docs/aip-7)) policies SHOULD audit
+  cross-department reporting changes. The spec exposes both graphs
+  on the resolution surface so an auditor can diff them.
+
+- **Identity forgery** — a view sets `identity.legalName` or
+  `identity.legalEntity` to a name not the org's. Mitigation:
+  identity fields are part of the resolution chain — every
+  modification to `identity.*` flows through the same
+  `governance.auditMutations: true` audit trail; signed manifests
+  ([AIP-1](/docs/aip-1) hash mechanism) prevent silent rewrites.
+
+- **Audit downgrade** — a view sets `defaults.auditMutations: false`
+  to silence the audit log for one consumer's session. Mitigation:
+  covered by the `office_audit_downgrade` HARD refusal. Once a
+  parent in the chain enables audit, no descendant can disable it.
+
+- **Signing downgrade** — a view relaxes a parent's signing
+  requirement on role / objective mutations to make unsigned
+  changes acceptable in one division. Mitigation: covered by the
+  `office_signing_downgrade` HARD refusal.
+
+- **Org-tree disable** — a view disables `orgTree.containment` to
+  remove the parent-link enforcement for one division. Items whose
+  `parent` fields no longer validate become orphans on next load.
+  Mitigation: covered by the `office_orgtree_disable` HARD refusal.
+
+- **Depth-widening attack** — a view widens
+  `orgTree.containment.rules.maxDepth` from 4 to 12, allowing a
+  malicious actor to bury a role-creation under nine layers of
+  shell departments. Mitigation: covered by the
+  `office_orgtree_depth_widen` HARD refusal — depth can only
+  narrow (smaller maxDepth) across descendants, never widen.
+
+- **Cross-AIP ref forgery** — a view declares `governance:
+  ws://policies/<slug>` for a policy that exists but is owned by
+  another tenant. Mitigation: hosts MUST resolve cross-AIP refs
+  inside the same tenant scope as the view file; cross-tenant
+  bindings are rejected with `office_xref_unresolvable`. The same
+  rule applies to `executor`, `work`, `agency`, `knowledge`,
+  `playbook`, and `defaults.workflow`.
+
+- **Collection alias collision** — two collection refs resolve to
+  the same effective name (e.g. one ref aliased to `team`, another
+  upstream-named `team`). Mitigation: covered by the
+  `office_collection_alias_conflict` HARD refusal.
+
+- **Workspace shadowing via view** — a malicious view extends a
+  benign organisation, replaces a `role` collection ref with an
+  inline that softens the per-collection ownership rules.
+  Mitigation: the collection's own composition rules (AIP-18
+  `collection_field_type_drift`, etc.) prevent the most dangerous
+  drifts at the collection layer. AIP-22's
+  `office_collection_alias_conflict` and the merge-by-effective-name
+  rule make the alias-substitution case auditable through the
+  resolution chain.
+
+- **Vendor metadata as policy bypass** — a vendor extension under
+  `metadata.<vendor>` carries a flag the host honours that softens
+  one-way switches. Mitigation: hosts MUST treat vendor metadata as
+  advisory. Nothing under `metadata.*` may change the meaning of
+  any field defined in this AIP. The four one-way switches are
+  spec-level invariants; vendor namespaces cannot bypass them.
+
+The threat model assumes the filesystem itself is trusted (or
+verified through [AIP-1](/docs/aip-1)'s hash/signature mechanisms).
+AIP-22 inherits that posture without restating it; per-collection
+threats (item-schema attacks, status-removal attacks) are documented
+in [AIP-18](/docs/aip-18) and not duplicated here.
+
+## See also
+
+- [AIP-1 — agent.json](/docs/aip-1)
+- [AIP-2 — AIP template & registry-of-views pattern](/docs/aip-2)
+- [AIP-3 — SKILL.md](/docs/aip-3)
+- [AIP-6 — agentcompanies/v1](/docs/aip-6) — the static company profile (companies.sh community standard) that an OFFICE.md may compose via the `company:` binding
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace AIP, mirror composition mechanic
+- [AIP-12 — agentplaybooks/v1](/docs/aip-12)
+- [AIP-15 — WORKFLOW.md](/docs/aip-15)
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate this AIP composes on
+- [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP for work tracking
+- [AIP-21 — agentagencies/v2](/docs/aip-21) — sibling Workspace AIP for commercial agencies
+- [`./resources/aip-22/draft/OFFICE.schema.json`](./resources/aip-22/draft/OFFICE.schema.json) — frontmatter validator
+- [`./resources/aip-22/draft/ADAPTER.md`](./resources/aip-22/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-22/draft/EXAMPLES.md`](./resources/aip-22/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-22/draft/skills/author-office-workspace/SKILL.md`](./resources/aip-22/draft/skills/author-office-workspace/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-22/draft/starters/office-starters/`](./resources/aip-22/draft/starters/office-starters) — starter collection library mirroring AIP-6 doctypes

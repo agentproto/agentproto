@@ -1,0 +1,522 @@
+---
+title: "AIP-31: HTTP.md — agenthttp/v1 (HTTP provider specialisation)"
+description: >-
+  A markdown + frontmatter format for declaring an HTTP-API provider — its base URL,
+  per-tool endpoint/method/body templates, header bindings, response extraction, and
+  (when needed) streaming hints. Specialises AIP-30 PROVIDER for the `kind: http` case.
+  Most third-party APIs (OpenAI, Stripe, Replicate, Anthropic) wrap as HTTP providers.
+aip: 31
+status: Draft
+type: Schema
+provider_kind: http
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 16, 19, 30]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/http-runtime
+resources: ./resources/aip-31/draft
+discussions-to: https://github.com/agentproto/specs/discussions/31
+---
+
+| Field | Value |
+|---|---|
+| AIP | 31 |
+| Title | HTTP.md — agenthttp/v1 (HTTP provider specialisation) |
+| Status | Draft |
+| Type | Schema |
+| Family | [Provider](/docs/family-provider) |
+| Provider kind | `http` |
+| Specialises | [AIP-30 PROVIDER.md](/docs/aip-30) |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Resources | [`./resources/aip-31`](./resources/aip-31/draft) — `HTTP.schema.json`, [`ADAPTER.md`](./resources/aip-31/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-31/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-31/draft/skills/author-http/SKILL.md) |
+
+## Abstract
+
+`HTTP.md` is the `kind: http` specialisation of
+[AIP-30 PROVIDER](/docs/aip-30). It packages an HTTP-API integration —
+the base URL, headers, per-tool endpoint + method + body template +
+response extraction. Most third-party APIs (OpenAI, Stripe, Replicate,
+Anthropic, GitHub, Slack, Linear, Notion, …) wrap as HTTP providers;
+this AIP is the canonical pattern.
+
+The frontmatter inherits everything from PROVIDER (identity, kind,
+implements, auth, install (typically empty), version_check (typically
+empty), network, region, policy_tags, cost_override, runner, …) and
+adds HTTP-specific fields under per-tool `metadata.http.…` blocks plus
+optional top-level `base_url` and `default_headers`.
+
+The format pairs with the standard `defineProvider({ kind: "http", ... })`
+signature; no separate `defineHttp` is required (it's sugar at most).
+
+## Motivation
+
+HTTP integrations are the single largest class of agent tools: every
+LLM API, every payment processor, every SaaS productivity tool, every
+search engine, every weather/maps/news data source. Without a shared
+HTTP-provider format, every integration ships its own auth/parse/retry
+boilerplate, often with subtle incompatibilities.
+
+Five problems disappear when HTTP providers share a format:
+
+1. **Per-API boilerplate.** Authentication header construction,
+   request body templating, response field extraction — every
+   integration reinvents these. A shared format declares them in one
+   place.
+
+2. **Auth inconsistency.** Bearer tokens, API-key-in-header,
+   API-key-in-query, OAuth bearer with refresh — five variants today,
+   each handled bespokely. The provider's `auth.login` and the HTTP
+   subtype's `default_headers` cover the common cases declaratively.
+
+3. **Streaming chaos.** Some APIs stream via SSE, some via chunked
+   JSON, some via WebSockets. v1 declares unary HTTP only; streaming
+   is explicit `metadata.http.streaming` and constrained.
+
+4. **Response extraction.** Most APIs return responses with envelope
+   keys (`{ data: {...} }`, `{ result: {...} }`); the contract wants
+   the inner shape. `response_extract` declares the path-to-data once.
+
+5. **Body templating.** API request bodies are often only loosely
+   related to contract inputs — an LLM API might want
+   `{ model: "...", messages: [...], max_tokens: ... }` from a
+   contract input of `{ prompt }`. `body_template` does the mapping.
+
+## Design principles
+
+1. **Inherit, don't repeat.** Identity, auth, network, region,
+   policy, region, cost-override all live on PROVIDER. HTTP only adds
+   what's HTTP-specific: endpoint, method, body, headers, response
+   extraction, streaming hints.
+
+2. **Declarative over imperative.** Body templates use `${input.X}`
+   substitution (no shell, no JS). Response extraction uses
+   JSONPath-lite (`$.data[0].url`). Custom logic when needed lives in
+   the provider's optional entry, not in the manifest.
+
+3. **One base_url per provider.** A single HTTP provider serves one
+   API host. Cross-host providers (multi-region failover) are two
+   providers, not one with conditional URL.
+
+4. **Standard auth shapes.** Bearer-in-header is default. API-key-in-
+   header, API-key-in-query, custom-header are declared via
+   `default_headers` and `auth.state.env` mapping. OAuth flows live in
+   the PROVIDER's `auth.login` with custom callback handling in the
+   entry.
+
+5. **Unary v1, streaming v2.** v1 contracts assume request → response.
+   Streaming responses (SSE, chunked JSON, NDJSON) are declared via
+   `metadata.http.streaming` but constrained — full streaming
+   semantics defer to a future revision.
+
+## Specification
+
+### File location
+
+HTTP providers live in a single folder, separate from the TOOL.md
+contracts they implement:
+
+```
+.providers/
+  openai-images-http/
+    PROVIDER.md            ← this AIP, kind: http
+    provider.ts            ← optional entry (custom auth flow, response parser)
+    SECRETS.md             ← AIP-19 inventory (OPENAI_API_KEY)
+    README.md
+```
+
+Convention: `id` ends with `-http` to make the kind self-evident in
+catalogs. The folder name SHOULD match `id`.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---`. Inherits all fields from
+[AIP-30 PROVIDER.md](/docs/aip-30) plus the HTTP-specific fields
+below.
+
+#### Required HTTP-specific fields
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | const `"http"` | Per AIP-30. |
+| `base_url` | string | The API's base URL. ALL `implements[].metadata.http.endpoint` paths are relative to this. Schema-validated as URI. |
+
+#### Optional HTTP-specific fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `default_headers` | object | `{}` | Headers attached to every request. Templating allowed: `{ "Authorization": "Bearer ${secrets.OPENAI_API_KEY}" }`. Per-tool overrides via `metadata.http.headers`. |
+| `default_method` | enum | `POST` | Default HTTP method when a per-tool entry omits `metadata.http.method`. |
+| `streaming` | object | none | Default streaming config for tools whose contract supports it. Per-tool override via `metadata.http.streaming`. v1 keys: `transport: "sse" \| "ndjson" \| "chunked"`, `event_field: string` (SSE event-name to filter on). |
+| `rate_limit` | object | none | Hint for the resolver/runtime: `{ requests_per_minute: int, burst: int }`. Used to throttle calls; not enforcement. |
+
+#### Per-tool `metadata.http` (in `implements[N].metadata.http`)
+
+Every entry in `implements[]` adds a `metadata.http` block describing
+how this provider serves that specific tool:
+
+| Field | Type | Description |
+|---|---|---|
+| `endpoint` | string | Path relative to `base_url` (`/v1/images/generations`). |
+| `method` | enum | `GET` \| `POST` \| `PUT` \| `PATCH` \| `DELETE`. Defaults to provider's `default_method`. |
+| `headers` | object | Per-tool header overrides; merged into `default_headers` (per-tool wins). |
+| `body_template` | object | Request body shape with `${input.X}` substitutions. Omitted = pass `args.input` verbatim as JSON. |
+| `query_template` | object | Query-string params with `${input.X}` substitutions. |
+| `response_extract` | string | JSONPath-lite expression to extract the response body matching the contract's `outputs` shape. Default: identity (`$`). Examples: `$.data[0]`, `$.result.image.url`. |
+| `streaming` | object | Per-tool streaming override of the provider's `streaming`. |
+| `idempotency_key_header` | string | Header name to send a deduplication token (`Idempotency-Key`). When set, the runtime synthesises a UUID per call. |
+
+### Body templating
+
+`body_template` is a JSON object with string-valued leaves. Strings
+containing `${input.X}` substitute the validated input value. Strings
+containing `${secrets.X}` substitute the resolved secret. Arrays and
+nested objects are templated recursively.
+
+```yaml
+body_template:
+  model: "dall-e-3"
+  prompt: "${input.prompt}"
+  size: "${input.size | default('1024x1024')}"
+  user: "${context.user.id}"
+```
+
+Template syntax (mirrors AIP-29 § argv):
+
+- `${input.X}` — value of input X. JSON-encoded by the runtime.
+- `${input.X \| default('Y')}` — fallback when X is undefined/null.
+- `${secrets.X}` — resolved secret value. Never logged.
+- `${context.X}` — per-call context (user.id, workspace.id, …).
+- `${input.X \| json}` — force JSON-stringify (for nested objects passed verbatim).
+
+Conditional/computed bodies (e.g. "include `seed` only if input has
+seed") use the optional entry's body-construction function (see
+[Custom body construction](#custom-body-construction)).
+
+### Response extraction
+
+`response_extract` is a JSONPath-lite expression returning the value
+the contract's `outputs` schema expects. Supported operators:
+
+| Syntax | Meaning |
+|---|---|
+| `$` | Whole response body. |
+| `$.foo` | Property `foo`. |
+| `$.foo.bar` | Nested property. |
+| `$.foo[0]` | First array element. |
+| `$.foo[*].bar` | Map array → field, returns array. |
+| `$.foo[?(@.kind=='X')]` | Filter (basic predicate). |
+
+Anything more complex than the above lives in the optional entry's
+`responseExtract` function.
+
+### Auth shapes
+
+HTTP providers' `auth` block (inherited from PROVIDER) typically uses
+one of three patterns:
+
+#### 1. API key in header (most common)
+
+```yaml
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["OPENAI_API_KEY"] }
+  expiry: { detect: "http_status:401" }
+
+default_headers:
+  Authorization: "Bearer ${secrets.OPENAI_API_KEY}"
+  Content-Type: "application/json"
+```
+
+#### 2. API key in query string
+
+```yaml
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["GOOGLE_MAPS_API_KEY"] }
+  expiry: { detect: "http_status:403" }
+
+# No default_headers needed; query template per tool:
+implements:
+  - tool: ./tools/maps-geocode/TOOL.md
+    metadata:
+      http:
+        endpoint: "/maps/api/geocode/json"
+        method: GET
+        query_template:
+          address: "${input.address}"
+          key: "${secrets.GOOGLE_MAPS_API_KEY}"
+```
+
+#### 3. OAuth bearer with refresh
+
+```yaml
+auth:
+  ref: ./SECRETS.md
+  state:
+    env: ["GITHUB_OAUTH_ACCESS_TOKEN", "GITHUB_OAUTH_REFRESH_TOKEN"]
+  login:
+    url: "https://github.com/login/oauth/authorize?client_id=…"
+    interactive: true
+    requires_callback_url: true
+    completes_when:
+      http: { method: GET, url: "https://api.github.com/user", expect_status: 200 }
+  refresh:
+    # Refresh requires a custom flow; lives in provider.ts
+    cmd: ""
+    every: "PT1H"
+  expiry:
+    detect: "http_status:401"
+
+default_headers:
+  Authorization: "Bearer ${secrets.GITHUB_OAUTH_ACCESS_TOKEN}"
+```
+
+The OAuth refresh flow lives in the provider's optional `provider.ts`
+entry, which exports a `refresh()` function per AIP-30.
+
+### Custom body construction
+
+When `body_template` isn't expressive enough (conditional fields,
+client-side hashing, multi-stage requests), declare an optional
+`provider.ts` entry that exports a `buildRequest` function:
+
+```ts
+import { defineProvider } from "@agentproto/provider-runtime"
+
+export default defineProvider({
+  id: "openai-images-http",
+  kind: "http",
+  // ...frontmatter mirrors...
+  buildRequest: ({ toolId, input, context, providerCtx }) => {
+    if (toolId === "image.create") {
+      return {
+        url: `${providerCtx.baseUrl}/v1/images/generations`,
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${providerCtx.secrets.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+          ...(input.idempotency_key && { "Idempotency-Key": input.idempotency_key }),
+        },
+        body: {
+          model: input.model ?? "dall-e-3",
+          prompt: input.prompt,
+          ...(input.size && { size: input.size }),
+          ...(input.style && { style: input.style }),
+        },
+      }
+    }
+    throw new Error(`No buildRequest for ${toolId}`)
+  },
+  parseResponse: ({ toolId, status, body, headers }) => {
+    if (status === 200 && toolId === "image.create") {
+      return { ok: true, value: { url: body.data[0].url, width: 1024, height: 1024 } }
+    }
+    if (status === 401) return { ok: false, error: { code: "auth_required" } }
+    return { ok: false, error: { code: "upstream_error", message: body?.error?.message ?? "unknown" } }
+  },
+})
+```
+
+The host's HTTP runtime uses `buildRequest` / `parseResponse` when
+declared, falling back to `body_template` / `response_extract` when
+not.
+
+### Streaming (v1 declarative only)
+
+When a contract supports streaming (per AIP-14's open-question
+section) AND the provider implements streaming, declare:
+
+```yaml
+streaming:
+  transport: sse
+  event_field: data
+implements:
+  - tool: ./tools/chat-completion/TOOL.md
+    metadata:
+      http:
+        endpoint: "/v1/chat/completions"
+        body_template:
+          stream: true
+          model: "..."
+          messages: "${input.messages}"
+        streaming:
+          transport: sse
+          event_field: data
+          terminator: "[DONE]"
+```
+
+The HTTP runtime parses SSE events, yielding each `data:` payload to
+the caller. v1 streams output only (request is unary). Bidirectional
+streaming defers to a future revision.
+
+### Stable identity
+
+Per AIP-30: `id` + `version` form the provider's stable identity.
+Bumping `base_url` or auth scheme is a major change. Adding a new
+`implements[]` entry without breaking existing ones is a minor.
+
+## The `defineProvider({ kind: "http", ... })` signature
+
+HTTP providers use `defineProvider` per AIP-30, with `kind: "http"`.
+The HTTP-specific behavioural functions are:
+
+```ts
+interface ProviderDefinition<"http"> extends ProviderDefinition {
+  kind: "http"
+  baseUrl: string
+  defaultHeaders?: Record<string, string>
+  defaultMethod?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  streaming?: { transport: "sse" | "ndjson" | "chunked"; event_field?: string }
+
+  // Optional behavioural adapters.
+  buildRequest?: (args: BuildRequestArgs) => HttpRequest
+  parseResponse?: (args: ParseResponseArgs) => ProviderResult<unknown>
+}
+
+interface BuildRequestArgs {
+  toolId: string
+  input: unknown
+  context: Record<string, unknown>
+  providerCtx: ProviderContext
+  signal: AbortSignal
+}
+
+interface HttpRequest {
+  url: string
+  method: string
+  headers: Record<string, string>
+  body?: unknown            // JSON-serialised by the runtime
+  query?: Record<string, string>
+}
+
+interface ParseResponseArgs {
+  toolId: string
+  status: number
+  body: unknown
+  headers: Record<string, string>
+}
+```
+
+A frontmatter-only HTTP provider (no entry) is valid when `body_template`
++ `response_extract` cover the dispatch shape. Most third-party REST
+APIs fit this pattern.
+
+A custom-entry HTTP provider extends with `buildRequest` / `parseResponse`
+when conditional or computed request shapes are needed.
+
+### Conformance rules
+
+1. **Inherit AIP-30 conformance.** All AIP-30 `defineProvider` rules
+   apply. Identity-vs-frontmatter, signal honouring, sandbox
+   enforcement, no module-load I/O.
+
+2. **`base_url` is single-host.** A provider serves one host. Multi-
+   region failover is multiple providers, not conditional URL.
+
+3. **Body templating is JSON-only.** `body_template` is JSON; v1 does
+   not support form-data, multipart, or query-only bodies. Use a
+   custom entry for those.
+
+4. **Response extraction is JSONPath-lite.** No JS expressions. Custom
+   parsing lives in `parseResponse`.
+
+5. **Streaming is opt-in.** Tools whose contract doesn't declare
+   streaming-eligible outputs cannot stream regardless of provider's
+   streaming declaration.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* an HTTP `PROVIDER.md` is via the paired
+[author-http skill](./resources/aip-31/draft/skills/author-http/SKILL.md).
+The skill walks the agent through:
+
+1. Pick `id` (kebab + `-http` suffix).
+2. Identify `base_url`.
+3. Identify auth scheme + map to `default_headers` / `auth.state.env`.
+4. For each TOOL the provider implements: identify endpoint, method,
+   body shape, response shape; author `metadata.http`.
+5. Declare `network.egress` (the API's host).
+6. Validate against
+   [`./resources/aip-31/draft/HTTP.schema.json`](./resources/aip-31/draft).
+
+## Example
+
+See [`./resources/aip-31/draft/EXAMPLES.md`](./resources/aip-31/draft/EXAMPLES.md)
+for canonical patterns: API-key auth, OAuth-bearer, query-key auth,
+streaming SSE, multi-tool sharing one auth.
+
+## Compatibility
+
+### With AIP-30 PROVIDER.md
+
+This AIP is a strict specialisation. Every HTTP provider IS a
+PROVIDER. The AIP-30 schema validates the universal fields; the
+AIP-31 schema validates the HTTP-specific fields. Hosts MUST run both
+schemas in sequence at registration time.
+
+### With AIP-14 TOOL.md
+
+HTTP providers reference TOOL.md contracts via `implements[].tool`.
+The contract's `inputSchema` is the input the runtime validates
+against; the body template references those validated input values.
+The contract's `outputSchema` is what `response_extract` (or
+`parseResponse`) produces.
+
+### With AIP-19 SECRETS.md
+
+The provider's `auth.ref` points at a `SECRETS.md` listing the
+HTTP API's required env-var bindings (API keys, OAuth tokens). The
+runtime resolves secrets per call and injects them into headers/body
+via `${secrets.X}` substitution.
+
+## Security considerations
+
+- **Headers leak secrets in logs.** Hosts MUST redact
+  `Authorization`, `X-API-Key`, and any header name listed in
+  `auth.state.env` from request/response logs. The runtime emits
+  audit rows with `header_keys` (not values).
+- **Body templates leak secrets** when authors carelessly substitute
+  `${secrets.X}` into body fields visible in audit logs. Hosts SHOULD
+  flag any `body_template` field whose value derives from `${secrets.…}`
+  and redact during audit.
+- **Idempotency keys** prevent retry-induced double-charges. When
+  the contract is `mutates: ["external:*"]`, providers SHOULD declare
+  `idempotency_key_header` and rely on the runtime's per-call UUID.
+- **Open redirects in `base_url`** are an attack surface for
+  user-supplied URLs. Hosts MUST refuse a `base_url` whose hostname
+  is in the call's `args.input` — `base_url` is a static config, not
+  user-controlled.
+- **TLS verification** is non-negotiable. Hosts MUST validate
+  certificates; providers MUST NOT request TLS-skip-verify.
+
+## Open questions
+
+1. **Multipart / form-data bodies.** v1 is JSON-only. APIs that
+   require multipart (file uploads) need either a custom entry or a
+   future `body_format: multipart` extension. Defer to v2.
+2. **Bidirectional streaming.** v1 streams response only.
+   Request-streaming (uploading a transcribed audio chunk-by-chunk
+   to a transcription API) needs a different mechanism. v2 candidate.
+3. **GraphQL.** A GraphQL endpoint is one URL with a body containing
+   the query — fits HTTP.md technically but feels under-served. v2
+   may add a `kind: graphql` sibling specialisation.
+4. **WebSocket transports.** Some APIs (Anthropic's streaming
+   endpoint, OpenAI's realtime API) speak WebSocket. v1 doesn't
+   cover this; defer to AIP-32 MCP-over-WebSocket or a future
+   AIP-XX WebSocket provider.
+
+## See also
+
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts HTTP providers
+  implement
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
+- [AIP-29 — CLI.md](/docs/aip-29) — sibling specialisation,
+  `kind: cli`
+- [AIP-30 — PROVIDER.md](/docs/aip-30) — abstract supertype
+- [AIP-32 — MCP.md](/docs/aip-32) — sibling specialisation,
+  `kind: mcp`
+- [AIP-33 — SDK.md](/docs/aip-33) — sibling specialisation,
+  `kind: sdk`
+- [Provider family](/docs/family-provider) — index of related AIPs
+- [`./HTTP.schema.json`](./resources/aip-31/draft) — JSON Schema validator
+- [`./ADAPTER.md`](./resources/aip-31/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-31/draft/EXAMPLES.md) — additional patterns

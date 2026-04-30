@@ -1,0 +1,565 @@
+---
+title: "AIP-26: CODE.md — code-workspace + sources composition"
+description: A composable schema block defining the `code` and `run` fields that declare what files compose a runnable bundle (inline, local, github, ref) and how to invoke them — together with the `code-workspace` first-class kind that other manifests reference.
+aip: 26
+status: Draft
+type: Schema
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 16, 17, 19]
+resources: ./resources/aip-26/draft
+discussions-to: https://github.com/agentproto/specs/discussions/26
+---
+
+| Field | Value |
+|---|---|
+| AIP | 26 |
+| Title | CODE.md — code-workspace + sources composition |
+| Status | Draft |
+| Type | Schema |
+| Domain | code.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-16](/docs/aip-16), [AIP-17](/docs/aip-17), [AIP-19](/docs/aip-19) |
+| Resources | [`./resources/aip-26`](./resources/aip-26/draft) — [`SKILL.md`](./resources/aip-26/draft/skills/use-code-block/SKILL.md), [`ADAPTER.md`](./resources/aip-26/draft/ADAPTER.md), [`CODE.schema.json`](./resources/aip-26/draft/CODE.schema.json) |
+
+## Abstract
+
+This AIP defines two schema blocks — **`code`** and **`run`** — and
+one new top-level manifest **`kind: code-workspace`**. Together they
+formalize *what files compose a runnable bundle, where those files
+come from, and how to invoke them* — separately from *who runs them*
+(AIP-17 RUNTIME), *what data flows through them* (AIP-16 IO), and
+*what permissions they hold* (AIP-19 SECRETS, top-level `network`).
+
+The `code` block accepts four source variants — `inline`, `local`,
+`github`, `ref` — composed via overlay merge. The `run` field
+accepts three forms — file path, exec argv, shell command — covering
+the same surface as Dockerfile `CMD` semantics.
+
+The `code-workspace` kind is a first-class workspace entity that
+multiple tools and workflows can reference, enabling shared bundles
+(deps installed once, code reused across many entry points).
+
+## Motivation
+
+The pre-AIP-26 manifests (TOOL.md, WORKFLOW.md) had implicit code
+identity: the bundle was always "the folder the manifest lives in",
+and the entry was always a single file (`tool.ts`, `workflow.ts`).
+This shape blocks several real workflows:
+
+1. **Multi-file projects.** Agents that author tools needing
+   `package.json`, lockfile, `lib/`, and assets cannot express that
+   structure — the bundler esbuild-flattens to one file.
+
+2. **Code reuse across tools.** Two tools that share a renderer or a
+   client library either duplicate code or work around with relative
+   imports across folders the bundler doesn't follow.
+
+3. **GitHub source-of-truth.** Agents that maintain their tool code
+   in a real repo (with CI, PRs, tests) cannot point a manifest at a
+   git SHA — they have to copy-paste the source into the workspace.
+
+4. **Composition / overlay.** A team-wide "Mastra tool shell" repo
+   that downstream tools customize with one inline override is not
+   expressible. Today users must either fork the shell or copy
+   everything.
+
+5. **Dockerfile compatibility.** Tools that need shell commands
+   (`npm run build && node dist/tool.js`) or explicit ARGV
+   (`["python", "-m", "module"]`) can't be expressed — the implicit
+   `node tool.ts` runner can't be overridden.
+
+This AIP introduces explicit identity primitives so each of these is
+a one-line declaration.
+
+## Design principles
+
+1. **Identity is declarative.** A manifest names what files compose
+   the bundle. The host materializes the tarball; the manifest does
+   not.
+
+2. **Sources compose by overlay.** Multiple sources merge in
+   declaration order — last wins on path collision. Same model as
+   Docker `FROM` + `COPY`, OverlayFS, container layer composition.
+
+3. **Source variants are limited and orthogonal.** Four variants —
+   `inline`, `local`, `github`, `ref` — cover authoring surfaces
+   without duplication. Each is a single concern.
+
+4. **Paths are unambiguous.** Workspace-relative or bundle-internal,
+   never both. Convention pins which by context (see
+   [Path semantics](#path-semantics)).
+
+5. **`code-workspace` is a peer kind.** Like `tool` and `workflow`,
+   `code-workspace` lives in the workspace, has its own manifest,
+   declares its own runner / secrets / network. Tools and workflows
+   reference it via `code: <path>` shorthand.
+
+6. **Run is Dockerfile-shaped.** A single `run` field accepts string
+   (path, runner inferred), exec array (explicit ARGV), or shell
+   command. Compatible with `CMD ["a", "b"]` / `CMD a b` / `CMD bash
+   -c "..."` flavor.
+
+## Specification
+
+### The two blocks
+
+A manifest that imports CODE declares:
+
+| Block | Type | Purpose |
+|---|---|---|
+| `code` | string \| object | The bundle's composition. String = path shorthand for a `ref` source. Object = `{ sources: [...] }` with one or more source variants. |
+| `run` | string \| array | What the runner invokes. String path = file (runner inferred). String with shell metacharacters = shell command. Array = exec ARGV. |
+
+Both blocks live at the top level of the importing manifest. Neither
+nests under `runner` or any other block. They are independent of
+runtime contract, IO shape, secrets, or network.
+
+### `code` — string shorthand
+
+```yaml
+code: ./shared/render-utils                    # ref to local code-workspace
+code: ./libs/base@4f3a2b1c                     # not allowed: SHA only on github
+```
+
+A bare string under `code:` desugars to a single `ref:` source:
+
+```yaml
+# Equivalent to:
+code:
+  sources:
+    - ref: ./shared/render-utils
+```
+
+The path is workspace-relative. Hosts MUST refuse string `code:`
+values that begin with `/` (absolute), contain `..`, or otherwise
+escape the workspace root.
+
+### `code` — object form
+
+```yaml
+code:
+  sources:
+    - inline:                                   # embedded content
+        path: tool.ts                            # bundle-internal
+        content: |
+          import { createTool } from "@mastra/core/tools"
+          ...
+    - local:                                    # workspace file or directory
+        path: package.json
+    - local:                                    # with remap
+        path: shared/utils/format-iban.ts
+        as: lib/format-iban.ts
+    - github:                                   # remote git
+        repo: mycompany/render-utils
+        ref: 4f3a2b1c
+        path: src/                               # remote-internal subfolder
+        as: vendor/                              # bundle-internal target
+    - ref:                                      # another code-workspace
+        path: ./shared/template-engine
+        # or shorthand: - ref: ./shared/template-engine
+```
+
+The `sources:` array is processed in declaration order. **Last wins
+on path collision.** Bundle-internal paths produced by each source
+are merged into a single tarball before runner startup.
+
+### Source variant: `inline`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Bundle-internal target path. MUST NOT start with `/` or contain `..`. |
+| `content` | string | yes | UTF-8 file content. YAML literal block scalar (`|`) is the canonical form. |
+
+Use case: short tool body, configuration patches, ad-hoc scripts the
+agent generates in-conversation.
+
+### Source variant: `local`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Workspace-relative path. May be a single file, a directory (recursive), or a glob. |
+| `as` | string | no | Bundle-internal target. Default = same as `path`. |
+| `glob` | string | no | Filter applied when `path` is a directory (e.g. `*.ts`). |
+
+Shorthand string form `- local: <path>` desugars to `{ path: <path> }`.
+
+Use case: workspace files the agent edits directly (lib/, assets/,
+package.json, lockfile). The host probes the workspace at scan time
+to resolve file vs directory; trailing `/` forces directory semantics.
+
+### Source variant: `github`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `repo` | string | yes | `<owner>/<name>` form. |
+| `ref` | string | yes | Branch, tag, or 40-character SHA. See [Cache invalidation](#cache-invalidation-for-github-sources). |
+| `path` | string | no | Sub-folder within the repo. Default = repo root. |
+| `as` | string | no | Bundle-internal target. Default = same as `path`. |
+
+Authentication: hosts MUST authenticate via the workspace's
+configured `github` connector (per AIP-19) or PAT-equivalent. Hosts
+MUST NOT embed credentials in the manifest.
+
+Use case: shared shell repos, vendor-published bundles, code that
+lives outside the workspace and is consumed by SHA.
+
+### Source variant: `ref`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Workspace-relative path to a folder containing a `kind: code-workspace` manifest. |
+
+Shorthand string form `- ref: <path>` desugars to `{ path: <path> }`.
+
+A `ref:` source recursively resolves the referenced code-workspace's
+own `code:` block — its sources become part of the importing
+manifest's source list, in the position where `ref:` appears.
+Resolution is depth-first; cycles MUST be detected and rejected.
+
+Use case: factor out a shared bundle (`./shared/render-utils`) that
+multiple tools reference. The shared bundle itself can use any
+combination of `inline`/`local`/`github` sources internally.
+
+### Overlay merge
+
+After all sources are resolved to bundle-internal `(path, bytes)`
+pairs, the host merges them into a single tarball:
+
+```
+1. Iterate sources in declaration order.
+2. For each source, expand to a list of (path, bytes) tuples.
+3. Insert into the merged map, OVERWRITING any existing entry.
+4. After all sources processed, the map is the bundle.
+```
+
+The "last wins" semantic enables the **shell + override** pattern:
+
+```yaml
+sources:
+  - github: { repo: org/shell, ref: v1.2.3 }   # baseline
+  - inline: { path: tool.ts, content: "..." }  # overrides shell's tool.ts
+  - local: { path: shared/lib/utils.ts }       # adds a local file
+```
+
+Hosts MUST NOT provide automatic file deletion; if a source needs to
+exclude a file from a downstream source, it must redeclare with new
+content. (A future variant `exclude:` may be added in a follow-up;
+not in scope for v1.)
+
+### `run` — three forms
+
+The `run` field declares what command starts the bundle. Three forms:
+
+**1. Single file path (most common):**
+```yaml
+run: tool.ts
+run: src/index.ts
+run: workflow.py
+```
+
+The host infers the runner from the file extension:
+
+| Extension | Inferred runner |
+|---|---|
+| `.ts`, `.tsx`, `.mts` | `npx --yes tsx <file>` |
+| `.js`, `.mjs`, `.cjs` | `node <file>` |
+| `.py` | `python <file>` |
+| `.sh` | `bash <file>` |
+
+**2. Exec ARGV (Dockerfile exec form):**
+```yaml
+run: ["python", "-m", "mytool"]
+run: ["node", "--experimental-vm-modules", "tool.js"]
+```
+
+The array is passed verbatim to `execve(2)`. No shell, no glob
+expansion. Matches Docker `CMD ["a", "b"]` and `ENTRYPOINT ["a", "b"]`
+exec semantics.
+
+**3. Shell command (Dockerfile shell form):**
+```yaml
+run: "npm run build && node dist/tool.js"
+run: "tail -f /dev/null"
+```
+
+A string with shell metacharacters (`&&`, `|`, `;`, `>`, `<`, backticks,
+`$()`, etc.) is executed via `bash -c <string>`. Hosts MUST detect
+shell-vs-path heuristically: any of the above metacharacters, or an
+embedded space outside a quoted segment, indicates shell form.
+
+Hosts MAY require explicit disambiguation via:
+```yaml
+run:
+  shell: "npm run build && node dist/tool.js"
+# or
+run:
+  exec: ["python", "-m", "mytool"]
+# or
+run:
+  file: tool.ts
+```
+
+The explicit form is RECOMMENDED for any manifest where automatic
+detection is ambiguous (e.g. file paths with spaces).
+
+### Path semantics
+
+Every `path:` field in this AIP is one of two kinds, pinned by context:
+
+| Block | Path kind |
+|---|---|
+| `code` (string shorthand) | Workspace-relative |
+| `code.sources[].inline.path` | Bundle-internal |
+| `code.sources[].local.path` | Workspace-relative |
+| `code.sources[].local.as` | Bundle-internal |
+| `code.sources[].github.path` | Remote-internal (subfolder of the repo) |
+| `code.sources[].github.as` | Bundle-internal |
+| `code.sources[].ref.path` | Workspace-relative |
+| `run` (string path form) | Bundle-internal |
+
+Workspace-relative paths MUST NOT start with `/`, MUST NOT contain
+`..` segments, and MUST stay inside the workspace root. Hosts MUST
+reject manifests that violate these constraints.
+
+### Cache invalidation for `github` sources
+
+Hosts MUST cache fetched github tarballs by `(repo, ref, path)`. The
+caching policy depends on the *shape* of `ref`:
+
+| Ref shape | Detection | Cache policy |
+|---|---|---|
+| 40-char hex | regex `^[0-9a-f]{40}$` | Cached forever — SHAs are immutable |
+| `vN.N.N` or `vN` | regex `^v[0-9]+(\.[0-9]+)*$` | Cached 24h, refetched after — tags MAY move |
+| anything else | (default) | Refetched on every scan — branches are mutable |
+
+Hosts MAY refuse non-SHA refs in production by setting a
+host-policy flag (e.g. `WORKSPACE_TOOLS_REQUIRE_PIN=true`) — a
+production-mode tool with `ref: main` is rejected at registration.
+
+Floating refs (tags, branches) MUST record the resolved SHA in the
+connector metadata at fetch time, so observability and audit can
+reconstruct exactly which bytes ran.
+
+### `kind: code-workspace`
+
+A workspace folder containing a `manifest.yaml` with `kind:
+code-workspace` is a first-class shared bundle. Its manifest declares
+the same blocks as a tool minus the IO contract:
+
+```yaml
+kind: code-workspace
+name: render-utils
+description: Shared HTML→PDF + image utilities
+
+code:
+  sources:
+    - github:
+        repo: mycompany/render-utils
+        ref: 4f3a2b1c
+    - local: { path: package-lock.json }       # local override of the lockfile
+
+runner:
+  engine: sandbox
+  needs:
+    language: node
+    native: [weasyprint, ffmpeg]
+  limits: { memory_mb: 2048, timeout_ms: 120000 }
+
+secrets:
+  CLOUDINARY_KEY: { vault: cloudinary-api-key }
+
+network:
+  egress: [api.cloudinary.com]
+
+source: { origin: workspace }
+```
+
+Tools and workflows reference it by path:
+
+```yaml
+kind: tool
+name: render-invoice
+code: ./code-workspaces/render-utils         # string shorthand
+run: invoice.ts                                # bundle-internal entry
+inputs:  {...}
+outputs: {...}
+source: { origin: ai-draft }
+```
+
+The referencing tool inherits the code-workspace's `runner`,
+`secrets`, and `network`. Each can be partially overridden at the
+tool level (host-defined merge policy; see ADAPTER.md).
+
+### Convention: workspace folder layout
+
+Hosts SHOULD scan the following locations for code-workspace
+manifests:
+
+```
+.code-workspaces/<slug>/manifest.yaml          # Convention: shared bundles
+.code/<slug>/manifest.yaml                     # Alternate: terser, same semantics
+```
+
+Authors MAY place code-workspaces anywhere in the workspace —
+`./shared/<slug>/`, `./team/finance/utils/`, etc. The conventions
+are defaults the wizard tool (`createCodeWorkspace`) writes to;
+authors are not bound to them.
+
+## The `defineCode` standard signature
+
+The runtime entry-point that materializes a bundle's sources into a
+tarball. Implementations conform to this signature so cross-runtime
+tooling can target any host.
+
+### `defineCode` (TypeScript notation, normative)
+
+```ts
+type Source =
+  | { inline: { path: string; content: string } }
+  | { local:  string | { path: string; as?: string; glob?: string } }
+  | { github: { repo: string; ref: string; path?: string; as?: string } }
+  | { ref:    string | { path: string } }
+
+interface CodeSpec {
+  sources: Source[]
+}
+
+interface DefineCodeArgs {
+  /** Resolved code spec (after string-shorthand expansion). */
+  code: CodeSpec
+
+  /** Working directory for relative-path resolution. */
+  workspaceRoot: string
+
+  /** Connector resolver for `github` sources (auth, fetch, cache). */
+  github: {
+    fetch(repo: string, ref: string, subpath?: string): Promise<Buffer>
+    resolveRef(repo: string, ref: string): Promise<string>  // returns SHA
+  }
+
+  /** Workspace filesystem reader for `local` and `ref` sources. */
+  fs: {
+    readFile(path: string): Promise<Uint8Array>
+    readDir(path: string): Promise<Array<{ name: string; type: "file" | "directory" }>>
+    readManifest(path: string): Promise<Record<string, unknown>>
+  }
+}
+
+/** Returns a tar.gz buffer with the merged bundle. */
+function defineCode(args: DefineCodeArgs): Promise<Buffer>
+```
+
+### Conformance rules
+
+1. **Cycle detection.** `ref:` sources MUST be tracked through
+   recursion; a cycle MUST throw before any I/O.
+
+2. **Path validation.** Every workspace-relative path MUST be
+   normalized and checked against `..` escapes BEFORE I/O.
+
+3. **Overlay determinism.** Given the same source list and SHA-pinned
+   github refs, `defineCode` MUST produce a byte-identical tarball.
+
+4. **Github auth boundary.** The `github.fetch` callback is the only
+   place that sees credentials. `defineCode` MUST NOT receive or log
+   tokens.
+
+5. **No filesystem writes outside the bundle.** `defineCode` MAY
+   write to a host-controlled tmpdir for staging, but MUST NOT write
+   to the workspace.
+
+## Compatibility
+
+### With AIP-14 TOOL.md and AIP-15 WORKFLOW.md
+
+Both consumers replace their previous "implicit folder is the bundle"
++ `entry: <single-file>` shape with the explicit `code:` + `run:`
+blocks defined here. Backward-compat preprocessor:
+
+```
+manifest.entry → manifest.run
+manifest folder → manifest.code (auto-built from local: directory)
+```
+
+### With AIP-17 RUNTIME (revision)
+
+AIP-17 narrows to runner-only (engine + image + needs + limits).
+Code identity moves here. Secrets binding moves to AIP-19.
+inputsFiles/outputsFiles stay in AIP-16. Network egress promotes to
+top-level (defined alongside AIP-17 or as a micro-AIP).
+
+### With AIP-16 IO
+
+Unchanged. Code-workspace manifests do NOT declare `inputs`,
+`outputs`, `inputsFiles`, or `outputsFiles` — those are per-call
+contracts that belong on the tool/workflow that consumes the bundle,
+not on the bundle itself.
+
+### With AIP-19 SECRETS
+
+`secrets:` block is defined in AIP-19. Code-workspace manifests MAY
+declare them; consumers (tools/workflows) inherit and MAY add their
+own. Conflict resolution is host-defined.
+
+### With AIP-18 COLLECTION
+
+`local:` sources MAY reference paths under `.collections/<slug>/` to
+include collection items in the bundle (e.g. prompt templates, data
+fixtures). The collection's typed-record contract (AIP-18) is
+opaque to AIP-26 — it just sees bytes.
+
+## Security considerations
+
+1. **Path traversal.** All workspace-relative paths MUST be normalized
+   and refused if they contain `..` after normalization.
+
+2. **Github fetch privileges.** The github source can fetch any repo
+   the connector token can read. Hosts MUST scope the connector's
+   PAT/OAuth scope to the minimum needed and audit fetches.
+
+3. **Tag mutability.** A `ref: v1.2.3` tag CAN be force-pushed by the
+   repo owner. The recommended production policy is SHA-only refs.
+
+4. **Cycle exhaustion.** A `ref:` cycle without detection would loop
+   indefinitely. Detection is mandatory (see [Conformance rules](#conformance-rules)).
+
+5. **Bundle size.** Hosts MUST cap the resolved tarball size (e.g.
+   100 MiB) to prevent DoS via accidental or malicious inclusion.
+
+6. **Inline content escaping.** YAML literal scalar `|` is the only
+   safe form for inline content with quotes / backticks / newlines.
+   Hosts MUST reject inline content with embedded null bytes.
+
+## Open questions
+
+- **`exclude:` source variant.** Should we add a 5th variant for
+  removing files from earlier sources? Real but rare; deferred to a
+  follow-up if pattern emerges.
+
+- **JSON merge for `package.json` and similar.** Should we add a
+  `patch:` source variant that does JSON merge-patch instead of full
+  override? Currently expressible by inline override; deferred.
+
+- **HTTP tarball source.** `npm pack`-style tarball at a URL? Useful
+  for vendor-published bundles outside github. Deferred until a
+  concrete need appears.
+
+- **Code-workspace inheritance depth.** `ref:` cycles are forbidden,
+  but should there be a maximum depth (e.g. 5)? Probably yes; not
+  spec'd yet.
+
+- **Per-tool `runner` override.** When a tool references a
+  code-workspace, can it override `runner.limits`? Currently
+  host-defined; should be normative.
+
+## See also
+
+- [AIP-14 — TOOL.md](/docs/aip-14) — primary consumer
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — primary consumer
+- [AIP-16 — IO.md](/docs/aip-16) — sibling block (per-call data)
+- [AIP-17 — RUNTIME](/docs/aip-17) — sibling block (process boundary)
+- [AIP-19 — SECRETS.md](/docs/aip-19) — sibling block (env binding)
+- [AIP-18 — COLLECTION.md](/docs/aip-18) — used by `local:` sources targeting `.collections/`
+- [`./CODE.schema.json`](./resources/aip-26/draft) — schema validator
+- [`./ADAPTER.md`](./resources/aip-26/draft) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-26/draft) — worked examples

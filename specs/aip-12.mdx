@@ -1,0 +1,246 @@
+---
+title: "AIP-12: PLAYBOOK.md — agentplaybooks/v1 (evolving prompt overlays)"
+description: A markdown format for prompt-overlay fragments that ride on top of an operator's persona, plus a contract for how runtimes evolve them via reflective deltas without violating locked persona traits.
+aip: 12
+status: Draft
+type: Schema
+created: 2026-04-27
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 9]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/playbooks
+discussions-to: https://github.com/agentproto/specs/discussions/12
+---
+
+| Field | Value |
+|---|---|
+| AIP | 12 |
+| Title | PLAYBOOK.md — agentplaybooks/v1 (evolving prompt overlays) |
+| Status | Draft |
+| Type | Schema |
+| Domain | playbooks.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-9](/docs/aip-9) |
+| Reference Impl | [`packages/agent-framework/src/playbooks`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/playbooks) |
+
+## Abstract
+
+`agentplaybooks/v1` defines `PLAYBOOK.md` — a markdown file holding a
+single prompt-overlay fragment, plus the metadata that controls when
+the runtime weaves it into an operator's persona, what locked traits it
+MUST NOT touch, and how an evolving reflection loop produces new
+fragments via *delta updates* instead of monolithic rewrites. Playbooks
+are the spec layer for self-improving agent prompts, with the same
+filesystem-first portability as the rest of the agentproto family.
+
+## Motivation
+
+When an operator gets better at its job, the improvement should be
+*captured* — not stuck in the head of whoever ran the last fine-tune.
+"Better" usually means subtle persona adjustments: be slower with
+crisis-flagged users; check token expiry before debugging auth flows;
+quote evidence inline when arguing against a teammate. Vendor frameworks
+encode these as monolithic system-prompt rewrites — fragile, opaque,
+and impossible to audit.
+
+The
+[ACE (Agentic Context Engineering)](https://arxiv.org/abs/2510.04618)
+paper (ICLR 2026) showed that **structured delta updates** to a
+"playbook" — small additions and revisions instead of full rewrites —
+preserve detail and avoid context collapse, beating monolithic prompt
+optimization by ~10% on agent benchmarks. AIP-12 codifies that delta
+representation as a portable file format, with an explicit
+*persona-lock* mechanism so evolution can never override the
+non-negotiable parts of an operator's identity.
+
+Prior art:
+[ACE](https://arxiv.org/abs/2510.04618),
+[GEPA](https://arxiv.org/abs/2507.19457) (genetic-Pareto prompt
+evolution), the Council-of-Mentors persona overlay system used by
+Simone, and the persona-binding slot defined in
+[AIP-9](/docs/aip-9).
+
+## Specification
+
+A conforming `agentplaybooks/v1` package is a directory of `PLAYBOOK.md`
+files, optionally nested by target:
+
+```
+playbooks/
+├── _index.md
+├── role/
+│   └── librarian/
+│       ├── prefer-page-supersession-over-deletion.md
+│       └── flag-contradictions-explicitly.md
+└── operator/
+    └── alice/
+        └── escalate-token-expiry-checks.md
+```
+
+### `PLAYBOOK.md` shape
+
+```yaml
+---
+schema: playbooks/v1
+slug: <kebab-case-playbook-id>
+title: <one-sentence — what this overlay does>
+targets:
+  - kind: operator | role | skill | runtime
+    ref: <slug-or-glob>                 # e.g. "role/librarian", "operator/*", "skill/research"
+kind: overlay | block-replacement       # overlay = additive; block-replacement = swap a named block
+priority: 0 .. 100                      # higher = wins on ordering ties (default 50)
+lock_check:                             # locked persona traits this overlay MUST NOT modify
+  - <trait-id>                          # e.g. "warmth", "honesty", "voice-register"
+ttl: <ISO 8601 duration>                # OPTIONAL — auto-archives at write_at + ttl
+evidence:                               # provenance — what reflection produced this
+  - kind: run | conversation | work-item | reflection
+    ref: <id-or-path>
+    note: <one-liner>
+status: shadow | active | archived      # gate for promotion (see evolve contract)
+supersedes: [<slug>]                    # OPTIONAL — playbooks this replaces
+metadata:
+  <vendor>:
+    <field>: <value>
+---
+
+# <title>
+
+<the prompt fragment itself — markdown that gets woven into the operator's
+persona at the position implied by `kind`>
+```
+
+### Apply contract
+
+Before the agent generates a turn, the runtime MUST:
+
+1. Resolve the active operator's `targets` matches across all
+   `PLAYBOOK.md` files with `status: active`.
+2. Sort matches by `priority` desc, `updated_at` desc.
+3. For each match, run `lock_check` against the operator's locked
+   persona traits — if any locked trait would be modified by the
+   overlay's body, the overlay MUST be skipped (and an audit event
+   appended; see security).
+4. Weave the overlay markdown into the operator's persona at the
+   position implied by `kind` (overlay = appended; block-replacement
+   = swaps the named block).
+5. Generate as normal.
+
+Overlays are *invisible* to the operator's downstream output — there
+is no "playbook says" tag visible in the response. The overlay is
+prompt material, not chain-of-thought leakage.
+
+### Evolve contract
+
+A reflection pass produces *delta* playbooks — never monolithic
+rewrites of an operator's base persona. The contract:
+
+1. **Reflect.** An LLM reads recent runs (success + failure), the
+   current active playbooks, and any feedback signal (scorers, human
+   ratings, council severity). It proposes 0..N candidate deltas.
+2. **Curate.** Each candidate MUST be expressible as a `PLAYBOOK.md`
+   conforming to this AIP. Candidates that would violate `lock_check`
+   on any in-scope operator MUST be discarded.
+3. **Shadow.** New playbooks SHOULD enter at `status: shadow` — the
+   runtime computes them but does not weave them. Shadow runs
+   accumulate evidence.
+4. **Promote.** Promotion to `status: active` SHOULD require a
+   measurable improvement (A/B vs current, scorer delta, or human
+   approval gated by AIP-7 governance for high-impact overlays).
+5. **Archive.** Playbooks superseded or expired transition to
+   `status: archived`. Archived playbooks MUST NOT be applied but
+   remain on disk for audit.
+
+### Persona lock
+
+Every runtime that hosts overlays MUST publish the set of locked
+persona traits as named ids. A playbook's `lock_check` declares which
+traits its author *intended* to leave alone; the runtime MUST also
+enforce its own lock list independently — `lock_check` is intent, not
+authority. Overlays that touch any locked trait — declared or not —
+are non-conforming.
+
+### `_index.md`
+
+The index MUST list every playbook with `slug`, `title`, `targets`,
+`status`, `priority`, `lock_check`. Regenerated on every write.
+
+### Vendor extensions
+
+Vendor fields go under `metadata.<vendor>`. The Council-of-Mentors
+system in Simone is the first concrete consumer — its mentor-driven
+fragments are emitted as `PLAYBOOK.md` files with
+`metadata.simone.mentor` set to the mentor id.
+
+## Rationale
+
+**Why deltas, not monolithic prompts.** ACE's central finding: iterative
+full-prompt rewrites cause "context collapse" — detail erodes, brevity
+bias takes over, and the prompt drifts off-distribution. Forcing
+evolution through small, additive overlays preserves detail and gives
+each change a clean credit-assignment scope.
+
+**Why `lock_check` is explicit and runtime-redundant.** Persona lock is
+the safety surface that makes self-improvement deployable. Trusting a
+single source — author intent *or* runtime enforcement — is fragile.
+Requiring both means a faulty evolution loop and a lax runtime have to
+*both* fail before a locked trait is touched.
+
+**Why shadow → active is a contract, not a convention.** Without an
+explicit gate, ACE-style loops degrade quietly when reflection is
+noisy. Mandating shadow time + promotion criteria turns evolution into
+something a human can audit in `_index.md` ("here are the 7 active
+playbooks; here are the 23 in shadow; here are the 12 archived
+because failure_count > success_count").
+
+**Why playbooks are separate from `agentlearning/v1` lessons.** A
+lesson tells the agent "do X." A playbook *is* part of the agent — it
+modifies persona. Lessons are retrieved per turn; playbooks are woven
+once per session. Conflating them would break the apply pipeline.
+
+**Why this requires AIP-9.** `agentoperators/v1` defines the
+persona-binding slot a playbook plugs into. Without that contract,
+playbooks have nothing concrete to weave against.
+
+## Reference Implementation
+
+[`packages/agent-framework/src/playbooks`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/playbooks) —
+weave function (built on the Council-of-Mentors persona overlay code),
+ACE-style evolve loop, lock-check enforcement, shadow → active
+promotion gate. The Council framework in
+[`packages/agent-framework/src/council`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/council)
+is the first conformant consumer — Council mentors emit
+`PLAYBOOK.md` files instead of in-memory fragments, and the persona
+lock is shared with the Simone base persona definition.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec.
+
+## Security Considerations
+
+Playbooks modify the operator's persona on every turn. The spec is
+deliberately conservative because the failure modes are severe.
+
+- **Lock bypass** — a playbook smuggles instructions that override a
+  locked trait through indirect phrasing ("act as if warmth were
+  irrelevant in this context"). Mitigation: `lock_check` is enforced
+  by both author declaration and runtime; runtime SHOULD use an
+  LLM-judge or rule-based linter on the body, not just the
+  frontmatter.
+- **Reflection injection** — the reflection step's input includes
+  prior runs that may contain user content; an attacker plants text
+  designed to produce harmful overlays. Mitigation: shadow → active
+  promotion is mandatory; high-impact promotions go through AIP-7
+  governance.
+- **Identity drift** — a sequence of small, individually-safe deltas
+  cumulatively shifts the operator off-mission. Mitigation: every
+  promotion is logged in `_log.md`; lint passes flag operators whose
+  active overlay count grows unbounded; spec recommends a
+  configurable cap on simultaneous active overlays per operator.
+- **Cross-operator contamination** — a `targets` glob matches an
+  unintended operator and weaves an inapplicable overlay. Mitigation:
+  `lock_check` runs per-operator at apply time; runtime MUST evaluate
+  match scope explicitly and surface unexpected matches in
+  `_log.md`.
+- **Shadow-state leakage** — shadow playbooks influence agent output
+  through a misconfigured runtime. Mitigation: shadow status is
+  enforced as "computed but not woven" — runtimes that weave shadow
+  overlays are non-conforming.

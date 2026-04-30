@@ -1,0 +1,645 @@
+---
+title: "AIP-27: REF.md — agentref/v1 (composable reference primitive)"
+description: A composable reference primitive — `ref` values that point at files, URLs, identities, transactions, and other resources via a typed, registry-extensible discriminated union with a canonical compact string form. Replaces ad-hoc `kind:slug` strings, narrow per-AIP path encodings, and string-typed identity bindings with one shared shape that other AIPs import.
+aip: 27
+status: Draft
+type: Schema
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/ref
+resources: ./resources/aip-27/draft
+discussions-to: https://github.com/agentproto/specs/discussions/27
+---
+
+| Field | Value |
+|---|---|
+| AIP | 27 |
+| Title | REF.md — agentref/v1 (composable reference primitive) |
+| Status | Draft |
+| Type | Schema |
+| Domain | ref.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Resources | [`./resources/aip-27`](./resources/aip-27/draft) — [`REF.schema.json`](./resources/aip-27/draft/REF.schema.json), [`ADAPTER.md`](./resources/aip-27/draft/ADAPTER.md) |
+
+## Abstract
+
+This AIP defines the **`ref`** value type — a typed, registry-extensible
+pointer used wherever an agentproto manifest references another
+resource (a workspace file, a URL, an identity, a transaction, a
+content hash, a sibling manifest). Every `ref` carries a **kind**
+discriminator and a kind-specific body, plus a canonical compact
+string form (`<kind>:<body>`) for places where a value-shaped object
+is awkward (frontmatter scalars, CLI args, log lines).
+
+The AIP defines:
+
+1. The base **kind registry** for v1 — eleven kinds covering the
+   pointer surfaces existing AIPs already need:
+   `local`, `url`, `git`, `github`, `ipfs`, `email`, `operator`,
+   `user`, `persona`, `eth_tx`, `ots`.
+2. A **canonical compact form** with deterministic parse/serialize
+   round-tripping.
+3. An **extension mechanism** so integration packages register new
+   kinds (`youtube_video`, `slack_message`, `linear_issue`, …)
+   without forking AIP-27.
+4. An optional **resolver contract** for kinds whose bodies can be
+   fetched (`local`, `url`, `github`, `ipfs`).
+5. The **`defineRef(...)`** standard signature implementations expose.
+
+This is a **schema-block AIP**, not a file format users author
+directly. There is no `REF.md` file checked into a repo. The block
+is referenced by other manifest specs via JSON Schema `$ref`.
+
+## Motivation
+
+Every AIP that needs to point at something has, until now, invented
+its own string format:
+
+| AIP | Pointer field today | Encoding |
+|---|---|---|
+| AIP-7 governance | `signer` | `"operator:jeremy"`, `"counterparty:acme-co"` — ad-hoc `kind:slug` regex |
+| AIP-7 governance | `artifactPath`, `signaturePath`, evidence URLs | bare strings, regex-validated |
+| AIP-13 / AIP-20 work | `assignee`, `parent`, `blockers` | bare strings |
+| AIP-23 IDENTITY | identity bindings | `"operator:slug"` strings |
+| AIP-25 PERSONA | `relationships` | `"persona:slug"` strings |
+| AIP-26 CODE | `code.sources[].ref` | path strings only — narrow `ref:` variant local to AIP-26 |
+| AIP-9 operators | mention/binding strings | bare slugs |
+| AIP-18 COLLECTION | item identifiers | bare strings |
+
+Five problems compound across the registry:
+
+1. **Drift.** Each AIP picks its own escape rules, validation regex,
+   and resolver contract. Two manifests can carry the same conceptual
+   pointer in two incompatible encodings.
+
+2. **No composition.** A governance signature whose evidence is a
+   GitHub commit SHA cannot say so without flattening the SHA into a
+   URL. A work-item that links a Slack message has no encoding for
+   "this is a Slack message", only "this is a string".
+
+3. **No type safety.** Tooling can't know that `signer` accepts
+   `operator|user|persona|email` but `assignee` accepts
+   `operator|user`. Both surfaces are `string`.
+
+4. **No resolver discovery.** An app rendering a manifest can't ask
+   "is this pointer fetchable?" — it has to special-case every
+   field.
+
+5. **Extension is ad-hoc.** When a new pointer kind appears
+   (`linear_issue`, `youtube_video`, `slack_message`), there is no
+   place to declare it that the rest of the ecosystem can pick up.
+
+AIP-26 already shows the drift starting: its `code.sources[].ref`
+variant is a single-purpose path-only encoding because no shared
+primitive existed when AIP-26 was authored. Without AIP-27, every
+subsequent AIP that needs a pointer will repeat the pattern.
+
+## Design principles
+
+1. **One discriminated value, many kinds.** A `ref` is always
+   `{ kind, …body }`. The kind is a closed enum **per implementation**
+   (extensible via registry) but never a free string at validation
+   time.
+
+2. **Canonical compact form is round-trippable.** Every value MUST
+   serialize to a deterministic `<kind>:<body>` string and parse back
+   to an identical value. Implementations MUST NOT carry
+   non-canonical metadata that survives round-trip.
+
+3. **Kinds are orthogonal.** Each kind is a single concern. `local`
+   does not also encode content hashes (use the optional `sha256`
+   sidecar); `url` does not also encode auth (auth is host config,
+   not a property of the reference).
+
+4. **Resolution is opt-in.** A `ref` is identity, not data. Some
+   kinds expose a resolver hook (`local`, `url`, `github`, `ipfs`);
+   others (`operator`, `eth_tx`) do not. Consumers that want bytes
+   must request resolution explicitly; consumers that just want
+   identity treat the ref opaquely.
+
+5. **Extension is registry-scoped, not core-scoped.** New kinds
+   register at the implementation boundary (declaration merging in
+   TS, `register_ref_kind()` in Python/Go). The base AIP-27 set
+   stays small — eleven kinds chosen because they are needed by
+   already-Final or Draft AIPs.
+
+6. **Schema validation at the boundary.** Each kind has a JSON
+   Schema. Manifests that import REF reference per-kind schemas via
+   `$ref`. Validators MUST reject unknown kinds in strict mode; MAY
+   surface them as warnings in lenient mode.
+
+## Specification
+
+### Shared base shape
+
+Every ref value MAY carry a small set of cross-cutting optional fields,
+shared across all kinds. Mirrors the `baseEntryShape` pattern used by
+companion specs (e.g. `@agstudio/model-catalog`):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `tags` | `string[]` | Free-form per-instance tags. Distinct from kind-level *collection* membership (below) — these are properties of a specific reference, not of every ref of that kind. |
+| `description` | `string` | Optional human label / annotation. Renderers MAY surface it in trust UIs. |
+
+These fields are optional everywhere they appear and MUST be ignored
+during canonical compact-form serialization (compact form encodes only
+the kind body; structural metadata stays in the object form).
+
+### Collections
+
+Every kind belongs to one or more **collections** declared at
+registration time. Collections are the cross-cutting categorization
+axis that lets manifests constrain a field to "any kind of `<category>`"
+without enumerating individual kinds:
+
+```ts
+// AIP-7 governance: signer accepts any identity-collection ref
+signer: RefIn<"identity">      // covers operator, user, persona, email,
+                                // and any future identity kind (DID,
+                                // fediverse-handle, …) registered with
+                                // collections: ["identity"]
+```
+
+Without collections, every consuming AIP would have to enumerate
+`Ref<"operator" | "user" | "persona" | "email">`, then update that
+union when a new identity kind ships. With collections, the constraint
+is "in the identity collection" — open to extension by definition.
+
+#### Base collections (v1)
+
+| Collection | Members | Purpose |
+|---|---|---|
+| `file` | `local`, `url`, `git`, `github`, `ipfs` | Resolvable to bytes; the artifact / content axis. |
+| `identity` | `operator`, `user`, `persona`, `email` | Names a principal (human or agent). Used by signer fields, assignees, mentions. |
+| `anchor` | `eth_tx`, `ots` | External tamper-evidence witnesses. Used by audit-log anchor sinks. |
+| `chain` | `eth_tx` | On-chain anchor subset of `anchor` — distinct because verification depends on chain RPC, not just file fetch. |
+
+Collections are **strings**, not a closed enum — integrations MAY
+register kinds into new collections (`media`, `messaging`, `chat`,
+`commerce`, …). The base set above is normative; new collection names
+SHOULD be agreed via the AIP-1 process when widely shared.
+
+#### Collection rules
+
+1. **A kind belongs to ≥ 0 collections.** Most kinds belong to exactly
+   one; multi-membership is allowed (e.g. `eth_tx` ∈ `{anchor, chain}`).
+
+2. **Membership is defined at the kind, not the value.** Every `local`
+   ref is in `file`; the assignment cannot be overridden per-ref.
+   Per-ref attributes use the `tags` shared field instead.
+
+3. **Collections are an open vocabulary.** A consumer asking
+   `refMatchesCollection(ref, "identity")` against a kind that doesn't
+   declare `identity` returns `false`, even if the kind would
+   semantically qualify — registration is authoritative.
+
+4. **`RefIn<C>` is a runtime constraint at the type level.** TypeScript
+   types narrow to `AnyRef`; the validator enforces collection
+   membership at the manifest boundary (or the consumer's
+   `refMatchesCollection` check).
+
+### The `ref` value
+
+A `ref` is a JSON value that takes one of two shapes:
+
+**Object form** (canonical for manifests):
+
+```json
+{ "kind": "github", "owner": "agentik", "repo": "studio", "ref": "main", "path": "packages/foo" }
+```
+
+**Compact form** (canonical for frontmatter scalars, CLI, logs):
+
+```
+github:agentik/studio@main:packages/foo
+```
+
+Implementations MUST accept both forms on input and MUST emit the
+object form when serializing to JSON. The compact form is the
+canonical scalar representation; the object form is the canonical
+structured representation.
+
+### Base kind registry (v1)
+
+| Kind | Body fields | Compact form | Resolver |
+|---|---|---|---|
+| `local` | `path`, optional `sha256` | `local:<path>` (with `#sha256=<hex>` suffix when present) | yes — workspace-relative file read |
+| `url` | `href`, optional `sha256` | `url:<href>` (with `#sha256=<hex>` suffix when present) | yes — HTTP GET |
+| `git` | `url`, `ref`, optional `path` | `git:<percent-encoded-url>@<ref>[:<path>]` | yes — fetch via git |
+| `github` | `owner`, `repo`, optional `ref`, optional `path` | `github:<owner>/<repo>[@<ref>][:<path>]` | yes — GitHub API |
+| `ipfs` | `cid`, optional `path` | `ipfs:<cid>[:<path>]` | yes — IPFS gateway |
+| `email` | `address` | `email:<address>` | no |
+| `operator` | `slug`, optional `workspace` | `operator:<slug>[@<workspace>]` | yes — AIP-9 operator registry |
+| `user` | `id`, optional `workspace` | `user:<id>[@<workspace>]` | yes — host user registry |
+| `persona` | `id` | `persona:<id>` | yes — AIP-25 persona file |
+| `eth_tx` | `chainId`, `txHash` | `eth_tx:<chainId>:<txHash>` | no |
+| `ots` | `proof` (a `Ref<local\|url>`) | `ots:<inner-compact>` | yes — fetch the proof bytes |
+
+#### Per-kind body details
+
+##### `local`
+
+Pointer to a file inside the workspace root.
+
+```json
+{ "kind": "local", "path": "engagements/acme/proposal.md" }
+{ "kind": "local", "path": "engagements/acme/proposal.md", "sha256": "ab12…" }
+```
+
+`path` MUST be workspace-relative (no leading `/`, no `..` segments
+that escape the root, forward slashes only). Implementations MUST
+reject path-escape attempts at parse time. The optional `sha256`
+binds the ref to specific bytes — useful for governance signatures
+and reproducibility checks.
+
+##### `url`
+
+Pointer to a HTTP or HTTPS URL.
+
+```json
+{ "kind": "url", "href": "https://example.com/x.pdf" }
+```
+
+`href` MUST be a valid RFC 3986 URI with scheme `http` or `https`.
+Other schemes (e.g. `ftp:`, `mailto:`) are out of scope for v1.
+Optional `sha256` content-binds the ref.
+
+##### `git`
+
+Generic git pointer for any host.
+
+```json
+{ "kind": "git", "url": "https://gitlab.example/team/repo.git", "ref": "v1.2.3", "path": "src/lib" }
+```
+
+`ref` is a SHA, tag, or branch name. `path` is repo-relative. The
+`url` is percent-encoded in the compact form because it can contain
+`:` and `@`.
+
+##### `github`
+
+Convenience for `github.com` — the most common git host.
+
+```json
+{ "kind": "github", "owner": "agentik", "repo": "studio", "ref": "main", "path": "packages/foo" }
+```
+
+`ref` defaults to the repo's default branch when omitted. `path`
+defaults to repo root.
+
+##### `ipfs`
+
+Content-addressed IPFS reference.
+
+```json
+{ "kind": "ipfs", "cid": "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi" }
+```
+
+`cid` MUST be a valid CIDv1 multihash. Optional `path` selects a
+subpath inside a UnixFS directory CID.
+
+##### `email`
+
+RFC 5322 email address.
+
+```json
+{ "kind": "email", "address": "jeremy@agentik.net" }
+```
+
+Used for external counterparties whose identity is not hosted by
+any AIP-9 operator registry — e.g. a customer signing a proposal.
+
+##### `operator`
+
+Reference to an AIP-9 operator. The `slug` field follows AIP-9
+operator naming rules. Optional `workspace` disambiguates when the
+same slug exists in multiple workspaces.
+
+```json
+{ "kind": "operator", "slug": "atlas" }
+{ "kind": "operator", "slug": "atlas", "workspace": "acme-co" }
+```
+
+##### `user`
+
+Reference to a workspace user. `id` is opaque and host-defined
+(typically a UUID or stable handle). Optional `workspace` scopes the
+id.
+
+##### `persona`
+
+Reference to an AIP-25 persona. `id` follows AIP-25 persona naming.
+
+##### `eth_tx`
+
+Ethereum transaction reference, used by AIP-7 governance for
+on-chain anchors and by any AIP that records on-chain proof.
+
+```json
+{ "kind": "eth_tx", "chainId": 1, "txHash": "0xabc123…" }
+```
+
+`chainId` follows EIP-155. `txHash` is 0x-prefixed lowercase hex.
+A consumer that wants to fetch the actual transaction bytes does so
+via an Ethereum RPC; the `ref` itself is just the identity.
+
+##### `ots`
+
+OpenTimestamps proof reference. The body is itself a `Ref<local|url>`
+pointing at the `.ots` proof file:
+
+```json
+{ "kind": "ots", "proof": { "kind": "local", "path": "engagements/acme/_chain/anchors/247.ots" } }
+```
+
+This kind exists separately from `local`/`url` so consumers can
+discover that the bytes at the location are an OTS proof, not raw
+file content, without having to inspect them.
+
+### Compact form grammar
+
+```
+ref         = kind ":" body
+kind        = lowercase-alpha-snake          ; e.g. "local", "eth_tx", "youtube_video"
+body        = kind-specific (see Per-kind body details)
+sha-suffix  = "#sha256=" 64-lowercase-hex     ; appended to compact form when sha256 present
+```
+
+Per-kind compact bodies:
+
+```
+local-body    = path
+url-body      = href
+git-body      = pct-encoded-url "@" ref [ ":" path ]
+github-body   = owner "/" repo [ "@" ref ] [ ":" path ]
+ipfs-body     = cid [ ":" path ]
+email-body    = address
+operator-body = slug [ "@" workspace ]
+user-body     = id [ "@" workspace ]
+persona-body  = id
+eth_tx-body   = chainId ":" txHash
+ots-body      = inner-compact-ref            ; e.g. ots:local:engagements/.../247.ots
+```
+
+Reserved characters in path/url bodies (`@`, `:`, `#`, `%`) MUST be
+percent-encoded.
+
+### Parsing rules
+
+1. Find the **first** unescaped `:` — left side is `kind`, right
+   side is body.
+2. Dispatch to the kind's body parser.
+3. If `kind` is not in the registry, raise `UnknownRefKind` (strict)
+   or return an opaque `{ kind, raw }` value (lenient).
+4. If the body fails the kind's grammar, raise `InvalidRefBody`.
+5. Apply per-kind validation (path-escape check for `local`, scheme
+   check for `url`, hex check for `eth_tx.txHash`, …).
+
+### Resolver contract
+
+Kinds with a resolver expose:
+
+```ts
+resolve(ref: Ref, ctx: ResolveContext): Promise<ResolveResult>
+
+interface ResolveContext {
+  fetcher?:    (url: string) => Promise<Uint8Array>     // for url, ots, github
+  filesystem?: IGovernanceFilesystem                     // for local
+  workspaceRoot?: string                                 // for local
+  registries?: {                                         // for operator, user, persona
+    operator?: OperatorRegistry
+    user?:     UserRegistry
+    persona?:  PersonaRegistry
+  }
+}
+
+interface ResolveResult {
+  bytes?:    Uint8Array      // for fetchable kinds
+  identity?: { displayName: string; canonical: Ref }   // for identity kinds
+}
+```
+
+Kinds without a resolver throw `NotResolvable` if asked. Consumers
+SHOULD probe via `isResolvable(ref)` before calling.
+
+### Extension mechanism
+
+New kinds are registered at the implementation boundary:
+
+**TypeScript** (declaration merging):
+
+```ts
+declare module "@agencies/ref" {
+  interface RefKindRegistry {
+    youtube_video: { kind: "youtube_video"; videoId: string; t?: number }
+  }
+}
+
+registerRefKind("youtube_video", {
+  schema: z.object({ kind: z.literal("youtube_video"), videoId: z.string(), t: z.number().optional() }),
+  parse:   (body) => /* … */,
+  serialize: (ref) => `youtube_video:${ref.videoId}${ref.t ? "?t=" + ref.t : ""}`,
+  resolver:  null,
+})
+```
+
+**Python**:
+
+```python
+register_ref_kind(
+    "youtube_video",
+    schema=YouTubeVideoRefSchema,
+    parser=parse_youtube_video,
+    serializer=serialize_youtube_video,
+    resolver=None,
+)
+```
+
+Extension kinds MUST follow the canonical compact-form grammar (one
+unescaped leading `:` separating kind from body) and MUST validate
+the kind name against `[a-z][a-z0-9_]*`.
+
+## The `defineRef` standard signature
+
+Every implementation MUST expose a function whose signature matches:
+
+```ts
+defineRef(input: string | RefValue): RefHandle
+
+type RefValue = { kind: string; [field: string]: unknown }
+
+interface RefHandle {
+  kind:        string
+  value:       RefValue                           // canonical object form
+  compact:     string                             // canonical compact form
+  resolvable:  boolean
+  resolve(ctx: ResolveContext): Promise<ResolveResult>     // throws NotResolvable when !resolvable
+  equals(other: RefHandle): boolean                        // canonical-form equality
+}
+```
+
+#### Kind definition shape (registry-extensible)
+
+Implementations MUST also expose `registerRefKind(definition)` and a
+`KindDefinition` shape:
+
+```ts
+interface KindDefinition<V extends { kind: string }> {
+  kind:        V["kind"]
+  collections: readonly string[]                  // declared collection membership
+  schema:      ZodLikeSchema<V>                   // implementation-language equivalent
+  parse:       (body: string) => V                // compact body → value
+  serialize:   (value: V) => string               // value → compact body
+  resolve?:    (value: V, ctx: ResolveContext) => Promise<ResolveResult>
+}
+```
+
+Companion helpers required by collection-typed constraints:
+
+```ts
+listKindsByCollection(collection: string): string[]
+listCollections(): string[]
+refMatchesCollection(ref: RefValue, collection: string): boolean
+```
+
+### Conformance rules
+
+1. **Canonical name.** The export MUST be named `defineRef`.
+2. **Round-trip identity.** For every supported kind,
+   `defineRef(defineRef(x).compact).value` MUST deep-equal
+   `defineRef(x).value`.
+3. **No I/O at parse time.** `defineRef(...)` MUST NOT touch the
+   filesystem, network, or registries. Resolution happens only via
+   `.resolve(...)`.
+4. **Strict by default.** Unknown kinds throw `UnknownRefKind`;
+   lenient mode is opt-in via implementation-specific config.
+5. **Equality is canonical.** `equals(...)` MUST use the canonical
+   object form, not the input string. Two refs that compact to the
+   same string are equal.
+
+### Implementer's guide
+
+For step-by-step guidance on implementing the parser, registry, and
+per-kind resolvers across Node, browser JS, and Python, see
+[`./resources/aip-27/draft/ADAPTER.md`](./resources/aip-27/draft).
+
+## Compatibility
+
+### With AIP-7 (governance)
+
+AIP-7's signature, audit-event, and policy doctypes migrate to typed
+`Ref` fields:
+
+```
+signer        : string  → Ref<operator|user|persona|email>
+artifactPath  : string  → artifact:  Ref<local|url|github|ipfs>
+signaturePath : string  → signature: Ref<local>
+anchorPayload : object  → anchor:    Ref<local|ots|eth_tx|url>
+evidence.url  : string  → evidence target carries Ref where applicable
+```
+
+Existing AIP-7 documents continue to validate under a backward-
+compatibility preprocessor that maps `kind:slug` strings to canonical
+`Ref` objects. The preprocessor is removed in AIP-7 v2.
+
+### With AIP-23 (IDENTITY)
+
+AIP-23 identity bindings become `Ref<operator|user|persona>`. The
+identity workspace is the source of truth for which slugs/ids exist;
+AIP-27 is just the wire shape.
+
+### With AIP-26 (CODE)
+
+AIP-26's `code.sources[].ref` variant — currently a path-only
+shorthand for "ref to local code-workspace" — is generalized to
+accept any `Ref` whose kind has a resolver. Existing AIP-26
+manifests continue to validate (a bare path string is treated as
+`local:<path>`).
+
+### With AIP-13 / AIP-20 (work)
+
+Work-item assignees, parents, and blockers move from bare strings
+to `Ref<operator|user>` (assignee), `Ref<work-item>` (parent /
+blockers — `work-item` registered as an extension kind by AIP-13's
+implementation).
+
+### Validation drift
+
+Validators across AIPs MUST converge on the AIP-27 conformance
+suite for `Ref` parsing and serialization. AIPs MAY constrain which
+kinds are accepted in a given field (e.g. `signer` does not accept
+`Ref<eth_tx>`) but MUST NOT redefine the parse rules.
+
+## Security considerations
+
+1. **Path-escape on `local`.** A malicious manifest authoring a
+   `local:../../../etc/passwd` MUST be rejected at parse time. The
+   resolver layer is not the right place to catch this.
+
+2. **URL scheme allowlist.** `url:` MUST be limited to `http` /
+   `https` in v1. `file://`, `data:`, and other schemes have very
+   different trust profiles and would silently expand the threat
+   surface.
+
+3. **Operator/user identity spoofing.** A `Ref<operator>` is just an
+   identifier — it does NOT prove the operator authored anything.
+   Authentication is the consumer's responsibility (AIP-7 layers a
+   JWS over signed payloads in v2; AIP-23 layers identity binding).
+
+4. **Unknown-kind handling.** Lenient parsing of unknown kinds is
+   useful for forward-compatibility but creates a downgrade vector.
+   Hosts SHOULD log unknown-kind occurrences and surface them in
+   trust UIs so an operator can decide whether to upgrade.
+
+5. **Resolver injection.** A `Ref<url>` resolver fetches arbitrary
+   bytes by definition. Consumers MUST treat resolved bytes as
+   untrusted until validated against an out-of-band content hash
+   (the `sha256` sidecar) or a signature.
+
+6. **Round-trip canonicalization.** Two refs that mean the same
+   thing MUST compact to the same string. Implementations that
+   normalize differently (e.g. Unicode form for `path`, percent-
+   encoding choices for `url`) will produce different signatures
+   over the same logical reference. The conformance suite covers
+   the edge cases.
+
+## Open questions
+
+1. **Multi-kind unions in field constraints.** Whether AIP-27 itself
+   should ship a typed union builder (`Ref<operator|user>`) or leave
+   that as a TypeScript-specific affordance. Python/Go consumers
+   express the same via runtime kind-set checks.
+
+2. **Versioned kinds.** When a kind's body grammar evolves (e.g.
+   `github` adds `subdir` semantics), do we mint `github_v2` or
+   accept extension fields with a `version` key? Current draft:
+   extension fields, no versioning, MAJOR-bump the AIP if a breaking
+   change is unavoidable.
+
+3. **Mutually-recursive kinds.** `ots` carries an inner `Ref<local|url>`.
+   How deep should nesting be allowed before rejecting? Current
+   draft: depth ≤ 2 (a kind body MAY contain at most one nested
+   ref).
+
+4. **Cross-AIP kind ownership.** When AIP-13 registers `work-item`,
+   AIP-23 registers `identity`, AIP-26 registers `code-workspace`,
+   conflicts can arise if two AIPs pick the same kind name.
+   Reservation table maintained by the AIP-1 process; PRs to AIP-27
+   to claim a kind name.
+
+5. **Compact-form length cap.** Whether to set a normative max
+   length (e.g. 2048 chars) for the compact form. Long forms
+   typically indicate a deeply-nested or path-heavy ref that should
+   be inlined as object form anyway.
+
+## See also
+
+- [AIP-7 — agentgovernance/v1 — audit & approval](/docs/aip-7) — primary consumer (signer, artifact, evidence, anchor)
+- [AIP-9 — agentoperators/v1 — operator runtime protocol](/docs/aip-9) — `operator` kind registry source
+- [AIP-13 / AIP-20 — agentwork](/docs/aip-13) — work-item assignee/parent/blocker fields
+- [AIP-23 — IDENTITY.md](/docs/aip-23) — identity binding consumer
+- [AIP-25 — PERSONA.md](/docs/aip-25) — `persona` kind registry source
+- [AIP-26 — CODE.md](/docs/aip-26) — `code.sources[].ref` generalization target
+- [`./REF.schema.json`](./resources/aip-27/draft) — schema validator
+- [`./ADAPTER.md`](./resources/aip-27/draft) — implementer's guide

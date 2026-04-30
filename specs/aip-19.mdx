@@ -1,0 +1,574 @@
+---
+title: "AIP-19: SECRETS.md — secret inventory + reveal contract"
+description: A workspace-level manifest format for declaring secret slugs, their purpose, access grants, and audit metadata — without ever storing the values themselves. Hosts resolve slugs against a real vault at reveal time.
+aip: 19
+status: Draft
+type: Schema
+created: 2026-04-29
+updated: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 17]
+resources: ./resources/aip-19/draft
+discussions-to: https://github.com/agentproto/specs/discussions/19
+---
+
+| Field | Value |
+|---|---|
+| AIP | 19 |
+| Title | SECRETS.md — secret inventory + reveal contract |
+| Status | Draft |
+| Type | Schema |
+| Domain | secrets.sh |
+| Requires | [AIP-7](/docs/aip-7), [AIP-17](/docs/aip-17) |
+| Resources | [`./resources/aip-19`](./resources/aip-19/draft) — [`SKILL.md`](./resources/aip-19/draft/skills/author-secrets/SKILL.md), [`ADAPTER.md`](./resources/aip-19/draft/ADAPTER.md), [`SECRETS.schema.json`](./resources/aip-19/draft/SECRETS.schema.json), [`EXAMPLES.md`](./resources/aip-19/draft/EXAMPLES.md) |
+
+## Abstract
+
+`SECRETS.md` is a markdown-with-frontmatter file format for
+declaring the secrets a workspace owns — slug, purpose, access
+grants, audit metadata. The manifest **never contains values**.
+Hosts resolve slugs against a real vault (KMS, HashiCorp Vault,
+GCP Secret Manager, encrypted database) at reveal time, with the
+manifest acting as the typed, reviewable inventory + access policy.
+
+The format pairs with the standard entry-point function
+**`defineSecret(...)`**, whose signature any implementation
+exposes so callers, runtimes, and adapters share one contract for
+naming a slug, expressing access, and recording a reveal.
+
+## Motivation
+
+Every agent platform that integrates external services ends up
+with the same problem: bodies need credentials (`STRIPE_API_KEY`,
+`OPENAI_API_KEY`, OAuth tokens, signing keys). The values must
+live somewhere safe; the manifest must be reviewable; the audit
+log must track who used what.
+
+Today these concerns scatter:
+
+- Some hosts dump credentials into `process.env` and hope nobody
+  prints `process.env`.
+- Some hosts have a "secret store" with no manifest — the inventory
+  is invisible to reviewers and auditors.
+- Some hosts encode access policy in a separate ACL system, drifted
+  from the secrets it gates.
+- Manifest formats that need credentials ([AIP-17](/docs/aip-17)
+  `runtime.env`) reference *names* without a typed contract for
+  what those names resolve to.
+
+`SECRETS.md` extracts the inventory + access policy + audit metadata
+into a portable file. Values stay in a vault; the manifest declares
+WHO can reveal WHAT, for WHAT PURPOSE, with WHAT TTL. The vault
+backend is host-resolved — bodies never see vault URIs, manifests
+rarely do.
+
+## Design principles
+
+1. **No values, ever.** A `SECRETS.md` MUST NOT contain plaintext
+   values, ciphertexts, decryption keys, pre-signed URLs, or
+   anything that decrypts. Manifests that violate this MUST be
+   rejected at parse time.
+
+2. **Slugs are not secret.** The fact that a slug exists is public
+   within the workspace. Slug names MAY be human-meaningful
+   (`stripe-api-key`) — they're inventory labels, not authentication
+   factors.
+
+3. **Backend resolution is host policy.** The default manifest
+   declares only the slug + access. Mapping slug → vault path is
+   the host's job. Manifests MAY override the backend pointer for
+   advanced cases, but it's optional and reviewers SHOULD audit
+   any explicit backend pointer.
+
+4. **Reveal is auditable, single-purpose.** Every reveal records
+   actor, slug, purpose, run identifier, timestamp. A reveal grants
+   access for one specific run / call; it's not a long-lived
+   handle.
+
+5. **Access composes with capability URNs.** Granting access to a
+   slug is the same operation as granting `cap://secret/reveal/<slug>`
+   per [AIP-18](/docs/aip-18). SECRETS.md's `access:` block is a
+   typed shorthand over the underlying capability primitive.
+
+6. **Plaintext is process-local.** Revealed values land in the
+   destination process's address space and nowhere else. Hosts
+   MUST NOT write plaintext to disk, log it, or persist it to a
+   shared store.
+
+## Specification
+
+### File location
+
+A workspace's secrets inventory lives at:
+
+```
+.secrets/
+  SECRETS.md          ← inventory of one or more slugs
+```
+
+Hosts MAY accept multiple inventory files (e.g. one per service)
+under `.secrets/<service>/SECRETS.md`. The host's parser merges them
+into a single inventory; slug uniqueness is enforced across the merged
+set.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. A single `SECRETS.md`
+file MAY declare multiple slugs via the top-level `secrets` array.
+
+```yaml
+---
+secrets:
+  - <slug-entry>
+  - <slug-entry>
+---
+```
+
+Each `<slug-entry>` shape:
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `slug` | string | Machine identifier. Lowercase, digits, dashes, optional `<namespace>/` prefix. 2–80 chars. Unique within the workspace inventory. |
+| `name` | string | Human-readable display label (1–80 chars). |
+| `description` | string | One-paragraph purpose, written for the human reviewer who decides who gets access. ≤2000 chars. |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `kind` | enum | `"opaque"` | `"opaque"` (single string), `"oauth"` (`{ accessToken, refreshToken, expiresAt }` envelope), `"keypair"` (`{ public, private }`), `"json"` (structured arbitrary). |
+| `backend` | string | host-resolved | URI pointing to the vault entry: `vault://<provider>/<path>`. Omitted by default — host driver maps slug → backend by convention. Setting it explicitly is reviewable infrastructure exposure. |
+| `access` | object | `{ reveal: [], rotate: [] }` | Grants. See [Access](#access). |
+| `audit` | object | host defaults | Audit retention + classification. See [Audit](#audit). |
+| `tags` | string[] | `[]` | Discovery tags (`finance`, `prod`, `customer-pii-related`). |
+| `metadata` | object | `{}` | Free-form, namespaced for adapter hints. |
+
+### Access
+
+The `access` block declares WHO may perform WHAT operation on the
+secret. Three operations:
+
+| Operation | Meaning |
+|---|---|
+| `reveal` | Read the value. Triggers a vault fetch + audit record. |
+| `bind` | Inject the value into a sandbox process at spawn time (e.g. via `runtime.env` per AIP-17). Bind grants imply reveal grants but with auto-issue at spawn rather than explicit reveal. |
+| `rotate` | Replace the value in the vault. Out of scope for v1; reserved field. |
+
+Each operation lists grant entries. Entry shapes:
+
+```yaml
+access:
+  reveal:
+    - role: billing-admin                        # role-based
+    - userId: u_123                              # principal-based
+    - cap: cap://secret/reveal/stripe-api-key    # capability-URN match (AIP-18)
+    - tool: stripe-charge                        # auto-grant when this tool runs
+    - workflow: invoice-sync                     # auto-grant when this workflow runs
+  bind:
+    - tool: stripe-charge                        # injected into the tool's runtime.env
+```
+
+A request is granted when **any** entry matches the requesting
+context (role / userId / capability / invoking-tool / invoking-
+workflow). Hosts that don't support a particular grant kind MUST
+ignore the entry, not fail — forward-compatibility for new entry
+kinds.
+
+### Audit
+
+```yaml
+audit:
+  retention: "7y"        # per industry / regulatory requirement
+  pii: false             # is the value itself PII?
+  classification:        # optional, host-defined ("public", "internal", "confidential", "restricted")
+    - confidential
+```
+
+The host's audit log per [AIP-7](/docs/aip-7) records every
+`reveal` and `bind` event with:
+
+```
+secret.reveal {
+  slug:        stripe-api-key
+  actor:       <userId-or-system>
+  purpose:     "tool=stripe-charge run=<runId>"
+  context:     { tool, workflow, run, agent }
+  timestamp:   <iso>
+  granted_by:  <which access entry matched>
+}
+```
+
+The audit record MUST NOT contain the plaintext value. The
+`granted_by` field names the matching entry so reviewers can trace
+provenance.
+
+### Reveal lifecycle
+
+```
+1. Body declares dependency
+     (e.g. WORKFLOW.md `runtime.env: [STRIPE_API_KEY]`)
+     ↓
+2. Host maps env-var name → slug
+     (default convention: STRIPE_API_KEY → stripe-api-key)
+     ↓
+3. Host runs access check against the slug's `access.bind` block
+     (matches the requesting tool / workflow / run)
+     ↓
+4. Host calls vault driver to fetch the value
+     ↓
+5. Host injects plaintext into the destination process
+     (sandbox spawn env, request context, header — destination per
+     binding type; see [Bindings](#bindings))
+     ↓
+6. Host writes an audit record per [AIP-7](/docs/aip-7)
+     ↓
+7. Process consumes the value, exits, value drops out of memory
+```
+
+The plaintext MUST NOT be written to disk, logged, or persisted to
+shared storage anywhere along this path.
+
+### Bindings
+
+How a revealed value reaches the destination depends on the
+binding type. v1 specifies one binding:
+
+#### `env` binding
+
+The slug is bound to an environment variable name. Convention:
+`STRIPE_API_KEY → stripe-api-key` (uppercase env name, lowercase
+slug, underscores ↔ dashes). Hosts MAY override the convention for
+specific slugs via metadata.
+
+```yaml
+metadata:
+  bindings:
+    env: ["STRIPE_API_KEY", "STRIPE_PUBLISHABLE_KEY"]   # this one slug exposes two env names
+```
+
+Future bindings (header injection, request-context placeholder,
+signed-JWT envelope) live behind their own metadata keys; v1 stays
+focused on the env binding because that's what consuming manifests
+(see [§ Consumer binding](#consumer-binding)) declare.
+
+### Consumer binding
+
+The above sections describe the **inventory side** — what a slug
+is, who can reveal it, how the host resolves the value. This
+section describes the **consumer side**: how a manifest that runs
+code (TOOL.md, WORKFLOW.md, code-workspace per
+[AIP-26](/docs/aip-26)) declares which env vars it needs and where
+each one resolves from.
+
+The consumer block is a top-level `secrets:` map at the manifest
+root:
+
+```yaml
+secrets:
+  <ENV_VAR_NAME>: <resolution-spec>
+```
+
+Each entry binds an environment variable name to a resolution
+source. v1 specifies three sources:
+
+| Source | Form | Resolution |
+|---|---|---|
+| Vault | `{ vault: <slug> }` | Resolved against the workspace's SECRETS.md inventory; reveal lifecycle and access checks apply per [§ Access](#access) and [§ Reveal lifecycle](#reveal-lifecycle). |
+| OAuth | `{ oauth: <provider> }` | Resolved against an OAuth connector configured for the workspace (e.g. `github`, `google`, `stripe`). The host returns a fresh access token. |
+| Plain value | `{ value: <literal> }` | A literal string passed verbatim. Not a secret — for non-sensitive config that benefits from being declared alongside the real secrets (region codes, feature flags, default locales). |
+
+#### Example — TOOL.md consumer
+
+```yaml
+kind: tool
+name: stripe-fetch-customers
+
+code: { sources: [{ inline: { path: tool.py, content: "..." } }] }
+run: ["python", "tool.py"]
+runner: { engine: sandbox, needs: { language: python } }
+
+secrets:
+  STRIPE_KEY:    { vault: stripe-api-key }       # ← resolves from SECRETS.md inventory
+  GITHUB_TOKEN:  { oauth: github }                # ← resolves from OAuth connector
+  DEFAULT_REGION: { value: "us-east-1" }          # ← plain config, no vault hop
+
+inputs:  { type: object }
+outputs: { type: object }
+source: { origin: ai-draft }
+```
+
+At runtime, the host:
+
+1. Looks up `STRIPE_KEY`'s entry → calls the SECRETS.md reveal
+   pipeline for slug `stripe-api-key` (audit log, access check,
+   vault fetch).
+2. Looks up `GITHUB_TOKEN`'s entry → calls the OAuth connector for
+   `github`, refreshes the token if expired, returns the access
+   token.
+3. Looks up `DEFAULT_REGION`'s entry → uses the literal value as-is.
+4. Spawns the body with these three keys in `process.env` and
+   nothing else from the host's own env.
+
+#### Conflict resolution
+
+When a tool inherits `secrets:` from a code-workspace it references
+(per AIP-26 inheritance rules), and ALSO declares its own
+`secrets:`, the tool's bindings override the workspace's
+field-by-field. Hosts MUST surface the merged set in the trust UI.
+
+#### Discriminator validation
+
+Each entry MUST declare exactly one of `vault`, `oauth`, `value`.
+Hosts MUST reject manifests where:
+
+- An entry has zero source fields.
+- An entry has more than one source field (ambiguous).
+- A `vault:` slug doesn't exist in the workspace inventory.
+- An `oauth:` provider isn't configured for the workspace.
+- A `value:` is non-string (objects, arrays, numbers, booleans are
+  rejected — env values are strings; manifests can stringify
+  upstream if needed).
+
+#### Why three sources, not two
+
+A naive design might collapse `oauth:` into `vault:` (every OAuth
+token is "a secret"). They're separated because the resolution
+lifecycle differs:
+
+- **Vault** values are author-stored. The reveal records WHO stored,
+  WHO authorized, WHO read.
+- **OAuth** values are connector-issued at reveal time. They
+  rotate, often have ~hour TTLs, may require refresh-token rounds.
+  The audit chain is "who initiated the OAuth flow" not "who stored
+  the token".
+
+Conflating the two would require every host to track both
+audit chains under the same `vault:` key, which dilutes the
+contract. Splitting at the manifest level keeps the two lifecycles
+visible to reviewers.
+
+#### Migration from `runtime.env`
+
+The pre-2026-04-30 [AIP-17](/docs/aip-17) `runtime.env: ["X", "Y"]`
+allowlist preprocessed into the new `secrets:` block:
+
+```yaml
+# Legacy
+runtime:
+  env: [STRIPE_API_KEY, OPENAI_API_KEY]
+
+# Preprocesses to
+secrets:
+  STRIPE_API_KEY: { vault: stripe-api-key }
+  OPENAI_API_KEY: { vault: openai-api-key }
+```
+
+The slug name is derived by the convention `lowercase().replace(/_/g, "-")`.
+Hosts SHOULD warn (not error) on legacy shape during the
+deprecation window.
+
+### Slug naming
+
+- **Lowercase, digits, dashes.** Optional namespace prefix
+  separated by `/`: `crm/hubspot-oauth-token`.
+- **2–80 chars** total (including any `<namespace>/`).
+- **No leading or trailing dash.** No double dashes.
+- **Unique within a workspace inventory.** Across workspaces,
+  slugs are independent (no global registry).
+- Pattern: `^([a-z][a-z0-9-]*[a-z0-9]/)?[a-z][a-z0-9-]*[a-z0-9]$`
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## Overview`** — narrative, what services these secrets unlock.
+- **`## Access policy summary`** — table of slug → who can reveal.
+- **`## Procurement`** — how new entries get added (link to a
+  ticket queue, runbook).
+
+The body is informational. Hosts MUST function with adapters that
+read only the frontmatter.
+
+## The `defineSecret` standard signature
+
+Every implementation that consumes `SECRETS.md` MUST expose a
+function whose signature matches the contract below.
+
+### `defineSecret` (TypeScript notation, normative)
+
+```ts
+defineSecret(definition: SecretDefinition): SecretHandle
+
+interface SecretDefinition {
+  slug:         string
+  name:         string
+  description:  string
+  kind?:        "opaque" | "oauth" | "keypair" | "json"
+  backend?:     string                            // vault://<provider>/<path>
+  access?:      AccessGrants
+  audit?:       AuditConfig
+  tags?:        string[]
+  metadata?:    Record<string, unknown>
+}
+
+interface AccessGrants {
+  reveal?:  AccessEntry[]
+  bind?:    AccessEntry[]
+  rotate?:  AccessEntry[]                         // reserved for future use
+}
+
+type AccessEntry =
+  | { role:     string }
+  | { userId:   string }
+  | { cap:      string }                          // AIP-18 capability URN
+  | { tool:     string }
+  | { workflow: string }
+
+interface AuditConfig {
+  retention?:      string                         // ISO 8601 duration ("P7Y") or shorthand ("7y")
+  pii?:            boolean
+  classification?: string[]
+}
+
+interface SecretHandle {
+  slug:        string
+  namespace?:  string                             // parsed from slug prefix
+  kind:        "opaque" | "oauth" | "keypair" | "json"
+  access:      AccessGrants                       // never undefined; defaults applied
+  audit:       AuditConfig
+
+  /**
+   * Check whether the supplied request context matches an entry
+   * under `access[op]`. Hosts call this before fetching from the
+   * vault. Returns the matching entry on success so the audit
+   * record can name `granted_by`.
+   */
+  checkAccess(
+    op: "reveal" | "bind" | "rotate",
+    ctx: RequestContext
+  ): { granted: true; granted_by: AccessEntry } | { granted: false; reason: string }
+
+  /**
+   * Reveal the value. Calls the host's vault driver, records an
+   * audit event, returns the plaintext for in-memory consumption.
+   * Hosts MUST NOT cache the returned value.
+   */
+  reveal(ctx: RequestContext): Promise<string | OAuthEnvelope | KeypairEnvelope | unknown>
+}
+```
+
+### Conformance rules
+
+1. **Canonical name.** The export MUST be named `defineSecret`.
+
+2. **No values at module load.** The module containing
+   `defineSecret(...)` MUST be safely importable without making
+   vault calls. Reveals happen only via `handle.reveal(ctx)`.
+
+3. **Access check before fetch.** Hosts MUST call `checkAccess`
+   before invoking the vault driver. Failed checks MUST NOT issue a
+   vault request.
+
+4. **Plaintext never persisted.** Implementations MUST NOT write
+   the result of `reveal()` to disk, logs, or shared stores. The
+   value lives in the destination process's address space only.
+
+5. **Audit record on every reveal.** Every successful `reveal`
+   call MUST emit an audit record per [AIP-7](/docs/aip-7) with the
+   fields named in [Audit](#audit). Failed access checks SHOULD
+   also emit audit records (`secret.reveal.denied`).
+
+6. **Slug uniqueness enforced at parse.** Hosts MUST reject a
+   workspace inventory that contains two entries with the same
+   slug.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineSecret` host
+implementation — vault drivers, access matchers, audit emitters —
+see
+[`./resources/aip-19/draft/ADAPTER.md`](./resources/aip-19/draft).
+The AIP defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Stable identity
+
+The `slug` is the secret's stable identity within a workspace.
+Once shipped to production, a slug MUST NOT change semantic — a
+new credential under an old slug MUST satisfy the same purpose +
+shape. Hosts that need to migrate to a different credential SHOULD
+introduce a new slug and migrate consumers.
+
+## Compatibility
+
+This AIP is greenfield — no migration is required from existing
+host-specific secret stores. Hosts that already have a "guild
+secret store" or similar adopt by:
+
+1. Author a `SECRETS.md` listing the existing slugs.
+2. Map the host's existing access ACL into the `access:` block
+   (one-time projection, not a live integration).
+3. Continue resolving slugs against the existing vault — only the
+   inventory + access representation changes.
+
+`runtime.env` consumers ([AIP-17](/docs/aip-17)) gain a typed
+contract: the env-var name maps to a slug, the slug has declared
+access policy, the reveal is audited.
+
+## Security considerations
+
+`SECRETS.md` is **declarative**: the access policy is only as
+strong as the host's enforcement of it.
+
+- **Misclassification.** A slug declared `pii: false` whose value
+  IS PII (e.g. a customer-data export key) leaks into audit
+  logs that aren't PII-scoped. Reviewers SHOULD treat `pii:` and
+  `classification:` as policy inputs, not author claims.
+- **Slug enumeration.** Slugs aren't secret, but the *list* of a
+  tenant's slugs reveals what services they integrate. Hosts MAY
+  consider slug list redaction in cross-tenant audit views.
+- **Reveal log retention.** Audit records of reveals (which actor
+  pulled which slug at which time) are themselves sensitive — long
+  retention enables behavioural analysis of operators. Set
+  `audit.retention` per regulatory minimums; don't over-keep.
+- **Body access to plaintext.** Once a body has the plaintext
+  (env var, request context value), the body can do anything with
+  it — print, exfiltrate, post to a third party. The sandbox
+  ([AIP-17](/docs/aip-17)) is the load-bearing boundary against a
+  malicious body. SECRETS.md mitigates *which* bodies see the
+  value; the sandbox mitigates what they can do with it.
+- **Backend pointer leak.** An explicit `backend:` URI in a
+  `SECRETS.md` reveals the vault provider + path topology. Default
+  to host-resolved bindings; require reviewer sign-off when an
+  explicit backend pointer appears.
+
+## Open questions
+
+1. **Multi-value secrets.** OAuth credentials are
+   `{ accessToken, refreshToken, expiresAt }`. v1 declares a
+   `kind: "oauth"` envelope; whether to allow finer-grained per-
+   field access (`reveal access-token only`) is open.
+2. **Reveal-result destinations.** v1 specs the env binding only.
+   Header injection, request-context placeholder, signed-JWT
+   envelope — open for v2.
+3. **Pre-bind validation.** Whether `checkAccess` should optionally
+   verify the *value* exists in the vault before granting access
+   (vs. failing at fetch time). Probably yes for clearer errors;
+   left for an adapter convention.
+4. **Multi-binding slugs.** A slug that maps to multiple env-var
+   names is allowed via metadata; whether to promote that to a
+   first-class field is open.
+
+(Rotation orchestration and cross-tenant secret sharing are
+intentionally out of scope for v1 and tracked as future AIPs.)
+
+## See also
+
+- [AIP-17 — RUNTIME.md](/docs/aip-17) — primary consumer (`runtime.env` resolves to SECRETS slugs)
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-18 — CAPABILITY.md (proposed)](/docs/aip-18) — `cap://secret/reveal/<slug>` is the underlying capability URN
+- [`./SECRETS.schema.json`](./resources/aip-19/draft) — schema validator
+- [`./ADAPTER.md`](./resources/aip-19/draft) — implementer's guide
+- [`./skills/author-secrets/SKILL.md`](./resources/aip-19/draft/skills/author-secrets/SKILL.md) — agent-side authoring skill

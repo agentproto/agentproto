@@ -1,0 +1,762 @@
+---
+title: "AIP-18: COLLECTION.md — collections/v1 (typed collections + items)"
+description: A composable primitive pack that lets any AIP define domain-extensible item types as on-disk schema files (`COLLECTION.md`) instantiated by markdown records (`ITEM.md`), so future workspace AIPs (work, knowledge, companies) compose on a shared type system instead of inventing their own.
+aip: 18
+status: Draft
+type: Schema
+created: 2026-04-28
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+resources: ./resources/aip-18/draft
+discussions-to: https://github.com/agentproto/specs/discussions/18
+---
+
+| Field | Value |
+|---|---|
+| AIP | 18 |
+| Title | COLLECTION.md — collections/v1 (typed collections + items) |
+| Status | Draft |
+| Type | Schema |
+| Domain | collections.sh |
+| Doctypes | `collection.schema/v1` (collection definition, written as `COLLECTION.md`) + `collection.item/v1` (record instance, written as `ITEM.md` or `<slug>.md`) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-13](/docs/aip-13) (work v1 — cautionary tale), AIP-20 (work v2 — planned successor) |
+| Resources | [`./resources/aip-18`](./resources/aip-18/draft) — [`COLLECTION.schema.json`](./resources/aip-18/draft/COLLECTION.schema.json), [`ADAPTER.md`](./resources/aip-18/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-18/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-18/draft/skills/author-collection/SKILL.md) |
+
+## Abstract
+
+`collections/v1` is a **primitive pack**: two cooperating doctypes that
+let any consumer of the AIP family declare a class of records and the
+records themselves on disk, without baking the record's shape into the
+host AIP. A `COLLECTION.md` (`collection.schema/v1`) declares the
+schema for a class of records — fields, statuses, ownership, deadlines,
+lints, identity rules. An `ITEM.md` (`collection.item/v1`) is a single
+record validated against a named collection. Collections compose via
+`extends:` — a child collection inherits its parent's fields, statuses,
+and lints, then adds, narrows, or refines them; the same merge mechanic
+[AIP-10](/docs/aip-10) and [AIP-7](/docs/aip-7) use for workspace views
+applies here to schemas. Universal item core is **intentionally
+minimal** — only `schema`, `collection`, `id`, and `title` are MUST.
+Everything else (parent, owner, status, dueAt, attachments, links,
+tags) is OPTIONAL at the spec level and gated by the resolved
+collection's schema. This AIP exists so that future workspace AIPs that
+need typed records — work-tracking, CRM, custom-record domains — stop
+hardcoding their item types and start composing on a shared primitive.
+
+## Motivation
+
+Workspace AIPs in the family keep reinventing the same thing. AIP-13
+([`WORK.md`](/docs/aip-13)) hardcodes three item kinds — `project`,
+`initiative`, `task` — into the spec. The status state machine, the
+ownership rules, and the lint set are baked into the AIP itself; a team
+that needs a fourth kind (an `epic`, a `bug`, an `incident`) cannot
+extend the spec, only fork it or smuggle the fourth kind through
+`metadata`. AIP-10 has the same instinct (`entityTypes` is a
+schema-shaped field on `KNOWLEDGE.md`) but with a wiki's lighter touch:
+the schema is enforced softly because wiki entries are prose. The
+moment a workspace AIP needs structured records — assignees, deadlines,
+status — the lightweight pattern stops scaling.
+
+The cleanest fix is to extract the type-definition surface itself into
+an AIP. **Treat the type-as-data**: a collection is a markdown file
+with frontmatter, just like everything else in the family; instances
+are markdown files that point at the collection. The host validates the
+instance against the collection at load time. New types are an authoring
+problem (write a new `COLLECTION.md`) not a spec problem (revise an AIP
+and re-cut its schema). And because the collection IS a file, it's
+shippable, forkable, signable, and composable on the same terms as
+every other AIP-1 artifact: `agentproto install collection://<slug>`
+turns a third-party schema into a local registration; `extends:` lets a
+team specialise an industry-standard `bug` collection with
+domain-specific fields without forking the registry entry.
+
+This decouples four things that workspace AIPs habitually couple:
+
+- **The workspace shape** (which kinds exist, how they're filed, what
+  the workspace's lint policy is) — that's the workspace AIP's job.
+- **The record schema** (what a single bug or task or investor record
+  looks like) — that's `COLLECTION.md`.
+- **The record instance** (this specific bug, that specific task) —
+  that's `ITEM.md`.
+- **The cross-AIP bindings** (which operator owns curation, which
+  governance policy applies) — that's the workspace's manifest, with
+  the collection schema riding underneath.
+
+AIP-13 is the cautionary tale. Its three hardcoded kinds were the right
+call for a v1 spec — concrete enough to ship, narrow enough to debug —
+but the cost shows up the moment a real team wants a fourth kind. The
+planned successor, AIP-20 (`work/v2`), will keep the workspace
+manifest, drop the hardcoded kinds, and require each enabled kind to
+reference a `COLLECTION.md`. Knowledge entries (AIP-10) and company
+roles (AIP-6) are next in line: same trick, same primitive. AIP-18 is
+the substrate.
+
+Prior art: schema-as-data is older than computers (XML schemas, SQL
+DDL, DSDL). The novelty here is filesystem-first composition with a
+view-mode-style `extends:` chain — borrowing the registry-of-views
+pattern from AIP-10 and applying it to a *schema* doctype rather than a
+workspace doctype. The other relevant prior art is Notion's database
+property model, Airtable's typed tables, and the Drizzle / Prisma
+schema-as-code lineage; AIP-18 differs by staying filesystem-first and
+runtime-agnostic.
+
+## Specification
+
+A conforming `collections/v1` deployment is two doctypes:
+`collection.schema/v1` (a markdown file named `COLLECTION.md`) and
+`collection.item/v1` (a markdown file storing one record). Hosts MUST
+validate items against the named collection's resolved schema at load
+time and refuse items that fail validation.
+
+### File location
+
+The filename `COLLECTION.md` is normative — discovery, install, and
+toolchains key off it. The path is conventional, not normative.
+Conventional layouts:
+
+```
+<workspace>/
+├── collections/
+│   ├── tasks/
+│   │   └── COLLECTION.md            # tasks collection definition
+│   └── bugs/
+│       └── COLLECTION.md            # bugs collection definition
+├── items/
+│   ├── tasks/
+│   │   ├── deploy-pipeline.md       # an ITEM.md (named by slug)
+│   │   └── refactor-billing.md
+│   └── bugs/
+│       └── 0001-flaky-login.md
+└── WORKSPACE.md                     # workspace AIP's root manifest
+                                     # (e.g. AIP-13's WORK.md, AIP-20's
+                                     # forthcoming WORK.md, AIP-10's
+                                     # KNOWLEDGE.md)
+```
+
+The host MUST treat the on-disk tree as canonical. Items reference
+their collection by name (`collection: tasks`); the host resolves the
+name against the collections it knows about (typically by walking
+`collections/<name>/COLLECTION.md` from the workspace root).
+
+ITEM files MAY use the literal filename `ITEM.md` (when one collection
+has a single canonical instance — rare) or, more commonly, a per-slug
+filename (`<slug>.md`). The frontmatter is what makes it an item; the
+filename is a hint.
+
+### `COLLECTION.md` — frontmatter shape
+
+```yaml
+---
+schema: collection.schema/v1
+name: <kebab-case-id>                   # required
+title: <human-readable>                 # required
+description: <one-paragraph purpose>    # required
+version: <semver>                       # required, the SHAPE version
+
+# Composition
+extends: ../base/COLLECTION.md          # OPTIONAL — relative path to
+                                        # parent collection; recursive
+                                        # merge bottom-up.
+appliesTo:                              # OPTIONAL — bind this view to
+                                        # specific workspace consumers.
+  - ws://workspaces/<slug>              # AIP-20 work workspace
+  - ws://wikis/<slug>                   # AIP-10 knowledge workspace
+  - ws://companies/<slug>               # AIP-6 company workspace
+
+# Item field schema — the shape of records belonging to this collection
+fields:                                 # array; merge-by-name vs parent
+  - name: <field-id>                    # required, kebab-case
+    type: string | number | boolean | enum | date | datetime
+        | text | url | ref | array
+    required: true | false              # default: false
+    description: <prose>                # OPTIONAL
+    enum: [<value>, ...]                # required when type=enum
+    items:                              # required when type=array
+      type: <inner-type>
+      ...                               # recursive shape
+    refKind: <collection-name>          # required when type=ref
+    pattern: <regex>                    # OPTIONAL, type=string only
+    min: <n>                            # OPTIONAL, type=number/array
+    max: <n>                            # OPTIONAL, type=number/array
+    format: email | uri | semver | ...  # OPTIONAL, type=string only
+    enabled: true | false               # OPTIONAL, default true; child
+                                        # may set false to deprecate a
+                                        # parent's field without removing it
+
+# Status state machine — per-collection (NOT in the universal core)
+statuses:                               # OPTIONAL; merge-by-id vs parent
+  - id: <kebab-id>                      # required, stable
+    label: <human-readable>             # required
+    terminal: true | false              # default: false
+    transitionsTo:                      # OPTIONAL — allowed next ids
+      - <status-id>
+initialStatus: <status-id>              # OPTIONAL — default for new items
+
+# Ownership — declared per collection
+ownership:
+  cardinality: none | single | multiple # default: single
+  role: <field-name>                    # which field holds the ref
+                                        # (default 'owner')
+  required: true | false                # default: false
+
+# Deadline — per collection
+deadline:
+  kind: none | target-date | window | recurrent  # default: none
+  required: true | false                          # default: false
+  fieldName: <field-name>                         # default 'dueAt'
+
+# Lint rules — per collection
+lints:                                  # OPTIONAL; merge-by-id vs parent
+  - id: <kebab-id>
+    kind: missing-owner | overdue | orphan | broken-ref | stale
+        | required-field | custom
+    appliesTo: "*"                      # always "*" for collections —
+                                        # items belong to one collection
+    severity: error | warn | info
+    params: { <key>: <value> }
+
+# Item identity & filing
+identity:
+  slugSource: <field-name> | random | sequence | hash:<source-fields>
+  filingPath: <template>                # e.g. "items/{collection}/{slug}.md"
+
+metadata: {}                            # vendor extensions, namespaced
+                                        # under <vendor>
+---
+
+# <body — markdown prose>
+
+Conventional sections:
+- ## Purpose — what this collection is for, who uses it
+- ## Conventions — when an item belongs here vs another collection
+- ## Field guide — additional prose about the schema
+- ## Examples — short snippets of typical items
+```
+
+The body is free-form markdown. The frontmatter is the contract.
+
+The `appliesTo` field is the binding surface that connects the
+collection to a specific workspace. A collection without `appliesTo` is
+a *generic* schema — installable into any workspace. A collection with
+`appliesTo` is bound to a named workspace; hosts MUST refuse to
+register the collection in a workspace not in `appliesTo`.
+
+### `ITEM.md` — frontmatter shape
+
+```yaml
+---
+schema: collection.item/v1              # required, const
+collection: <collection-name>           # required — the COLLECTION.md's
+                                        # `name`. The host resolves this
+                                        # against the registered
+                                        # collections.
+id: <kebab-or-prefixed-id>              # required — unique within the
+                                        # collection
+title: <human-readable>                 # required, 1..200 chars
+
+# Optional universal-ish fields. Declared OPTIONAL at the spec level.
+# The collection's resolved schema decides which become required.
+parent: <ref>                           # OPTIONAL — containment ref
+                                        # (item or collection)
+owner: <ref> | [<ref>, ...]             # OPTIONAL — depends on
+                                        # collection.ownership
+status: <status-id>                     # OPTIONAL — must be in
+                                        # collection.statuses
+dueAt: <date-or-datetime>               # OPTIONAL — depends on
+                                        # collection.deadline
+attachments: [<ref>, ...]               # OPTIONAL
+links: [<ref>, ...]                     # OPTIONAL
+tags: [<tag>, ...]                      # OPTIONAL
+createdAt: <datetime>                   # OPTIONAL
+updatedAt: <datetime>                   # OPTIONAL
+
+# Collection-specific fields go HERE, flat at the top level. The
+# collection's resolved schema names every field; the host validates
+# against it.
+<arbitrary-collection-field>: <value>
+...
+
+metadata: {}                            # vendor extensions
+---
+
+# <body — markdown prose, the description of the record>
+
+Conventional sections (free-form):
+- # <title>
+- Description / context paragraph
+- ## Subsections (acceptance criteria, repro steps, etc.)
+```
+
+The universal core is **only four MUST fields**: `schema`,
+`collection`, `id`, `title`. Every other field shown above is OPTIONAL
+at the AIP-18 level. The collection's schema is what determines whether
+`status` is required, whether `owner` is required, whether `dueAt` must
+appear. AIP-18 declares the *namespace* for these fields so that hosts
+know how to read them; the *requirement* is per-collection.
+
+The collection's `fields` are flat at the item's top level. There is no
+`fields:` wrapper inside the item — every collection field is a
+top-level item key. Per-field type validation is the host's
+responsibility (cf. [`./resources/aip-18/draft/ADAPTER.md`](./resources/aip-18/draft/ADAPTER.md)).
+
+### Composition (the `extends:` chain semantics)
+
+When a host loads a `COLLECTION.md` whose `extends:` is set:
+
+1. **Walk the parent chain.** Recursively load the parent referenced by
+   `extends:`; that parent's parent if it has one; until a collection
+   with no `extends:` is reached. Maximum chain depth is **eight**.
+   Hosts MUST detect cycles by tracking visited absolute paths.
+2. **Treat depth overflow and cycle detection as warnings**, not
+   errors. A child whose chain is malformed MUST still load — the
+   runtime falls back to the local collection only and surfaces a
+   `collection_extends_cycle` (or `collection_extends_depth_exceeded`)
+   warning.
+3. **Tolerate a missing parent.** If `extends:` points to a path that
+   does not exist, the host emits `collection_extends_missing` as a
+   warning and uses the local collection only.
+4. **Merge bottom-up.** Walk the chain from the root toward the leaf,
+   merging each collection into the accumulator using the strategy
+   below.
+
+**Merge strategy** (child wins on conflicts):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins. |
+| `extends` | local-only | Not inherited. |
+| `appliesTo` | local-only | Not inherited. Each child declares its own scope. |
+| `fields` | merge-by-name | Same `name` → child replaces parent's, subject to type-drift refusal (below). New names → appended. |
+| `statuses` | merge-by-id | Same `id` → child replaces parent's, subject to status-removal refusal (below). New ids → appended. |
+| `initialStatus` | override | |
+| `ownership.*` | leaf-field override | `cardinality`, `role`, `required` each override independently. |
+| `deadline.*` | leaf-field override | |
+| `lints` | merge-by-id | Same `id` → child replaces parent's. New ids → appended. |
+| `identity.*` | leaf-field override | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+The host MUST expose **both** the merged effective schema AND the
+resolution chain (ordered list of absolute paths consumed during merge)
+on its debug surface. Consumers use the merged schema; tooling uses the
+chain to explain *why* a field has the shape it does.
+
+#### `appliesTo` enforcement
+
+`appliesTo` is **not inherited**. A child's bindings are local; the
+parent's bindings do not leak into the child. Cross-field constraint:
+**`appliesTo` present ⇒ `extends` REQUIRED**. A collection that binds
+to a consumer must extend a parent — a binding without an extension is
+semantically a workspace-root with a consumer claim, which the
+registry-of-views pattern rejects as ill-formed.
+
+Hosts MUST refuse a collection whose `appliesTo` references a
+non-existent consumer with `collection_appliesto_unresolvable`. This is
+a hard failure, not a warning — a binding to nothing is broken in a way
+that degrading-to-local cannot fix.
+
+#### Field-shape conflict policy (HARD refusal)
+
+If a child redeclares a parent's field with an **incompatible type**,
+the host MUST refuse to register the collection with
+`collection_field_type_drift`. Examples of HARD drift:
+
+- Parent `severity: string` → child `severity: number`.
+- Parent `dueAt: date` → child `dueAt: ref`.
+- Parent `tags: array<string>` → child `tags: string`.
+
+Examples of permitted refinements (NOT drift):
+
+- Parent `severity: enum [low, medium, high, critical]` → child
+  narrows to `enum [medium, high, critical]` (subset).
+- Parent `description: string` → child adds `pattern:`, `min:`, or
+  `max:` (narrowing).
+- Parent `severity: string, required: false` → child `severity:
+  string, required: true` (narrowing).
+- Parent declares a field with no constraints → child adds
+  constraints (narrowing).
+
+The rule: a child may make a field's contract **stricter**, never
+**looser** in a way that invalidates instances of the parent.
+
+#### Removed-field policy (HARD refusal)
+
+A child collection MAY NOT remove a parent's field. Removal would
+invalidate every existing item that carries the field. To deprecate a
+field while preserving backward compatibility, the child sets
+`enabled: false` on the inherited field — the host treats the field as
+deprecated (lints flag uses; new items SHOULD avoid the field) but
+does not strip it from the resolved schema. Attempting to delete a
+parent field outright surfaces `collection_field_removed`.
+
+#### Status-removal policy (HARD refusal)
+
+A child MAY add new statuses; MAY mark an inherited status `terminal`;
+MAY restrict `transitionsTo` (narrow the legal next-status set). A
+child MUST NOT remove a parent status — existing items reference it
+and would become invalid on load. Attempting to remove an inherited
+status surfaces `collection_status_removed`.
+
+These three HARD refusals (`collection_field_type_drift`,
+`collection_field_removed`, `collection_status_removed`) are the spec's
+guarantee that an item valid under a parent collection remains valid
+under any descendant collection. Without that guarantee, every fork
+breaks every reader.
+
+### Validation contract
+
+A host that loads an `ITEM.md` MUST:
+
+1. **Parse the frontmatter** as YAML.
+2. **Resolve `collection:`** against the registered collections. If the
+   collection is unknown, surface `collection_item_invalid` with code
+   `unknown_collection`.
+3. **Validate against the collection's resolved schema** — the schema
+   the host computed by walking the collection's `extends:` chain. For
+   each field in the resolved schema:
+   - If `required: true` and the item omits the field, fail with
+     `collection_item_invalid` (cause: `field_missing`).
+   - If the item's value type does not match `type:`, fail with cause
+     `field_type_mismatch`.
+   - If the field has constraints (`pattern`, `enum`, `min`, `max`,
+     `format`) and the value violates them, fail with cause
+     `field_constraint`.
+4. **Validate the `status` field**, if present, against
+   `statuses[].id`. Unknown status → `collection_item_status_unknown`.
+5. **Validate refs** (`type: ref`, `parent`, `owner`, `attachments`,
+   `links`). Unresolvable ref → `collection_item_ref_unresolvable`. The
+   host MAY accept dangling refs as warnings depending on workspace
+   policy; AIP-18 RECOMMENDS hard failure.
+6. **Run lints** declared in the collection's resolved schema; surface
+   findings via the workspace's lint pipeline (cf. AIP-13's `_log.md`,
+   AIP-10's `_log.md`).
+
+A failing item is rejected; the host returns a structured error
+envelope (cf. ADAPTER.md). Partial validation is NOT acceptable — an
+item is either fully conforming or it is not registered.
+
+### Body conventions
+
+The body of an `ITEM.md` is free-form markdown by default. AIP-18 does
+NOT impose body sections; that's the host's or the workspace's choice.
+A future minor version of this AIP MAY add a `bodySections:` field to
+the collection schema for cases where the workspace wants to enforce
+section presence (acceptance criteria, repro steps, postmortem
+template); for now, treat the body as documentation prose.
+
+The same flexibility applies to the body of a `COLLECTION.md`. Authors
+SHOULD use the body to explain when an item belongs in this collection
+vs another, with short example item snippets if useful.
+
+### Item ↔ Collection link
+
+The relation between an `ITEM.md` and its `COLLECTION.md` is the
+load-bearing contract of this AIP. Six design decisions govern it.
+
+#### 1. Ref shape
+
+By default, `collection:` is a **string** — the collection's `name`:
+
+```yaml
+# ITEM.md
+collection: eng-bug
+```
+
+Items that need to **pin** a specific schema version (cross-team
+publishing, archival snapshots, third-party imports) MAY use the
+**object form** with a semver range:
+
+```yaml
+collection:
+  name: eng-bug
+  version: "1.x"        # accept any 1.* schema; refuse 2.0+
+```
+
+Hosts MUST accept both forms. Object-form pinning is a power-user
+escape hatch — string form is the canonical 99%-case.
+
+#### 2. Resolution order
+
+The host resolves a collection ref in this priority order, stopping
+at the first hit:
+
+1. **Inline** — declared on the consuming workspace's root manifest
+   (e.g. `WORK.md` `collections: [{ name: eng-bug, ... }]`).
+2. **Local file** — `<workspace>/collections/<name>/COLLECTION.md`
+   by convention.
+3. **Registry** — `ws://collections/<name>` cross-workspace import.
+
+If none of the three resolves, the host MUST fail with
+`collection_unresolvable` — a hard error, surfaced on item load.
+
+#### 3. Versioning posture
+
+By default, items DO NOT pin the schema version. They float to the
+current resolved schema. When a collection's schema is bumped:
+
+- Items remain on disk untouched (their bytes don't change).
+- The host MUST re-validate every item against the new schema on next
+  load.
+- Items that fail validation under the new schema surface as
+  `collection_item_schema_drift` (warn, not hard) with a per-item
+  list of failing fields. The host SHOULD render this in tooling so
+  the operator can run an explicit migration.
+
+This mirrors how npm semver ranges work: items track the latest
+compatible schema; hosts surface incompatibilities so a human can
+decide. Migrations are first-class operations on items, never silent
+auto-rewrites.
+
+Items that opted into the **object form** (`{ name, version: "1.x" }`)
+get stricter behaviour: a schema bump outside the pinned range fails
+with `collection_item_schema_pinned_drift` (HARD) until the item is
+explicitly re-pinned or migrated.
+
+#### 4. One item, one collection (no mixin)
+
+An `ITEM.md` belongs to exactly ONE collection. AIP-18 deliberately
+does NOT support multi-collection items (mixin / multiple inheritance
+on instances). Polymorphism is achieved through:
+
+- **`tags[]`** — categorical labels, free-form, host-indexed.
+- **`links[]`** — relational refs to OTHER items.
+- **`extends:` on the collection** — shared schema between sibling
+  collections, defined ONCE on the parent.
+
+Single-collection membership keeps validation deterministic, queries
+predictable, and avoids the diamond-inheritance problem at runtime.
+
+#### 5. Sub-type query semantics
+
+When a collection `eng-bug` `extends: bug`, items of `eng-bug` are
+also semantically items of `bug` (Liskov substitution holds — every
+field valid under `bug` remains valid under `eng-bug`). Therefore:
+
+- A query on the parent collection name (`bug`) MUST return items of
+  any descendant collection by default (`bug` ∪ `eng-bug` ∪
+  `infra-bug` ∪ …).
+- The host MUST expose a `descendants(collectionName)` API surface so
+  callers can compute the descendant set when needed.
+- Callers may opt into strict (exact) matching with a host-defined
+  flag (e.g. `query.strict: true`); this is a host concern, not a
+  spec requirement.
+
+#### 6. One-way direction (item → collection)
+
+The link is **one-way**. Items reference their collection via
+`collection:`; collections do NOT list their items in their
+frontmatter. The reverse index (`getItemsByCollection(name)`) is a
+host-side derived structure — neither stored in `COLLECTION.md` nor
+required by AIP-18 conformance.
+
+This keeps `COLLECTION.md` stable: a collection's manifest does not
+change every time an item is added or removed. The collection is the
+*schema*; items are *instances*; the host maintains the index.
+
+### Cross-AIP refs
+
+`COLLECTION.md` is the binding surface where `collections/v1` meets the
+rest of the AIP family:
+
+| Field | References | Purpose |
+|---|---|---|
+| `appliesTo` | [AIP-6](/docs/aip-6) company / [AIP-9](/docs/aip-9) operator / AIP-20 work workspace / [AIP-10](/docs/aip-10) wiki / [AIP-3](/docs/aip-3) skill | A collection declares which workspace consumers it adapts the schema for. Hosts MUST refuse a collection whose `appliesTo` does not resolve. |
+| `extends` | another `COLLECTION.md` | Composition. |
+| `fields[].refKind` | another collection's `name` | Refs across collections — e.g. a `bug` field `assignee` may reference an `engineer` collection. |
+| `lints[].kind: custom` | host-defined check | Hosts MAY register custom lint algorithms keyed by `id`. |
+
+Items reference operators (AIP-9), companies (AIP-6), other items
+(within or across collections), or any other AIP-1 ref via the
+universal `parent`, `owner`, `attachments`, `links` fields, OR via
+collection-specific fields with `type: ref`. The collection schema's
+`refKind` constrains the target type.
+
+### Vendor extensions
+
+Hosts MAY add fields under `metadata.<vendor>` (e.g. `metadata.guilde`,
+`metadata.simone`). Vendor fields MUST NOT change the meaning of any
+field defined in this AIP, and a host MUST tolerate (ignore) vendor
+extensions it does not understand. This is a non-bypassable rule:
+vendor namespaces are a side-channel for tooling, not a back-door for
+policy.
+
+## Rationale
+
+**Why minimal universal core (`id` + `title` + `collection` + `schema`
+only as MUST).** Every prior attempt to design a "universal record"
+overspecified — the standard required `owner`, or `status`, or `dueAt`,
+on the assumption every record has those concepts. They don't. A
+research-note collection has no owner; a recurring-cron-event
+collection has no due date; a discussion-thread collection has no
+status. By keeping the universal core to identity (`id`, `title`,
+`collection`, `schema`) and pushing every other axis into the
+collection schema, AIP-18 avoids the "everything is a task" trap and
+lets domain-specific schemas describe themselves. The collection IS
+the contract; the universal core is just the addressing.
+
+**Why per-collection statuses, deadlines, ownership.** These three
+axes are the most domain-variable in record-tracking systems. A bug
+has statuses (`open`, `triaged`, `fixed`); a meeting note doesn't. A
+task has a single assignee; an OKR has multiple co-owners. A project
+has a target completion date; a customer-record doesn't. Pushing all
+three into the collection schema means every workspace AIP that builds
+on AIP-18 inherits per-collection variability for free, instead of
+forcing every consumer to thread the same plumbing. The alternative —
+a generic `status` enum at the AIP level — was the AIP-13 approach,
+and the cost shows up the moment a fourth kind appears.
+
+**Why `extends:` over a more sophisticated type system.** Inheritance
+chains are the only composition primitive that survives the
+filesystem-first constraint. Mixins, traits, structural typing — all
+of those need a runtime resolver and a global type registry, which
+disqualifies them under [AIP-1](/docs/aip-1)'s "the file is the
+contract" rule. A linear `extends:` chain merges with a deterministic
+algorithm a reviewer can run on paper. The same algorithm AIP-10 uses
+for workspace composition, AIP-7 for governance composition, AIP-17
+for runtime composition. One mental model across the family.
+
+**Why this primitive should be a separate AIP.** A naïve approach
+would bake the type system into the workspace AIP that needs it
+(AIP-20 for work, AIP-10 for knowledge, AIP-6 for companies). That's
+how AIP-13 got into trouble — the work spec owns the type system, and
+moving the type system means rewriting the work spec. Splitting the
+primitive into AIP-18 means: the type system has its own version, its
+own validator, its own evolution path; workspaces compose it without
+inheriting its release cadence. AIP-20 can reference
+`collection.schema/v1` and AIP-21 can reference
+`collection.schema/v1`; if AIP-18 evolves to v2, both consumers
+coordinate the migration on their own schedules. Decoupling primitives
+from consumers is the only way a registry of doctypes scales past a
+handful of formats.
+
+**Why no body-section schema (yet).** A collection could declare that
+items MUST have a `## Acceptance Criteria` section in their body, an
+`## Owner` section, etc. That's tempting — it's exactly what some
+workspace AIPs (incident postmortems, RFCs) need. But specifying body
+section structure interacts with markdown parsing, header levels, and
+prose conventions in ways that vary by host. Rather than half-spec it
+in v1, AIP-18 leaves the body free-form and reserves a future
+`bodySections:` field for a focused minor version when the use case
+crystallises. The frontmatter is the contract; the body is
+documentation.
+
+**Why HARD refusal on field-type drift, field removal, and status
+removal.** The whole composition mechanic depends on one invariant:
+**an item valid under a parent collection remains valid under any
+descendant**. If a child can change a field's type, the invariant
+breaks — items written against the parent's contract become invalid
+when the child loads. If a child can remove a field, the invariant
+breaks — items that carry the field become non-validating. If a child
+can remove a status, the invariant breaks — items in the removed
+status become unloadable. Hard refusal on these three cases is what
+makes the registry of collections trustworthy: you can install a
+collection and know its descendants don't sabotage your records.
+
+**Why no built-in lint runner.** The lint declarations are data; the
+host's lint pipeline runs them. Bundling a lint runner into AIP-18
+would force every host into the same execution model (sync vs async,
+batch vs incremental, full vs scoped). Hosts already have lint
+machinery from AIP-7 governance, AIP-10 knowledge, AIP-13 work; the
+declarations from AIP-18 plug into existing pipelines. The spec
+contributes the *vocabulary* (`missing-owner`, `overdue`, `orphan`),
+not the *runner*.
+
+**Why no persistence story.** Items are markdown files in a workspace.
+Hosts that need fast queries layer a database, vector index, or graph
+store on top — that's a runtime concern, not a spec concern. The
+filesystem-first invariant from AIP-1/2 holds: the markdown files are
+canonical; everything else is a cache.
+
+## Reference Implementation
+
+Reference implementation in progress. The spec leads the
+implementation; once the in-flight `packages/collection/core` package
+lands, this AIP will absorb the working schema in full as part of
+moving Draft → Review.
+
+The first consumer is AIP-20 (work v2), which will replace AIP-13's
+hardcoded `project`/`initiative`/`task` doctypes with three
+`COLLECTION.md` files shipped alongside the workspace AIP. The second
+consumer is a planned refactor of AIP-10's `entityTypes` field into
+`collection://*` references — turning the wiki's entity types into
+shippable, forkable collections.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec. AIP-13's hardcoded
+work doctypes remain valid under the v1 spec; AIP-20 will be a
+*successor* (replacing AIP-13 in the registry index) rather than a
+breaking change to AIP-13. Hosts SHOULD continue to support
+`work/v1` until AIP-20's deprecation window closes; the migration
+path from `work/v1` to `collection.item/v1` (via AIP-20) will be
+documented in AIP-20's `Backwards Compatibility` section, not here.
+
+## Security Considerations
+
+Collections are *write surface* for schema authority. Threats:
+
+- **Schema poisoning** — a malicious child collection inherits a
+  trusted parent and silently relaxes its lints (turns `error` into
+  `warn`, drops `required: true`). Mitigation: lints and required
+  fields compose under merge-by-id and merge-by-name; governance
+  ([AIP-7](/docs/aip-7)) policies SHOULD restrict which fields and
+  lints a child may soften, and the host MUST expose the resolution
+  chain so reviewers can audit the diff. The spec does not mandate the
+  governance policy, but the binding surface (`appliesTo` ⇒ workspace
+  whose policy may forbid softening) is the hook through which it
+  enforces.
+
+- **Field-type drift attacks** — an attacker publishes a child
+  collection that flips a string field to a number, breaking every
+  downstream item. Mitigation: covered by the `collection_field_type_drift`
+  HARD refusal. The host refuses to register the child; the registry's
+  type invariant survives.
+
+- **Status-removal attacks** — an attacker removes a status to render
+  every item in that status unloadable (effective denial-of-service
+  against the workspace). Mitigation: covered by
+  `collection_status_removed` HARD refusal. Only `terminal: true` and
+  `transitionsTo:` narrowing are permitted on inherited statuses.
+
+- **Cross-collection ref forgery** — an item declares `parent:
+  bug-1234` where `bug-1234` is a slug from a collection the item is
+  not allowed to reference. Mitigation: refs declared via `type: ref`
+  carry a `refKind` constraint; the host MUST verify the target
+  collection matches `refKind` before resolving the ref.
+  Workspace-level ACLs (out of scope for AIP-18) gate cross-workspace
+  refs; the spec contributes the type-tag, the host enforces the
+  policy.
+
+- **Vendor metadata as policy bypass** — a vendor extension
+  (`metadata.<vendor>`) sneaks a `force_severity_info` flag that the
+  host honours, effectively softening lints. Mitigation: hosts MUST
+  treat vendor metadata as advisory; nothing under `metadata.*` may
+  change the meaning of an AIP-18 field. The spec is explicit: vendor
+  extensions are tolerated but never authoritative. If a vendor needs
+  policy authority, that policy SHOULD be expressed as governance
+  (AIP-7), not as collection metadata.
+
+- **`appliesTo` forgery** — a collection claims to bind to a
+  workspace it has no authority over. Mitigation: hosts MUST verify
+  the collection is actually installed inside the workspace's tree
+  before trusting the binding. The `appliesTo` field is a declaration,
+  not an authorization; authorization flows through the workspace's
+  governance.
+
+The threat model assumes the filesystem itself is trusted (or
+verified through AIP-1's hash/signature mechanisms). AIP-18 inherits
+that posture without restating it.
+
+## See also
+
+- [AIP-1 — agent.json](/docs/aip-1)
+- [AIP-2 — AIP template](/docs/aip-2)
+- [AIP-3 — SKILL.md](/docs/aip-3)
+- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-10 — agentknowledge/v1](/docs/aip-10) — the registry-of-views pattern AIP-18 mirrors
+- [AIP-13 — agentwork/v1](/docs/aip-13) — the cautionary hardcoded-types tale; AIP-20 will compose with AIP-18 instead
+- [`./resources/aip-18/draft/COLLECTION.schema.json`](./resources/aip-18/draft/COLLECTION.schema.json) — frontmatter validator
+- [`./resources/aip-18/draft/ADAPTER.md`](./resources/aip-18/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-18/draft/EXAMPLES.md`](./resources/aip-18/draft/EXAMPLES.md) — reference collections and items
+- [`./resources/aip-18/draft/skills/author-collection/SKILL.md`](./resources/aip-18/draft/skills/author-collection/SKILL.md) — agent-side authoring skill

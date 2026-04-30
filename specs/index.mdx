@@ -1,0 +1,46 @@
+---
+title: Agent Protocol
+description: "Open numbered standards for the AI-agent ecosystem — like BIPs for Bitcoin or EIPs for Ethereum, but for agents. Goal — readability, operability, composability."
+---
+
+# Agent Protocol
+
+**AIPs (Agent Improvement Proposals)** are open numbered standards for the
+AI-agent ecosystem.
+
+The model is the same one that built the internet and most working
+crypto stacks:
+
+- **[BIPs](https://github.com/bitcoin/bips)** — Bitcoin Improvement Proposals
+- **[EIPs](https://eips.ethereum.org/)** — Ethereum Improvement Proposals
+- **[RFCs](https://www.rfc-editor.org/)** — Internet Engineering Task Force standards
+- **[PEPs](https://peps.python.org/)** — Python Enhancement Proposals
+
+Each AIP is a single document that defines one piece of the stack — a
+file format, a runtime contract, an orchestration primitive. AIPs
+reference each other (e.g. AIP-9 *requires* AIPs 3, 6, 7), build on
+each other, and graduate through a clear lifecycle: **Draft → Review →
+Final → Superseded**.
+
+The goal is **readability** (specs anyone can read), **operability**
+(specs that running systems implement), and **composability** (specs
+that snap together rather than each running their own universe).
+
+This is not a foundation, a community, or a vendor catalog — it's a
+process. Like every numbered-proposal system before it.
+
+<AipRegistry />
+
+## Submit an AIP
+
+Read [AIP-1](/docs/aip-1) for the full process, then copy [AIP-2](/docs/aip-2)
+as your starting template. PRs land in the public spec repo at
+[github.com/agentproto/specs](https://github.com/agentproto/specs).
+
+## Related standards
+
+AIPs aren't built in isolation — see the
+[Related Standards & Initiatives](/docs/related-standards) page for the
+peer specifications (MCP, A2A, AGNTCY, AITP, Anthropic Skills, OTel
+GenAI, W3C VCs, OpenAPI, DTCG, Olas, Fetch.ai, …) that AIPs defer to,
+build on, or run adjacent to.

@@ -1,0 +1,109 @@
+---
+title: "AIP-5: CANVAKIT.md — template + data-source binding"
+description: A markdown + frontmatter format for templates that declare named data sources, resolve them in parallel, and re-render when data changes.
+aip: 5
+status: Draft
+type: Schema
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/core
+---
+
+| Field | Value |
+|---|---|
+| AIP | 5 |
+| Title | CANVAKIT.md — template + data-source binding |
+| Status | Draft |
+| Type | Schema |
+| Domain | canvakit.sh |
+| Reference Impl | [`packages/canvakit/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/core) |
+
+## Abstract
+
+A canvakit template is a single file with YAML frontmatter declaring named
+data sources and a body written in a pluggable template engine (Mustache
+in v1). A canvakit runtime resolves the sources in parallel, merges the
+results into a rendering context, and emits the body — typically HTML, but
+the spec is output-agnostic. Canvakit's value is making "render once, bind
+to live data, re-render on change" portable across agent runtimes.
+
+## Motivation
+
+An agent that needs to *update* a rendered UI with new data has two usual
+options today: re-emit the whole HTML (expensive in tokens, fragile), or
+hand-wire a component library that knows how to refresh itself (heavy,
+framework-specific, non-portable). Canvakit gives a third option: render
+the template once, bind it to live tools, re-render only when the data
+changes. The template body stays stable across updates; only the resolved
+data differs.
+
+Canvakit is the structural sibling to AIP-4 (DESIGN.md): DESIGN.md covers
+*style*, CANVAKIT.md covers *structure + binding*. They're orthogonal and
+compose through the optional `@canvakit/designkit` bridge.
+
+## Specification
+
+> Full normative text is in
+> [`packages/canvakit/core/CANVAKIT.md`](https://github.com/agentik/agentik-studio/blob/dev/packages/canvakit/core/CANVAKIT.md).
+> AIP-5 will absorb that text in full as part of moving Draft → Review.
+
+Three-part structure:
+
+1. **YAML frontmatter** (required) — identity, data sources, variables.
+2. **Body** (required) — content, interpreted by the chosen template
+   engine. v1 default: [Mustache](https://mustache.github.io/mustache.5.html).
+3. **Output** — whatever the engine produces. HTML is the soft default;
+   non-HTML outputs are spec-legal.
+
+Canonical filename: `<name>.canvakit.<engine-ext>` (e.g.
+`q2-dashboard.canvakit.html`, `report.canvakit.mdx`). The double-extension
+glob `*.canvakit.*` is the canonical discovery pattern.
+
+Frontmatter sketch:
+
+```yaml
+---
+schema: canvakit/v1
+template: true
+sources:
+  user:
+    kind: tool
+    tool: get-user
+    args: { id: "{{user_id}}" }
+  reports:
+    kind: tool
+    tool: list-reports
+    args: { since: "2026-01-01" }
+variables:
+  user_id: { type: string, required: true }
+---
+
+# Body — Mustache by default
+
+Hello {{user.name}}, you have {{reports.count}} reports.
+```
+
+## Rationale
+
+*To be authored. Defend: declarative `kind: tool` references over imperative
+fetching (portability), Mustache as v1 default (simplicity, broad
+implementations), output-agnostic stance (don't lock to HTML).*
+
+## Reference Implementation
+
+[`packages/canvakit/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/core)
+ships the Node/TypeScript reference runtime, parser, Mustache engine
+adapter, and the `@canvakit/designkit` bridge to AIP-4.
+
+## Backwards Compatibility
+
+Not applicable — first version of the spec.
+
+## Security Considerations
+
+*To be authored. Threat surface includes: untrusted templates that bind
+to privileged tools, frontmatter injection through interpolated variables,
+DoS through fan-out source resolution. Mitigations are runtime-side
+(tool allow-listing, parallelism caps, variable escaping) — the file
+format itself doesn't execute code.*

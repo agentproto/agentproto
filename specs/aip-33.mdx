@@ -1,0 +1,507 @@
+---
+title: "AIP-33: SDK.md — agentsdk/v1 (in-process SDK provider specialisation)"
+description: >-
+  A markdown + frontmatter format for declaring an in-process SDK provider — an
+  npm/pip/cargo/go package that exposes named functions implementing one or
+  more abstract TOOL contracts directly in the host runtime, without
+  subprocess spawn or network hop. Specialises AIP-30 PROVIDER for the
+  `kind: sdk` case.
+aip: 33
+status: Draft
+type: Schema
+provider_kind: sdk
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 16, 17, 19, 30]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/sdk-runtime
+resources: ./resources/aip-33/draft
+discussions-to: https://github.com/agentproto/specs/discussions/33
+---
+
+| Field | Value |
+|---|---|
+| AIP | 33 |
+| Title | SDK.md — agentsdk/v1 (in-process SDK provider specialisation) |
+| Status | Draft |
+| Type | Schema |
+| Family | [Provider](/docs/family-provider) |
+| Provider kind | `sdk` |
+| Specialises | [AIP-30 PROVIDER.md](/docs/aip-30) |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Resources | [`./resources/aip-33`](./resources/aip-33/draft) — `SDK.schema.json`, [`ADAPTER.md`](./resources/aip-33/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-33/draft/skills/author-sdk/SKILL.md) |
+
+## Abstract
+
+`SDK.md` is the `kind: sdk` specialisation of
+[AIP-30 PROVIDER](/docs/aip-30). It packages an **in-process** SDK
+integration — an npm / pip / cargo / go package whose named functions
+implement one or more abstract TOOL contracts. No subprocess, no
+network, no IPC: the host runtime imports the package and dispatches
+directly.
+
+SDK providers serve three use-cases:
+
+1. **Self-hosted models** (local Llama via `@meta/llama-sdk`, local
+   SDXL via `@host/sdxl-runner`) — fastest dispatch, lowest cost,
+   pii-safe.
+2. **First-party convenience wrappers** that codify host-specific
+   conventions (e.g. `@agstudio/billing-sdk` wrapping Stripe with
+   tenant-scoped contexts).
+3. **Performance-critical paths** where subprocess (CLI) or network
+   (HTTP, MCP) latency is unacceptable.
+
+The frontmatter inherits everything from PROVIDER and adds
+SDK-specific fields: `package`, `package_manager`, per-tool
+`function_ref` and optional `args_template`. The format pairs with
+`defineProvider({ kind: "sdk", ... })`.
+
+## Motivation
+
+In-process tool execution is a real category that CLI / HTTP / MCP
+don't cover. Today such tools are just "code in the same repo as the
+agent" — they bypass the provider model entirely, which means:
+
+1. **No catalog visibility.** A function is a function; nothing
+   declares "this implements `image.create`". Catalog UIs can't list
+   it; the resolver can't pick it.
+
+2. **No safety contract.** The function ships side effects, but the
+   contract layer doesn't enforce `mutates` / `approval` /
+   `risk_level`. Audit logs miss it.
+
+3. **No multi-provider routing.** When a self-hosted local model is
+   one of three candidates (alongside OpenAI HTTP and Replicate
+   HTTP), the resolver should pick it for pii-tagged workspaces. If
+   the local SDK isn't a registered provider, the resolver doesn't
+   know it exists.
+
+4. **Versioning collision.** A package declares one version; the
+   contract declares another; without a binding manifest, the two
+   drift silently.
+
+5. **Auth state still matters.** Even in-process providers may need
+   secrets (API keys, model paths, license tokens). PROVIDER's `auth`
+   block applies; without SDK.md, every wrapper reinvents secret
+   resolution.
+
+`SDK.md` slots into AIP-30's family, gives in-process tools first-
+class catalog status, and lets the resolver pick them when policy
+favours self-hosted execution.
+
+## Design principles
+
+1. **Inherit, don't repeat.** Identity, auth, install (npm/pip
+   install), version_check (npm-version / pip-version), policy_tags,
+   region all come from PROVIDER. SDK only adds package + function
+   refs.
+
+2. **No subprocess, no network.** The defining property. SDK
+   providers run in the host's own process. The `network.egress`
+   field declares network NEEDED by the SDK (some SDKs make HTTP
+   calls under the hood); it's still enforced.
+
+3. **Function refs are resolvable at module-load.** When the host
+   loads the SDK provider, it imports the package and resolves the
+   declared function refs at registration time. Refs that don't
+   exist fail registration, not first call.
+
+4. **Args templates for renaming.** Like HTTP's `body_template`, SDK
+   providers can rename input keys via `args_template`. Most SDK
+   functions take inputs verbatim, so `args_template` is rarely
+   needed.
+
+5. **Sandbox is best-effort.** True process-level isolation isn't
+   available in-process. Hosts MAY enforce capability sandboxing
+   (e.g. denying `child_process` access for sandboxed npm packages),
+   but the strong sandbox guarantee belongs to CLI / HTTP / MCP. SDK
+   providers SHOULD declare `policy_tags: ["self-hosted"]` and
+   `network.egress` honestly.
+
+6. **Streaming is natural.** Unlike CLI, SDK functions can be async
+   generators / observables. v1 supports streaming through generator
+   functions when the contract permits it.
+
+## Specification
+
+### File location
+
+SDK providers live in a single folder:
+
+```
+.providers/
+  host-sdxl-sdk/
+    PROVIDER.md            ← this AIP, kind: sdk
+    provider.ts            ← optional entry (custom dispatch / streaming)
+    SECRETS.md             ← AIP-19 inventory (when API keys needed)
+    package.json           ← when the SDK itself is co-located
+```
+
+Convention: `id` ends with `-sdk`. The folder name SHOULD match `id`.
+
+### Frontmatter
+
+Inherits all fields from [AIP-30 PROVIDER.md](/docs/aip-30) plus the
+SDK-specific fields below.
+
+#### Required SDK-specific fields
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | const `"sdk"` | Per AIP-30. |
+| `package` | string | Package name in the language's registry. (`@host/sdxl-runner`, `boto3`, `tokio`, …). |
+| `package_manager` | enum | `"npm"` \| `"pnpm"` \| `"yarn"` \| `"pip"` \| `"poetry"` \| `"cargo"` \| `"go"` \| `"local"` (workspace-relative). Drives the `install` block default. |
+
+#### Optional SDK-specific fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `package_version` | string | inferred from `version_check` | Semver range pinned for this provider. |
+| `entrypoint` | string | language default | Module path within the package (`dist/index.js`, `lib/main.py`, `src/lib.rs`). Most languages have a clear default; declare only when non-standard. |
+| `import_style` | enum | `"esm"` | `"esm"` \| `"cjs"` \| `"python"` \| `"rust-crate"` \| `"go-module"`. Drives how the host loads the package. |
+| `streaming` | object | none | Default streaming config for tools the SDK can stream. v1: `{ mode: "async-iterator" \| "callback" }`. |
+
+#### Per-tool `metadata.sdk` (in `implements[N].metadata.sdk`)
+
+Every entry in `implements[]` adds:
+
+| Field | Type | Description |
+|---|---|---|
+| `function_ref` | string | The named export to call. `"default"` for the package's default export; `"createImage"` for a named export; `"images.create"` for a nested namespace. |
+| `args_template` | object | Optional rename: contract-input keys → SDK-function arg names/positions. Default: identity (input passed as the function's first arg). |
+| `result_extract` | string | JSONPath-lite to extract the contract's `outputs` shape from the function's return value. Default: identity (`$`). |
+| `streaming` | object | Per-tool streaming override. Used when the contract supports streaming AND the SDK function is an async generator. |
+
+### Function refs
+
+`function_ref` is dot-notation pointing at the export to call:
+
+| Ref | Resolved to (TS/JS) | Resolved to (Python) |
+|---|---|---|
+| `"default"` | `pkg.default` (or `pkg` for CJS) | `pkg.__default__` (rare; usually `pkg.main`) |
+| `"createImage"` | `pkg.createImage` | `pkg.create_image` |
+| `"images.create"` | `pkg.images.create` | `pkg.images.create` |
+| `"Client.images.create"` | `new pkg.Client(opts).images.create` | `pkg.Client(...).images.create` |
+
+The fourth pattern (constructor + method) requires the SDK runtime
+to instantiate a client per provider; the constructor args come from
+`auth.state.env` resolved secrets plus optional `client_options`.
+
+### Args templating
+
+`args_template` is sparse — most SDK functions accept a single object
+argument matching the contract's input shape. Use `args_template`
+only when:
+
+- The SDK uses positional args:
+
+  ```yaml
+  args_template:
+    _0: "${input.prompt}"        # first positional
+    _1: { model: "${input.model | default('llama-3-70b')}", temperature: 0.7 }  # second positional, computed
+  ```
+
+- The SDK uses different field names than the contract:
+
+  ```yaml
+  args_template:
+    text: "${input.prompt}"      # contract.prompt → SDK.text
+    options:
+      max_length: "${input.max_tokens}"
+      stop: "${input.stop_sequences}"
+  ```
+
+When omitted, the host calls `fn(args.input)` for object-arg SDKs or
+`fn(args.input.prompt, args.input.options)` for positional-arg SDKs
+(positional inferred from the function's introspectable signature
+in TS/JS via reflection).
+
+### Result extraction
+
+Same JSONPath-lite as AIP-31. Examples:
+
+- `"$"` (default) — return value passes through.
+- `"$.choices[0].message.content"` — OpenAI-shaped LLM responses.
+- `"$.images[0].url"` — image-generation responses.
+
+For streaming results (async generators), `result_extract` applies
+to each yielded chunk.
+
+### Streaming
+
+When the contract's outputs support streaming (per AIP-14's
+streaming roadmap) AND the SDK function returns an async generator
+or accepts a callback:
+
+```yaml
+streaming:
+  mode: async-iterator             # the function is an async generator
+implements:
+  - tool: ./tools/chat-completion/TOOL.md
+    metadata:
+      sdk:
+        function_ref: "Client.streamChat"
+        result_extract: "$.delta"
+        streaming:
+          mode: async-iterator
+```
+
+The host iterates the generator and yields each chunk to the caller.
+Callback-style streams use `mode: callback` and require the optional
+entry's custom dispatch.
+
+### Auth shapes
+
+SDK providers' `auth` typically uses:
+
+- **Env-var injection** at module load (`OPENAI_API_KEY` set in the
+  process env, `OpenAI()` reads it).
+- **Constructor args** from secrets (`new OpenAI({ apiKey: secrets.OPENAI_API_KEY })`).
+- **No auth** for self-hosted models reading from local disk.
+
+```yaml
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["LLAMA_MODEL_PATH"] }    # path to local model weights
+  expiry: { detect: "exception:ModelLoadFailed" }
+```
+
+### Stable identity
+
+Per AIP-30. Bumping `package_version` to a new major requires
+bumping the provider's major. Bumping the SDK function signature
+(rename, removed param) is a breaking change at the SDK layer that
+propagates: schema-narrowing changes in `args_template` are major.
+
+## The `defineProvider({ kind: "sdk", ... })` signature
+
+```ts
+interface ProviderDefinition<"sdk"> extends ProviderDefinition {
+  kind: "sdk"
+  package: string
+  packageManager: "npm" | "pnpm" | "yarn" | "pip" | "poetry" | "cargo" | "go" | "local"
+  packageVersion?: string
+  entrypoint?: string
+  importStyle?: "esm" | "cjs" | "python" | "rust-crate" | "go-module"
+  streaming?: { mode: "async-iterator" | "callback" }
+
+  // Optional behavioural adapters.
+  buildArgs?: (args: BuildArgsArgs) => unknown[]
+  parseResult?: (args: ParseResultArgs) => ProviderResult<unknown>
+  loadModule?: (args: LoadModuleArgs) => Promise<unknown>     // custom module-load
+}
+```
+
+A frontmatter-only SDK provider works for SDKs whose function
+signature matches the contract input verbatim. Custom entries handle
+constructor-based SDKs (auth in constructor), positional-arg SDKs,
+and streaming-via-callback patterns.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* an SDK `PROVIDER.md` is via the
+paired [author-sdk skill](./resources/aip-33/draft/skills/author-sdk/SKILL.md).
+The skill walks the agent through:
+
+1. Identify the package + package manager.
+2. Identify the function refs implementing each TOOL contract.
+3. Map auth (constructor args vs env vars).
+4. Author `args_template` only when names diverge.
+5. Author `result_extract` only when the SDK's return shape differs
+   from the contract.
+6. Validate against
+   [`./resources/aip-33/draft/SDK.schema.json`](./resources/aip-33/draft).
+
+## Example
+
+```md
+---
+name: OpenAI SDK (in-process)
+id: openai-sdk
+description:
+  OpenAI SDK as an in-process provider. Wraps the official `openai` npm
+  package; implements image.create and chat.completion via direct
+  function calls. No subprocess, no extra network hop beyond what the
+  SDK itself does.
+version: 1.0.0
+kind: sdk
+
+package: "openai"
+package_manager: "npm"
+package_version: "^4.50.0"
+import_style: "esm"
+
+install:
+  - { method: npm, package: "openai", global: false }
+version_check:
+  cmd: "node -e \"console.log(require('openai/package.json').version)\""
+  parse: '(\d+\.\d+\.\d+)'
+  range: ">=4.50 <5"
+
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["OPENAI_API_KEY"] }
+  expiry: { detect: "exception:AuthenticationError" }
+
+network:
+  egress: ["api.openai.com"]
+region: ["global"]
+policy_tags: ["third-party-llm"]
+
+implements:
+  - tool: ./tools/image-create/TOOL.md
+    version: "^1.0.0"
+    schema_narrowing:
+      drop_inputs: [seed, negative_prompt]
+    cost_override: { cost_units_per_call: 4 }
+    metadata:
+      sdk:
+        function_ref: "Client.images.generate"
+        args_template:
+          model: "dall-e-3"
+          prompt: "${input.prompt}"
+          size: "${input.aspect | default('1024x1024')}"
+        result_extract: "$.data[0].url"
+  - tool: ./tools/chat-completion/TOOL.md
+    version: "^1.0.0"
+    cost_override: { cost_units_per_call: 0.5 }
+    metadata:
+      sdk:
+        function_ref: "Client.chat.completions.create"
+        args_template:
+          model: "${input.model | default('gpt-4o')}"
+          messages: "${input.messages}"
+          stream: false
+        result_extract: "$.choices[0].message.content"
+
+tags: [openai, in-process, sdk]
+---
+```
+
+A self-hosted local-model SDK provider:
+
+```md
+---
+name: Local SDXL (SDK)
+id: host-sdxl-sdk
+description:
+  In-process Stable Diffusion XL model. Uses the host's own GPU.
+  No third-party API; PII-safe.
+version: 1.0.0
+kind: sdk
+
+package: "@host/sdxl-runner"
+package_manager: "local"           # workspace-relative, not a registry
+import_style: "esm"
+
+install:
+  - { method: vendored, path: "./packages/sdxl-runner" }
+
+network:
+  egress: []                       # fully offline once model loaded
+region: ["self-hosted"]
+policy_tags: ["self-hosted", "pii-safe", "no-third-party"]
+
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["SDXL_MODEL_PATH", "SDXL_DEVICE"] }
+
+implements:
+  - tool: ./tools/image-create/TOOL.md
+    version: "^1.0.0"
+    cost_override: { cost_units_per_call: 0.5 }   # GPU electricity ≈ free
+    metadata:
+      sdk:
+        function_ref: "default"     # default export from @host/sdxl-runner
+        result_extract: "$.imagePath"
+
+tags: [sdxl, self-hosted, pii-safe]
+---
+```
+
+See [`./resources/aip-33/draft/EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md)
+for additional patterns.
+
+## Compatibility
+
+### With AIP-30 PROVIDER.md
+
+Strict specialisation. Universal fields validate against AIP-30's
+schema; SDK-specific fields validate against AIP-33's. Hosts run
+both schemas in sequence at registration.
+
+### With AIP-14 TOOL.md
+
+SDK providers reference TOOL.md contracts. The contract's
+`inputSchema` is what the runtime validates; `args_template` reshapes
+for the SDK function signature. The contract's `outputSchema` is
+what `result_extract` produces from the SDK function's return value.
+
+### With package managers
+
+The `install` block's `method` choice MUST be consistent with
+`package_manager`. Hosts MUST refuse mixed declarations (e.g.
+`package_manager: npm` with `install.method: cargo`).
+
+### With AIP-17 RUNNER.md
+
+SDK providers run in the host's process. `runner` is typically
+omitted or declared as `{ engine: "in-process" }`; if declared,
+host's RUNNER must be `in-process` — SDK providers cannot run in a
+sandboxed subprocess (that's CLI's job).
+
+## Security considerations
+
+- **In-process means full host privileges.** SDK providers run in
+  the same process as the agent and can access anything the agent
+  can. Hosts MUST treat SDK providers with the same trust model as
+  first-party code; they're NOT a sandbox.
+- **Module load is side-effect-prone.** Some SDKs run code at import
+  time (registering global handlers, opening files). Hosts SHOULD
+  scan import logs and refuse providers whose module load triggers
+  unexpected I/O.
+- **Secrets in constructor args.** When auth is via constructor
+  (`new Client({ apiKey: secrets.X })`), the secret enters the SDK's
+  internal state and may be logged by the SDK itself. Hosts MUST
+  vet SDK behaviour around secret handling before approving.
+- **Streaming generators leak.** Async generators that aren't fully
+  consumed leak memory. Hosts MUST cancel generators on caller
+  abort (`signal`) and MUST NOT leak iterators across calls.
+- **Versioning lock-step.** When the SDK's package major bumps, the
+  provider's major MUST bump too. Hosts SHOULD reject loading an
+  SDK whose installed version doesn't match `package_version`.
+
+## Open questions
+
+1. **Polyglot SDK providers.** v1 declares one package + one
+   `package_manager`. A provider that wraps the same logic in TS
+   and Python today needs two providers; v2 may add multi-language
+   declaration.
+2. **In-process sandbox.** Strong process-level isolation isn't
+   available; capability-level (deny `child_process`, deny `fs`)
+   varies by language. v2 may codify language-specific sandbox
+   primitives.
+3. **Hot-reload.** SDK packages can be hot-replaced during dev; the
+   provider runtime needs a reload hook. v2.
+4. **Bundle size and load time.** Some SDKs (Anthropic's, OpenAI's,
+   AWS') are heavy. Cold-start cost is real. v2 may add
+   `lazy_load: true` for providers that defer module-load until
+   first call.
+
+## See also
+
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts SDK providers
+  implement
+- [AIP-17 — RUNNER.md](/docs/aip-17) — runner block (`in-process` for
+  SDK providers)
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
+- [AIP-29 — CLI.md](/docs/aip-29) — sibling specialisation,
+  `kind: cli`
+- [AIP-30 — PROVIDER.md](/docs/aip-30) — abstract supertype
+- [AIP-31 — HTTP.md](/docs/aip-31) — sibling specialisation,
+  `kind: http`
+- [AIP-32 — MCP.md](/docs/aip-32) — sibling specialisation,
+  `kind: mcp`
+- [Provider family](/docs/family-provider) — index of related AIPs
+- [`./SDK.schema.json`](./resources/aip-33/draft) — JSON Schema validator
+- [`./ADAPTER.md`](./resources/aip-33/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md) — additional patterns

@@ -1,0 +1,111 @@
+---
+title: "AIP-3: SKILL.md — skill manifest format"
+description: A markdown + frontmatter format for distributing reusable agent skills as portable, version-controlled files.
+aip: 3
+status: Draft
+type: Schema
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/skills
+---
+
+| Field | Value |
+|---|---|
+| AIP | 3 |
+| Title | SKILL.md — skill manifest format |
+| Status | Draft |
+| Type | Schema |
+| Domain | skills.sh |
+| Reference Impl | [`packages/skills`](https://github.com/agentik/agentik-studio/tree/dev/packages/skills) |
+| Aligned with | [Anthropic Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) ([`anthropics/skills`](https://github.com/anthropics/skills)) — open standard since Dec 2025; AIP-3 adds registry conventions on top |
+
+## Abstract
+
+`SKILL.md` is a markdown-with-frontmatter file format that packages a single
+reusable agent skill — its metadata, instructions, optional tool bindings,
+and example invocations — into a portable, version-controlled artifact.
+Skills are first-class citizens of an agent's repertoire; SKILL.md makes
+them shareable across runtimes.
+
+## Motivation
+
+Skills today are scattered across vendor-specific JSON, framework-specific
+class hierarchies, and ad-hoc prompt files. A skill defined for one
+runtime rarely runs in another without rewriting. SKILL.md gives a single
+declarative file a developer can hand to any AIP-compliant runtime and
+have the skill loaded, indexed, and invocable.
+
+The format draws on:
+
+- [Anthropic's Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
+  (markdown-as-skill, frontmatter for metadata) — open-sourced at
+  [`anthropics/skills`](https://github.com/anthropics/skills) in Dec 2025
+  and adopted by OpenAI Codex; AIP-3 is **aligned with**, not a fork of,
+  this format. See [related standards](./related-standards#anthropic-agent-skills-skill-md)
+  for scope split.
+- The success of `package.json` and `Cargo.toml` as portable manifests
+- AIP-4 (DESIGN.md) and AIP-5 (CANVAKIT.md) as sibling Schema specs in
+  the same family
+
+## Specification
+
+> **Status note.** The reference implementation in `packages/skills/`
+> (v1.0.0) defines the working schema. The canonical normative
+> specification is being authored from that implementation. This section
+> will be filled in as part of moving AIP-3 from Draft → Review.
+
+The high-level shape, pending the full normative text:
+
+```yaml
+---
+schema: skills/v1
+name: <kebab-case-skill-id>
+title: <human-readable title>
+description: <one-sentence what-it-does>
+version: <semver>
+tags: [<topic>, <topic>]
+inputs:
+  - name: <param>
+    type: string | number | boolean | object
+    required: true
+    description: <prose>
+tools:
+  - <tool-name>           # optional — tools this skill expects to be available
+examples:
+  - input: { ... }
+    output: <expected output sketch>
+---
+
+# Body — instruction prose for the agent
+
+The body is markdown. Headings, code blocks, and prose are all consumed
+by the runtime as instructions. Sections that read as data (e.g. "## Tool
+catalog") are conventionally extracted; sections that read as guidance
+("## When to use this skill") are passed through verbatim.
+```
+
+## Rationale
+
+*To be authored. Key decisions to defend in this section: why markdown
+over JSON Schema, why YAML frontmatter over TOML, why no separate
+`runtime` field (use `tags` + capability negotiation instead), why no
+embedded code (skills declare what they need, runtimes provide it).*
+
+## Reference Implementation
+
+[`packages/skills`](https://github.com/agentik/agentik-studio/tree/dev/packages/skills) —
+parser, file-tree source, DB-backed source, and library tooling. The
+implementation is the source of truth for the schema during the Draft
+phase.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec.
+
+## Security Considerations
+
+*To be authored. Threat surface includes: untrusted skills loaded into a
+trusted runtime, skill bodies that perform prompt injection on the host
+agent, frontmatter `tools` declaring tools the runtime should not expose.
+Mitigations live in runtime policy, not the file format itself.*

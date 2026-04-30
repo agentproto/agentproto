@@ -1,0 +1,114 @@
+---
+title: "AIP-8: AGENCY.md — agentagencies/v1 (autonomous agency engine)"
+description: A filesystem-first operations format that extends agentcompanies (AIP-6) and agentgovernance (AIP-7) with the doctypes needed to run an autonomous agency — services, procedures, engagements, agreements, deliverables, invoices.
+aip: 8
+status: Draft
+type: Core
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 6, 7]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agencies
+discussions-to: https://github.com/agentproto/specs/discussions/8
+---
+
+| Field | Value |
+|---|---|
+| AIP | 8 |
+| Title | AGENCY.md — agentagencies/v1 (autonomous agency engine) |
+| Status | Draft |
+| Type | Core |
+| Domain | agencies.sh |
+| Requires | [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7) |
+| Reference Impl | [`packages/agencies`](https://github.com/agentik/agentik-studio/tree/dev/packages/agencies) |
+
+> **⚠ Deprecation notice.** This AIP defines `agentagencies/v1` with
+> 11 hardcoded doctypes. It is being superseded by [AIP-21](/docs/aip-21)
+> (`agentagencies/v2`), which lifts the per-doctype schemas to
+> [AIP-18](/docs/aip-18) collections. AIP-21 ships starter collections
+> (`agentagencies-v1-compat`) so v1 workspaces remain loadable. AIP-8
+> stays in Draft for the duration of the transition; it will move to
+> Superseded once AIP-21 reaches Final.
+
+## Abstract
+
+`agentagencies/v1` is the operating-layer specification on top of
+[AIP-6](/docs/aip-6) (companies) and [AIP-7](/docs/aip-7) (governance).
+It defines the doctypes an autonomous agency needs to run real commercial
+operations: a service catalog, vendor-neutral procedures, engagements
+with counterparties, signed agreements, deliverables, invoices, recurring
+routines, and operator capacity. AIP-8 is filesystem-first: the agency
+*is* the folder of files, with adapters projecting it into runtimes and
+databases.
+
+## Motivation
+
+An "AI agency" today means a vendor-specific bundle of prompts, tools,
+and scaffolds. There is no portable artifact you can hand from one
+runtime to another, no auditable record of what the agency *agreed to*
+or *delivered*. AIP-8 closes that gap: an agency is a collection of
+files, signed via AIP-7, structured around AIP-6 primitives, that any
+conforming runtime can ingest and execute.
+
+This is the keystone of the agency-protocol stack: AIP-6 describes
+*who*, AIP-7 describes *how decisions are recorded*, AIP-8 describes
+*what gets done and how it's billed*.
+
+## Specification
+
+> Full normative text lives in
+> [`packages/agencies/core/AGENTAGENCIES.md`](https://github.com/agentik/agentik-studio/blob/dev/packages/agencies/core/AGENTAGENCIES.md)
+> with per-doctype Zod schemas at `src/spec/doctypes/`. AIP-8 will
+> absorb that text in full as part of moving Draft → Review.
+
+Operations doctypes added on top of AIP-6/AIP-7:
+
+| File | Purpose |
+|---|---|
+| `AGENCY.md` | Operational profile (alongside `COMPANY.md` from AIP-6) |
+| `OPERATIONS.md` | Root file for external operations packages |
+| `SERVICE.md` | Catalog item |
+| `PROCEDURE.md` | Vendor-neutral playbook |
+| `PRICING-MODEL.md` | Pricing rule |
+| `COUNTERPARTY.md` | External client |
+| `ENGAGEMENT.md` | Commercial instance |
+| `AGREEMENT.md` | Contract |
+| `DELIVERABLE.md` | Work product |
+| `INVOICE.md` | Bill |
+| `ROUTINE.md` | Schedule |
+| `CAPACITY.md` | Operator availability |
+
+All doctypes follow the conventions inherited from AIP-6 (markdown +
+frontmatter, slug references, `schema:` field, vendor extensions).
+Approvals on every contractual artifact (`AGREEMENT.md`, `DELIVERABLE.md`,
+`INVOICE.md`) flow through AIP-7's `signature` doctype.
+
+## Rationale
+
+*To be authored. Defend: extending AIP-6/7 instead of monolithic
+re-spec, the specific doctype split (why `ENGAGEMENT.md` vs
+`AGREEMENT.md` vs `DELIVERABLE.md` are separate files), filesystem-first
+over orchestrator-first.*
+
+## Reference Implementation
+
+[`packages/agencies/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/agencies) —
+spec and Zod schemas. The companion adapter
+[`packages/agencies/adapters/mastra`](https://github.com/agentik/agentik-studio/tree/dev/packages/agencies/adapters/mastra)
+projects an `agentagencies/v1` package into a Mastra runtime.
+
+## Backwards Compatibility
+
+Not applicable — first version of the spec.
+
+## Security Considerations
+
+The contractual surface is the central risk: a runtime that auto-signs
+`AGREEMENT.md` files commits the operator to obligations. Mitigations:
+
+- All contractual doctypes MUST be signed via AIP-7 `signature` events
+  before they are considered binding — implementations that skip
+  signatures are non-conforming.
+- `POLICY.md` files (AIP-7) gate which agreements an autonomous
+  operator may sign without human approval.
+- Audit log entries for every contract state transition allow
+  third-party verification after the fact.

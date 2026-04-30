@@ -1,0 +1,749 @@
+---
+title: "AIP-28: INTENT.md — agentintent/v1 (user-facing operation manifest)"
+description: A markdown + frontmatter format for declaring a user-facing agent intent — the verb a user surfaces ("create image", "list PRs"). Sits between SKILL (multi-step expertise) and TOOL (atomic technical call), carrying the catalog/UX layer (label, intent, surfaces, examples) and routing one or more underlying tools, with the standard `defineIntent` entry-point signature.
+aip: 28
+status: Draft
+type: Schema
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 3, 14, 16, 19]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/intent-runtime
+resources: ./resources/aip-28/draft
+discussions-to: https://github.com/agentproto/specs/discussions/28
+---
+
+| Field | Value |
+|---|---|
+| AIP | 28 |
+| Title | INTENT.md — agentintent/v1 (user-facing operation manifest) |
+| Status | Draft |
+| Type | Schema |
+| Domain | intents.sh |
+| Requires | [AIP-3](/docs/aip-3) (SKILL), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS) |
+| Resources | [`./resources/aip-28`](./resources/aip-28/draft) — `INTENT.schema.json`, [`ADAPTER.md`](./resources/aip-28/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-28/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-28/draft/skills/author-intent/SKILL.md) |
+
+## Abstract
+
+`INTENT.md` is a markdown + frontmatter file format that packages a
+**user-facing agent operation** — a verb a human or agent surfaces
+("create an image", "list pull requests", "send invoice"). Each
+intent carries the **catalog/UX layer**: a human-readable label, a
+short description, an intent string LLMs match against, the
+**surfaces** the intent shows up on (chat, menu, voice, keyboard
+shortcut), the UX-shaped **inputs** the user fills in, and
+**examples** for both LLMs and end-users.
+
+An intent **does not contain** input/output JSON schemas, adapter
+code, sandbox declarations, or any technical contract. Those live
+in [TOOL.md (AIP-14)](/docs/aip-14). An intent **routes** to one or
+more tools via an `implements` block, optionally with conditional
+dispatch (e.g. `style: photorealistic` → tool A, default → tool B).
+
+The format is paired with a standard entry-point function,
+**`defineIntent(...)`**, whose signature any implementation in any
+language exposes so callers, runtimes, and adapters share one
+contract.
+
+The file is human-authored, version-controlled, machine-parseable,
+and grep-able — same posture as
+[SKILL.md](/docs/aip-3),
+[TOOL.md](/docs/aip-14),
+[CANVAKIT.md](/docs/aip-5).
+
+## Motivation
+
+The registry today has two layers:
+
+- [**SKILL.md (AIP-3)**](/docs/aip-3) — multi-step expertise.
+  Prompts, sub-skills, workflows. Big surface ("manage GitHub PR
+  review cycle"). Lives close to the agent's prompt system.
+- [**TOOL.md (AIP-14)**](/docs/aip-14) — atomic, invocable function.
+  Strict input/output schema, adapter, sandbox. Lives close to the
+  runtime.
+
+Missing in between: the **user-intent layer**. When a user types
+*"génère-moi une image style aquarelle"* or clicks a "Create image"
+button, what they trigger is neither a skill (too large, no
+prompt-system context needed) nor a single tool (the system might
+pick between Replicate, OpenAI, or Gemini based on style, locale,
+or quota). Today this routing is **implicit** — buried in agent
+prompts, in catalog UI configs, or in one-off `if/else` chains.
+
+Five problems compound across the registry:
+
+1. **Routing is invisible.** "Create image" picks a tool — but where?
+   Prompt? Catalog config? Switch statement in the UI? No one place.
+   When a tool needs to be swapped, every surface that touches the
+   intent must be edited.
+
+2. **Surface duplication.** Chat agents, voice agents, keyboard
+   shortcuts each re-describe the same intent in their own format.
+   Adding a new surface means re-authoring user-facing copy.
+
+3. **i18n drift.** "Create image" / "Créer une image" /
+   "Crear imagen" lives in code, in prompts, in marketing pages.
+   Translations drift across surfaces and never converge.
+
+4. **No catalog.** "What can this agent do for me?" can't be answered
+   from data — it requires reading prompts and tool registries by
+   hand. Product teams ship features that nobody can find.
+
+5. **Provider lock-in by accident.** Every surface that says
+   `callTool("openai-dalle", …)` hard-codes the provider. Swapping
+   to Replicate is a refactor across the codebase, not a config
+   change.
+
+`INTENT.md` gives this layer a name and a file format. It is the
+data product teams ship to expose new capabilities, the surface
+designers write copy against, the routing point ops teams swap
+providers at, and the catalog source of truth for "what can this
+agent do".
+
+## Design principles
+
+1. **Catalog over code.** An intent is a description, not an
+   implementation. The body of an intent is human-readable
+   markdown; the routing is data; the user-facing copy is i18n
+   maps. Implementations live in tools.
+
+2. **Provider-agnostic by default.** An intent's `implements` block
+   may route between several tools. Provider choice is data, not
+   code. Swapping Replicate for OpenAI is editing one frontmatter
+   field, not chasing call sites.
+
+3. **i18n-first.** Every user-visible field (`label`, `description`,
+   `inputs[].label`, `examples`) accepts a per-locale map. Strings
+   are a special case ("default to en"). The format never assumes
+   monolingual deployment.
+
+4. **Surface-aware, not surface-coupled.** The intent declares which
+   surfaces it appears on (`chat`, `menu`, `voice`, `shortcut`).
+   Each surface adapter renders the intent in its own idiom; the
+   manifest is shared. No surface "owns" intents.
+
+5. **Composable up and down.** A skill ([AIP-3](/docs/aip-3))
+   orchestrates intents. A CLI ([AIP-29](/docs/aip-29)) ships
+   intents as catalog shortcuts. An intent implements via tools
+   ([AIP-14](/docs/aip-14)). Each layer reads only the layer
+   directly below.
+
+6. **UX inputs ≠ tool schemas.** Intent inputs carry UX metadata
+   (label, placeholder, choice values, dependencies) — not the
+   strict JSON Schema the tool consumes. The intent runtime maps
+   UX inputs to tool inputs at invocation. This decouples form
+   layout from function signatures.
+
+7. **Stable identity, evolvable copy.** `id@major` is the contract.
+   Copy, examples, surfaces, and routing may change freely without
+   bumping the major. Schema-shape changes (renaming an input,
+   removing a field) are major bumps.
+
+## Specification
+
+### File location
+
+Intents live in a single folder:
+
+```
+.intents/
+  image-create/
+    INTENT.md          ← this AIP
+    intent.ts          ← optional entry (when routing logic is non-trivial)
+    previews/
+      image-create.png ← optional thumbnail
+    README.md          ← optional long-form
+```
+
+The folder name SHOULD match the manifest's `id`. Intents MAY be
+nested under a domain (e.g. `.intents/media/image-create/`);
+consumers MUST NOT depend on directory depth.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive. Fields whose value is "i18n-aware" accept either a
+plain string (treated as `en`) or an object keyed by BCP-47 locale
+tag.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | i18n string | Internal display name (1–80 chars). Used in dev consoles and logs. |
+| `id` | string | Machine identifier. Lowercase, digits, dashes, dots. 2–80 chars. Dots denote namespace (`image.create`, `github.pr.merge`). Unique within the registry that hosts the intent. |
+| `label` | i18n string | User-facing button/menu label (1–60 chars). What the user sees. |
+| `description` | i18n string | One-paragraph user-facing copy (≤500 chars). Goes on catalog cards, hover panels, voice confirmation prompts. |
+| `version` | semver string | Spec version of THIS intent. Bump on routing change, input rename, or surface removal. |
+| `intent` | i18n string[] | Natural-language seeds an LLM matches against. Each entry is a short phrase. The runtime composes these with the description for embedding/match. ≥1 entry. |
+| `surfaces` | string[] | Which surfaces render this intent. v1 enum: `chat`, `menu`, `voice`, `shortcut`, `api`. Empty = intent is internal-only (not user-surfaced). |
+| `implements` | object[] | Routing block. ≥1 entry. See [Routing](#routing). |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `inputs` | object[] | `[]` | UX-shaped input fields the user fills before invocation. See [UX inputs](#ux-inputs). When omitted, the intent takes no user input. |
+| `outputs` | object | none | UX-shaped output rendering hint (`type: text \| image \| markdown \| file \| custom`, `template?: string`). Optional — surfaces MAY infer from the routed tool's `outputs` schema. |
+| `entry` | string | none | Workspace-relative path to a routing implementation (`intent.ts`, `intent.py`, …). Required when `implements` uses `entry:` dispatch (see [Custom routing](#custom-routing)). |
+| `cost_class` | string | inherited | `trivial` / `metered` / `expensive`. Defaults to the routed tool's `cost_class`; declare here to override (e.g. an intent that charges a flat fee). |
+| `quota_key` | string | none | Logical key against which usage counts (`ai.image.create`). Lets product teams meter at the intent level even when underlying tools differ per call. |
+| `requires` | object | inherited | Capability requirements (governance gating per [AIP-7](/docs/aip-7)). When omitted, the runtime computes the union of all candidate tools' `requires`. |
+| `auth` | string | none | Reference to [SECRETS.md](/docs/aip-19). Usually omitted — auth is per-tool. Declare here only when the intent layer adds requirements (e.g. an OAuth scope used by routing logic itself). |
+| `experiments` | object[] | `[]` | A/B routing config: `[{ id, weight, when?, implements }]`. The runtime picks one experiment arm per session/user; the picked arm's `implements` overrides the default. |
+| `preview` | string | none | Workspace-relative thumbnail (`./previews/foo.png`) or external URL. Surfaces MAY display in catalog cards. |
+| `tags` | string[] | `[]` | Free-form discovery tags (`media`, `productivity`, `read-only`). |
+| `examples` | object[] | `[]` | Each `{ user: i18n string, note?: i18n string }`. Few-shot examples for LLMs and end-users. |
+| `metadata` | object | `{}` | Free-form. Authors MAY stash surface-specific hints under namespaced keys (`metadata.chat.system_prompt_hint`, `metadata.voice.confirmation_template`). Consumers MUST tolerate unknown keys. |
+
+#### Discouraged
+
+`disabled`, `beta`, `feature_flag` are deployment concerns, not
+manifest identity. Use experiment / gating layers instead.
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## When to use`** — long-form purpose, when to surface this
+  intent, when NOT to.
+- **`## Behaviour`** — what the user sees: the form, the
+  confirmation prompt, the result rendering.
+- **`## Routing`** — explanation of why the routing rules look the
+  way they do (provider quirks, cost trade-offs).
+- **`## Examples`** — paired with `examples` frontmatter, expanded
+  with screenshots/mock dialogues.
+
+The body is informational. Intents MUST function with adapters
+that read only the frontmatter.
+
+### UX inputs
+
+`inputs` is an array of UX-shaped field descriptors. Unlike a tool's
+JSON Schema, these carry presentation metadata:
+
+```yaml
+inputs:
+  - name: prompt                    # tool-input key
+    label:                          # i18n
+      en: "What to draw"
+      fr: "Que dessiner"
+    type: text                      # see field-type table below
+    placeholder:
+      en: "A sunset over mountains"
+    required: true
+    max_length: 500
+  - name: style
+    label: { en: "Style" }
+    type: choice
+    values:
+      - { value: photorealistic, label: { en: "Photorealistic" } }
+      - { value: watercolor,     label: { en: "Watercolor" } }
+      - { value: illustration,   label: { en: "Illustration" } }
+    required: false
+    default: photorealistic
+  - name: aspect
+    label: { en: "Aspect ratio" }
+    type: choice
+    values: ["1:1", "16:9", "4:3"]  # short form when no per-locale labels
+    required: false
+    depends_on:                     # only show when style is set
+      style: { not_empty: true }
+```
+
+#### Field types (v1)
+
+| `type` | Renders as | Tool-input shape |
+|---|---|---|
+| `text` | Single-line input | `string` |
+| `textarea` | Multi-line input | `string` |
+| `number` | Number input | `number` |
+| `toggle` | Switch / checkbox | `boolean` |
+| `choice` | Dropdown / radio (per `values` length) | `string` matching one of `values[].value` |
+| `multi-choice` | Checkbox list / multi-select | `string[]` |
+| `file` | File picker | [AIP-16 file ref](/docs/aip-16) |
+| `image` | Image picker (with thumbnail) | [AIP-16 file ref](/docs/aip-16) |
+| `date` | Date picker | ISO-8601 date string |
+| `markdown` | Rich-text editor | `string` (markdown) |
+| `code` | Code editor (`language?` hint) | `string` |
+| `ref` | Resource reference picker per [AIP-27](/docs/aip-27) | `ref` value |
+
+Implementers SHOULD treat unknown `type` values as `text` and warn.
+New types are added by AIP revision.
+
+#### Field options (v1)
+
+| Field | Applies to | Description |
+|---|---|---|
+| `name` | all | Tool-input key. MUST match the routed tool's input property unless an explicit `mapping:` is declared. |
+| `label` | all | i18n label rendered next to the field. |
+| `placeholder` | text-like | i18n placeholder. |
+| `hint` | all | i18n short help text. |
+| `required` | all | `boolean`. |
+| `default` | all | Default value. |
+| `min` / `max` | number, date | Bound. |
+| `min_length` / `max_length` | text-like | Bound. |
+| `pattern` | text | RFC 5234 regex. |
+| `values` | choice, multi-choice | Array of `{ value, label }` or shorthand strings. |
+| `accept` | file, image | MIME globs (`image/*`, `application/pdf`). |
+| `language` | code | Code-editor hint (`python`, `ts`, `bash`). |
+| `depends_on` | all | Conditional visibility — see [Conditional inputs](#conditional-inputs). |
+
+### Routing
+
+The `implements` block declares one or more candidate tools. The
+runtime picks one per invocation:
+
+```yaml
+implements:
+  - tool: ./tools/replicate-flux-schnell/TOOL.md
+    when: { style: photorealistic }
+  - tool: ./tools/openai-dalle/TOOL.md
+    default: true
+```
+
+Each entry is one of:
+
+- **Tool ref + condition** — `{ tool: <ref>, when: <predicate> }`.
+  The runtime evaluates `when` against the intent's input values.
+  First matching entry wins.
+- **Default** — `{ tool: <ref>, default: true }`. Falls through when
+  no condition matches. Exactly one entry MUST be marked default.
+- **Workflow ref** — `{ workflow: <ref> }` instead of `tool:`. The
+  runtime invokes a [WORKFLOW.md (AIP-15)](/docs/aip-15) instead of
+  a single tool. Use for multi-step intents where atomicity at the
+  tool level isn't enough.
+
+#### Predicates
+
+The `when:` predicate is a flat object whose keys are input names
+and whose values are the match shape:
+
+| Shape | Example | Matches when |
+|---|---|---|
+| Literal | `style: photorealistic` | input `style` equals `"photorealistic"` |
+| `not` | `style: { not: photorealistic }` | input `style` ≠ `"photorealistic"` |
+| `in` | `style: { in: [a, b] }` | input `style` ∈ list |
+| `not_in` | `style: { not_in: [a, b] }` | input `style` ∉ list |
+| `not_empty` | `prompt: { not_empty: true }` | input `prompt` is set & non-empty |
+| `gt` / `lt` / `gte` / `lte` | `count: { gt: 5 }` | numeric comparison |
+
+Multiple keys in one predicate are AND-combined. v1 deliberately
+omits OR — express with multiple `implements` entries. This keeps
+the surface readable; complex routing belongs in custom routing.
+
+#### Custom routing
+
+When predicate dispatch isn't enough, declare `entry:` and ship a
+routing function:
+
+```yaml
+implements:
+  - entry: intent.ts
+```
+
+```ts
+// intent.ts
+import { defineIntent } from "@agentproto/intent-runtime"
+
+export default defineIntent({
+  id: "image.create",
+  // ...frontmatter mirrors...
+  route: ({ input, context }) => {
+    if (context.user?.tier === "free") {
+      return { tool: "./tools/replicate-flux-schnell/TOOL.md" }
+    }
+    if (input.style === "photorealistic") {
+      return { tool: "./tools/replicate-flux-pro/TOOL.md" }
+    }
+    return { tool: "./tools/openai-dalle/TOOL.md" }
+  },
+})
+```
+
+The route function receives the validated input + per-call context
+and returns a single tool/workflow ref. The runtime invokes the
+returned ref. See [`defineIntent`](#defineintent-signature).
+
+#### Input mapping
+
+By default, an intent input named `prompt` maps to the routed
+tool's input named `prompt`. Override with `mapping:`:
+
+```yaml
+implements:
+  - tool: ./tools/openai-dalle/TOOL.md
+    default: true
+    mapping:
+      prompt: prompt              # explicit
+      style:  artistic_style      # rename
+      size:                       # compute
+        from: aspect
+        transform: aspect_to_size # named transformer (see entry)
+```
+
+When a `transform:` is named, the entry file MUST export a
+matching transformer function. Inline expressions are
+deliberately omitted (no Turing-complete YAML).
+
+### Conditional inputs
+
+`depends_on` controls visibility at form-render time:
+
+```yaml
+inputs:
+  - name: kind
+    label: { en: "Image kind" }
+    type: choice
+    values: [logo, illustration, photo]
+  - name: brand_color
+    label: { en: "Brand color" }
+    type: text
+    depends_on:
+      kind: logo                # only shown when kind=logo
+  - name: photo_subject
+    label: { en: "Subject" }
+    type: text
+    depends_on:
+      kind: { in: [photo, illustration] }
+```
+
+The predicate shape mirrors `when:` in routing. Hidden fields are
+**not submitted** to the routed tool; the runtime omits them from
+the input map.
+
+### Multi-tool intents (workflows)
+
+When an intent triggers more than one tool in sequence, route to a
+[WORKFLOW.md (AIP-15)](/docs/aip-15) instead:
+
+```yaml
+implements:
+  - workflow: ./workflows/image-create-and-upscale/WORKFLOW.md
+    default: true
+```
+
+Do **not** chain tool calls inline in the intent's entry. The
+intent layer is for *intent + routing*; orchestration belongs in
+workflows. This keeps intents reviewable as small, declarative
+files.
+
+### Stable identity
+
+`id` + `version` together form the intent's stable identity. Two
+intents with the same `id` but different major `version` values
+MUST be treated as distinct. Caches, audit logs, and surface
+registrations key on `id@major`.
+
+Surface adapters MAY hot-reload patch versions (copy edits, new
+examples) without re-rendering the surface. Major bumps require an
+explicit re-registration.
+
+## The `defineIntent` standard signature
+
+Every implementation that consumes `INTENT.md` and wants to ship
+a routing entry MUST expose a function named **`defineIntent`**
+whose signature matches the contract below.
+
+### Signature (TypeScript notation, normative)
+
+```ts
+defineIntent(definition: IntentDefinition): IntentHandle
+
+interface IntentDefinition {
+  // Identity — mirrors the manifest fields with the same names.
+  id:           string
+  name?:        I18nString
+  label:        I18nString
+  description:  I18nString
+  version?:     string
+
+  // Surface + intent
+  surfaces:     Array<"chat" | "menu" | "voice" | "shortcut" | "api">
+  intent:       I18nStringArray
+
+  // UX inputs (manifest shape; framework MAY accept zod/pydantic)
+  inputs?:      InputField[]
+
+  // Routing — exactly one of `route` (function) or `implements` (data).
+  // Manifests with frontmatter-only routing don't need a defineIntent
+  // call; this signature is for entries that ship custom routing.
+  route?:       (args: RouteArgs) => RouteResult | Promise<RouteResult>
+  implements?:  ImplementsEntry[]
+
+  // Optional bookkeeping
+  costClass?:   "trivial" | "metered" | "expensive"
+  quotaKey?:    string
+  requires?:    Capabilities
+  experiments?: ExperimentArm[]
+  tags?:        string[]
+  metadata?:    Record<string, unknown>
+}
+
+interface RouteArgs {
+  /** UX inputs after validation against `inputs[]` shape. */
+  input:   Record<string, unknown>
+  /** Per-call context (user, locale, surface, capabilities, …). */
+  context: IntentContext
+  /** Caller-set abort signal — MUST be honoured by route(). */
+  signal:  AbortSignal
+}
+
+interface IntentContext {
+  user?:         { id: string; tier?: string; locale?: string }
+  surface:       "chat" | "menu" | "voice" | "shortcut" | "api"
+  workspace?:    { id: string; tenant?: string }
+  capabilities?: string[]
+  // Free-form host-supplied keys; bodies MUST tolerate missing fields.
+  [key: string]: unknown
+}
+
+type RouteResult =
+  | { tool: string;     mapping?: Record<string, string> }
+  | { workflow: string; mapping?: Record<string, string> }
+```
+
+### Conformance rules
+
+1. **One canonical name.** The exported name MUST be `defineIntent`.
+   Implementations MAY also re-export under host-specific aliases
+   (`createIntent`, `intent`) but the canonical name is what
+   `INTENT.md` adapters reference.
+
+2. **Input is validated before `route` runs.** The host MUST
+   validate `args.input` against the manifest's `inputs[]` shape
+   before calling `route`. Custom-route bodies MUST NOT re-validate.
+
+3. **`route` is pure.** It MUST NOT perform side-effecting I/O
+   (no API calls, no DB writes). Its only job is picking a tool
+   given input + context. Side effects belong inside the tool.
+
+4. **`route` honours `signal`.** Long-running route logic
+   (e.g. consulting an LLM for tool selection) MUST observe the
+   abort signal and stop promptly when the caller cancels.
+
+5. **No I/O at module load.** The module containing `defineIntent`
+   MUST be safely importable as a side-effect-free unit. All I/O
+   happens inside `route`.
+
+6. **Routing returns a ref, not a value.** `route` returns
+   `{ tool }` or `{ workflow }`. The host invokes the returned ref
+   and threads outputs back. Routing functions never call tools
+   directly.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineIntent`-conformant
+implementation in a specific language or framework, see
+[`./resources/aip-28/draft/ADAPTER.md`](./resources/aip-28/draft/ADAPTER.md).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* an `INTENT.md` is via a paired
+[SKILL.md](/docs/aip-3) — distributed at
+[`./resources/aip-28/draft/skills/author-intent/SKILL.md`](./resources/aip-28/draft/skills/author-intent/SKILL.md) —
+that an agent loads when asked to build an intent. The skill walks
+the agent through:
+
+1. Pick `id`, write `name`, `label`, `description`.
+2. Decide the **surfaces** the intent should appear on.
+3. Sketch UX **inputs** (form fields a user fills).
+4. Decide the **routing**: single tool, multi-tool with conditions,
+   workflow.
+5. Write **intent** seeds for LLM matching.
+6. Add 2–5 **examples** (paired user phrasing + outcome).
+7. Validate the manifest against
+   [`./resources/aip-28/draft/INTENT.schema.json`](./resources/aip-28/draft).
+
+The agent MAY install the skill, follow the steps, and emit the
+final `INTENT.md` (and optional `intent.ts` for custom routing)
+without further instruction.
+
+## Example
+
+```md
+---
+name: Create image
+id: image.create
+label:
+  en: "Create an image"
+  fr: "Créer une image"
+description:
+  en: "Generate an image from a text prompt. Picks the best model based on the chosen style and your plan."
+  fr: "Génère une image à partir d'un texte. Choisit le meilleur modèle selon le style et ton forfait."
+version: 1.0.0
+intent:
+  - "create/make/generate an image"
+  - "draw a picture of …"
+  - "génère/crée une image"
+surfaces: [chat, menu]
+quota_key: ai.image.create
+inputs:
+  - name: prompt
+    label: { en: "What to draw", fr: "Que dessiner" }
+    type: textarea
+    placeholder:
+      en: "A sunset over snowy mountains, cinematic lighting"
+    required: true
+    max_length: 500
+  - name: style
+    label: { en: "Style", fr: "Style" }
+    type: choice
+    values:
+      - { value: photorealistic, label: { en: "Photorealistic", fr: "Photoréaliste" } }
+      - { value: watercolor,     label: { en: "Watercolor", fr: "Aquarelle" } }
+      - { value: illustration,   label: { en: "Illustration", fr: "Illustration" } }
+    required: false
+    default: photorealistic
+  - name: aspect
+    label: { en: "Aspect ratio" }
+    type: choice
+    values: ["1:1", "16:9", "4:3", "9:16"]
+    required: false
+    default: "1:1"
+implements:
+  - tool: ./tools/replicate-flux-pro/TOOL.md
+    when: { style: photorealistic }
+    mapping:
+      prompt: prompt
+      aspect: aspect_ratio
+  - tool: ./tools/openai-dalle/TOOL.md
+    default: true
+    mapping:
+      prompt: prompt
+      aspect:
+        from: aspect
+        transform: aspect_to_size
+outputs:
+  type: image
+preview: ./previews/image-create.png
+tags: [media, generative-ai]
+examples:
+  - user: { en: "create an image of a sunset over mountains", fr: "génère une image d'un coucher de soleil sur la montagne" }
+    note: { en: "Default style → DALL-E. Returns one 1024×1024 image." }
+  - user: { en: "draw a watercolor of a coastal village" }
+    note: { en: "style=watercolor → DALL-E (no Flux watercolor variant in v1)." }
+---
+
+## When to use
+
+Surface this intent whenever a user asks for a new image, illustration,
+or visual asset. Do NOT use when the user wants to *edit* an existing
+image — route those through `image.edit`.
+
+## Behaviour
+
+A form opens with three fields (prompt, style, aspect). Submit triggers
+the routed tool. The result is one image rendered inline in chat or as
+a card in the menu surface. Generation runs ~3–10 s; surfaces SHOULD
+show a progress affordance.
+
+## Routing
+
+`photorealistic` style routes to Flux Pro because it dominates DALL-E
+on photoreal benchmarks at comparable cost. All other styles route to
+DALL-E, which is faster on 1:1 and 16:9 outputs. When the user is on
+the free plan, the route function (when present) overrides this with
+Flux Schnell to cap cost; see `intent.ts` for the full plan-aware
+routing.
+```
+
+## Compatibility
+
+### With existing tool catalogs
+
+Catalog UIs that today register tools directly (Mastra
+`mastra.getTool(...)`, LangChain `tool registry`) can adopt intents
+incrementally:
+
+1. Wrap the existing tool in an `INTENT.md` whose `implements`
+   contains a single entry pointing at the tool.
+2. Add UX `inputs` derived from the tool's JSON Schema.
+3. Migrate surfaces one at a time to read from the intent registry
+   instead of the tool registry.
+
+The tool stays unchanged. Intents are additive.
+
+### With SKILL.md (AIP-3)
+
+Skills MAY list intents as capabilities under a `capabilities:`
+block (canonical shape: `[{ kind: "intent", ref: "./intents/foo" }]`).
+A skill that wraps an LLM prompt teaching the agent to call several
+intents reuses the intent's `intent` and `examples` as few-shot.
+
+### With WORKFLOW.md (AIP-15)
+
+Multi-step intents route to a workflow (see
+[Multi-tool intents](#multi-tool-intents-workflows)). The intent
+remains the user-facing entry; the workflow handles orchestration.
+
+### With CLI.md (AIP-29)
+
+CLI bundles MAY ship pre-wired intents in their `intents:` block
+(see [AIP-29](/docs/aip-29)). The bundled intents are catalog
+shortcuts — `gh.pr.create` is an intent whose `implements` points
+at the corresponding `gh pr create` tool inside the CLI bundle.
+
+## Security considerations
+
+`INTENT.md` is **declarative**: a malicious manifest can lie about
+its `quota_key`, `requires`, or routing. Hosts MUST treat the
+manifest as untrusted input until verified (signature, hash on a
+trust list, or sandbox enforcement). [AIP-7](/docs/aip-7)'s
+capability gating MUST run regardless of what the intent's
+`requires` claims.
+
+Routing is a security-relevant decision when tools have asymmetric
+trust profiles (a paid model vs a self-hosted one with different
+data-residency guarantees). Hosts SHOULD enforce a routing-policy
+allowlist for intents whose `implements` set crosses trust
+boundaries.
+
+`experiments[].weight` is observable to users (different users see
+different routing). Authors writing experiments MUST avoid arms
+that change observable contract (e.g. one arm that returns
+markdown, another that returns plain text) without surfacing the
+difference; surface adapters cannot adapt to silent contract drift.
+
+## Open questions
+
+1. **Output rendering.** v1 declares `outputs.type` as a hint. Do we
+   evolve this into a full output-block schema (mirroring AIP-16)
+   or keep it advisory and let surfaces infer from the tool?
+2. **i18n storage at scale.** Inline locale maps stay readable for
+   2–4 locales. Past that, a `./i18n/<locale>.json` sidecar pattern
+   may scale better. Pick one canonical pattern (or formally
+   support both).
+3. **Predicate language.** v1 covers literal/in/not_empty/numeric.
+   When richer predicates are needed (regex match on input, locale
+   match on context), do we extend the YAML grammar or fall back
+   to custom routing?
+4. **Cross-intent composition.** A "chat-with-image" surface might
+   compose `image.create` + `image.describe`. Do we add an intent-
+   composition primitive, or insist these compose at the workflow
+   layer?
+5. **Intent analytics.** Should `quota_key` be the only meter, or
+   do we standardise per-intent analytics events (started,
+   completed, errored, abandoned) for product-team consumption?
+
+These remain open until enough adapters ship to settle the answers
+empirically.
+
+## See also
+
+- [AIP-3 — SKILL.md](/docs/aip-3) — multi-step expertise; an
+  INTENT's parent layer
+- [AIP-14 — TOOL.md](/docs/aip-14) — atomic invocation; an INTENT's
+  child layer
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — multi-tool orchestration;
+  alternative routing target
+- [AIP-16 — IO.md](/docs/aip-16) — `inputs`/`outputs` blocks shared
+  with TOOL/WORKFLOW
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth inventory referenced
+  by routed tools
+- [AIP-29 — CLI.md](/docs/aip-29) — CLI bundles ship optional
+  pre-wired INTENTs
+- [`./INTENT.schema.json`](./resources/aip-28/draft) — JSON Schema validator
+- [`./ADAPTER.md`](./resources/aip-28/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-28/draft/EXAMPLES.md) — additional INTENT.md examples

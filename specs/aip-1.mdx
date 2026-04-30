@@ -1,0 +1,221 @@
+---
+title: "AIP-1: Purpose & Process"
+description: The mission of the AIP registry, the lifecycle every AIP follows, and how to propose, review, and finalize a new spec.
+aip: 1
+status: Final
+type: Meta
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+resources: ./resources/aip-1/draft
+---
+
+| Field | Value |
+|---|---|
+| AIP | 1 |
+| Title | Purpose & Process |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Final |
+| Type | Meta |
+| Created | 2026-04-26 |
+| Resources | [`./resources/aip-1`](./resources/aip-1/draft) — [`SKILL.md`](./resources/aip-1/draft/skills/propose-aip/SKILL.md) |
+
+## Abstract
+
+This AIP defines the purpose of the **Agent Improvement Proposal (AIP)**
+registry, the lifecycle every AIP follows, the roles involved in steering
+the registry, and the mechanics for proposing, reviewing, and finalizing a
+new specification. AIPs are the unit of standardization for the agent
+ecosystem — runtimes, schemas, governance, orchestration. Like EIPs for
+Ethereum or RFCs for the internet.
+
+## Motivation
+
+The agent ecosystem ships fast. New runtimes, schemas, and protocols appear
+weekly across vendors, frameworks, and open-source projects. But there is
+no shared place to:
+
+- **Number** specs so they can be cited unambiguously
+- **Track lifecycle** — is this a sketch, a proposal, a finalized spec, or
+  superseded?
+- **Cross-reference dependencies** — "X requires Y v2" without ambiguity
+- **Authoritatively host** the canonical text
+
+MCP, A2A, AGNTCY, and AITP each cover slices of the surface but none provide
+the EIP-style numbered registry that lets ecosystem participants converge.
+AIPs fill that gap.
+
+## Specification
+
+### Lifecycle
+
+Every AIP moves through these states:
+
+```
+Draft  →  Review  →  Final
+   ↘                    ↓
+    Withdrawn       Superseded
+```
+
+- **Draft** — Authored, opened as a PR. Open for substantial change.
+- **Review** — Author requests review. Pinned by editors for ≥14 days. The
+  community comments and challenges. Author may iterate.
+- **Final** — Editors merge and assign Final. The spec is now stable; only
+  errata are accepted. Replacing it requires a new AIP that *Supersedes*.
+- **Superseded** — A later AIP has replaced this one. The doc remains
+  readable for citation; new implementations should follow the successor.
+- **Withdrawn** — Author or editors abandoned the proposal. Doc remains for
+  historical reference.
+
+### Categories (the `type` field)
+
+Every AIP declares exactly one type:
+
+- **Meta** — Process, governance, or registry mechanics. Affect the AIP
+  process itself, not user-facing software. (AIP-1 and AIP-2 are Meta.)
+- **Schema** — A file format, frontmatter convention, or data-shape
+  specification that agents, tools, or humans consume directly. Examples:
+  `SKILL.md`, `DESIGN.md`, `CANVAKIT.md`.
+- **Core** — A runtime contract, governance primitive, or orchestration
+  protocol. Examples: agency engines, governance/approval machinery,
+  inter-agent transport.
+
+### Required frontmatter
+
+Every AIP MUST start with YAML frontmatter containing at minimum:
+
+```yaml
+---
+aip: <integer>                  # The AIP number
+title: <short title>
+author: <name <email>>
+status: Draft | Review | Final | Superseded | Withdrawn
+type: Meta | Schema | Core
+created: YYYY-MM-DD
+requires: [<aip>, ...]          # optional — only if other AIPs are dependencies
+replaces: <aip>                 # optional — when status=Final and this supersedes
+discussions-to: <url>           # optional — pointer to a discussion thread
+ref-impl: <url>                 # required for Schema and Core
+---
+```
+
+### Required body sections
+
+Every AIP MUST contain these sections (in order):
+
+1. **Abstract** — 2–3 sentences. What this AIP defines.
+2. **Motivation** — Why this exists; what problem it solves.
+3. **Specification** — The actual schema, contract, or protocol. This is
+   the normative section. Use Zod schemas, type definitions, BNF, or
+   prose — whatever fits.
+4. **Rationale** — Why these design choices. What alternatives were
+   considered and rejected, and why.
+5. **Reference Implementation** — Link to working code. Required for
+   Schema and Core; optional for Meta.
+6. **Backwards Compatibility** — Required when this AIP supersedes a prior
+   one. Document migration paths and breaking changes.
+7. **Security Considerations** — Required for Core; recommended for
+   Schema. What could go wrong; what threats are in scope.
+
+### Cross-references and dependencies
+
+The `requires` frontmatter field lists AIPs this one depends on, by number.
+Implementations MUST satisfy all transitively-required AIPs. Cycles are
+forbidden — the dep graph is a DAG.
+
+### Roles
+
+- **Authors** propose AIPs by opening a PR against
+  [github.com/agentproto/specs](https://github.com/agentproto/specs).
+- **Editors** keep the registry consistent: they assign numbers, enforce
+  format, move state forward, and merge. Editors do not gate on technical
+  merit — that's the community's job during Review.
+- The community discusses, challenges, and ratifies through the
+  `discussions-to` thread and PR review.
+
+### Numbering
+
+AIP numbers are assigned by editors at PR-open time, monotonically. Numbers
+1–10 are reserved for **Meta** AIPs. There are no "drafts without a number" —
+opening a PR gets a number.
+
+## Submission
+
+To propose a new AIP:
+
+1. Read this document and [AIP-2](/docs/aip-2) (the template).
+2. Fork [github.com/agentproto/specs](https://github.com/agentproto/specs).
+3. Copy `AIPS/aip-template.md` to `AIPS/aip-XXXX.md` (use a placeholder
+   number — editors will assign the real one).
+4. Fill in frontmatter and all required body sections. Status starts at
+   `Draft`.
+5. Open a PR. Editors assign a number and tag the PR. Iterate based on
+   review.
+6. When you believe the spec is stable, comment to request `Review`. After
+   ≥14 days of open review, editors move to `Final` if no blocking
+   concerns remain.
+
+## Adjacency to other specs
+
+AIPs are deliberately scoped to the **AI-company operating layer** —
+the surface above MCP/A2A transport and below vendor frameworks.
+Implementers should expect AIPs to:
+
+- **Defer** to MCP for tool / resource / prompt server protocol
+- **Defer** to A2A for inter-agent transport and `AgentCard` discovery
+- **Defer** to AGNTCY for identity (DIDs + W3C Verifiable Credentials)
+  and OASF / Agent Directory
+- **Defer** to AITP for agent-mediated transactions and payments
+- **Build on** OpenAPI / JSON Schema / OAuth / OpenTelemetry GenAI
+  semconv
+
+When an AIP overlaps with an existing spec from one of these
+initiatives, the AIP MUST cite the overlap in its Rationale section
+and explain *why* the new spec exists rather than extend the existing
+one. The default position is: extend, don't fork.
+
+A full enumeration of peer initiatives lives at
+[`/docs/related-standards`](/docs/related-standards) — that page is the
+canonical reference for "what other agent-ecosystem specs exist and
+how AIPs relate."
+
+## Rationale
+
+**Why model on EIPs.** The Ethereum EIP process has run for nearly a decade
+across dozens of editors, hundreds of authors, and thousands of
+implementers. Its lifecycle, frontmatter, and PR-driven workflow are
+battle-tested. Reinventing them would burn time without improving outcomes.
+
+**Why three categories instead of more.** Agent specs cluster naturally
+into "process docs," "data formats agents consume," and "runtime
+contracts." Finer slicing (e.g. EIP's split of ERC, Networking, Interface,
+Core) creates editorial overhead before there's enough volume to justify
+it. We can subdivide later if needed.
+
+**Why no number reservation for `Schema` or `Core`.** The cost of a
+contiguous numbering scheme is low; the cost of having to re-number AIPs
+when a category fills its block is high. Categories live in `type`, not in
+the number.
+
+**Why ≥14 days of Review.** Long enough that distributed reviewers in
+different timezones and weekly cadences can engage; short enough that
+shippable specs aren't bottlenecked by ceremony.
+
+## Reference Implementation
+
+This site (`agentproto.sh`) and its companion repo
+[github.com/agentproto/specs](https://github.com/agentproto/specs) are
+themselves the reference implementation of AIP-1.
+
+## Backwards Compatibility
+
+Not applicable — this is the bootstrap document.
+
+## Security Considerations
+
+The AIP process itself doesn't run code. The risk surface is editorial:
+malicious or low-quality specs reaching `Final`. Mitigations:
+
+- The 14-day Review window gives the community time to challenge.
+- Editors can reject specs that don't meet format requirements.
+- `Final` is a community signal, not an enforcement mechanism — implementers
+  retain full discretion to ignore or fork.

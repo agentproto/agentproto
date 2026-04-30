@@ -1,0 +1,207 @@
+---
+title: "AIP-9: OPERATOR.md — agentoperators/v1 (operator runtime protocol)"
+description: A single canonical operator shell — pluggable profile, skills, tools, memory, governance — that any agent runtime can implement and any conforming workflow can dispatch to.
+aip: 9
+status: Draft
+type: Core
+created: 2026-04-27
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 3, 6, 7]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/apps/guilde/api/src/mastra/operator-orchestrator
+discussions-to: https://github.com/agentproto/specs/discussions/9
+---
+
+| Field | Value |
+|---|---|
+| AIP | 9 |
+| Title | OPERATOR.md — agentoperators/v1 (operator runtime protocol) |
+| Status | Draft |
+| Type | Core |
+| Domain | operators.sh |
+| Requires | [AIP-3](/docs/aip-3), [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7) |
+| Reference Impl | [`apps/guilde/api/src/mastra/operator-orchestrator`](https://github.com/agentik/agentik-studio/tree/dev/apps/guilde/api/src/mastra/operator-orchestrator) |
+
+## Abstract
+
+`agentoperators/v1` specifies the **runtime contract** for an operator —
+the canonical agent type that powers AI-company products. An operator is
+a single agent shell with pluggable attachments: a profile (identity +
+role), a skill set ([AIP-3](/docs/aip-3)), a tool set, a memory/context
+slot, and a governance binding ([AIP-7](/docs/aip-7)). One agent class,
+configured many ways, dispatchable by any conforming workflow.
+
+This AIP complements [AIP-6](/docs/aip-6) (`agentcompanies/v1`), which
+defines the *file representation* of an operator (`OPERATOR.md`); AIP-9
+defines the *running behavior* the file describes.
+
+## Motivation
+
+Agent platforms today multiply agent classes: a "researcher agent",
+a "writer agent", a "coordinator agent", each implemented separately
+with diverging conventions. The result: every new role costs new code,
+and operators built for platform X don't run on platform Y.
+
+The opinionated wager of agentoperators/v1: **you don't need multiple
+agent classes — you need one well-specified shell with pluggable
+parts.** A "researcher" is an operator with research skills + research
+tools + a researcher persona. A "coordinator" is the same shell, with
+different attachments. The shape of the agent is fixed; the contents
+move.
+
+This unification lets:
+
+- **Workflows** dispatch tasks to *any* operator without per-class
+  adapters
+- **Tools** target the operator-shell contract instead of N agent
+  vendors
+- **Governance** ([AIP-7](/docs/aip-7)) attach uniformly — every
+  operator goes through the same approval/audit gates
+- **File definitions** ([AIP-6](/docs/aip-6) `OPERATOR.md`) be portable
+  across runtimes that implement this AIP
+
+The pattern is field-tested: the reference implementation in Guilde
+runs production agencies built entirely from this single operator
+class, with persona, skill, and tool attachments doing the role
+differentiation.
+
+## Specification
+
+> Full normative text is being authored from the Guilde reference
+> implementation. AIP-9 will absorb the formal contract as part of
+> moving Draft → Review.
+
+### Operator shape
+
+An operator is the tuple:
+
+```ts
+interface Operator {
+  /** AIP-6 OPERATOR.md slug — stable identity */
+  id: string
+
+  /** AIP-6 OPERATOR.md content — role, persona, ranking, profile prose */
+  profile: OperatorProfile
+
+  /** AIP-3 SKILL.md ids the operator has loaded */
+  skills: SkillRef[]
+
+  /** Tool bindings the operator can invoke
+   *  (MCP servers, framework tools, AIP-3 skill-attached tools) */
+  tools: ToolBinding[]
+
+  /** Memory / operator-context slot — what the operator carries
+   *  across turns and what it shares with teammates */
+  memory: MemoryBinding
+
+  /** AIP-7 governance binding — which actions require approval,
+   *  which audit log to write to, which policies gate autonomy */
+  governance: GovernanceBinding
+
+  /** Capability flags — autonomous / supervised / gated, plus
+   *  per-action overrides */
+  capabilities: CapabilityFlags
+
+  /** Conversation participation — whether/when this operator
+   *  reads + responds in shared threads */
+  participation: ParticipationConfig
+}
+```
+
+### Lifecycle
+
+Every operator goes through these states, observable to the runtime
+and to peer operators:
+
+```
+idle → invoked → running → ( suspended | completed | interrupted )
+                              ↓
+                            resumed → running
+```
+
+- **invoked** — workflow or human dispatched the operator
+- **running** — actively executing (calling tools, generating)
+- **suspended** — paused for governance approval or human input
+- **resumed** — picked back up after suspension
+- **completed** — turn finished cleanly
+- **interrupted** — stopped before completion (user cancelled, error,
+  policy block)
+
+Every state transition writes an `audit-event` per [AIP-7](/docs/aip-7).
+
+### Conversation participation
+
+An operator that joins a conversation MUST implement:
+
+- **Mention handling** — receive `@<slug>` mentions and respond
+- **Pass** — choose to *not* respond when the message is not relevant
+  to the operator's role / skills
+- **Reactions** — emit lightweight signals (👍, ✅, 🚧) without
+  generating a full turn
+- **Visibility** — public, private-to-admin, or scoped per the
+  conversation's visibility rules
+
+### Capability negotiation
+
+Operators declare what they CAN do. Runtimes declare what they OFFER.
+Tools / actions are available iff both sides agree. Gaps surface as
+`unmet-capability` errors during workflow planning, before the
+operator runs.
+
+## Rationale
+
+*To be authored. Defend:*
+
+- *Why a single shell instead of agent-class subtyping (composition >
+  inheritance, easier portability, cleaner governance attach points)*
+- *Why `participation` is first-class (operators in shared threads
+  are the dominant pattern; treating it as an attachment makes
+  multi-operator collaboration tractable)*
+- *Why governance is a binding, not a wrapper (gives the operator
+  awareness of what it can and cannot do, instead of the runtime
+  silently rejecting actions)*
+- *Why memory is per-operator, not per-conversation (lets operators
+  develop "personality through history" the way human roles do)*
+
+## Reference Implementation
+
+[`apps/guilde/api/src/mastra/operator-orchestrator`](https://github.com/agentik/agentik-studio/tree/dev/apps/guilde/api/src/mastra/operator-orchestrator)
+in agentik-studio. Includes:
+
+- `operator-orchestrator.ts` — the runtime that turns an operator
+  configuration into a Mastra agent + executes turns
+- `routing/` — mention-resolution, multi-operator triage, pass logic
+- `generation/` — turn generation strategies (sequential vs
+  think-then-speak, normal vs deep work mode)
+- `types.ts` — the typed contract that AIP-9 will codify
+
+The orchestrator boots from an [AIP-6](/docs/aip-6) `OPERATOR.md`
+package + an [AIP-3](/docs/aip-3) skill set + tool registry, and
+produces a fully-configured operator ready to dispatch to.
+
+## Backwards Compatibility
+
+Not applicable — this is the first runtime spec for operators.
+Pre-existing per-vendor operator classes (LangChain agents, custom
+runtimes) can adopt agentoperators/v1 by implementing an adapter
+that maps to the shape above.
+
+## Security Considerations
+
+Operators are autonomous actors with tool access. The risk surface:
+
+- **Tool-call injection** — a malicious user message persuades the
+  operator to invoke a tool the user shouldn't have access to.
+  Mitigation: governance binding ([AIP-7](/docs/aip-7)) policy gates
+  every privileged tool; the operator MUST consult its governance
+  binding before invoking a gated action.
+- **Skill-as-prompt-injection** — an untrusted skill loaded into a
+  trusted operator could try to subvert the operator's role. Mitigation:
+  AIP-3 skill provenance metadata + runtime-side skill allow-listing.
+- **Memory poisoning** — an attacker controls a conversation and seeds
+  the operator's memory with false facts. Mitigation: memory writes
+  go through a validation step; AIP-7 audit log records every memory
+  update so poisoning is forensically recoverable.
+- **Participation flooding** — an operator with `participation:
+  always-respond` in a shared thread could spam. Mitigation: rate
+  limits and the `pass` primitive (operators choosing silence is
+  first-class behavior, not failure).

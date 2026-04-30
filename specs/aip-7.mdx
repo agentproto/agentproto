@@ -1,0 +1,439 @@
+---
+title: "AIP-7: GOVERNANCE.md — agentgovernance/v1 (audit, approval & policy primitives)"
+description: A filesystem-first format for recording approvals, append-only audit logs, and autonomy policies as workspace files — vendor-neutral, third-party-verifiable.
+aip: 7
+status: Draft
+type: Core
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 27]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/governance/core
+discussions-to: https://github.com/agentproto/specs/discussions/7
+---
+
+| Field | Value |
+|---|---|
+| AIP | 7 |
+| Title | GOVERNANCE.md — agentgovernance/v1 (audit, approval & policy primitives) |
+| Status | Draft |
+| Type | Core |
+| Domain | governance.sh |
+| Doctypes | `signature` (approval event), `audit-event` (append-only log line), `policy` (declarative rule), `governance.workspace/v1` (manifest + view) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-13](/docs/aip-13) (work) |
+| Reference Impl | [`packages/governance/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/governance/core) |
+
+## Abstract
+
+`agentgovernance/v1` is an open file-format standard for recording
+approvals, audit logs, and autonomy policies as workspace files. It
+provides a vendor-neutral, filesystem-first, third-party-verifiable
+primitive for any system — human, agentic, or hybrid — that needs
+auditable decisions. Three doctypes: `signature` (universal approval
+event), `audit-event` (append-only hash-chained log line), `policy`
+(declarative autonomy rule).
+
+## Motivation
+
+Auditability in agentic systems is typically vendor-locked: each platform
+keeps approvals and logs in its own database, with proprietary formats
+and no cross-platform verification. agentgovernance/v1 makes the artifacts
+themselves portable and verifiable: a workspace receiving these files can
+validate every doctype and verify the audit chain end-to-end without
+trusting the originating system.
+
+The standard is **domain-agnostic**: signature/audit/policy reference no
+business concepts. Any workflow that needs auditable approvals — clinician
+overrides, approve-to-publish flows, AI agent action gates, board votes —
+adopts the spec directly.
+
+The three primitives — `signature`, `audit-event`, `policy` — are individual
+records. They answer "did this approval happen?" and "what's the rule?",
+but not "what is the *posture* of THIS workspace, for THIS operator, in
+THIS company?". Posture is a registry-of-policies question: which policies
+apply, which keys may sign, what autonomy level is the floor, what audit
+retention is locked, where does escalation route. Without a manifest that
+binds the registry, every consumer ([AIP-3](/docs/aip-3) skill,
+[AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator) re-derives
+posture from prose, which drifts.
+
+`governance.workspace/v1` (file = `GOVERNANCE.md`) closes the gap. It is
+the canonical, machine-parseable workspace root that declares the binding:
+the autonomy floor, the default approval class, the signing keyring, the
+audit retention, the registry of policies and approvers, and the cross-AIP
+hooks. The same doctype, used recursively via `extends:`, expresses
+**per-context views** — an operator, a company, a team, or a skill ships
+its own `GOVERNANCE.md` that adapts the base workspace for its context. It
+is the same composability pattern that AIP-10's `KNOWLEDGE.md` uses for
+wikis and AIP-13's `WORK.md` uses for work tracking; AIP-7 adopts it for
+the governance posture.
+
+## Specification
+
+> Full normative text is in
+> [`packages/governance/core/AGENTGOVERNANCE.md`](https://github.com/agentik/agentik-studio/blob/dev/packages/governance/core/AGENTGOVERNANCE.md).
+> AIP-7 will absorb that text in full as part of moving Draft → Review.
+
+| Doctype | File path | Purpose |
+|---|---|---|
+| `governance.workspace/v1` | `<scope>/GOVERNANCE.md` | Workspace manifest (root or view) — declares posture, registers policies/approvers |
+| `signature` | `<artifact>/../signatures/<signer>-<isoDate>.signature.json` | Universal approval primitive (one signature event per file) |
+| `audit-event` | `<scope>/audit/audit-log.jsonl` (one line per event) | Append-only hash-chained event log |
+| `policy` | `<scope>/policies/<slug>/POLICY.md` | Declarative autonomy rule |
+
+Conventions adopted:
+
+- **Markdown canonical** with YAML frontmatter (for `POLICY.md`)
+- **JSON canonical** for `signature.json` and `audit-log.jsonl` lines
+- **Slug-based references**, never database IDs
+- **`schema: agentgovernance/v1`** on every doctype
+- **Vendor-specific extensions** under `metadata.<vendor>.*`
+- **Git-native** workspace layout
+
+The hash-chain protocol for `audit-event` is published separately and
+allows third-party verifiers in any language to validate the chain.
+
+### References (AIP-27)
+
+All pointer fields on every governance doctype are **typed references**
+under [AIP-27 REF.md](/docs/aip-27). The fields use AIP-27's
+collection-typed form so consumers get extension-friendly constraints:
+
+| Doctype field | AIP-27 collection | Example values |
+|---|---|---|
+| `signature.signer` | `RefIn<"identity">` | `operator:atlas`, `user:abc123`, `persona:atlas`, `email:jeremy@agentik.net` |
+| `signature.artifact` | `RefIn<"file">` | `local:engagements/acme/proposal.md`, `github:agentik/studio@main:CONTRIBUTING.md` |
+| `signature.evidence.target` (when applicable) | `RefIn<"file">` | typed-name evidence references no target; esign-external evidence MAY carry a `Ref<url>` to the provider envelope |
+| `audit-event.actor` | `RefIn<"identity">` (nullable for system events) | same as signer |
+| `audit-event.entity` | `RefIn<"file"\|"identity">` | the artifact or principal the event is about |
+| `audit-event.anchor` (emitted by anchor sinks) | `RefIn<"anchor">` | `ots:local:engagements/.../247.ots`, `eth_tx:1:0xabc…` |
+| `policy.requiredSignatures[].signer` | `RefIn<"identity">` | same as signer |
+
+#### Why typed Refs
+
+Earlier drafts encoded these as ad-hoc strings (`"operator:atlas"`,
+`"engagements/acme/proposal.md"`). Each string had its own
+parse/validate logic, an ad-hoc escape rule, and no extension story. As
+AIP-27 details, this drift is the principal blocker to harmonizing
+across the agentproto registry. AIP-7 imports AIP-27 to:
+
+1. **Replace `kind:slug` regex parsing** with the canonical AIP-27
+   parser. Adding a new identity kind (e.g. `did`, `fediverse_handle`)
+   becomes "register a kind into the `identity` collection"; AIP-7
+   needs no change.
+2. **Validate paths through `Ref<local>`** including the path-escape
+   rules and optional `#sha256=…` fragment. The `signature.documentHash`
+   field still exists separately as the recorded hash; the optional
+   sha-fragment on the `signature.artifact` Ref is the *expected* hash
+   the caller asserted (rejected by the runtime on mismatch with disk).
+3. **Open the anchor encoding** from a single `AnchorPayload` shape to
+   any `Ref` in the `anchor` collection — `ots`, `eth_tx`, future
+   anchor backends — without touching AIP-7.
+
+#### Migration path
+
+AIP-7 v1 (this draft) ships **dual acceptance**: the legacy string
+forms remain valid wire formats and are preprocessed into AIP-27 `Ref`
+values at parse time. Validators normalize on read. Producers SHOULD
+emit AIP-27 object form on write; consumers MUST accept either.
+
+A future AIP-7 v2 will deprecate the legacy string forms and require
+AIP-27 object form on write. The reference implementation tracks this
+transition; see the package roadmap.
+
+## Workspace root manifest (`GOVERNANCE.md`)
+
+`GOVERNANCE.md` is the canonical, machine-parseable manifest that binds the
+three primitives — `signature`, `audit-event`, `policy` — to a concrete
+workspace and declares its posture. Sibling AIPs use the same pattern:
+[`KNOWLEDGE.md`](/docs/aip-10) is the workspace root for a wiki,
+[`WORK.md`](/docs/aip-13) is the workspace root for work tracking, and now
+`GOVERNANCE.md` is the workspace root for the governance surface.
+
+The same doctype, `governance.workspace/v1`, is used in TWO modes:
+
+- **Workspace-root mode** — `<scope>/GOVERNANCE.md`, no `extends`. Declares
+  the base posture: autonomy floor, default approval class, signing
+  keyring, audit retention, the registry of policies and approvers.
+- **View mode** — `<consumer>/GOVERNANCE.md`, `extends:` set to a parent
+  `GOVERNANCE.md`. Adapts the base for a specific operator
+  ([AIP-9](/docs/aip-9)), company ([AIP-6](/docs/aip-6)), or skill
+  ([AIP-3](/docs/aip-3)). View mode is the mechanism that lets one base
+  posture be tightened, narrowed, or escalated per consumer without
+  forking.
+
+### Why a workspace manifest
+
+Earlier drafts of this AIP shipped only the three primitives. That works
+for a single team, but breaks the moment two consumers need different
+postures over the same audit chain. The CFO assistant needs a stricter
+approval class than the research operator; both write to the same audit
+log. A junior engineer's operator needs a narrower keyring than the senior
+engineer's; both share the org-wide policy registry. Without a
+machine-parseable binding, posture drifts into prose ("the CFO branch is
+stricter") that no runtime can enforce.
+
+`GOVERNANCE.md` makes posture a contract. The host loads the manifest, the
+manifest declares which policies apply, which keys may sign, what audit
+retention is locked, what autonomy ceiling applies. A view tightens the
+contract for a specific consumer — never loosens it past the parent's
+hardened invariants.
+
+### Frontmatter shape
+
+```yaml
+---
+schema: governance.workspace/v1
+name: <kebab-case-id>                # required
+title: <human-readable>              # required
+description: <one-paragraph purpose> # required
+version: <semver>                    # required, the WORKSPACE version
+
+# Composition (view mode)
+extends: ../path/to/parent/GOVERNANCE.md   # OPTIONAL — relative path
+appliesTo:                                  # OPTIONAL — bind this view
+  - ws://operators/<slug>                   #   AIP-9 operator
+  - ws://companies/<slug>                   #   AIP-6 company
+  - ws://skills/<slug>                      #   AIP-3 skill
+
+# Autonomy + approval defaults
+autonomy:
+  level: 0 | 1 | 2 | 3                      # AIP-7 0=read-only ... 3=irreversible
+  defaultApproval: auto | always | on-mutate | policy:<ref>
+  approvalEscalation:                       # OPTIONAL — fallover route
+    from: <approval-class>
+    to: <approval-class>
+
+# Signing + audit
+signing:
+  algo: ed25519 | ecdsa-p256 | rsa-pss-sha256
+  keyring: <path>                           # public-key bundle
+  required: true | false                    # MUST every audit event sign?
+audit:
+  retention: forever | days:<n>
+  hashAlgo: sha256 | sha512 | blake3
+  appendOnly: true                          # locked at workspace creation
+  storage: <vendor-neutral-uri>             # OPTIONAL — where logs live
+  headPointerSign: true | false             # publish signed head-pointer?
+
+# Policy registry — what policies apply, with binding
+policies:                                   # array; merge-by-id vs parent
+  - id: <kebab-id>                          # required, stable
+    ref: <relative-path-to-policy.md>       # required — file ref
+    appliesTo: <kind> | "*"                 # AIP-7 action kind or wildcard
+    severity: error | warn | info
+    params:
+      <key>: <value>
+
+# Approver registry — pre-declared approvers
+approvers:                                  # array; merge-by-id vs parent
+  - id: <kebab-id>                          # required
+    role: <human-name-or-AIP-9-ref>
+    canApprove: [<approval-class>, ...]
+    quorum: 1 | n-of-m
+
+# Cross-AIP refs
+executor: ws://operators/<slug>             # OPTIONAL — AIP-9 operator
+escalateTo: ws://operators/<slug>           # OPTIONAL — escalation operator
+work: ws://workspaces/<slug>/WORK.md        # OPTIONAL — AIP-13 binding
+knowledge: ws://wikis/<slug>/KNOWLEDGE.md   # OPTIONAL — AIP-10 binding
+
+# Display / UX hints
+display:
+  defaultDashboard: <slug>                  # OPTIONAL
+  showRetentionWarnings: true | false
+
+metadata:                                   # vendor extensions, namespaced
+  <vendor>:
+    <field>: <value>
+---
+
+# <body — purpose, threat model, conventions>
+```
+
+### Composition semantics
+
+When a host loads a `GOVERNANCE.md` whose frontmatter declares
+`extends:`, it MUST:
+
+1. **Walk the parent chain.** Recursively load the parent referenced by
+   `extends:`, then that parent's parent, until a manifest with no
+   `extends` is reached. Maximum chain depth is **eight**. Hosts MUST
+   detect cycles by tracking visited absolute paths.
+2. **Treat depth overflow and cycle detection as warnings, not errors.**
+   A view whose chain is malformed MUST still load — the host falls back
+   to the local manifest only and surfaces a `governance_extends_cycle`
+   (or `governance_extends_depth_exceeded`) warning.
+3. **Tolerate a missing parent.** If `extends:` points to a path that
+   does not exist, the host emits `governance_extends_missing` as a
+   warning and uses the local manifest only.
+4. **Merge bottom-up** with child winning on overrides — EXCEPT for the
+   one-way switches enumerated below.
+
+**Merge strategy** (child wins on override unless a one-way switch
+fires):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins; both are exposed via the resolution chain. |
+| `extends` | local-only | Not inherited. |
+| `appliesTo` | local-only | Not inherited; each view declares its own scope. |
+| `autonomy.*` | leaf-field override | `level`, `defaultApproval`, `approvalEscalation` each override independently. |
+| `signing.algo`, `signing.keyring` | override | Child can rebind. The keyring set MAY narrow but SHOULD NOT widen silently — hosts emit `governance_keyring_drift` (warn) if a child adds keys not present in the parent. |
+| **`signing.required`** | **one-way switch** | If parent is `true`, child MUST NOT downgrade to `false`. Hard refusal: `governance_signing_downgrade`. |
+| `audit.retention`, `audit.hashAlgo`, `audit.storage`, `audit.headPointerSign` | leaf-field override | Each independent. |
+| **`audit.appendOnly`** | **one-way switch** | If parent is `true`, child MUST NOT downgrade to `false`. Hard refusal: `governance_append_only_relaxation`. |
+| `policies` | merge-by-id | Same `id` → child replaces parent. New ids → appended. |
+| `approvers` | merge-by-id | Same `id` → child replaces parent. New ids → appended. |
+| `executor`, `escalateTo`, `work`, `knowledge` | override | Child can rebind. |
+| `display.*` | leaf-field override | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+**One-way switches are HARD errors, not warnings.** The append-only
+guarantee and the signing-required guarantee are AIP-7's two strongest
+invariants. Once a workspace root locks them, no descendant view may
+silently relax them. The host MUST refuse to merge such a child and
+MUST emit a `governance_append_only_relaxation` (or
+`governance_signing_downgrade`) error pointing at the offending
+manifest. This is the defining safety property of `GOVERNANCE.md`:
+posture can only get **stricter** down the chain, never looser.
+
+The host MUST expose **both** the merged effective config AND the
+resolution chain (ordered list of absolute paths consumed during
+merge). Consumers use the merged config; tooling uses the chain to
+explain *why* a field has the value it does.
+
+### Cross-AIP refs
+
+`GOVERNANCE.md` is the binding surface where governance meets the rest
+of the AIP family:
+
+| Field | References | Purpose |
+|---|---|---|
+| `executor` | [AIP-9](/docs/aip-9) operator | Names the operator the host activates to run governance flows (apply policies, collect signatures, append audit). |
+| `escalateTo` | [AIP-9](/docs/aip-9) operator | When `approvalEscalation` fires, route to this operator. |
+| `work` | [AIP-13](/docs/aip-13) `WORK.md` | Bind audit events to a work-tracking workspace; mutations recorded here also produce work-item updates. |
+| `knowledge` | [AIP-10](/docs/aip-10) `KNOWLEDGE.md` | Bind the wiki this workspace governs; schema changes to the wiki flow through THIS workspace's approval gate. |
+| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator | A view declares which consumers it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer (`governance_appliesto_unresolvable`). |
+| `extends` | another `GOVERNANCE.md` | Composition. |
+| `policies[].ref` | AIP-7 `policy` doctype (POLICY.md) | Each entry references a policy file by relative path. |
+
+`appliesTo` is **not inherited**. A view binds to its own consumers; a
+parent's bindings do not leak into the child. The schema enforces
+`appliesTo` ⇒ `extends` (a view that binds to a consumer must extend a
+parent).
+
+### Workspace mode vs view mode — composability table
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<scope>/GOVERNANCE.md` | `<consumer>/GOVERNANCE.md` |
+| `extends:` | absent | required (otherwise it's a workspace, not a view) |
+| `appliesTo:` | absent (a workspace has no single consumer) | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins (subject to one-way switches) |
+| `audit.appendOnly` | declares the lock | MAY NOT relax |
+| `signing.required` | declares the lock | MAY NOT downgrade |
+| Mutability | edits are themselves governed by the workspace's own policies | local edits adapt the lens, do not affect the workspace |
+| Use cases | org-wide posture authors | operator/company/skill teams who want a stricter lens |
+| Validation | full schema check | schema check + chain validation + one-way invariant check |
+| Lifecycle | versioned with the scope | versioned with the consumer |
+
+The same doctype, the same file name, the same schema. Only the
+location, the presence of `extends:`, and the one-way invariant
+direction distinguish.
+
+## Rationale
+
+*To be authored. Defend: hash-chained append-only over signed snapshots,
+per-event JSONL over batched JSON arrays (streaming-friendly), markdown
+for `POLICY.md` (human-authorable autonomy rules), peer-standard status
+to AIP-6 instead of merging into one mega-spec.*
+
+**Why a workspace manifest (`GOVERNANCE.md`).** Individual policies and
+signatures answer "what's the rule?" and "did this approval happen?".
+They do not answer "what is the *posture* of this workspace?" — the
+binding question that says which policies apply, which keys may sign,
+what autonomy ceiling is enforced, what audit retention is locked.
+Without a machine-parseable binding, posture lives in prose and drifts.
+The manifest is the registry-of-policies surface: a runtime can load
+`GOVERNANCE.md`, validate it, and know exactly which policies to enforce
+on every mutation, without re-reading prose.
+
+**Why one doctype for both workspace root and view.** The alternative is
+two doctypes — `governance.workspace/v1` for the root and
+`governance.workspace.view/v1` for the per-consumer adaptation. Two
+doctypes means two schemas, two validators, and an asymmetric merge
+surface. One doctype with `extends:` collapses both into a single mental
+model: a workspace IS its own view of itself, and every view IS a
+workspace bound to a different consumer. The same schema validates both,
+the same merge algorithm applies recursively, and the same authoring
+skill walks an agent through both flows. This is the same pattern that
+[AIP-10](/docs/aip-10) uses for `KNOWLEDGE.md` and
+[AIP-13](/docs/aip-13) uses for `WORK.md`.
+
+**Why one-way switches are hard errors, not warnings.** Append-only and
+signing-required are AIP-7's two strongest invariants — the whole
+third-party-verifiability story collapses if either can be silently
+relaxed by a descendant manifest. A view that downgrades `appendOnly:
+true → false` would let a malicious operator skip the chain entirely;
+a view that downgrades `signing.required: true → false` would let
+unsigned events into the chain. Both attacks are detectable at merge
+time. Refusing the merge with a hard error keeps the parent's
+guarantees intact for every consumer, by construction. The one-way
+direction (parent strict → child stricter or equal) is the defining
+property: posture can only ratchet up.
+
+## Reference Implementation
+
+[`packages/governance/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/governance/core) —
+parser, validator, hash-chain implementation, and policy evaluator.
+
+## Backwards Compatibility
+
+First version of the spec, with one wire-format transition already on
+the roadmap: the AIP-27 Ref migration described above. Within this
+draft, both the legacy `kind:slug` string form and the AIP-27 object
+form are normative inputs; producers SHOULD emit object form, consumers
+MUST accept either.
+
+A future AIP-7 v2 will deprecate the string form. The transition window
+is at least one minor release of every reference implementation listed
+in the registry, so operators can update producers and consumers
+independently.
+
+## Security Considerations
+
+Audit-log integrity is the central invariant. The hash chain is
+verifiable end-to-end by any third party using the published protocol.
+Threats:
+
+- **Tampering**: detected by hash mismatch on any altered prior event.
+- **Truncation**: head-pointer attestations (separate, vendor-specific)
+  guard against silent truncation.
+- **Replay**: `audit-event` includes monotonic sequence numbers and
+  timestamps; replay attacks are detectable.
+- **Signature spoofing**: signers identify themselves with
+  cryptographic keys; the spec is key-format agnostic but RECOMMENDS
+  Ed25519 or Sigstore-style transparency-log signatures.
+- **Posture relaxation via view shadowing**: a malicious or careless
+  view extends a strict workspace and silently downgrades
+  `audit.appendOnly` or `signing.required`. **Mitigation: HARD
+  REFUSAL** at merge time. The host MUST emit
+  `governance_append_only_relaxation` (or `governance_signing_downgrade`)
+  and refuse to activate the view. Unlike the chain warnings (cycle,
+  depth, missing parent) which degrade gracefully, one-way switches do
+  NOT degrade — a relaxed child fails to load entirely. This is the
+  defining safety property of `GOVERNANCE.md`.
+- **Keyring drift via view**: a child view rebinds `signing.keyring` to
+  a path containing keys not in the parent's keyring, effectively
+  authorising new signers without going through the parent's approval
+  gate. Mitigation: hosts emit `governance_keyring_drift` (warn) and
+  SHOULD route the keyring change itself through the parent's approval
+  gate before merging. Hosts MAY upgrade `governance_keyring_drift` to
+  a hard refusal in production deployments via runtime policy.
+- **Schema poisoning of `GOVERNANCE.md` itself**: an attacker rewrites
+  the workspace root to relax policies, narrow the keyring, or unbind
+  the audit chain. Mitigation: edits to `GOVERNANCE.md` MUST be subject
+  to the workspace's own approval gate — i.e. mutating `GOVERNANCE.md`
+  is itself a governed action. The reference implementation gates
+  `GOVERNANCE.md` writes through the policy registered with
+  `appliesTo: governance.workspace/v1` (or `*` if absent).

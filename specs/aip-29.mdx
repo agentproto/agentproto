@@ -1,0 +1,864 @@
+---
+title: "AIP-29: CLI.md — agentcli/v1 (CLI integration manifest)"
+description: A markdown + frontmatter format for declaring a command-line tool's surface to an agent — its binary, install paths, version detection, subcommand tree, sandbox needs, auth flows, and output conventions. Lets agents discover, install, and safely operate third-party CLIs (gh, gcloud, kubectl, ffmpeg, …) inside a sandbox, with the standard `defineCli` entry-point signature.
+aip: 29
+status: Draft
+type: Schema
+provider_kind: cli
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 17, 19, 28]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/cli-runtime
+resources: ./resources/aip-29/draft
+discussions-to: https://github.com/agentproto/specs/discussions/29
+---
+
+| Field | Value |
+|---|---|
+| AIP | 29 |
+| Title | CLI.md — agentcli/v1 (CLI integration manifest) |
+| Status | Draft |
+| Type | Schema |
+| Domain | cli.sh |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-28](/docs/aip-28) (INTENT) |
+| Resources | [`./resources/aip-29`](./resources/aip-29/draft) — `CLI.schema.json`, [`ADAPTER.md`](./resources/aip-29/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-29/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-29/draft/skills/author-cli/SKILL.md) |
+
+## Abstract
+
+`CLI.md` is a markdown + frontmatter file format that packages a
+**third-party CLI integration** — a command-line binary (`gh`,
+`gcloud`, `kubectl`, `ffmpeg`, `aws`, `stripe`, …) declared in a
+shape an agent can **discover, install, sandbox, authenticate, and
+invoke safely**. Each subcommand surfaces as a
+[TOOL.md (AIP-14)](/docs/aip-14) the agent calls; the bundle
+declares **install paths, version detection, auth flows, sandbox
+profile, output conventions, and canonical examples** at one level
+above.
+
+CLIs are not just "tools" — they are **families of tools** sharing
+a single binary, a single auth surface, a single sandbox profile,
+and a single set of OS dependencies. Treating each subcommand as a
+standalone tool duplicates that context across dozens of files; a
+bundle factors it.
+
+The format is paired with a standard entry-point function,
+**`defineCli(...)`**, whose signature any implementation in any
+language exposes so callers, runtimes, and adapters share one
+contract.
+
+The file is human-authored, version-controlled, machine-parseable,
+and grep-able — same posture as
+[SKILL.md](/docs/aip-3),
+[TOOL.md](/docs/aip-14),
+[INTENT.md](/docs/aip-28).
+
+## Motivation
+
+Agents in production routinely shell out to CLIs. `gh` for GitHub.
+`gcloud` for GCP. `ffmpeg` for media. `kubectl` for clusters.
+`yt-dlp` for downloads. `stripe` for payments. Each CLI brings:
+
+- An **install story** (`brew`, `apt`, `npm`, `curl | sh`, vendored
+  binary).
+- A **version range** the agent's adapters know how to drive.
+- An **auth surface** (env vars, config file, OS keychain, browser
+  login flow, refresh tokens, expiry).
+- A **sandbox profile** (which network domains, which filesystem
+  paths, exec permission, TTY needs).
+- An **output convention** (`--json` flag? exit codes? mixed
+  stdout/stderr? prompts requiring a TTY?).
+- **Subcommands** — often dozens, each with its own args/flags.
+
+Today this is reverse-engineered per integration. Agents grep
+`--help` output, hope `--json` exists, parse stderr by accident,
+crash when the binary isn't installed, and ship one-off auth code
+per CLI. There is no shared format for "this is the gh CLI, and
+this is what an agent needs to know to use it safely."
+
+Five concrete problems compound:
+
+1. **Install state is invisible.** Agent calls `gh pr list` →
+   command not found → agent retries with bad params, no recovery.
+   The host has no contract for "install this CLI before invoking".
+
+2. **Version skew is silent.** `gcloud beta` semantics shift
+   between releases; the agent has no contract for "this manifest
+   targets gcloud ≥ 460". Tools written against one version break
+   silently against another.
+
+3. **Auth surfaces are bespoke.** `gh auth login`, `aws configure`,
+   `gcloud auth application-default login`, `stripe login` — five
+   incompatible flows, two requiring browser callbacks, three
+   stashing state in different locations. No shared "login required"
+   signal.
+
+4. **Sandbox policies leak.** A CLI bundle that needs
+   `~/.kube/config` write access AND outbound `:443` to
+   `*.googleapis.com` has no place to declare both. Per-tool
+   declarations duplicate the bundle's profile across N subcommand
+   tools.
+
+5. **Discovery is grep-based.** "Which CLIs can this agent operate?"
+   requires reading code. A registry of CLI.md files answers it
+   declaratively.
+
+`CLI.md` gives this layer a name and a file format. It is the
+manifest a host reads to install a CLI on demand, validate its
+version, kick off auth, build a sandbox, and route subcommands to
+their TOOL.md siblings.
+
+## Design principles
+
+1. **Bundle as data.** Install, version, auth, and sandbox are
+   declared, not coded. The host parses the manifest and acts;
+   integration code stays minimal.
+
+2. **Per-CLI sandbox profile.** Network, filesystem, and exec
+   permissions are declared once at the bundle level and inherited
+   by every subcommand tool. Tools MAY narrow but MUST NOT widen.
+
+3. **Tools per subcommand.** Each invocable subcommand maps to a
+   [TOOL.md](/docs/aip-14). The bundle indexes them; the tools own
+   their own input/output schemas. This keeps the strict typing
+   that AIP-14 already provides.
+
+4. **Version-aware.** The manifest declares the binary version
+   range it targets. Hosts validate before invocation and refuse
+   when out of range, with a structured error.
+
+5. **Login is a state.** Auth is not "set this env var" — it is
+   "complete this flow, then poll this check, then refresh every
+   N hours". The bundle expresses this state machine.
+
+6. **Sandbox is the policy.** The declared `sandbox:` block is the
+   policy contract. Hosts MUST enforce it (firewall, fs ACLs,
+   exec deny). Bundles that lie SHOULD fail at install time
+   (signature mismatch) or at runtime (host-detected escape).
+
+7. **Unopinionated about install method.** `brew`, `apt`, `npm`,
+   `curl`, `pip`, `vendored` are equal citizens. The host picks
+   based on environment; the bundle declares all viable paths.
+
+8. **Composable up.** A skill ([AIP-3](/docs/aip-3)) requires
+   CLIs as capabilities. An intent ([AIP-28](/docs/aip-28)) routes
+   to subcommand tools. The CLI bundle is the supply layer; what
+   sits on top consumes it.
+
+## Specification
+
+### File location
+
+CLI bundles live in a single folder:
+
+```
+.cli/
+  gh/
+    CLI.md                  ← this AIP
+    cli.ts                  ← optional entry (login flows, output adapters)
+    SECRETS.md              ← AIP-19 inventory for this CLI
+    RUNNER.md               ← AIP-17 isolation profile (optional sibling)
+    tools/
+      pr-create/TOOL.md     ← per-subcommand tools
+      pr-list/TOOL.md
+      issue-view/TOOL.md
+    intents/                ← optional pre-wired INTENTs (AIP-28)
+      open-pr/INTENT.md
+    README.md               ← optional long-form
+```
+
+The folder name SHOULD match the manifest's `id`. Bundles MAY be
+nested under a category (e.g. `.cli/cloud/gcloud/`); consumers MUST
+NOT depend on directory depth.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable display name (1–80 chars). |
+| `id` | string | Machine identifier. Lowercase, digits, dashes. 2–64 chars. Unique within the registry. |
+| `description` | string | One-paragraph purpose for an LLM caller. ≤2000 chars. |
+| `version` | semver string | Spec version of THIS manifest. Bump on bundle-shape changes (new sandbox key, removed install method). |
+| `bin` | string | Binary name on `$PATH` after install. Single token, no spaces. |
+| `install` | object[] | One or more install paths. ≥1 entry. See [Install methods](#install-methods). |
+| `version_check` | object | How to detect & validate the installed binary version. See [Version detection](#version-detection). |
+| `sandbox` | object | Network / filesystem / exec policy. See [Sandbox](#sandbox). |
+| `commands` | object | Subcommand → TOOL.md ref map. See [Subcommands](#subcommands). |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `bin_args` | string[] | `[]` | Default arguments injected before every invocation (`["--quiet"]`, `["--region", "us-east-1"]`). Tools MAY override via their own `args`. |
+| `auth` | object | none | Auth surface declaration — env vars, config files, login flow, refresh policy. See [Auth](#auth). When omitted, the CLI is presumed unauthenticated. |
+| `runner` | object \| string | none | [AIP-17](/docs/aip-17) runner block, inline or as a workspace-relative ref to a sibling `RUNNER.md`. When omitted, hosts apply a subprocess default. |
+| `output` | object | host defaults | Output convention — JSON flag, exit codes, stream allocation. See [Output conventions](#output-conventions). |
+| `intents` | object[] | `[]` | Pre-wired [INTENT.md](/docs/aip-28) refs the bundle ships as catalog shortcuts. Each `{ ref: <path> }`. |
+| `requires` | object | `{}` | Capability requirements ([AIP-7](/docs/aip-7)). Subfields: `os: string[]` (`"darwin"`, `"linux"`, `"windows"`), `arch: string[]` (`"x64"`, `"arm64"`), `min_disk_mb: int`, `min_memory_mb: int`. |
+| `examples` | object[] | `[]` | Each `{ goal: string, cmd: string, note?: string }`. Canonical invocations for LLM discovery and human reference. |
+| `tags` | string[] | `[]` | Free-form discovery tags (`devops`, `git`, `cloud`). |
+| `metadata` | object | `{}` | Free-form. Authors MAY stash adapter-specific hints under namespaced keys (`metadata.docker.image`). Consumers MUST tolerate unknown keys. |
+
+#### Discouraged
+
+`shell`, `env`, `cwd` at the bundle level — they are per-invocation
+concerns owned by the runner ([AIP-17](/docs/aip-17)) and the
+subcommand tools.
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## When to reach for this CLI`** — what problems it solves, what
+  it doesn't.
+- **`## Gotchas`** — auth quirks, version skew traps, environment
+  pitfalls.
+- **`## Debugging`** — how to read the CLI's logs, common errors and
+  fixes.
+- **`## Reference`** — links to upstream docs, status pages, support
+  channels.
+
+The body is informational. Bundles MUST function with adapters that
+read only the frontmatter.
+
+### Install methods
+
+`install` is an ordered list of viable installation paths. Hosts try
+methods in order until one succeeds. Each entry is one of:
+
+```yaml
+install:
+  - { method: brew,      package: gh }                              # Homebrew
+  - { method: apt,       package: gh }                              # Debian / Ubuntu
+  - { method: dnf,       package: gh }                              # Fedora / RHEL
+  - { method: choco,     package: gh }                              # Windows / Chocolatey
+  - { method: scoop,     package: gh }                              # Windows / Scoop
+  - { method: npm,       package: "@github/gh", global: true }      # Node global
+  - { method: pip,       package: "github-cli" }                    # Python
+  - { method: cargo,     package: "gh-cli" }                        # Rust
+  - { method: go,        package: "github.com/cli/cli/v2/cmd/gh@latest" }
+  - { method: curl,      url: "https://cli.github.com/install.sh" } # Shell installer
+  - { method: download,  url: "https://github.com/cli/cli/releases/download/v2.40.0/gh_2.40.0_linux_amd64.tar.gz", extract_bin: "gh_2.40.0_linux_amd64/bin/gh" }
+  - { method: vendored,  path: "./bin/gh" }                         # Bundled in workspace
+```
+
+#### Methods (v1)
+
+| `method` | Required fields | Notes |
+|---|---|---|
+| `brew` | `package` | macOS / Linux Homebrew |
+| `apt` | `package` | Debian / Ubuntu `apt-get install` |
+| `dnf` | `package` | Fedora / RHEL `dnf install` |
+| `pacman` | `package` | Arch `pacman -S` |
+| `choco` | `package` | Windows Chocolatey |
+| `scoop` | `package` | Windows Scoop |
+| `npm` | `package`, `global?: bool` | Node package |
+| `pip` | `package`, `user?: bool` | Python package |
+| `cargo` | `package` | Rust binary |
+| `go` | `package` | Go install path |
+| `curl` | `url`, `verify_sha256?: string` | Shell installer; SHA-256 verification SHOULD be supplied |
+| `download` | `url`, `extract_bin: string`, `verify_sha256?: string` | Tarball / zip with binary inside |
+| `vendored` | `path` | Workspace-relative pre-built binary |
+
+Hosts MUST reject install methods whose `requires.os` / `arch`
+don't match the runtime environment. Hosts MUST verify SHA-256
+when supplied. Implementations SHOULD decline `curl | sh`-style
+installers without a SHA-256 in production environments.
+
+New install methods are added by AIP revision; bundles MAY ship
+unknown methods marked `experimental: true`, which compliant hosts
+SHOULD warn about and skip.
+
+### Version detection
+
+`version_check` declares how to retrieve and validate the binary's
+installed version:
+
+```yaml
+version_check:
+  cmd: "gh --version"
+  parse: 'gh version (\S+)'        # ECMAScript regex with capture group
+  range: ">=2.40 <3"               # semver range
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `cmd` | string | Command the host runs. SHOULD exit 0 within `timeout_ms`. |
+| `parse` | string | Regex with at least one capture group; the first group is the parsed semver. |
+| `range` | string | npm-style semver range. The host validates the parsed version satisfies this range. |
+| `timeout_ms` | int | Default `5000`. Hard cap on the version check. |
+
+Hosts MUST run the version check after install and before
+considering the bundle "available". A failed version check
+SHOULD trigger reinstall once, then surface
+`error: "version_mismatch"` to the caller.
+
+### Auth
+
+`auth` declares the authentication surface. Most CLIs need one; a
+few (`ffmpeg`, `jq`, `yt-dlp`) don't and omit the block.
+
+```yaml
+auth:
+  ref: ./SECRETS.md                  # AIP-19 inventory of env-var bindings
+  state:                             # optional: where stateful auth lives
+    paths: ["~/.config/gh"]          # config files the CLI manages
+    env:   ["GH_TOKEN", "GITHUB_TOKEN"]
+  login:
+    cmd: "gh auth login --web"
+    interactive: true                # cannot run unattended; surface a prompt
+    requires_callback_url: false
+    completes_when:                  # how the host detects "logged in"
+      cmd: "gh auth status"
+      exit_code: 0
+  refresh:
+    cmd: "gh auth refresh -s repo,read:org"
+    every: "PT24H"                   # ISO-8601 duration, host-driven cadence
+  expiry:
+    detect: "exit_code:4"            # auth-required signal (see Output)
+```
+
+| Block | Purpose |
+|---|---|
+| `ref` | Pointer to a [SECRETS.md](/docs/aip-19) inventory binding env vars to vault slugs / OAuth providers. |
+| `state` | Where the CLI stashes stateful auth (config files, env vars). The host's sandbox MUST whitelist these paths. |
+| `login` | The interactive flow. `interactive: true` signals "the host SHOULD surface a UI"; `requires_callback_url: true` signals "the host MUST expose a public callback". `completes_when` is the check that flips state to "logged in". |
+| `refresh` | Periodic refresh. `every: "PT24H"` uses ISO-8601 durations. The host runs this before invocation when the elapsed-since-refresh exceeds the cadence. |
+| `expiry` | How to detect mid-flight auth expiry — typically a specific exit code mapped from `output.exit_codes`. |
+
+#### Login state machine
+
+Hosts implement a three-state machine per CLI:
+
+```
+unknown ──(version_check ok)──▶ unauthed ──(login completes)──▶ authed
+                                                                  │
+                                  ▲ ─────(expiry detected)─────── ┘
+```
+
+Tools invoked in `unauthed` state SHOULD short-circuit with
+`error: "auth_required"` and surface the `login.cmd` to the user.
+`refresh` runs eagerly while in `authed` to delay re-entry to
+`unauthed`.
+
+### Sandbox
+
+`sandbox` is the policy contract. Hosts MUST enforce it; bundles
+that exceed declared permissions MUST fail.
+
+```yaml
+sandbox:
+  network:
+    egress:                          # outbound allowlist
+      - api.github.com
+      - github.com
+      - "*.githubusercontent.com"
+    ingress: []                      # inbound (callback URLs); usually []
+  fs:
+    read:
+      - "**/.git/**"
+      - "~/.config/gh/**"
+    write:
+      - "~/.config/gh/**"
+    deny:                            # explicit deny (overrides read/write)
+      - "~/.ssh/**"
+      - "/etc/**"
+  exec:
+    allow: false                     # may not spawn child processes
+    spawn:                           # if allow=true, allowlist of bin names
+      - git                          # gh shells out to git for some commands
+  env:
+    pass:                            # env vars the sandbox propagates
+      - GH_TOKEN
+      - GITHUB_TOKEN
+      - HOME
+    set:                             # env vars the sandbox sets
+      GH_PROMPT_DISABLED: "1"
+  tty:
+    required: false                  # true → host MUST allocate a PTY
+```
+
+| Block | Purpose |
+|---|---|
+| `network.egress` | Outbound host allowlist. Hostnames + globs. CIDR support is v2. |
+| `network.ingress` | Inbound URLs the host MUST expose (rare; only for browser-callback auth flows). |
+| `fs.read` / `fs.write` | Glob-shaped filesystem permissions. `~/` and `**` allowed. |
+| `fs.deny` | Explicit deny overriding read/write. Used to prevent accidental escapes. |
+| `exec.allow` | Bool. When `false`, the CLI cannot fork child processes. When `true`, `exec.spawn[]` is the allowlist of binaries it MAY invoke. |
+| `env.pass` | Env vars propagated from host into sandbox. |
+| `env.set` | Env vars the sandbox forces (regardless of host). |
+| `tty.required` | When `true`, the host MUST allocate a PTY (for CLIs that gate features on `isatty`). |
+
+#### Inheritance to subcommand tools
+
+Each subcommand TOOL.md inherits the bundle's sandbox by default.
+Tools MAY narrow (`fs.write: []` removes write entirely) but MUST
+NOT widen. Hosts validating a TOOL.md against its parent CLI.md
+MUST reject widenings.
+
+### Subcommands
+
+`commands` is a tree mapping subcommand paths to TOOL.md refs:
+
+```yaml
+commands:
+  pr:
+    create: ./tools/pr-create/TOOL.md
+    list:   ./tools/pr-list/TOOL.md
+    merge:  ./tools/pr-merge/TOOL.md
+    view:   ./tools/pr-view/TOOL.md
+  issue:
+    list:   ./tools/issue-list/TOOL.md
+    view:   ./tools/issue-view/TOOL.md
+    create: ./tools/issue-create/TOOL.md
+  auth:
+    status: ./tools/auth-status/TOOL.md
+```
+
+The path from root to leaf is the subcommand argv:
+`./tools/pr-create/TOOL.md` is invoked as
+`gh pr create <args>`. Each leaf TOOL.md declares its own
+`inputs`, `outputs`, `args` template, and any narrowed sandbox.
+
+#### Args template
+
+Each TOOL.md inside a CLI bundle MAY declare an `args` template
+that the runner expands into argv. Example fragment from
+`./tools/pr-create/TOOL.md`:
+
+```yaml
+# inside the subcommand TOOL.md
+runner:
+  cli: ../../CLI.md                  # ref back to the parent bundle
+  argv:
+    - pr
+    - create
+    - --title
+    - "${input.title}"
+    - --body
+    - "${input.body}"
+    - --base
+    - "${input.base | default('main')}"
+```
+
+The bundle adapter resolves `${input.X}` against the validated tool
+input. Hosts MUST shell-escape interpolated values; bundles MUST
+NOT use shell features (no `&&`, no piping). Compose multi-step
+invocations via [WORKFLOW.md (AIP-15)](/docs/aip-15).
+
+### Output conventions
+
+`output` declares how the CLI emits results so the runner can parse
+correctly:
+
+```yaml
+output:
+  default_format: text                 # what plain invocations emit
+  json_flag: "--json"                  # how to force JSON
+  json_flag_args: ["number,title,body"] # default args required for --json (gh-specific)
+  exit_codes:
+    0: ok
+    1: error
+    2: usage_error
+    4: auth_required                   # mapped from auth.expiry.detect
+  stream: stdout                       # where success goes (stdout | stderr | mixed)
+  error_stream: stderr                 # where errors go
+```
+
+| Field | Description |
+|---|---|
+| `default_format` | `text` / `json` / `yaml` / `binary`. What invocations emit by default. |
+| `json_flag` | Flag the runner appends to force JSON output. Many CLIs accept `--json`, `--format=json`, `-o json`. |
+| `json_flag_args` | When the JSON flag itself takes arguments (notable: `gh --json` requires a comma-list of fields). |
+| `exit_codes` | Numeric → semantic mapping. Hosts MAY add codes; bundles MAY narrow. Reserved semantics: `0=ok`, `1=error`, `2=usage_error`, `4=auth_required`, `124=timeout`, `137=killed`. |
+| `stream` | Where success output lands. Mixed CLIs (write success to stderr) MUST declare. |
+| `error_stream` | Where error messages land. Hosts read both, segregate by exit code. |
+
+### Stable identity
+
+`id` + `version` together form the bundle's stable identity. Two
+bundles with the same `id` but different major `version` values
+MUST be treated as distinct. Caches, audit logs, and tool
+registrations key on `id@major`.
+
+`version` here is the **manifest** version, distinct from the
+binary's version (covered by `version_check.range`). Bumping
+`version_check.range` to support a new gh major SHOULD bump the
+manifest's major, since tools written for the old range may break.
+
+## The `defineCli` standard signature
+
+Every implementation that consumes `CLI.md` and ships routing
+helpers MUST expose a function named **`defineCli`** whose signature
+matches the contract below. Many bundles ship a frontmatter-only
+manifest with no entry; this signature is for entries that need
+custom login/output adapters.
+
+### Signature (TypeScript notation, normative)
+
+```ts
+defineCli(definition: CliDefinition): CliHandle
+
+interface CliDefinition {
+  // Identity — mirrors the manifest fields with the same names.
+  id:           string
+  name:         string
+  description:  string
+  version?:     string
+  bin:          string
+
+  // Install + version + sandbox + commands — usually frontmatter-driven.
+  // The entry MAY override or extend.
+  install?:        InstallMethod[]
+  versionCheck?:   VersionCheck
+  sandbox?:        SandboxPolicy
+  commands?:       Record<string, ToolRef | CommandTree>
+
+  // Optional adapters — when frontmatter declarations aren't expressive enough.
+  login?:          (args: LoginArgs) => Promise<LoginResult>
+  refresh?:        (args: RefreshArgs) => Promise<RefreshResult>
+  parseOutput?:    (args: ParseOutputArgs) => ParseOutputResult
+  detectExpiry?:   (args: DetectExpiryArgs) => boolean
+
+  // Bookkeeping
+  tags?:        string[]
+  metadata?:    Record<string, unknown>
+}
+
+interface LoginArgs {
+  /** Per-call context — surface, user, host capabilities. */
+  context: CliContext
+  /** Caller-set abort signal — MUST be honoured. */
+  signal:  AbortSignal
+}
+
+type LoginResult =
+  | { ok: true }
+  | { ok: false; reason: "user_cancelled" | "callback_failed" | "upstream_error"; message?: string }
+
+interface RefreshArgs {
+  /** Same as LoginArgs.context. */
+  context: CliContext
+  signal:  AbortSignal
+}
+
+type RefreshResult =
+  | { ok: true; nextRefreshAt?: string /* ISO-8601 */ }
+  | { ok: false; reason: "auth_expired" | "upstream_error"; message?: string }
+
+interface ParseOutputArgs {
+  exitCode: number
+  stdout:   string
+  stderr:   string
+  /** What the manifest declared. */
+  expected: { format: "text" | "json" | "yaml" | "binary" }
+}
+
+interface ParseOutputResult {
+  ok:      boolean
+  value?:  unknown
+  error?:  { code: string; message: string; retryable?: boolean }
+}
+```
+
+### Conformance rules
+
+1. **One canonical name.** The exported name MUST be `defineCli`.
+   Implementations MAY also re-export under host-specific aliases
+   (`createCli`, `cli`) but the canonical name is what `CLI.md`
+   adapters reference.
+
+2. **Frontmatter is the source of truth.** When the entry exports
+   conflicting values for a field declared in frontmatter, the
+   adapter MUST surface a warning and prefer the frontmatter.
+   Entries are for behavioural adapters (login flows, output
+   parsers), not for redefining identity.
+
+3. **`login` honours `signal`.** Browser-callback flows MUST
+   abort cleanly when the caller cancels (e.g. user closes the
+   prompt). Tools blocked on a hung login flow are a UX
+   regression.
+
+4. **`parseOutput` is pure.** It consumes exit code + stdout +
+   stderr and returns a structured result. It MUST NOT touch the
+   network or file system; that's the runner's job.
+
+5. **Sandbox enforcement is the host's.** The bundle declares
+   policy; the host enforces it. A `defineCli` implementation MUST
+   NOT subvert host enforcement (e.g. by spawning child processes
+   when `exec.allow: false`).
+
+6. **No I/O at module load.** The module containing `defineCli`
+   MUST be safely importable as a side-effect-free unit. All I/O
+   happens inside `login` / `refresh` / `parseOutput`.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineCli`-conformant
+implementation in a specific language or framework, see
+[`./resources/aip-29/draft/ADAPTER.md`](./resources/aip-29/draft/ADAPTER.md).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* a `CLI.md` is via a paired
+[SKILL.md](/docs/aip-3) — distributed at
+[`./resources/aip-29/draft/skills/author-cli/SKILL.md`](./resources/aip-29/draft/skills/author-cli/SKILL.md) —
+that an agent loads when asked to package a CLI. The skill walks
+the agent through:
+
+1. Identify the binary and its install paths across at least three
+   package managers + a fallback `download` URL.
+2. Extract the version-detection regex from the binary's
+   `--version` output.
+3. Map the auth surface (env vars, login flow, refresh cadence,
+   expiry signal) to a [SECRETS.md](/docs/aip-19) inventory.
+4. Author the sandbox profile by reading the binary's man page,
+   the project's documentation, and observed network calls.
+5. Walk the subcommand tree, generating one TOOL.md per leaf via
+   the AIP-14 author-tool skill.
+6. Optionally pre-wire 3–5 INTENT.md catalog shortcuts for common
+   intents.
+7. Validate the manifest against
+   [`./resources/aip-29/draft/CLI.schema.json`](./resources/aip-29/draft).
+
+The agent MAY install the skill, follow the steps, and emit a
+complete CLI bundle without further instruction. The skill is the
+preferred path to onboarding a new CLI; hand-authoring is
+supported but slower.
+
+## Example
+
+```md
+---
+name: GitHub CLI
+id: gh
+description: GitHub command-line interface — operate PRs, issues, releases, repos, and gists from a single binary against any GitHub host (github.com or GHES).
+version: 1.0.0
+bin: gh
+install:
+  - { method: brew,     package: gh }
+  - { method: apt,      package: gh }
+  - { method: choco,    package: gh }
+  - { method: download, url: "https://github.com/cli/cli/releases/download/v2.40.0/gh_2.40.0_linux_amd64.tar.gz", extract_bin: "gh_2.40.0_linux_amd64/bin/gh", verify_sha256: "abc123…" }
+version_check:
+  cmd: "gh --version"
+  parse: 'gh version (\S+)'
+  range: ">=2.40 <3"
+auth:
+  ref: ./SECRETS.md
+  state:
+    paths: ["~/.config/gh"]
+    env:   ["GH_TOKEN", "GITHUB_TOKEN"]
+  login:
+    cmd: "gh auth login --web"
+    interactive: true
+    completes_when:
+      cmd: "gh auth status"
+      exit_code: 0
+  refresh:
+    cmd: "gh auth refresh -s repo,read:org"
+    every: "PT24H"
+  expiry:
+    detect: "exit_code:4"
+sandbox:
+  network:
+    egress:
+      - api.github.com
+      - github.com
+      - "*.githubusercontent.com"
+  fs:
+    read:  ["**/.git/**", "~/.config/gh/**"]
+    write: ["~/.config/gh/**"]
+    deny:  ["~/.ssh/**"]
+  exec:
+    allow: true
+    spawn: ["git"]
+  env:
+    pass: ["GH_TOKEN", "GITHUB_TOKEN", "HOME"]
+    set:
+      GH_PROMPT_DISABLED: "1"
+output:
+  default_format: text
+  json_flag: "--json"
+  json_flag_args: ["number,title,body,state,author"]
+  exit_codes:
+    0: ok
+    1: error
+    2: usage_error
+    4: auth_required
+  stream: stdout
+  error_stream: stderr
+commands:
+  pr:
+    create: ./tools/pr-create/TOOL.md
+    list:   ./tools/pr-list/TOOL.md
+    merge:  ./tools/pr-merge/TOOL.md
+    view:   ./tools/pr-view/TOOL.md
+  issue:
+    list:   ./tools/issue-list/TOOL.md
+    view:   ./tools/issue-view/TOOL.md
+    create: ./tools/issue-create/TOOL.md
+  auth:
+    status: ./tools/auth-status/TOOL.md
+intents:
+  - { ref: ./intents/open-pr/INTENT.md }
+  - { ref: ./intents/triage-issues/INTENT.md }
+tags: [git, github, devops]
+examples:
+  - { goal: "list open PRs",       cmd: "gh pr list --state open --json number,title" }
+  - { goal: "merge PR #42",        cmd: "gh pr merge 42 --squash --delete-branch" }
+  - { goal: "view issue #100",     cmd: "gh issue view 100" }
+  - { goal: "create a release",    cmd: "gh release create v1.0.0 --notes 'First release'" }
+---
+
+## When to reach for this CLI
+
+Use `gh` whenever the agent needs to operate against a GitHub repo or
+org — list/merge PRs, triage issues, manage releases, fetch repo
+metadata. Prefer it over raw `git` for any operation that touches
+GitHub's web surface (PRs, reviews, comments).
+
+## Gotchas
+
+- `gh auth refresh -s <new-scope>` is required after asking for a
+  new scope; the existing token does not auto-upgrade.
+- `gh --json <fields>` requires the comma-list to be supplied; bare
+  `--json` errors. The `output.json_flag_args` block above declares
+  the default field list the runner appends.
+- `gh` shells out to `git` for some commands (`pr checkout`,
+  `repo clone`); `sandbox.exec.spawn: ["git"]` allowlists this.
+
+## Debugging
+
+Set `GH_DEBUG=api` for verbose API logs (written to stderr). Inspect
+`~/.config/gh/hosts.yml` to verify which GitHub host (github.com vs
+GHES) is currently authenticated.
+
+## Reference
+
+- [Upstream documentation](https://cli.github.com/manual/)
+- [Release notes](https://github.com/cli/cli/releases)
+- [Issue tracker](https://github.com/cli/cli/issues)
+```
+
+## Compatibility
+
+### With pre-AIP CLI integrations
+
+Existing CLI integrations (Mastra MCP servers, LangChain
+`ShellTool`, Anthropic SDK shell wrappers) can adopt CLI.md
+incrementally:
+
+1. Author a `CLI.md` next to the existing wrapper, copying install
+   paths and version regex from the wrapper's setup code.
+2. Convert each wrapped subcommand to a TOOL.md sibling under
+   `./tools/<name>/`. Re-export the existing body as the
+   `defineTool` default export.
+3. Move auth / sandbox / output-parsing logic into the
+   `defineCli` entry so it's reused across subcommands.
+
+The legacy wrapper stays functional during the migration; CLI.md
+is additive.
+
+### With AIP-7 (governance)
+
+Each subcommand TOOL.md inherits the bundle's `sandbox` for
+governance gating. Approval policies that gate on
+`mutates: ["external:github.com"]` apply uniformly across the
+bundle's tools, written once on the bundle.
+
+### With AIP-19 (SECRETS.md)
+
+The bundle's `auth.ref:` points at the SECRETS inventory the
+bundle needs (env vars, OAuth bindings, vault slugs). Tools inside
+the bundle inherit the inventory by reference; they do not
+re-declare it.
+
+### With AIP-17 (RUNNER.md)
+
+`runner` at the bundle level declares the process boundary. Each
+subcommand TOOL.md inherits the boundary unless it narrows. A CLI
+that needs Docker isolation declares `runner.engine: "docker"` once
+at the bundle level; every subcommand inherits.
+
+### With AIP-28 (INTENT.md)
+
+The bundle MAY ship pre-wired INTENTs in `intents:` so user-facing
+surfaces don't have to compose subcommands manually. An intent
+named `gh.open-pr` (label: "Open a PR") routes to the
+`pr/create` TOOL.md inside the bundle. Authors compose the intent
+catalog from bundle-supplied intents + custom ones.
+
+## Security considerations
+
+`CLI.md` is **declarative**: a malicious bundle can lie about
+`sandbox`, `version_check`, or `install`. Hosts MUST treat the
+manifest as untrusted input until verified — minimum:
+
+- Verify install method's `verify_sha256` for `curl` and `download`
+  methods.
+- Validate the binary's actual version against `version_check.range`
+  *after* install, before invocation.
+- Enforce the declared sandbox at the OS level — process namespacing,
+  fs ACLs, network firewall. A bundle that escapes its sandbox MUST
+  fail closed (refuse to execute), not fail open.
+
+Browser-callback login flows (`auth.login.requires_callback_url:
+true`) expose the host. Hosts MUST allocate a single-use, time-
+bound callback URL and reject inbound requests from unexpected
+origins.
+
+`exec.allow: true` with `spawn: [...]` is a privilege escalation
+surface. Hosts SHOULD audit the spawn list against the known set of
+sub-binaries the upstream CLI is expected to invoke; new entries
+require a major bump and re-review.
+
+## Open questions
+
+1. **Install-method registry.** `method` is currently a closed enum.
+   When bundles need a method we haven't blessed (`brew tap`,
+   `cargo install --git`, custom installers), do we add an open
+   `experimental:` flag and a registry pattern, or extend the enum
+   per AIP revision?
+2. **Sandbox grammar.** `network.egress` accepts hostnames + globs.
+   v1 deliberately omits CIDR, regex, port-specific rules,
+   per-method rules. v2 candidate?
+3. **Stateful login flows.** Browser-callback auth (`gh auth login
+   --web`, `gcloud auth login`) needs a host-allocated callback URL
+   + state. Should the AIP ship a normative AUTH-FLOW shape, or
+   defer to a future AIP focused on auth flows?
+4. **Versioned manifests.** When `gh` ships v3 with breaking
+   changes, a single CLI.md can't cover both. File-naming pattern
+   (`CLI.gh@v2.x.md`) vs version-range exclusion vs separate
+   bundles? Pick one.
+5. **Subcommand depth.** `gcloud compute instances create` is 4
+   levels deep. The nested `commands:` map keeps reviewability;
+   for CLIs with hundreds of subcommands, do we add a flatten
+   shorthand (`gcloud.compute.instances.create:`) or stay nested?
+
+These remain open until enough bundles ship to settle the answers
+empirically.
+
+## See also
+
+- [AIP-3 — SKILL.md](/docs/aip-3) — skills MAY require CLIs as
+  capabilities
+- [AIP-7 — governance](/docs/aip-7) — sandbox + approval gating
+- [AIP-14 — TOOL.md](/docs/aip-14) — per-subcommand tools inside
+  the bundle
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — multi-tool orchestration
+  on top of the bundle
+- [AIP-17 — RUNNER.md](/docs/aip-17) — process-boundary block
+  inherited bundle-wide
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
+- [AIP-28 — INTENT.md](/docs/aip-28) — pre-wired user-facing
+  intents on the bundle
+- [`./CLI.schema.json`](./resources/aip-29/draft) — JSON Schema validator
+- [`./ADAPTER.md`](./resources/aip-29/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-29/draft/EXAMPLES.md) — additional CLI.md examples

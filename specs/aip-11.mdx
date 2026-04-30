@@ -1,0 +1,240 @@
+---
+title: "AIP-11: LESSON.md — agentlearning/v1 (distilled lessons from experience)"
+description: A markdown format for storing the transferable lessons an agent extracts from successful and failed runs — title, trigger, evidence, outcome — and a contract for how runtimes distill them and inject them back into future turns.
+aip: 11
+status: Draft
+type: Schema
+created: 2026-04-27
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/lessons
+discussions-to: https://github.com/agentproto/specs/discussions/11
+---
+
+| Field | Value |
+|---|---|
+| AIP | 11 |
+| Title | LESSON.md — agentlearning/v1 (distilled lessons from experience) |
+| Status | Draft |
+| Type | Schema |
+| Domain | learning.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Reference Impl | [`packages/agent-framework/src/lessons`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/lessons) |
+
+## Abstract
+
+`agentlearning/v1` defines `LESSON.md` — a markdown file that captures
+one transferable lesson an agent has extracted from a completed run.
+Lessons are *distilled*, not raw trajectories: a title, a trigger
+condition, a short reasoning body, evidence pointers, and explicit
+success/failure counts. The spec also defines the distill and retrieve
+contracts that runtimes implement to turn experience into a compounding
+playbook of heuristics.
+
+## Motivation
+
+Storing raw agent trajectories — every tool call, every message — is
+the path of least resistance and the wrong default. Trajectories don't
+generalize: the agent that did task X yesterday doesn't recognize that
+task Y today is the same shape. Worse, most "agent memory" systems
+treat success as the only learning signal and silently discard
+failures, even though failures often carry the most transferable
+information.
+
+Google's
+[ReasoningBank](https://research.google/blog/reasoningbank-enabling-agents-to-learn-from-experience/)
+work formalized the alternative: distill *generalizable* lessons —
+"always verify the page identifier before clicking *Load More*" instead
+of "click button at coordinates (x, y)." Pull them from successes
+*and* failures. Inject them at retrieval time before the next
+related task.
+
+AIP-11 codifies that lesson shape as a portable file format so that:
+
+- Lessons are auditable artifacts a human can read and curate.
+- A lesson distilled by one runtime can be retrieved by another.
+- Failure-derived counter-examples are first-class, not lost in
+  trajectory archives.
+- The distill/retrieve loop is specified as a contract, not a vendor
+  detail.
+
+Prior art: Google ReasoningBank, the Reflexion family of
+self-reflective agents, ACE's "playbook" formulation
+([AIP-12](/docs/aip-12)) for the prompt-evolution sibling problem.
+
+## Specification
+
+A conforming `agentlearning/v1` package is a directory of `LESSON.md`
+files plus an index:
+
+```
+lessons/
+├── _index.md
+├── verify-page-id-before-load-more.md
+├── prefer-batch-over-loop-when-rate-limited.md
+└── ...
+```
+
+### `LESSON.md` shape
+
+```yaml
+---
+schema: learning/v1
+slug: <kebab-case-lesson-id>
+title: <one-sentence imperative — what to do or avoid>
+trigger:
+  description: <plain-text — when this lesson applies>
+  tags: [<topic>, <topic>]              # OPTIONAL — for retrieval
+  targets:                              # OPTIONAL — operator/role/skill globs
+    - operator: <slug-or-glob>
+    - role: <slug-or-glob>
+    - skill: <slug-or-glob>
+outcome: success | failure | mixed
+evidence:                               # provenance — refs into runs, conversations, work items
+  - kind: run | conversation | work-item | wiki-page
+    ref: <id-or-path>
+    note: <one-liner — what happened>
+confidence: 0 .. 1                      # OPTIONAL, default 0.5 at first sighting
+success_count: <int>                    # times this lesson "worked" when applied
+failure_count: <int>                    # times the underlying claim was contradicted
+supersedes: [<slug>]                    # OPTIONAL — lessons this replaces
+expires_at: <ISO 8601>                  # OPTIONAL — soft TTL for stale heuristics
+metadata:
+  <vendor>:
+    <field>: <value>
+---
+
+# <title>
+
+## When this applies
+
+<expanded trigger prose — what shape of task / situation invites this lesson>
+
+## What to do (or avoid)
+
+<distilled reasoning steps — imperative, concise>
+
+## Counter-example
+
+<short narrative of the run that established this lesson — useful when
+outcome=failure or mixed>
+```
+
+### Distill contract
+
+When a runtime ingests a completed run `R` (a conversation, work item,
+or workflow execution) into the lesson bank:
+
+1. The runtime MUST evaluate `R` against current lessons before
+   extracting new ones — to update `success_count` / `failure_count`
+   on lessons whose triggers fired and whose advice was followed.
+2. The runtime MUST run an LLM-as-judge step over `R`'s trajectory and
+   outcome to propose 0..N candidate lessons.
+3. Candidates MUST be *deduplicated* against existing lessons by slug
+   similarity and trigger overlap. A duplicate updates the existing
+   lesson (incrementing counts, appending evidence) rather than
+   creating a parallel file.
+4. New lessons MUST cite at least one `evidence` entry pointing back
+   to `R`.
+5. A lesson MUST be derivable from a single failure (`outcome:
+   failure`, `success_count: 0`) — failure-only lessons are
+   first-class.
+
+### Retrieve contract
+
+Before the agent generates a turn, the runtime SHOULD select top-K
+lessons by:
+
+1. Trigger match against the current request (tag overlap, role/operator
+   target match, semantic similarity if available).
+2. Confidence weighting (lessons with `failure_count > success_count`
+   are presented as cautions, not guidance).
+3. Recency / TTL — expired lessons MUST NOT be injected unless the
+   runtime explicitly opts in for archival reads.
+
+The selected lessons are formatted into the operator's prompt under a
+clearly labeled section ("Lessons from past experience:") so the
+underlying agent can distinguish them from instruction.
+
+### Supersession & decay
+
+A new lesson MAY mark older lessons as `supersedes`. Superseded
+lessons MUST be excluded from default retrieval but remain on disk
+(their `_log` provenance is part of the audit trail).
+
+`expires_at` is a soft TTL. The retrieve contract treats expired
+lessons as absent by default; lint passes MAY archive them.
+
+### `_index.md`
+
+The index MUST list every lesson with `slug`, `title`, `outcome`,
+`confidence`, `success_count`, `failure_count`. The runtime regenerates
+it on every distill or supersession.
+
+### Vendor extensions
+
+Vendor fields go under `metadata.<vendor>`. Standard fields MUST NOT
+be redefined by vendors.
+
+## Rationale
+
+**Why one lesson per file.** A lesson is the unit of supersession,
+audit, and credit assignment. Bundling N lessons in one file makes all
+three harder. The cost (more files) is dwarfed by the win in
+auditability.
+
+**Why explicit `success_count` and `failure_count`.** Confidence is a
+poor signal on its own — a single LLM judgment isn't trustworthy. Counts
+accumulate from real applications and decay gracefully when a lesson
+stops working.
+
+**Why failure-first is allowed.** ReasoningBank's strongest result is
+that failure-derived lessons (counter-examples) generalize as well as
+or better than success-derived ones. A spec that requires a "success"
+to extract a lesson would discard the most informative cases.
+
+**Why no embeddings field.** Mirrors AIP-10's stance: retrieval is a
+runtime concern. Lessons on disk are portable; runtimes that want
+vector retrieval compute embeddings themselves.
+
+**Why distinct from `agentknowledge/v1`.** A lesson is *imperative* —
+"do X" / "avoid Y." A wiki page is *declarative* — "X is the case." The
+two are read at different points in the agent loop (lessons before
+generate; wiki on query). Conflating them would break the prompt
+construction discipline.
+
+## Reference Implementation
+
+[`packages/agent-framework/src/lessons`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/lessons) —
+distill pipeline (LLM-as-judge over completed runs), file store with
+slug-based supersession, retrieval processor that injects top-K
+lessons before agent generation. Used by Guilde for per-operator
+learning across work items, and by Simone to feed Council
+([Council of Mentors](/)) overlay fragments.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec.
+
+## Security Considerations
+
+Lessons influence agent behavior on every turn — they are a high-value
+target.
+
+- **Lesson injection** — an attacker writes malicious lessons that
+  cause the agent to leak data or take harmful actions. Mitigation:
+  lesson writes (especially LLM-distilled ones) MUST flow through a
+  validation step; high-impact lessons SHOULD be gated by AIP-7
+  governance.
+- **Confidence laundering** — an attacker writes lessons with high
+  `confidence` and inflated `success_count`. Mitigation: counts are
+  computed by the runtime from observed outcomes, not author-declared;
+  spec-conforming runtimes MUST NOT trust author-supplied counts.
+- **Trigger over-broadening** — a lesson with overly generic
+  `tags`/`targets` injects into unrelated turns. Mitigation: retrieve
+  contract MUST require tag overlap *and* target match (not OR), and
+  runtimes MAY cap K to bound prompt budget.
+- **Stale lesson rot** — outdated lessons silently degrade behavior.
+  Mitigation: `expires_at` is honored by default; lint passes archive
+  expired lessons; `failure_count` exceeding `success_count` SHOULD
+  trigger lesson review.

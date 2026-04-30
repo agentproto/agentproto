@@ -1,0 +1,500 @@
+---
+title: "AIP-32: MCP.md — agentmcp/v1 (MCP provider specialisation)"
+description: >-
+  A markdown + frontmatter format for declaring a Model Context Protocol
+  provider — its server reference, transport (stdio / SSE / HTTP), per-tool
+  MCP tool-name binding, prompts/resources composition, and lifecycle.
+  Specialises AIP-30 PROVIDER for the `kind: mcp` case. Wraps Anthropic-spec
+  MCP servers (filesystem, github, postgres, …) as agent tools.
+aip: 32
+status: Draft
+type: Schema
+provider_kind: mcp
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 16, 19, 30]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/mcp-runtime
+resources: ./resources/aip-32/draft
+discussions-to: https://github.com/agentproto/specs/discussions/32
+---
+
+| Field | Value |
+|---|---|
+| AIP | 32 |
+| Title | MCP.md — agentmcp/v1 (MCP provider specialisation) |
+| Status | Draft |
+| Type | Schema |
+| Family | [Provider](/docs/family-provider) |
+| Provider kind | `mcp` |
+| Specialises | [AIP-30 PROVIDER.md](/docs/aip-30) |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Resources | [`./resources/aip-32`](./resources/aip-32/draft) — `MCP.schema.json`, [`ADAPTER.md`](./resources/aip-32/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-32/draft/skills/author-mcp/SKILL.md) |
+
+## Abstract
+
+`MCP.md` is the `kind: mcp` specialisation of
+[AIP-30 PROVIDER](/docs/aip-30). It packages a
+[Model Context Protocol](https://modelcontextprotocol.io) server
+integration — its server reference (binary, container, or remote
+URL), transport (stdio / SSE / HTTP), and per-tool mapping from
+abstract TOOL contracts to MCP tool names.
+
+MCP is Anthropic's open protocol for connecting LLMs to data sources,
+tools, and prompts via a JSON-RPC-like interface. Reference servers
+exist for filesystems, git, GitHub, postgres, sqlite, Brave search,
+etc. This AIP wraps those servers as conformant providers in the
+AIP-30 supertype.
+
+The frontmatter inherits everything from PROVIDER and adds MCP-
+specific fields: `server`, `transport`, `mcp_tools` mapping, plus
+optional `prompts` and `resources` composition. The format pairs
+with `defineProvider({ kind: "mcp", ... })`.
+
+## Motivation
+
+MCP is rapidly becoming the de-facto protocol for "give an LLM access
+to a tool". Anthropic ships ~15 reference servers; community servers
+proliferate. Without a shared MCP-provider format:
+
+1. **Each MCP server has its own setup story.** "Run via npx", "build
+   from source", "docker pull then expose stdio" — five flavours of
+   install, no shared declaration.
+
+2. **MCP tools don't carry contracts.** An MCP server exposes
+   `tools/list` returning JSON-Schema-validated tool definitions, but
+   those don't naturally map to AIP-14 abstract contracts. Two
+   different MCP servers may both expose `read_file` with subtly
+   different schemas; a contract-bound layer normalises.
+
+3. **Auth state is per-server.** GitHub MCP server needs OAuth;
+   filesystem MCP server needs no auth; postgres MCP server needs
+   a connection string. The PROVIDER auth shape covers all three;
+   without it, callers handle each separately.
+
+4. **Routing across same-purpose servers.** Multiple MCP servers may
+   serve `fs.read` (Anthropic's reference filesystem-mcp,
+   alternative implementations, custom server). The resolver picks;
+   without the AIP-30 layering, "MCP" is a bypass that hides
+   alternatives.
+
+5. **Lifecycle.** MCP servers spawn, connect, list tools, get torn
+   down. Without a provider format, every host re-implements the
+   lifecycle.
+
+## Design principles
+
+1. **Inherit, don't repeat.** Identity, auth, install, sandbox,
+   policy_tags, region all come from PROVIDER. MCP only adds what's
+   MCP-specific: server location, transport, tool-name mapping.
+
+2. **Server is data, not code.** `server` declares "where the MCP
+   server lives" (binary path, npm package + args, docker image, or
+   remote URL). The host's MCP runtime spawns / connects per the
+   declaration; provider authors write zero connection code in the
+   common case.
+
+3. **`mcp_tools` is the binding.** Each entry in `implements[]`
+   includes `metadata.mcp.tool_name` declaring which MCP tool name
+   serves the contract. The host calls
+   `mcp.tools/call({ name, arguments })` with the validated input.
+
+4. **Transport-agnostic at the contract layer.** stdio, SSE, and HTTP
+   transports all conform to the same MCP semantics; provider
+   declares transport, host's MCP client handles dispatch.
+
+5. **Prompts and resources are first-class.** MCP exposes prompts and
+   resources alongside tools. v1 references them via optional
+   `prompts` / `resources` blocks; full integration with AIP-3 SKILL
+   and AIP-27 REF is a follow-up.
+
+6. **Local stdio for self-hosted, HTTP for remote.** Default-recommend
+   stdio when the MCP server runs locally (filesystem, sqlite,
+   localhost postgres). Use HTTP/SSE for remote managed services or
+   shared-network deployments.
+
+## Specification
+
+### File location
+
+MCP providers live in a single folder:
+
+```
+.providers/
+  filesystem-mcp/
+    PROVIDER.md            ← this AIP, kind: mcp
+    provider.ts            ← optional entry (custom resource handler)
+    server.json            ← MCP server config (sometimes inlined into PROVIDER.md)
+    SECRETS.md             ← AIP-19 inventory (when auth is needed)
+```
+
+Convention: `id` ends with `-mcp`. The folder name SHOULD match `id`.
+
+### Frontmatter
+
+Inherits all fields from [AIP-30 PROVIDER.md](/docs/aip-30) plus the
+MCP-specific fields below.
+
+#### Required MCP-specific fields
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | const `"mcp"` | Per AIP-30. |
+| `server` | object | Where the MCP server lives. See [The server block](#the-server-block). |
+| `transport` | enum | `"stdio"` \| `"sse"` \| `"http"`. How the host connects to the server. |
+
+#### Optional MCP-specific fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `protocol_version` | string | latest known | MCP protocol version this provider targets. v1 default tracks the latest stable MCP release. |
+| `prompts` | object[] | `[]` | MCP prompts the server exposes. Each `{ name, description, integrate_as }`. v1 supports `integrate_as: "skill_block"` (composes into AIP-3 SKILL.md) or `"raw"` (exposed verbatim). |
+| `resources` | object[] | `[]` | MCP resources the server exposes. Each `{ uri_template, description, integrate_as }`. v1 `integrate_as: "ref_kind"` registers a new AIP-27 REF kind. |
+| `connection_options` | object | `{}` | Transport-specific connection params: timeout_ms, max_retries, keepalive. |
+
+#### Per-tool `metadata.mcp` (in `implements[N].metadata.mcp`)
+
+Every entry in `implements[]` adds:
+
+| Field | Type | Description |
+|---|---|---|
+| `tool_name` | string | The MCP tool name to call (`tools/call({ name: <here> })`). MUST be a tool exposed by the server's `tools/list`. |
+| `argument_mapping` | object | Optional rename: contract-input key → MCP-tool argument name. Default: identity (contract input keys passed verbatim). |
+| `result_extract` | string | JSONPath-lite to extract the contract's `outputs` shape from the MCP `tools/call` response. Default: identity (`$`). |
+
+### The `server` block
+
+Declares where the MCP server lives. Four shapes:
+
+#### 1. Local binary (stdio)
+
+```yaml
+server:
+  kind: binary
+  path: /usr/local/bin/mcp-filesystem
+  args: ["/workspace"]
+transport: stdio
+```
+
+The host spawns the binary as a subprocess with stdio piped.
+
+#### 2. npm package (stdio, most common pattern)
+
+```yaml
+server:
+  kind: npm
+  package: "@modelcontextprotocol/server-filesystem"
+  args: ["/workspace"]
+transport: stdio
+install:
+  - { method: npm, package: "@modelcontextprotocol/server-filesystem", global: false }
+```
+
+Host runs `npx <package> <args>` (or installs and runs).
+
+#### 3. Docker image (stdio or http)
+
+```yaml
+server:
+  kind: docker
+  image: "modelcontextprotocol/server-postgres:latest"
+  env:
+    DATABASE_URL: "${secrets.POSTGRES_URL}"
+transport: stdio
+```
+
+Host pulls + runs the image, connecting via stdio (with `-i` flag) or
+exposed port.
+
+#### 4. Remote HTTP / SSE endpoint
+
+```yaml
+server:
+  kind: remote
+  url: "https://mcp.example.com/v1"
+transport: sse                # or "http"
+```
+
+Host connects directly; no spawn, no install.
+
+### Transport semantics
+
+| Transport | Use when | Lifecycle |
+|---|---|---|
+| `stdio` | MCP server is a local subprocess (binary, npm, docker -i). | Spawn-on-first-use, keep alive across calls, terminate on host shutdown or idle timeout. |
+| `sse` | MCP server is remote, supports server-sent-events for bidirectional streaming. | HTTP connection upgrade; one connection per provider, multiplexed across calls. |
+| `http` | MCP server is remote, request-response per call. | One HTTP request per `tools/call`. |
+
+Providers SHOULD prefer stdio for local servers and sse for remote
+managed services with bidirectional needs.
+
+### MCP tool mapping
+
+Each `implements[]` entry binds an abstract TOOL.md to an MCP tool
+exposed by the server:
+
+```yaml
+implements:
+  - tool: ./tools/fs-read/TOOL.md
+    version: "^1.0.0"
+    metadata:
+      mcp:
+        tool_name: read_file              # the MCP tool's name from tools/list
+        argument_mapping:
+          path: path                       # contract input → MCP arg
+        result_extract: "$.contents"       # MCP returns { contents, mime_type }
+  - tool: ./tools/fs-write/TOOL.md
+    version: "^1.0.0"
+    metadata:
+      mcp:
+        tool_name: write_file
+        argument_mapping:
+          path: path
+          content: content
+```
+
+The host's MCP runtime:
+
+1. Spawns/connects the server (per `server` and `transport`).
+2. Calls `tools/list` to validate the declared `tool_name`s exist.
+3. Per call: applies `argument_mapping` to the validated contract
+   input, calls `tools/call`, applies `result_extract` to the
+   response.
+
+### Prompts integration (preview)
+
+When the MCP server exposes prompts (via `prompts/list`), the
+PROVIDER MAY declare integration:
+
+```yaml
+prompts:
+  - name: summarize-document
+    description: "Generate a structured summary of a document."
+    integrate_as: skill_block
+    skill_ref: ./skills/summarize/SKILL.md
+```
+
+`integrate_as: "skill_block"` registers the prompt as a callable
+sub-skill within the named SKILL.md. v1 implementation is preview
+quality; full integration with AIP-3 is on the roadmap.
+
+### Resources integration (preview)
+
+When the MCP server exposes resources (via `resources/list`), the
+PROVIDER MAY declare integration:
+
+```yaml
+resources:
+  - uri_template: "file:///{path}"
+    description: "Filesystem resource."
+    integrate_as: ref_kind
+    ref_kind_id: mcp_filesystem
+```
+
+`integrate_as: "ref_kind"` registers a new AIP-27 REF kind
+(`mcp_filesystem:file:///path/to/file`) so other AIPs can reference
+MCP-server-backed resources via the unified REF format. v1 preview.
+
+### Stable identity
+
+Per AIP-30. Bumping the MCP protocol version, the server source
+(npm package version major), or the transport is a major change.
+
+## The `defineProvider({ kind: "mcp", ... })` signature
+
+```ts
+interface ProviderDefinition<"mcp"> extends ProviderDefinition {
+  kind: "mcp"
+  server: McpServer
+  transport: "stdio" | "sse" | "http"
+  protocolVersion?: string
+  prompts?: McpPrompt[]
+  resources?: McpResource[]
+  connectionOptions?: { timeout_ms?: number; max_retries?: number; keepalive?: boolean }
+
+  // Optional behavioural adapters.
+  buildArguments?: (args: BuildArgumentsArgs) => Record<string, unknown>
+  parseToolResult?: (args: ParseToolResultArgs) => ProviderResult<unknown>
+}
+
+type McpServer =
+  | { kind: "binary"; path: string; args?: string[]; env?: Record<string, string> }
+  | { kind: "npm";    package: string; args?: string[]; env?: Record<string, string> }
+  | { kind: "docker"; image: string; args?: string[]; env?: Record<string, string> }
+  | { kind: "remote"; url: string; auth?: McpRemoteAuth }
+```
+
+A frontmatter-only MCP provider is valid when `argument_mapping` +
+`result_extract` cover the dispatch shape — most reference MCP servers
+fit this pattern.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* an MCP `PROVIDER.md` is via the paired
+[author-mcp skill](./resources/aip-32/draft/skills/author-mcp/SKILL.md).
+The skill walks the agent through:
+
+1. Identify the MCP server (npm package / docker image / remote URL).
+2. Identify the transport (stdio for local, sse for remote).
+3. Connect once and list MCP tools (`tools/list`).
+4. Map each MCP tool to a TOOL.md contract (existing or new).
+5. Author `argument_mapping` and `result_extract` per tool.
+6. Validate against
+   [`./resources/aip-32/draft/MCP.schema.json`](./resources/aip-32/draft).
+
+## Example
+
+```md
+---
+name: Filesystem MCP
+id: filesystem-mcp
+description:
+  Anthropic's reference filesystem MCP server. Stdio transport. Exposes
+  read_file, write_file, list_directory as the contracts fs-read,
+  fs-write, fs-list.
+version: 1.0.0
+kind: mcp
+
+server:
+  kind: npm
+  package: "@modelcontextprotocol/server-filesystem"
+  args: ["/workspace"]
+transport: stdio
+protocol_version: "2025-03"
+
+install:
+  - { method: npm, package: "@modelcontextprotocol/server-filesystem", global: false }
+version_check:
+  cmd: "npx @modelcontextprotocol/server-filesystem --version"
+  parse: 'v(\S+)'
+  range: ">=0.5"
+
+network:
+  egress: []                              # local stdio, no network
+region: ["self-hosted"]
+policy_tags: ["self-hosted", "pii-safe"]
+
+implements:
+  - tool: ./tools/fs-read/TOOL.md
+    version: "^1.0.0"
+    metadata:
+      mcp:
+        tool_name: read_file
+        argument_mapping: { path: path }
+        result_extract: "$.contents"
+  - tool: ./tools/fs-write/TOOL.md
+    version: "^1.0.0"
+    metadata:
+      mcp:
+        tool_name: write_file
+        argument_mapping: { path: path, content: content }
+        result_extract: "$"
+  - tool: ./tools/fs-list/TOOL.md
+    version: "^1.0.0"
+    metadata:
+      mcp:
+        tool_name: list_directory
+        argument_mapping: { path: path }
+        result_extract: "$.entries"
+
+resources:
+  - uri_template: "file:///{path}"
+    description: "Filesystem resources accessible via this MCP server."
+    integrate_as: ref_kind
+    ref_kind_id: mcp_filesystem
+
+tags: [mcp, filesystem, anthropic-reference, pii-safe]
+---
+```
+
+See [`./resources/aip-32/draft/EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md)
+for additional patterns: postgres MCP, GitHub MCP with OAuth, custom
+remote MCP server.
+
+## Compatibility
+
+### With AIP-30 PROVIDER.md
+
+Strict specialisation. Universal fields validate against AIP-30's
+schema; MCP-specific fields validate against AIP-32's. Hosts run both
+in sequence.
+
+### With AIP-14 TOOL.md
+
+MCP providers reference TOOL.md contracts. The contract's
+`inputSchema` is what the runtime validates; `argument_mapping`
+renames keys for the MCP server. The contract's `outputSchema` is
+what `result_extract` produces.
+
+### With AIP-3 SKILL.md (preview)
+
+`prompts[].integrate_as: "skill_block"` lets MCP-server prompts plug
+into named skills. Full integration is on the roadmap; v1 wires the
+prompt as a callable block within the named skill.
+
+### With AIP-27 REF.md (preview)
+
+`resources[].integrate_as: "ref_kind"` registers MCP-resource URIs
+as new REF kinds. Other AIPs can then reference MCP resources via
+`mcp_<kind_id>:<uri>` strings.
+
+### With Anthropic MCP reference servers
+
+The reference-server registry at
+[github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)
+provides ~15 servers. Each can be wrapped as a `kind: mcp` provider
+following the patterns in EXAMPLES.md. The author-mcp skill
+templates the wrapping.
+
+## Security considerations
+
+- **Spawned subprocess sandbox.** Stdio MCP servers spawn a
+  subprocess per provider. The PROVIDER's `network.egress` and (for
+  CLI-style) sandbox apply to the subprocess. Hosts MUST NOT allow
+  the MCP subprocess to escape the declared sandbox.
+- **MCP tool definitions are server-supplied.** A malicious MCP
+  server could expose a tool whose schema doesn't match the contract.
+  Hosts MUST validate `tools/list` responses against the registered
+  contract; mismatches fail at registration, not at first call.
+- **Resource URIs may be user-controlled.** When a tool input is a
+  resource URI (`file:///user/path`), hosts MUST sanitise against the
+  MCP server's declared sandbox before forwarding.
+- **Connection state across users.** A stdio MCP server is a
+  long-lived subprocess; per-call user context (auth, tenant) MUST
+  be passed in `tools/call.arguments`, never bound at spawn time.
+  Otherwise users share state.
+- **Remote MCP servers** expose the same risks as third-party HTTP
+  APIs (per AIP-31's security considerations). TLS verification,
+  policy_tags, region — all apply.
+
+## Open questions
+
+1. **Prompts and resources integration depth.** v1 marks both as
+   preview. Full integration with AIP-3 SKILL.md and AIP-27 REF.md
+   needs more concrete server examples to settle.
+2. **MCP protocol versioning.** Anthropic ships breaking changes via
+   protocol version. v1 doesn't yet codify how providers express
+   "supports both v1 and v2"; defer to v2 with field experience.
+3. **Multi-tenant stdio servers.** Stdio servers are subprocess-
+   per-provider; multi-tenant routing today means subprocess-per-
+   tenant. Scaling needs a connection-pool model — v2.
+4. **Streaming on stdio.** MCP supports streaming via newline-
+   delimited JSON-RPC notifications; the AIP-31 streaming pattern
+   doesn't quite fit. Defer to a v2 streaming integration.
+
+## See also
+
+- [Model Context Protocol](https://modelcontextprotocol.io) — upstream protocol
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts MCP providers
+  implement
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
+- [AIP-29 — CLI.md](/docs/aip-29) — sibling specialisation,
+  `kind: cli`
+- [AIP-30 — PROVIDER.md](/docs/aip-30) — abstract supertype
+- [AIP-31 — HTTP.md](/docs/aip-31) — sibling specialisation,
+  `kind: http`
+- [AIP-33 — SDK.md](/docs/aip-33) — sibling specialisation,
+  `kind: sdk`
+- [Provider family](/docs/family-provider) — index of related AIPs
+- [`./MCP.schema.json`](./resources/aip-32/draft) — JSON Schema validator
+- [`./ADAPTER.md`](./resources/aip-32/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md) — additional patterns

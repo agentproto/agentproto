@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentproto.dev/schemas/aip-3/SKILL.schema.json",
+  "title": "SKILL.md frontmatter (AIP-3)",
+  "description": "Validates the YAML frontmatter portion of an AIP-3 SKILL.md manifest. Note: this very schema is also exercised by the AIP-3 authoring SKILL.md in the same folder — the authoring skill is itself a valid AIP-3 skill and validates against this file.",
+  "type": "object",
+  "required": ["schema", "name", "title", "description", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "skills/v1",
+      "description": "Schema dispatch tag. MUST be 'skills/v1' for this version of AIP-3."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+      "description": "Machine identifier. Lowercase, digits, dashes. Must start with a letter, end with a letter or digit."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Human-readable display title, sentence case."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "One-paragraph purpose, written for the LLM caller. Used by the host catalog for skill selection."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][a-zA-Z0-9.-]+)?$",
+      "description": "Semver. Bump on breaking change to inputs or required tools."
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Optional. Conventional shape: 'Name <email>'."
+    },
+    "entry": {
+      "type": "string",
+      "description": "Optional. Relative path to an entry file (e.g. skill.ts) exposing defineSkill. Body-only skills omit this."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "default": [],
+      "maxItems": 12,
+      "description": "Catalog tags. Lowercase kebab-case; no leading symbols. 3-6 tags is typical."
+    },
+    "inputs": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "description": "Parameter identifier. camelCase or snake_case."
+          },
+          "type": {
+            "enum": ["string", "number", "boolean", "object"],
+            "description": "Input type. Richer shapes go in the body as guidance."
+          },
+          "required": {
+            "type": "boolean",
+            "default": false
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Prose for the LLM. Empty descriptions train the agent to hallucinate."
+          },
+          "default": {
+            "description": "Optional default value when 'required' is false."
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Optional. JSON Schema (draft 2020-12) describing the structured output the skill reports back, if any. Most skills return prose only and omit this field."
+    },
+    "tools": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$" },
+      "default": [],
+      "description": "Tool ids the skill expects to find in the host's catalog. Declarative — the body still drives invocation."
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$" },
+      "default": [],
+      "description": "Other skills this skill composes with. The host MAY refuse activation if any are absent."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "network": { "type": "array", "items": { "type": "string" } },
+        "fs.read": { "type": "array", "items": { "type": "string" } },
+        "fs.write": { "type": "array", "items": { "type": "string" } },
+        "env": { "type": "array", "items": { "type": "string" } },
+        "secrets": { "type": "array", "items": { "type": "string" } },
+        "tools": { "type": "array", "items": { "type": "string" } }
+      },
+      "description": "Host capabilities the skill needs. Gated by AIP-7 before activation."
+    },
+    "examples": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["input"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "input": {},
+          "output": {},
+          "note": { "type": "string" }
+        }
+      },
+      "description": "Optional sample invocations. The host MAY use these as registration-time tests."
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "enum": ["workspace", "user", "host"],
+          "default": "workspace",
+          "description": "Default install scope hint. Hosts MAY override based on policy."
+        },
+        "path": {
+          "type": "string",
+          "description": "Optional custom install path; defaults to '<scope-root>/.skills/<name>/'."
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {},
+      "description": "Host-specific extension fields. Authors stash hints under namespaced keys (e.g. metadata.acme.foo)."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["entry"]
+      },
+      "then": {
+        "properties": {
+          "entry": { "type": "string", "minLength": 1 }
+        },
+        "description": "If 'entry' is declared, it MUST be non-empty. The host loads it and expects a defineSkill default export."
+      }
+    }
+  ]
+}

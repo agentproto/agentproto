@@ -1,0 +1,101 @@
+---
+title: "AIP-6: COMPANY.md — agentcompanies/v1 (company, role & objective primitives)"
+description: A filesystem-first, vendor-neutral file format for representing AI companies — their org structure, roles, and objectives — as portable git-native packages.
+aip: 6
+status: Draft
+type: Core
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/paperclipai/paperclip
+discussions-to: https://github.com/agentproto/specs/discussions/6
+---
+
+| Field | Value |
+|---|---|
+| AIP | 6 |
+| Title | COMPANY.md — agentcompanies/v1 (company, role & objective primitives) |
+| Status | Draft |
+| Type | Core |
+| Domain | companies.sh |
+| Upstream | [paperclipai/paperclip](https://github.com/paperclipai/paperclip) |
+
+## Abstract
+
+`agentcompanies/v1` is an open file-format standard for representing the
+structural primitives of an AI company — the company itself, its roles,
+its objectives, its operators — as a set of markdown-with-frontmatter and
+JSON files in a filesystem-first, vendor-neutral package. Any git
+repository conforming to the layout is a valid company package. AIP-6
+mirrors the upstream spec maintained at
+[paperclipai/paperclip](https://github.com/paperclipai/paperclip) and
+anchors it inside the AIP registry so dependent specs (AIP-7, AIP-8) can
+reference it by AIP number.
+
+## Motivation
+
+AI-company products today represent org structure in vendor-specific
+databases. That makes:
+
+- **Portability** impossible: moving a company between vendors requires
+  re-authoring it.
+- **Audit** opaque: there is no diffable, version-controlled artifact.
+- **Composition** ad-hoc: governance specs (AIP-7) and operational specs
+  (AIP-8) have no shared substrate to extend.
+
+agentcompanies/v1 fixes this by making the company *a folder of files*.
+Git is the version control. The filesystem is the database. Adapters
+project these files into vendor-specific databases when needed.
+
+## Specification
+
+> AIP-6 mirrors the canonical specification maintained upstream at
+> [paperclipai/paperclip](https://github.com/paperclipai/paperclip). The
+> normative text will be vendored into this AIP as part of moving
+> Draft → Review, with editorial divergences (if any) called out
+> explicitly.
+
+Doctype shape (sketch):
+
+| Doctype | Path | Purpose |
+|---|---|---|
+| `company` | `COMPANY.md` | Root file: identity, mission, structure |
+| `role` | `roles/<slug>/ROLE.md` | A role within the company |
+| `objective` | `objectives/<slug>/OBJECTIVE.md` | An objective the company pursues |
+| `operator` | `operators/<slug>/OPERATOR.md` | A specific AI operator (instance of a role) |
+
+Common conventions adopted by all `agentcompanies/v1` files:
+
+- **Markdown canonical** with YAML frontmatter
+- **`schema: agentcompanies/v1`** field on every doctype
+- **Slug-based references**, never database IDs
+- **Vendor-specific extensions** under `metadata.<vendor>.*`
+- **Git-native**: any repository hosting these files is a valid company
+
+## Rationale
+
+*To be authored. Defend: filesystem-first over DB-first, slug references
+over UUIDs, markdown over pure JSON for human-authorable doctypes,
+vendor-extensions namespace.*
+
+## Reference Implementation
+
+Upstream at
+[paperclipai/paperclip](https://github.com/paperclipai/paperclip) — the
+spec, parsers, validators. Inside the agentik ecosystem, the
+agentik-studio monorepo consumes companies via adapters; concrete usage
+emerges through AIP-8 (agencies engine).
+
+## Backwards Compatibility
+
+Not applicable — first AIP-numbered version. If the upstream spec
+revs to v2, AIP-6 stays at v1 and a new AIP supersedes it.
+
+## Security Considerations
+
+The spec is a file format with no execution semantics, but the *contents*
+of a company package describe agent permissions, roles, and access. A
+malicious company package fed to a credulous runtime could grant
+inappropriate permissions. Mitigations are runtime-side: signatures
+(via AIP-7), provenance metadata, and human approval gates before
+ingesting external companies.

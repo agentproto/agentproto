@@ -1,0 +1,322 @@
+---
+title: Propose an AIP
+description: How to submit a new Agent Improvement Proposal — submission workflow, editorial process, review timelines, number assignment, and what makes an AIP land.
+---
+
+# Propose an AIP
+
+Anyone can propose an AIP. AIPs are merged on technical merit and
+adoption potential — not on who authored them. The process is the same
+shape as [BIPs](https://github.com/bitcoin/bips),
+[EIPs](https://eips.ethereum.org/), and
+[PEPs](https://peps.python.org/): open, numbered, public, and
+asynchronous.
+
+## TL;DR
+
+```bash
+# 1. Fork the spec repo
+git clone https://github.com/agentproto/specs
+
+# 2. Copy the template
+cp AIPS/aip-template.md AIPS/aip-XXXX.md
+
+# 3. Fill in frontmatter + the 7 required sections
+$EDITOR AIPS/aip-XXXX.md
+
+# 4. Open a PR. Editors assign a real AIP number on PR open.
+git push origin propose-<short-slug>
+```
+
+Detailed walkthrough below.
+
+---
+
+## 1. Before you start
+
+A good AIP describes **one decision at one boundary** — the smallest
+contract a third party can implement against. Before opening a PR,
+sanity-check:
+
+- **Is the gap real?** Have you searched the
+  [related-standards](/docs/related-standards) page to confirm MCP /
+  A2A / AGNTCY / AITP / Anthropic Skills don't already cover this?
+- **Is there shipping code?** Aspirational specs without an
+  implementation are returned as Withdrawn. Reference implementations
+  can be in any language and any repo — they just need to exist.
+- **Is the scope tight?** AIPs that try to standardize an entire
+  platform almost always fail review. One file format, one runtime
+  contract, one transport — pick one.
+- **Have you read [AIP-1](/docs/aip-1) and [AIP-2](/docs/aip-2)?**
+  AIP-1 is the meta-process; AIP-2 is the template. Skipping either is
+  the most common reason PRs bounce.
+
+If your idea overlaps with an in-flight AIP (check the
+[index](/docs)), join *that* discussion before starting a new one.
+
+## 1.5. Scratch RFCs (optional pre-staging)
+
+For genuinely novel architectural ideas — a new abstraction layer, a
+new file format that doesn't fit any existing slot, a substantial
+refactor of multiple existing AIPs — authoring a **scratch RFC**
+before minting an AIP number can absorb design risk.
+
+A scratch RFC lives at:
+
+```
+AIPS/drafts-pre-aip/<short-name>-RFC.md
+```
+
+It has no `aip:` frontmatter (so the registry doesn't index it) and
+no AIP number assigned. It's a working document for the author and
+reviewers to iterate on before committing to a numbered slot.
+
+**Time-limited.** Scratch RFCs MUST be either minted as an AIP,
+withdrawn, or moved to the discussion forum within **90 days** of
+their initial commit. Editors track open scratch RFCs and prompt the
+author at the deadline. The 90-day cap exists because numbering
+discipline is the editorial filter that forces specs to land —
+removing it permanently is corrosive.
+
+**When to use:**
+
+- The abstraction is novel enough that you want public feedback
+  before claiming a permanent AIP number (e.g. AIP-30 PROVIDER's
+  abstract/concrete split was scratch-RFC'd before mint).
+- You're proposing a refactor of multiple existing AIPs and want to
+  see how reviewers react to the surface area before committing.
+
+**When NOT to use:**
+
+- A concrete instance of an already-validated contract (e.g. a new
+  PROVIDER subtype) — go straight to numbered Draft, the abstract
+  is settled.
+- A bug fix or clarification to a Final AIP — that's errata, not a
+  new spec.
+- An idea you haven't yet thought through enough to articulate the
+  problem it solves. RFC-stage isn't a thinking pad; it's a
+  consensus-building stage.
+
+The pattern is borrowed from IETF "individual drafts" and from
+Rust's RFC repo. A scratch RFC that survives 90 days of feedback and
+gets minted is more durable than a hastily-numbered Draft that
+churns through major rewrites.
+
+## 2. Submission workflow
+
+### Step 1 — Fork & branch
+
+```bash
+git clone https://github.com/agentproto/specs
+cd specs
+git checkout -b propose-<your-slug>
+```
+
+### Step 2 — Author the file
+
+Copy `AIPS/aip-template.md` to `AIPS/aip-XXXX.md` (literal `XXXX` —
+editors assign the real number). Fill in the required frontmatter:
+
+```yaml
+---
+aip: XXXX
+title: <short, descriptive title>
+author: <Your Name <your@email>>
+status: Draft
+type: Meta | Schema | Core
+created: YYYY-MM-DD
+requires: [<aip>, ...]            # optional
+replaces: <aip>                    # optional
+discussions-to: <github URL>       # optional but encouraged
+ref-impl: <repo URL>               # required for Schema and Core
+---
+```
+
+Then complete the 7 mandatory body sections:
+
+1. **Abstract** — 2-3 sentences
+2. **Motivation** — what problem this solves; why existing specs don't cover it
+3. **Specification** — the normative content (Zod / TypeScript / JSON Schema / BNF / prose)
+4. **Rationale** — why these design choices; what alternatives were rejected
+5. **Reference Implementation** — link to working code
+6. **Backwards Compatibility** — required only if `replaces` is set
+7. **Security Considerations** — required for Core, recommended for Schema
+
+### Step 3 — Open the PR
+
+Title format: `AIP: <short title>`. Body should include a one-paragraph
+summary and a link to discussion if any.
+
+Editors will:
+
+- Assign a real AIP number (replacing `XXXX`)
+- Add the file to `AIPS/` index
+- Tag the PR with `status:draft`
+- Pin a tracking issue if discussion is expected
+
+### Step 4 — Iterate during Draft
+
+While in Draft, substantial change is welcome. Push commits as the
+spec evolves. Anyone in the community may comment on the PR or in the
+discussion thread.
+
+### Step 5 — Request Review
+
+When you believe the spec is stable, comment on the PR requesting
+`status:review`. Editors verify minimum criteria (frontmatter
+complete, all 7 sections present, ref-impl reachable, no unresolved
+blockers) and flip the status.
+
+Review lasts a **minimum of 14 days**. The clock resets on substantive
+spec changes.
+
+### Step 6 — Final
+
+After Review with no blocking concerns, editors merge the spec as
+`Final`. From this point only **errata** are accepted; replacing it
+requires a new AIP that `replaces` it.
+
+---
+
+## 3. The 2-implementer rule
+
+To move from `Review` to `Final`, an AIP MUST have **at least two
+independent implementations** — one of which MAY be the author's
+reference impl, but at least one other MUST come from a different
+organization or maintainer.
+
+This rule is the registry's adoption filter. Without it, the namespace
+becomes a graveyard of "internal proposals dressed as standards" (the
+exact failure mode that killed ~99% of EIPs).
+
+If your AIP solves a real problem but no second implementer signs up,
+the AIP can stay `Review` indefinitely or be reclassified as
+**Informational** — published but explicitly not pushed for adoption.
+
+---
+
+## 4. Editorial process
+
+### Editors
+
+Editors are the maintainers of the
+[github.com/agentproto/specs](https://github.com/agentproto/specs) repo.
+They do **not** gate on technical merit during Draft/Review — that's
+the public's job on the PR. Editors enforce:
+
+- Format compliance (frontmatter, section completeness)
+- Number uniqueness
+- Status transitions
+- The 2-implementer rule for `Final`
+- Conflict-of-interest disclosure (an editor cannot solo-merge their
+  own AIP to `Final`)
+
+Same role as BIP / EIP / PEP editors — clerical and procedural, not
+political.
+
+### Response timelines
+
+| Action | Editor response SLA |
+|---|---|
+| New PR opened | Number assigned within 7 days |
+| `status:review` requested | Verified or rejected within 7 days |
+| `Final` requested (post-Review) | Decision within 14 days |
+| Errata PR on `Final` AIP | Reviewed within 7 days |
+
+These are SLAs, not promises. Editors are volunteers; complex AIPs may
+take longer with explicit author notice.
+
+### Becoming an editor
+
+After landing two AIPs (as author or substantive reviewer), you can
+nominate yourself for editor status by opening a discussion. New
+editors are added by consensus of the existing team.
+
+---
+
+## 5. Rejection, withdrawal, supersession
+
+### Withdrawn
+
+The author can withdraw at any time. The doc remains in the registry
+for historical reference; status flips to `Withdrawn`.
+
+### Editor rejection
+
+Editors may reject a PR before number assignment if it:
+
+- Duplicates an existing AIP without superseding it
+- Has no reference implementation (for Schema/Core)
+- Is outside the AIP-family scope (the
+  [adjacency clause](/docs/aip-1#adjacency-to-other-specs) — extend an
+  existing spec rather than fork)
+- Violates the AIP-2 template structure
+
+Rejections are not punitive. The PR can be reopened after addressing
+the rejection reason. Authors who feel a rejection was wrong may open
+a discussion to appeal — a different editor will adjudicate.
+
+### Supersession
+
+A later AIP that defines a successor protocol marks itself with
+`replaces: <number>`. The replaced AIP's status becomes `Superseded`
+once the replacement reaches `Final`. The replaced doc remains
+readable for citation.
+
+---
+
+## 6. Style guide
+
+- **Be concrete.** Replace "the system" with the actual subject. Vague
+  specs become contested specs.
+- **Use small examples.** A 5-line YAML beats two paragraphs of prose.
+- **Cite prior AIPs by number.** Write `AIP-7`, not "the governance
+  one". Numbers are permanent; titles can evolve.
+- **Use RFC-2119 keywords.** MUST / SHOULD / MAY are normative;
+  use them deliberately.
+- **Reference adjacent specs.** If your AIP overlaps with MCP, A2A,
+  AGNTCY, AITP, OpenAPI, etc., cite the overlap explicitly in
+  Rationale and explain why a new spec exists.
+
+---
+
+## 7. FAQ
+
+**Can I propose an AIP that replaces an existing Final one?**
+Yes. Set `replaces: <N>` and explain the breaking change in Backwards
+Compatibility. Supersession is a normal lifecycle event.
+
+**Does my AIP need to be MIT-licensed?**
+The text of the AIP must be open (MIT or CC-BY at minimum). The
+reference implementation can be any open-source license.
+
+**Who owns AIPs after they're merged?**
+Authors retain attribution. The AIP text is licensed for redistribution
+under the registry's CC-BY license.
+
+**What if MCP / A2A / AGNTCY publish a competing spec mid-Review?**
+The AIP can pivot to be a *profile of* or *extension to* the
+upstream spec rather than a competitor. AIP-1's adjacency clause
+recommends extending over forking by default.
+
+**Can vendors propose AIPs that lock in their stack?**
+They can, but specs that read as vendor-specific extensions to a
+proprietary platform won't pass the 2-implementer rule and won't
+reach `Final`. Vendor authorship is welcome; vendor lock-in is not.
+
+**How do I get help drafting an AIP?**
+Open a discussion on
+[github.com/agentproto/specs/discussions](https://github.com/agentproto/specs/discussions)
+before opening a PR. Early feedback is cheap; spec rewrites are
+expensive.
+
+---
+
+## Ready to start?
+
+```bash
+git clone https://github.com/agentproto/specs
+cp AIPS/aip-template.md AIPS/aip-XXXX.md
+```
+
+Open a PR when ready. We respond within a week.

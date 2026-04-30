@@ -1,0 +1,939 @@
+---
+title: "AIP-21: AGENCY.md — agentagencies/v2 (commercial agency workspace on AIP-18 collections)"
+description: A workspace-only successor to AIP-8 that drops the eleven hardcoded agency doctypes (service, engagement, agreement, deliverable, invoice, counterparty, procedure, pricing-model, routine, capacity, agency) and delegates all per-doctype schema work to AIP-18 collections — owning only the workspace root manifest, the engagement lifecycle helpers that span collections, scope axes, and cross-AIP composition with strong governance and work bindings.
+aip: 21
+status: Draft
+type: Schema
+created: 2026-04-28
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 18]
+replaces: 8
+resources: ./resources/aip-21/draft
+discussions-to: https://github.com/agentproto/specs/discussions/21
+---
+
+| Field | Value |
+|---|---|
+| AIP | 21 |
+| Title | AGENCY.md — agentagencies/v2 (commercial agency workspace on AIP-18 collections) |
+| Status | Draft |
+| Type | Schema |
+| Domain | agencies.sh |
+| Doctypes | `agency.workspace/v2` (workspace manifest + view, written as `AGENCY.md`) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7), [AIP-18](/docs/aip-18) |
+| Replaces | [AIP-8](/docs/aip-8) (`agentagencies/v1`) — once Final |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work workspaces) |
+| Resources | [`./resources/aip-21`](./resources/aip-21/draft) — [`AGENCY.schema.json`](./resources/aip-21/draft/AGENCY.schema.json), [`ADAPTER.md`](./resources/aip-21/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-21/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md), [`starters/`](./resources/aip-21/draft/starters/agentagencies-v1-compat) |
+
+## Abstract
+
+`agentagencies/v2` is a **workspace-only** successor to
+[AIP-8](/docs/aip-8). It defines a single doctype —
+`agency.workspace/v2`, written as `AGENCY.md` — that declares the
+shape of a commercial-agency tracker without baking the eleven
+per-doctype schemas of v1 into the spec. Where AIP-8 hardcoded
+`service`, `engagement`, `agreement`, `deliverable`, `invoice`,
+`counterparty`, `procedure`, `pricing-model`, `routine`, `capacity`,
+and `agency` itself as first-class doctypes, AIP-21 lifts every
+per-doctype concern (fields, status state machine, ownership
+cardinality, signature semantics, financial fields) to
+[AIP-18](/docs/aip-18) `COLLECTION.md` files and keeps only the
+**workspace-level** concerns at the `AGENCY.md` layer: agency
+identity (legal entity, taxId, jurisdiction, currency), which
+collections are enabled, how scope axes apply across collections,
+how cross-collection lifecycle rules propagate state from
+deliverables up to engagements and from engagements down to
+invoices, what lints span the whole agency, and how the workspace
+binds to the rest of the AIP family — governance ([AIP-7](/docs/aip-7))
+for signature gates, work ([AIP-20](/docs/aip-20)) for execution,
+companies ([AIP-6](/docs/aip-6)) for counterparty resolution,
+playbooks ([AIP-12](/docs/aip-12)) for routine plays, knowledge
+([AIP-10](/docs/aip-10)) for case studies, workflows
+([AIP-15](/docs/aip-15)) for procedure execution. The same doctype,
+used recursively via `extends:`, also expresses **per-context
+views** — an operator ([AIP-9](/docs/aip-9)), a company
+([AIP-6](/docs/aip-6)), a jurisdiction, or a sub-studio ships its
+OWN `AGENCY.md` that adapts the base agency for its lens. AIP-21
+ships a starter library
+(`starters/agentagencies-v1-compat/`) of ten
+[AIP-18](/docs/aip-18) collections that mirror AIP-8's hardcoded
+doctypes so existing v1 agencies can be loaded under v2 without
+breaking — the eleventh v1 doctype (`agency` itself) becomes the
+`AGENCY.md` workspace root.
+
+## Motivation
+
+The hard lesson from [AIP-8](/docs/aip-8) was that **the per-doctype
+schema does not belong on the workspace AIP**. AIP-8's eleven
+hardcoded doctypes were the right call for shipping v1 (concrete,
+debuggable, narrow), but the pattern collapses the moment a real
+agency needs a twelfth — a `proposal`, a `case-study`, a `referral`,
+a `retainer-bucket`, a `time-entry` finer-grained than `capacity`.
+With v1, every additional doctype required either a fork of the
+workspace AIP or a smuggled-in `metadata.<vendor>` extension that
+the spec cannot validate. The cost of mixing workspace concerns
+with item-schema concerns shows up the moment an agency tries to
+serve more than one client domain's vocabulary. The agency that
+sells SaaS development needs an `epic` separate from a `deliverable`;
+the agency that sells legal services needs a `matter` separate from
+an `engagement`; the agency that sells creative-direction work
+needs a `concept-board` that doesn't fit any of v1's eleven slots.
+
+The fix is the same separation [AIP-13](/docs/aip-13) → [AIP-20](/docs/aip-20)
+just landed for work-tracking, applied to the commercial-agency
+domain. [AIP-18](/docs/aip-18) owns the type system: a
+`COLLECTION.md` declares the schema for a class of records (fields,
+statuses, ownership cardinality, deadline kind, lints, identity
+rules); an `ITEM.md` is a single record validated against a named
+collection. AIP-21 owns everything *above* the type system: which
+collections an agency tracks, how scope axes apply across them,
+when an engagement's deliverables roll up to mark the engagement
+delivered, when an engagement's deliverable acceptance triggers
+invoice creation, what lints span the whole agency, and how the
+agency binds to operators, governance, knowledge, work, playbooks,
+companies, and workflows. **Two AIPs, two surfaces, one mental
+model.** An agency that needs a twelfth doctype writes a twelfth
+`COLLECTION.md` (an authoring problem), not a revision to AIP-21
+(a registry problem). And because the seam runs between
+"workspace shape" and "item shape", changes to one rarely require
+changes to the other — a new field on `invoice` is an AIP-18 edit,
+a new lifecycle rule across `deliverable` and `invoice` is an
+AIP-21 edit.
+
+The commercial-agency domain has one specific feature that work-tracking
+does not: **lifecycle state propagates across collections, not just
+within one**. An engagement isn't `delivered` until all its
+deliverables are accepted; an engagement isn't `invoiced` until at
+least one invoice has been generated; an agreement isn't `closed`
+until the engagement it gates is terminal. These cross-collection
+relationships are the AIP-21 distinctive contribution — they don't
+fit at the AIP-18 layer (which knows only one collection at a time)
+and they don't fit on per-item fields (which would denormalize the
+state). They live at the **workspace** level, declared once in
+`AGENCY.md`, evaluated by the host whenever an item in any of the
+related collections is written. The same registry-of-views pattern
+[AIP-2](/docs/aip-2) codifies and [AIP-7](/docs/aip-7) /
+[AIP-10](/docs/aip-10) / [AIP-20](/docs/aip-20) instantiate keeps
+the lifecycle helpers composable across views: a per-jurisdiction
+view inherits the parent's lifecycle rules unchanged, a per-operator
+view adds a lint without touching them, a sub-studio adds a new
+rule and the merge resolves it cleanly.
+
+The migration path is conservative. AIP-21 ships a starter library
+([`starters/agentagencies-v1-compat/`](./resources/aip-21/draft/starters/agentagencies-v1-compat))
+containing ten [AIP-18](/docs/aip-18) collections — `service`,
+`engagement`, `agreement`, `deliverable`, `invoice`, `counterparty`,
+`procedure`, `pricing-model`, `routine`, `capacity` — whose fields,
+statuses, ownership rules, and signature semantics mirror AIP-8's
+hardcoded doctypes. An existing AIP-8 agency can opt into v2 by
+adding an `AGENCY.md` at its root and pointing `collections:` at
+the starter library; existing items load unchanged. AIP-8 stays in
+Draft for the duration of the transition; it will move to
+Superseded once AIP-21 reaches Final. The cross-AIP centre of
+gravity stays the same — agencies bind to companies for
+counterparties, governance for signatures, work for execution —
+but every per-doctype schema concern moves to AIP-18 where it can
+be specialised without touching the workspace.
+
+## Specification
+
+A conforming `agentagencies/v2` deployment is a single doctype:
+`agency.workspace/v2`, written as `AGENCY.md`. The agency's items
+live under [AIP-18](/docs/aip-18) collections — AIP-21 does NOT
+define an item doctype of its own. Every per-doctype concern is
+deferred to AIP-18. Every workspace-level concern (identity,
+collections enablement, scope, lifecycle helpers across collections,
+cross-AIP bindings, workspace-spanning lints) is owned by this AIP.
+
+### File location
+
+The filename `AGENCY.md` is normative — discovery, install, and
+toolchains key off it. The path is conventional, not normative.
+Conventional layout:
+
+```
+<agency-root>/
+├── AGENCY.md                          # workspace manifest (REQUIRED at the agency root)
+├── collections/                       # AIP-18 collections enabled by this agency
+│   ├── service/
+│   │   └── COLLECTION.md              # AIP-18 collection definition
+│   ├── engagement/
+│   │   └── COLLECTION.md
+│   ├── agreement/
+│   │   └── COLLECTION.md
+│   ├── deliverable/
+│   │   └── COLLECTION.md
+│   ├── invoice/
+│   │   └── COLLECTION.md
+│   └── counterparty/
+│       └── COLLECTION.md
+└── items/                             # AIP-18 ITEM.md records, filed by collection
+    ├── service/
+    │   └── <slug>.md
+    ├── engagement/
+    │   └── <slug>.md
+    ├── agreement/
+    │   └── <slug>.md
+    ├── deliverable/
+    │   └── <slug>.md
+    └── invoice/
+        └── <slug>.md
+```
+
+**Per-context views** live alongside their consumer, not under the
+agency root:
+
+```
+operators/account-manager/AGENCY.md    # extends ../../<agency-root>/AGENCY.md
+companies/acme/AGENCY.md               # extends ../../<agency-root>/AGENCY.md
+jurisdictions/eu/AGENCY.md             # extends ../../<agency-root>/AGENCY.md
+studios/creative/AGENCY.md             # extends ../../<agency-root>/AGENCY.md
+```
+
+A view's `extends:` field points to a parent `AGENCY.md` (workspace
+root OR another view). `appliesTo:` binds the view to one or more
+operator/company/skill workspace refs. The host resolves the chain
+on load and exposes the merged effective config to the consumer.
+
+### `AGENCY.md` — frontmatter shape
+
+```yaml
+---
+schema: agency.workspace/v2
+name: <kebab-case-id>                       # required
+title: <human-readable>                     # required
+description: <one-paragraph purpose>        # required
+version: <semver>                           # required, the WORKSPACE version
+
+# Composition (view mode)
+extends: ../path/to/parent/AGENCY.md        # OPTIONAL
+appliesTo:                                  # OPTIONAL — bind this view to consumers
+  - ws://operators/<slug>                   #   AIP-9 operator
+  - ws://companies/<slug>                   #   AIP-6 company
+  - ws://skills/<slug>                      #   AIP-3 skill
+
+# Identity (commercial-flavored — AIP-21 specific)
+identity:
+  legalEntity: ws://companies/<slug>        # OPTIONAL — AIP-6 ref to the agency's legal entity
+  legalName: <string>                       # OPTIONAL — display string when no AIP-6 ref
+  taxId: <string>                           # OPTIONAL — VAT number / EIN / other tax id
+  jurisdiction: <ISO 3166-1 alpha-2>        # OPTIONAL — primary jurisdiction (e.g. FR, US, GB)
+  defaultCurrency: <ISO 4217>               # OPTIONAL — default currency (e.g. EUR, USD, GBP)
+
+# Cross-AIP composition (the centre of gravity)
+governance: <path-or-ref>                   # OPTIONAL — AIP-7 governance binding
+work: ws://workspaces/<slug>                # OPTIONAL — AIP-20 work-tracking binding
+knowledge: ws://wikis/<slug>/KNOWLEDGE.md   # OPTIONAL — AIP-10 wiki binding
+playbook: ws://playbooks/<slug>             # OPTIONAL — AIP-12 active playbook
+companies: ws://companies                   # OPTIONAL — AIP-6 root for counterparty resolution
+executor: ws://operators/<slug>             # OPTIONAL — AIP-9 default executor
+
+# The collections this agency tracks. Three forms supported.
+collections:                                # array; merge-by-effective-name with parent
+  # 1. Inline declaration (small agencies, no sharing):
+  - inline:
+      schema: collection.schema/v1
+      name: service
+      title: Service
+      description: A catalog item for the agency's service catalog.
+      version: 1.0.0
+      fields: [...]
+      statuses: [...]
+      ownership: { cardinality: single, role: owner, required: false }
+      # full COLLECTION.md frontmatter, parsed in-place under AIP-18
+  # 2. File ref (shared with peers):
+  - ref: ./collections/engagement/COLLECTION.md
+  # 3. Registry import:
+  - ref: ws://collections/agreement
+  # With aliasing (for renaming or version pinning at workspace level):
+  - ref: ws://collections/contract
+    alias: agreement
+    version: "1.x"
+
+# Engagement lifecycle (the AIP-21 distinctive contribution)
+# Cross-collection state propagation rules: when items in collection A
+# satisfy a predicate, the host bubbles a status onto items in collection B.
+lifecycle:
+  enabled: true
+  rules:
+    - id: <kebab-id>                        # required — merge key
+      when: <predicate>                     # required — when the rule fires
+      forCollection: <collection-name>      # required — which collection's items get the status
+      bubbleStatus: <status-id>             # required — status id to bubble
+      params: { <key>: <value> }            # OPTIONAL — predicate parameters
+
+# Scope axes (mirror AIP-20 — workspace-level uniformity across collections)
+scope:
+  containment:
+    enabled: true
+    field: parent                           # which item field carries the containment ref
+    rules:
+      allowedKinds: [engagement, deliverable]
+      maxDepth: 4
+  applicability:
+    enabled: true
+    field: appliesTo                        # which item field carries scope-applicability list
+    valueClass: client | market | service | <custom>
+  ownership:
+    enabled: true
+    field: owner                            # delegates to per-collection ownership.role by default
+    policy: strict | inherit | open
+
+# Workspace-spanning lints (AIP-18 lints are per-collection; these span collections)
+lints:                                       # array; merge-by-id with parent
+  - id: <kebab-id>
+    kind: stale-engagement | unsigned-agreement | overdue-invoice | broken-procedure-ref | custom
+    severity: error | warn | info
+    params: { <key>: <value> }
+
+# Routine workflow defaults (composes with AIP-15)
+defaults:
+  workflow: <ref>                           # OPTIONAL — default WORKFLOW.md path or ref
+  approvalClass: auto | always | on-mutate | policy:<ref>
+  auditMutations: true | false              # ONE-WAY SWITCH — once true, child can't disable
+
+# Engagement-specific terms (AIP-21 specific)
+engagement:
+  terms:
+    contractRequired: true | false          # ONE-WAY SWITCH — once true, child can't downgrade
+    defaultPaymentTerms: net-15 | net-30 | <custom>
+    defaultCurrency: <ISO 4217>             # OPTIONAL — defaults to identity.defaultCurrency
+
+# Display / UX hints
+display:
+  homePage: <slug>                          # OPTIONAL — landing item id
+  defaultGrouping: kind | status | counterparty | engagement
+  defaultView: list | board | timeline | dashboard
+
+metadata:                                    # vendor extensions, namespaced under <vendor>
+  <vendor>:
+    <field>: <value>
+---
+
+# <body — markdown prose>
+
+Conventional sections in the body include:
+
+- ## Purpose — what this agency does, who it serves
+- ## Conventions — when an item belongs in collection A vs collection B
+- ## What this agency does NOT cover — set boundaries explicitly
+- ## When to extend vs replace — composition guidance
+```
+
+The body is free-form markdown. The frontmatter is the contract.
+
+### Identity
+
+The `identity:` block is the AIP-21 distinctive contribution to
+agency identity (vs the more general work-workspace identity of
+[AIP-20](/docs/aip-20)). All five fields are optional; agencies
+that operate as a sole operator with no counterparty billing may
+omit the block entirely.
+
+| Field | Purpose | Format |
+|---|---|---|
+| `legalEntity` | Refers to the [AIP-6](/docs/aip-6) company that legally signs agreements and issues invoices. When set, the host resolves this ref to populate `legalName` and `taxId` automatically. | `ws://companies/<slug>` |
+| `legalName` | Display string for the legal entity name. Used when `legalEntity` is absent (the agency is an unincorporated operator) or when the AIP-6 record's `legalName` should be overridden. | string |
+| `taxId` | Tax identifier — VAT number (EU), EIN (US), GST (CA/AU), etc. Hosts MUST treat this string as opaque; format validation belongs to per-jurisdiction tooling outside this spec. | string |
+| `jurisdiction` | Primary jurisdiction the agency operates under, as ISO 3166-1 alpha-2 (`FR`, `US`, `GB`, `DE`). Drives jurisdiction-specific lints and currency defaults. | `^[A-Z]{2}$` |
+| `defaultCurrency` | Default currency for new invoices, as ISO 4217 (`EUR`, `USD`, `GBP`). Per-engagement overrides take precedence; this is the workspace fallback. | `^[A-Z]{3}$` |
+
+Identity fields are inherited along the `extends:` chain via
+override (child wins). A per-jurisdiction view typically narrows
+`jurisdiction` and `defaultCurrency`; a per-operator view typically
+inherits the parent's identity unchanged.
+
+### Collection declaration
+
+The `collections:` array is the bridge between AIP-21 and
+[AIP-18](/docs/aip-18). Each entry MUST be one of three forms:
+
+**1. Inline declaration.** A full `collection.schema/v1`
+frontmatter, parsed in-place. The host registers the collection
+directly via [AIP-18](/docs/aip-18)'s `defineCollection` without
+loading a separate file. Useful for small, single-tenant agencies
+where the collection is not shared:
+
+```yaml
+collections:
+  - inline:
+      schema: collection.schema/v1
+      name: service
+      title: Service
+      description: A catalog item for the agency's service catalog.
+      version: 1.0.0
+      fields:
+        - { name: pricingModel, type: ref, refKind: pricing-model }
+        - { name: tags, type: array, items: { type: string } }
+      statuses:
+        - { id: draft, label: Draft }
+        - { id: live, label: Live, terminal: false }
+        - { id: retired, label: Retired, terminal: true }
+      ownership: { cardinality: single, role: owner, required: false }
+```
+
+**2. File ref.** A relative path to a `COLLECTION.md` on disk. The
+host loads the file via [AIP-18](/docs/aip-18) and registers the
+collection. Useful when the collection is shared with peer agencies
+or when the collection's version is managed independently:
+
+```yaml
+collections:
+  - ref: ./collections/engagement/COLLECTION.md
+```
+
+**3. Registry import.** A `ws://collections/<slug>` URI resolved
+against the host's collection registry. Useful for cross-agency
+sharing and for installing third-party collection definitions:
+
+```yaml
+collections:
+  - ref: ws://collections/agreement
+```
+
+**Aliasing.** Any ref form MAY carry an `alias:` to expose the
+collection in this agency under a different name. This is the
+escape hatch for ref-name conflicts and for workspace-local naming
+preferences (for example, an agency that calls every signed contract
+a `letter-of-engagement` rather than `agreement`):
+
+```yaml
+collections:
+  - ref: ws://collections/contract
+    alias: agreement
+    version: "1.x"
+```
+
+When `alias:` is set, items in this agency MUST reference the
+alias, not the upstream name. The host MUST refuse a workspace
+whose two entries resolve to the same effective name with
+`agency_collection_alias_conflict` (HARD).
+
+The `collections:` array merges across the `extends:` chain by
+**effective name** (alias if set, otherwise the collection's `name`).
+A child entry with the same effective name replaces the parent's;
+new effective names are appended.
+
+### Engagement lifecycle helpers
+
+This is the AIP-21 distinctive contribution. Where
+[AIP-20](/docs/aip-20) tracks **status rollups** (parent ← children
+within one workspace tree), AIP-21 tracks **cross-collection
+lifecycle propagation** (one collection's items trigger a status
+change on a different collection's items).
+
+The commercial-agency domain has three canonical relationships
+that span collections:
+
+- An engagement is `delivered` when all its deliverables are
+  terminal-accepted.
+- An engagement is `invoiced` when at least one invoice has been
+  generated against it.
+- An agreement is `closed` when the engagement it gates becomes
+  terminal.
+
+These relationships do not fit at the [AIP-18](/docs/aip-18) layer
+— a collection's status state machine knows only its own items.
+They do not fit on individual item fields — denormalising the
+"all my children are accepted" predicate into a stored field on
+the parent guarantees stale data on the next mutation. They fit
+at the **workspace** level, evaluated by the host whenever an item
+in any of the related collections is written.
+
+```yaml
+lifecycle:
+  enabled: true
+  rules:
+    - id: deliverables-complete
+      when: "all-items-in-collection-terminal"
+      forCollection: engagement
+      bubbleStatus: delivered
+      params:
+        sourceCollection: deliverable
+        terminalStatuses: [accepted]
+        linkField: engagement       # field on `deliverable` items pointing at the engagement
+    - id: any-invoice-paid
+      when: "any-linked-item-status"
+      forCollection: engagement
+      bubbleStatus: invoiced
+      params:
+        sourceCollection: invoice
+        statusEquals: paid
+        linkField: engagement
+    - id: engagement-closed
+      when: "linked-item-terminal"
+      forCollection: agreement
+      bubbleStatus: closed
+      params:
+        sourceCollection: engagement
+        linkField: agreement        # field on engagement pointing at agreement
+```
+
+Each rule has four required fields:
+
+| Field | Purpose |
+|---|---|
+| `id` | Stable kebab-case identifier. Merge key when composing across `extends:`. |
+| `when` | Predicate id from the recognized vocabulary (see table below). |
+| `forCollection` | The collection whose items receive the bubbled status. |
+| `bubbleStatus` | The status id to set on the target item when the predicate holds. MUST exist on `forCollection`'s state machine. |
+
+Recognized predicates:
+
+| `when` clause | Meaning |
+|---|---|
+| `all-items-in-collection-terminal` | All items in `params.sourceCollection` linked to this item via `params.linkField` are terminal (or terminal-and-in `params.terminalStatuses` if narrowed). |
+| `any-linked-item-status` | At least one item in `params.sourceCollection` linked to this item has `status == params.statusEquals`. |
+| `linked-item-terminal` | The item in `params.sourceCollection` linked to this item is terminal. |
+| `no-linked-items` | No items in `params.sourceCollection` link back to this item. |
+| `custom:<id>` | Host-defined predicate keyed by `id`. |
+
+**Evaluation semantics.** When a host writes an item, after the
+[AIP-18](/docs/aip-18) per-collection validation succeeds, the host
+walks the `lifecycle.rules` array. For each rule whose
+`forCollection` matches the written item's collection OR whose
+`params.sourceCollection` matches the written item's collection,
+the host re-evaluates the predicate against the current state and
+bubbles the status when it holds. Evaluation MUST be idempotent —
+re-running the rule on already-bubbled state is a no-op. Cycle
+detection: a rule MUST NOT have `forCollection == params.sourceCollection`,
+and the host MUST refuse a `lifecycle.rules` array that creates a
+graph cycle (rule A bubbles status onto collection X, rule B fires
+on X, rule B bubbles onto collection Y, rule C fires on Y and
+bubbles onto collection X) with `agency_lifecycle_cycle` (HARD).
+
+**Idempotency caveat.** Bubbling a status that the target item is
+already in is a no-op. Bubbling a status that the target item's
+state machine does not declare as a valid transition from the
+current status is treated as a soft warning (`agency_lifecycle_rule_invalid`)
+and skipped — the host does NOT force-write across an
+[AIP-18](/docs/aip-18) transition guard.
+
+### Scope axes
+
+The three orthogonal axes from [AIP-20](/docs/aip-20) carry over
+to AIP-21 with one terminology shift: the natural `valueClass` for
+agency `appliesTo` is typically `client` (a counterparty ref), `market`
+(a market segment), or `service` (a service catalog entry).
+
+| Axis | Question it answers | Item field (default) | Per-collection counterpart |
+|---|---|---|---|
+| `containment` | What is this part of? | `parent` | [AIP-18](/docs/aip-18) `parent` |
+| `applicability` | Who is this *about* / scoped to? | `appliesTo` | a collection-declared field with `type: array` of refs |
+| `ownership` | Who is *doing* this? | `owner` | [AIP-18](/docs/aip-18) `ownership.role` |
+
+The semantics mirror [AIP-20](/docs/aip-20)'s scope axes verbatim;
+see [AIP-20 § Scope axes](/docs/aip-20#scope-axes) for the full
+treatment. AIP-21 adds no new axis — three is the right number,
+and the orthogonality argument holds for commercial agencies as
+much as for work-tracking trackers.
+
+### Cross-AIP composition
+
+`AGENCY.md` is the centre of gravity for AIP-family composition in
+the commercial domain. The table below lists every cross-AIP ref
+and the AIP that owns the binding's semantics.
+
+| Field | Target AIP | Purpose |
+|---|---|---|
+| `executor` | [AIP-9](/docs/aip-9) operator | Default executor for items with no explicit assignee. |
+| `governance` | [AIP-7](/docs/aip-7) policy / audit | Status-transition approvals, signature gates on agreements, scope-widening interventions, audit log routing. **Agreements MUST be signed; the default policy lives here.** |
+| `knowledge` | [AIP-10](/docs/aip-10) `KNOWLEDGE.md` | Wiki this agency refers to — case studies, prior-art, methodology. Lets cross-references on items resolve against the bound wiki by default. |
+| `work` | [AIP-20](/docs/aip-20) `WORK.md` | Work-tracking workspace for engagement deliverables. Items in `deliverable` MAY be tracked as work items in the bound work workspace. |
+| `playbook` | [AIP-12](/docs/aip-12) playbook | Active playbook governing routine plays this agency runs. |
+| `companies` | [AIP-6](/docs/aip-6) companies root | Resolution root for `counterparty` items: a counterparty's `companyRef` field resolves under this binding. |
+| `defaults.workflow` | [AIP-15](/docs/aip-15) `WORKFLOW.md` | Default routine workflow run against agency items (e.g. nightly invoice-overdue sweep). |
+| `identity.legalEntity` | [AIP-6](/docs/aip-6) company | The agency's own legal entity (the company that signs and bills). |
+| `collections[].ref` / `collections[].inline` | [AIP-18](/docs/aip-18) `COLLECTION.md` | Per-doctype schema. EVERY item-schema concern is delegated here. |
+| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator | View binding. |
+| `extends` | another `AGENCY.md` | Composition. |
+
+The cross-AIP centre of gravity is wider in AIP-21 than in
+[AIP-20](/docs/aip-20). Where work-tracking sometimes binds a single
+governance policy, an agency *must* bind governance for signature
+gates (an unsigned agreement is a non-binding draft) and *typically*
+binds work and companies as well. The starter library reflects this
+— most starter `engagement.md` items expect a counterparty ref to
+resolve under the agency's `companies:` root, and the
+`agreement.md` starter expects the agency's `governance:` policy
+to gate signing.
+
+A host MUST verify that every cross-AIP ref it loads resolves —
+unresolvable refs surface as `agency_xref_unresolvable` (HARD for
+`executor` / `governance` / `knowledge` / `playbook` / `companies` /
+`identity.legalEntity`; warn for `work` and `defaults.workflow`
+since both may be intentionally provisioned later).
+
+### Composition (`extends:` chain)
+
+When a host loads an `AGENCY.md` whose `extends:` is set, it MUST:
+
+1. **Walk the parent chain** up to depth 8, with cycle detection
+   (warning), missing-parent detection (warning), depth-overflow
+   detection (warning). Same posture as [AIP-20](/docs/aip-20).
+2. **Tolerate malformed chains as warnings**, not errors.
+3. **Tolerate a missing parent.**
+4. **Merge bottom-up**, child wins on conflicts.
+
+**Merge strategy** (child wins on conflicts):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins. |
+| `extends` | local-only | Not inherited. |
+| `appliesTo` | local-only | Not inherited. Each child declares its own scope. |
+| `identity.*` | leaf-field override | `legalEntity`, `legalName`, `taxId`, `jurisdiction`, `defaultCurrency` each override independently. |
+| `executor`, `governance`, `knowledge`, `work`, `playbook`, `companies` | override | Child can rebind. Subject to one-way switches and governance gating. |
+| `collections` | merge-by-effective-name | Effective name = `alias` if set, otherwise the collection's `name`. |
+| `lifecycle.enabled` | override | |
+| `lifecycle.rules` | merge-by-id | Same `id` → child replaces parent's; new ids appended. |
+| `scope.containment.*` | leaf-field deep-merge | ONE-WAY: `enabled: true` cannot be downgraded. |
+| `scope.applicability.*` | leaf-field deep-merge | ONE-WAY: `valueClass` cannot drift. |
+| `scope.ownership.*` | leaf-field deep-merge | `policy` may narrow (`open` → `inherit` → `strict`). |
+| `lints` | merge-by-id | Same `id` → child replaces parent's. |
+| `defaults.*` | leaf-field override | ONE-WAY: `auditMutations: true` cannot be downgraded. |
+| `engagement.terms.*` | leaf-field deep-merge | ONE-WAY: `contractRequired: true` cannot be downgraded. |
+| `display.*` | leaf-field override | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+#### One-way switches (HARD refusals)
+
+Five fields are **one-way switches**: once enabled or set at any
+ancestor in the `extends:` chain, descendants MUST NOT relax them.
+Attempting to relax surfaces a HARD refusal — the view does NOT
+degrade to local-only, it fails to load.
+
+| Field | Switch direction | Refusal code |
+|---|---|---|
+| `defaults.auditMutations: true` | Once true at any ancestor, child cannot set false. | `agency_audit_downgrade` |
+| `scope.containment.enabled: true` | Once true at any ancestor, child cannot set false (would orphan items). | `agency_scope_disable` |
+| `scope.applicability.valueClass: <X>` | Once set at any ancestor, child cannot change to a different class. | `agency_scope_value_class_drift` |
+| `governance.signing.required: true` | Once required at any ancestor (via the AIP-7 binding), child cannot relax signing for downstream views. | `agency_signing_downgrade` |
+| `engagement.terms.contractRequired: true` | Once required at any ancestor, child cannot accept engagements without an agreement. | `agency_contract_required_downgrade` |
+
+The fourth and fifth switches are AIP-21 specific. The signing
+switch is delegated to the bound [AIP-7](/docs/aip-7) policy — the
+host reads the policy's `signing.required` field and enforces the
+one-way invariant on it. The contract-required switch is purely
+AIP-21: it gates whether a workspace allows engagement items
+without a corresponding agreement item, and once enabled at any
+ancestor, downstream views cannot disable it (commercial protection
+against a sub-studio quietly accepting work without paperwork).
+
+#### `appliesTo` enforcement
+
+Same as [AIP-20](/docs/aip-20): `appliesTo` is **not inherited**;
+**`appliesTo` present ⇒ `extends` REQUIRED**; unresolvable refs
+HARD-refuse with `agency_appliesto_unresolvable`.
+
+### Body conventions
+
+The frontmatter ends; the body is markdown. Conventional sections:
+
+- `## Purpose` — what this agency does and who it serves.
+- `## Conventions` — when an item belongs in collection A vs
+  collection B; which scope axes apply; how lifecycle rules
+  propagate.
+- `## What this agency does NOT cover` — set boundaries explicitly.
+- `## When to extend vs replace` — composition guidance.
+
+The body is free-form. The contract lives in the frontmatter.
+
+### Vendor extensions
+
+The `metadata` namespace accepts vendor-specific extensions
+namespaced under `<vendor>` keys. Hosts MUST treat vendor metadata
+as advisory: nothing under `metadata.*` may change the meaning of
+any field defined in this AIP, and in particular nothing in vendor
+metadata may bypass a one-way switch.
+
+## Workspace root manifest (AGENCY.md)
+
+Per the convention codified in [AIP-2](/docs/aip-2), every
+Workspace AIP MUST define a root manifest doctype. AIP-21's root
+manifest is the same `agency.workspace/v2` doctype used in two
+modes:
+
+- **Workspace-root mode** — `<agency-root>/AGENCY.md`, no
+  `extends:`. Declares the BASE shape: identity, enabled
+  collections, scope axes, lifecycle rules, lints, defaults.
+  Lives at the root of the agency tree.
+- **View mode** — `<consumer>/AGENCY.md`, `extends:` set. Adapts
+  the base for a specific operator/company/skill/jurisdiction —
+  narrows the visible collections, adds a workspace-level lint,
+  rebinds governance for that context.
+
+The same schema validates both modes; the host distinguishes by
+checking whether `extends:` is set. The same merge algorithm
+applies recursively. The same authoring skill
+([`./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md`](./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md))
+walks an agent through both flows.
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<agency-root>/AGENCY.md` | `<consumer>/AGENCY.md` |
+| `extends:` | absent | required |
+| `appliesTo:` | absent | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins |
+| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the workspace |
+| Use cases | agency authors, schema designers | operator/company/jurisdiction teams who want their own lens |
+| Validation | full schema check | schema check + chain validation + one-way-switch check |
+| Lifecycle | versioned with the agency | versioned with the consumer |
+
+## Rationale
+
+**Why split workspace concerns from item-schema concerns.**
+[AIP-8](/docs/aip-8) collapsed both layers into one AIP. The
+workspace AIP owned both "what kinds exist" and "what a single
+kind looks like", and the cost showed up the moment a real agency
+needed a twelfth doctype — a `proposal` separate from `agreement`,
+a `time-entry` finer-grained than `capacity`, a `case-study` that
+isn't quite a `deliverable`. AIP-18 carved out the item-schema
+layer; AIP-21 keeps only the workspace layer. This is the same
+separation [AIP-2](/docs/aip-2) codifies as the registry-of-views
+pattern and that [AIP-13](/docs/aip-13) → [AIP-20](/docs/aip-20)
+just landed for work-tracking. Three distinct layers (workspace,
+collection, item), three distinct AIPs, one composition mechanic.
+
+**Why keep engagement-lifecycle helpers at the workspace level
+(not per-collection).** The lifecycle rules that propagate state
+across collections — "all deliverables accepted ⇒ engagement
+delivered", "any invoice paid ⇒ engagement invoiced", "engagement
+terminal ⇒ agreement closed" — fundamentally span collections.
+A per-collection [AIP-18](/docs/aip-18) state machine knows only
+its own items; it cannot express "this engagement's status depends
+on those deliverables". Pushing the rules into a per-item field
+denormalises the state and guarantees it goes stale on the next
+mutation. The natural home is the workspace, where the rules are
+declared once, evaluated by the host on every write, and merged
+cleanly across the `extends:` chain. This is the AIP-21 distinctive
+contribution and the reason `lifecycle.rules` is a first-class
+field rather than an extension on top of [AIP-20](/docs/aip-20)'s
+`statusRollup`.
+
+**Why one-way switches on `contractRequired` and `signing.required`.**
+The commercial-agency domain has stronger contractual invariants
+than work-tracking. An agreement that one descendant view treats
+as optional — by relaxing `engagement.terms.contractRequired:
+false` for one operator's lens — silently legitimises
+under-the-table engagements. A signature requirement that one
+sub-studio relaxes silently strips the audit trail off agreements
+in that sub-studio. Both invariants belong in the same one-way
+posture as [AIP-7](/docs/aip-7)'s `auditRequired` and
+[AIP-20](/docs/aip-20)'s `auditMutations`: once enabled at any
+ancestor, descendants MUST NOT relax. Hard refusal on these two,
+in addition to the three [AIP-20](/docs/aip-20) shares, makes the
+agency tree trustworthy: a third party inspecting the chain can
+verify that no descendant erodes signing or contracting
+invariants without reading every leaf.
+
+**Why allow inline + ref + aliased collection declarations.**
+Same answer as [AIP-20](/docs/aip-20). Three forms cover three
+real authoring postures: *inline* for small single-tenant agencies
+where the collection schema is private and co-located; *file ref*
+for shared-on-disk collections where peer agencies import the same
+`COLLECTION.md`; *registry import* for third-party collections
+installed via `agentproto install`. *Aliasing* is the escape hatch
+for ref-name conflicts and workspace-local renaming. The host's
+three-step resolution order (inline → local file → registry)
+means authors can prototype inline, graduate to file ref when
+sharing emerges, and only reach for registry import when
+third-party collections enter the picture. No mode is mandatory;
+all three are first-class.
+
+**Why AIP-21 mirrors AIP-20 structurally.** The agentproto family
+converges on a shared mechanic for workspace AIPs: one
+`<NAMESPACE>.md` doctype, two modes (workspace root / view),
+`extends:` for composition, `appliesTo:` for binding, merge-by-id
+for arrays of objects, hard-refusal on bindings to non-existent
+consumers, soft-warning on malformed chains. [AIP-10](/docs/aip-10)
+codified it for wikis, [AIP-7](/docs/aip-7) for governance, and
+[AIP-20](/docs/aip-20) for work-tracking; AIP-21 keeps the same
+convergent shape for commercial agencies. A host implementing one
+Workspace AIP gets the others structurally for free — same loader,
+same merge algorithm, same effective-config exposure surface. The
+cost of inventing a per-AIP composition mechanic would have been
+shipping four subtly different loaders; the cost of converging is
+one paragraph of "see AIP-20 for the merge strategy" per AIP. The
+convergence is deliberate, and AIP-21's only domain-specific
+additions are the `identity` block, the `lifecycle.rules` array,
+and the two extra one-way switches — everything else is the same
+machinery [AIP-20](/docs/aip-20) shipped.
+
+**Why a starter library, not a normative type list.** Shipping
+ten `service` / `engagement` / `agreement` / etc. as REQUIRED
+collections would re-introduce AIP-8's mistake (workspace concerns
+and item-schema concerns coupled at the AIP level). Shipping them
+as a STARTER LIBRARY keeps the migration concrete (existing v1
+agencies have a clear on-disk path) without making the type list
+normative. An agency building a v2 workspace from scratch picks
+zero, two, five, or ten of the starter collections, and adds
+whatever eleventh / twelfth / thirteenth kind their business needs
+— without forking an AIP. The library is the floor, not the
+ceiling.
+
+## Reference Implementation
+
+Reference implementation in progress. The spec leads the
+implementation; once the in-flight `packages/agencies/v2` package
+lands, this AIP will absorb the working schema in full as part of
+moving Draft → Review.
+
+The implementation will compose with [AIP-18](/docs/aip-18)'s
+`packages/collection/core` (also in flight) — `AGENCY.md`
+validation delegates per-item-kind validation to AIP-18; both
+packages share the same merge algorithm and resolution-chain
+exposure surface as [AIP-20](/docs/aip-20).
+
+## Backwards Compatibility
+
+[AIP-8](/docs/aip-8) (`agentagencies/v1`) is the predecessor.
+AIP-21 is set up to replace it via the `replaces: 8` frontmatter;
+AIP-8 moves to Superseded once AIP-21 reaches Final. Until then,
+both AIPs are loadable.
+
+**Migration path.** AIP-21 ships a starter library at
+[`./resources/aip-21/draft/starters/agentagencies-v1-compat/`](./resources/aip-21/draft/starters/agentagencies-v1-compat)
+containing ten [AIP-18](/docs/aip-18) collections — `service`,
+`engagement`, `agreement`, `deliverable`, `invoice`, `counterparty`,
+`procedure`, `pricing-model`, `routine`, `capacity` — whose
+fields, statuses, ownership, and signature semantics mirror AIP-8's
+hardcoded doctypes. The eleventh AIP-8 doctype (`agency` itself,
+written as `AGENCY.md`) becomes the AIP-21 workspace root.
+
+An existing v1 agency can opt into v2 by:
+
+1. Adding an `AGENCY.md` at its agency root (workspace-root mode).
+2. Pointing `collections:` at the ten starter collections (file
+   refs or inline).
+3. Setting `scope.containment.enabled: true` with appropriate
+   `allowedKinds` to preserve v1 parent semantics.
+4. Setting `engagement.terms.contractRequired: true` if the agency
+   relies on the v1 contractual invariant.
+5. Enabling `lifecycle.rules` if the team relies on v1's implicit
+   "deliverables-accepted ⇒ engagement-delivered" propagation
+   (v1 had this as runtime behavior; v2 makes it declarative).
+
+Existing items load unchanged. The starter collections are
+*examples*, not normative — teams MAY extend them
+([AIP-18](/docs/aip-18) `extends:`) to add domain-specific fields
+(`engagement.budget`, `deliverable.assetUrl`, `invoice.poNumber`)
+without touching the workspace manifest.
+
+**Richer migrations** (introducing kinds AIP-8 did not anticipate
+— `proposal`, `case-study`, `referral`, `time-entry`,
+`retainer-bucket` — restructuring the parent hierarchy, adding new
+scope axes) are an operator concern, not a spec concern. AIP-21
+deliberately avoids prescribing a richer migration path.
+
+**What breaks.** Nothing on the item side: AIP-8 items remain
+valid under AIP-21 once the starter collections are wired in.
+Workspace-root manifests written against AIP-8's `agency/v1` schema
+do NOT load directly under AIP-21 — the discriminator changes
+(`schema: agency.workspace/v2`), the doctype enumeration shifts to
+collections, and the lifecycle rules are now declarative.
+Hosts that need to load both v1 and v2 manifests MUST switch on
+the `schema:` discriminator and route accordingly.
+
+**Deprecation window.** AIP-8 stays Draft until AIP-21 reaches
+Final. Once AIP-21 is Final, AIP-8 moves to Superseded; hosts
+SHOULD continue supporting v1 for at least one minor-version
+cycle to give live agencies time to migrate.
+
+## Security Considerations
+
+Agencies are *write surface* for commercial authority. Threats:
+
+- **Signature poisoning.** A malicious view sets a more permissive
+  signature policy on agreements (lowering the AIP-7 threshold
+  from human-required to autosign, or relaxing
+  `governance.signing.required`). Mitigation: covered by
+  `agency_signing_downgrade` (HARD). Once any ancestor sets
+  `governance.signing.required: true`, no descendant may relax it.
+
+- **Contract terms downgrade.** A view sets
+  `engagement.terms.contractRequired: false` to silently allow
+  engagement items without an agreement. Mitigation: covered by
+  `agency_contract_required_downgrade` (HARD). Once any ancestor
+  sets it true, descendants cannot disable.
+
+- **Invoice forgery.** A malicious item write sets `status: paid`
+  on an invoice without a corresponding payment event. Mitigation:
+  per-collection AIP-18 status transitions guard against arbitrary
+  status writes (the `paid` transition typically requires a
+  payment-event signature); the workspace's `lifecycle.rules`
+  cross-reference invoice paid status to engagement status, so a
+  forged paid status surfaces as a downstream lifecycle bubble that
+  reviewers can audit. Combine with `defaults.auditMutations: true`
+  for full traceability.
+
+- **Counterparty impersonation.** A view declares a counterparty
+  item whose `companyRef` resolves to a real AIP-6 company that
+  the agency has no relationship with — silently establishing an
+  apparent engagement. Mitigation: hosts MUST resolve cross-AIP
+  refs inside the same tenant scope; AIP-6 companies registered
+  under a different tenant fail to resolve with
+  `agency_xref_unresolvable`. The `companies:` binding declares
+  the resolution root explicitly; counterparties resolved outside
+  that root are rejected.
+
+- **Cross-AIP ref forgery.** A view declares
+  `executor: ws://operators/<slug>` for an operator that exists
+  but is owned by another tenant. Mitigation: same posture as
+  [AIP-20](/docs/aip-20) — hosts MUST resolve cross-AIP refs
+  inside the same tenant scope as the view file; cross-tenant
+  bindings fail with `agency_xref_unresolvable`.
+
+- **Audit downgrade.** A view sets `defaults.auditMutations: false`
+  to silence the audit log for one consumer's session. Mitigation:
+  covered by `agency_audit_downgrade` (HARD). Once a parent in
+  the chain enables audit, no descendant can disable it.
+
+- **Scope axis drift.** A view changes
+  `scope.applicability.valueClass` from `client` to `service`,
+  invalidating every existing item whose `appliesTo` was written
+  against `client` refs. Mitigation: covered by
+  `agency_scope_value_class_drift` (HARD).
+
+- **Lifecycle rule cycle.** A malicious or careless author defines
+  rules that form a graph cycle (rule A ⇒ collection X status,
+  rule B fires on X ⇒ collection Y status, rule C fires on Y ⇒
+  collection X status). Mitigation: the host MUST detect cycles at
+  workspace registration time and refuse with
+  `agency_lifecycle_cycle` (HARD). The cycle check runs over the
+  graph of `(forCollection, params.sourceCollection)` edges across
+  all rules.
+
+- **Vendor metadata as policy bypass.** A vendor extension under
+  `metadata.<vendor>` carries a flag the host honours that softens
+  one-way switches (signing, audit, scope, contract). Mitigation:
+  hosts MUST treat vendor metadata as advisory. Nothing under
+  `metadata.*` may change the meaning of any field defined in this
+  AIP. The five one-way switches are spec-level invariants; vendor
+  namespaces cannot bypass them.
+
+The threat model assumes the filesystem itself is trusted (or
+verified through [AIP-1](/docs/aip-1)'s hash/signature mechanisms).
+AIP-21 inherits that posture without restating it; per-collection
+threats (item-schema attacks, status-removal attacks) are
+documented in [AIP-18](/docs/aip-18) and not duplicated here.
+
+## See also
+
+- [AIP-1 — agent.json](/docs/aip-1)
+- [AIP-2 — AIP template & registry-of-views pattern](/docs/aip-2)
+- [AIP-3 — SKILL.md](/docs/aip-3)
+- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-8 — agentagencies/v1](/docs/aip-8) — the predecessor; deprecated by this AIP
+- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace AIP, same composition mechanic
+- [AIP-12 — agentplaybooks/v1](/docs/aip-12)
+- [AIP-15 — WORKFLOW.md](/docs/aip-15)
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate this AIP composes on
+- [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP, structural template
+- [`./resources/aip-21/draft/AGENCY.schema.json`](./resources/aip-21/draft/AGENCY.schema.json) — frontmatter validator
+- [`./resources/aip-21/draft/ADAPTER.md`](./resources/aip-21/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-21/draft/EXAMPLES.md`](./resources/aip-21/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md`](./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-21/draft/starters/agentagencies-v1-compat/`](./resources/aip-21/draft/starters/agentagencies-v1-compat) — starter collection library mirroring AIP-8 doctypes

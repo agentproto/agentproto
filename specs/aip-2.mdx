@@ -1,0 +1,219 @@
+---
+title: "AIP-2: AIP Template"
+description: The template every new AIP starts from. Copy this file, change the frontmatter, and fill in the sections.
+aip: 2
+status: Final
+type: Meta
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1]
+resources: ./resources/aip-2/draft
+---
+
+| Field | Value |
+|---|---|
+| AIP | 2 |
+| Title | AIP Template |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Final |
+| Type | Meta |
+| Requires | [AIP-1](/docs/aip-1) |
+| Created | 2026-04-26 |
+| Resources | [`./resources/aip-2`](./resources/aip-2/draft) — [`SKILL.md`](./resources/aip-2/draft/skills/use-aip-template/SKILL.md) |
+
+## How to use this template
+
+1. Copy this file to `AIPS/aip-XXXX.md` in
+   [github.com/agentproto/specs](https://github.com/agentproto/specs).
+2. Replace the frontmatter values below.
+3. Fill in every required body section — keep the section headings exactly
+   as shown so the registry tooling can parse them.
+4. Open a PR. Editors will assign a real number.
+
+See [AIP-1](/docs/aip-1) for the full submission process and lifecycle.
+
+---
+
+## Template — frontmatter
+
+```yaml
+---
+aip: XXXX                                   # Editors assign — leave as XXXX
+title: <short, descriptive title>
+author: <Your Name <your@email>>
+status: Draft                                # Always start here
+type: Meta | Schema | Core                  # Pick exactly one
+created: YYYY-MM-DD
+requires: [<aip>, <aip>]                    # Optional — list AIPs this depends on
+replaces: <aip>                              # Optional — only if this supersedes a prior Final AIP
+discussions-to: <github discussion URL>     # Optional but encouraged
+ref-impl: <repo URL>                         # Required for Schema/Core
+---
+```
+
+## Template — body
+
+Copy the sections below verbatim. Required sections must be present even if
+their content is "Not applicable" (with a one-line justification).
+
+### Abstract
+
+*Two to three sentences. What this AIP defines. A reader scanning the
+registry should be able to grasp the scope from the abstract alone.*
+
+### Motivation
+
+*Why does this exist? What problem does it solve that existing specs do not?
+Reference prior art (MCP, A2A, AGNTCY, AITP, internal designs) and explain
+the gap.*
+
+### Specification
+
+*The normative section. Define the schema, contract, or protocol with
+enough precision that an independent implementer could build it without
+asking the author questions.*
+
+*Use whatever formalism fits — Zod schemas, TypeScript types, JSON Schema,
+BNF, prose. Be explicit about MUST / SHOULD / MAY (RFC 2119 keywords).*
+
+### Rationale
+
+*Why these design choices? What alternatives were considered and why were
+they rejected? This section is where you defend non-obvious decisions to
+future readers (and yourself in 18 months).*
+
+### Reference Implementation
+
+*Link to working code. For Schema AIPs, this is typically a parser and
+validator. For Core AIPs, this is a runtime adapter or full reference
+implementation.*
+
+*If the reference impl is not yet ready: state that explicitly and link to
+the in-progress work.*
+
+### Backwards Compatibility
+
+*Required if this AIP has `replaces` set. Document:*
+
+- *What breaks*
+- *Migration path for implementers of the prior AIP*
+- *Whether the prior AIP is immediately Superseded or has a deprecation window*
+
+*If not applicable, write "Not applicable — this AIP introduces a new
+spec."*
+
+### Security Considerations
+
+*Required for Core; recommended for Schema; optional for Meta.*
+
+*Document the threat model: what does an adversary controlling each input
+look like? What invariants does the spec rely on? What happens at the
+trust boundary?*
+
+*If you genuinely don't see a security surface, say so and explain why —
+"This is a static file format with no execution semantics" is a valid
+answer.*
+
+---
+
+## Single-doc vs Workspace AIPs — the registry-of-views pattern
+
+Every Schema or Core AIP defines either a **single-doc artifact** or a
+**workspace** of multiple doctypes. Pick one before you start writing —
+the choice drives the title, the directory shape, and the importer
+contract.
+
+### Single-doc AIPs
+
+The whole AIP defines ONE markdown-with-frontmatter file that an agent
+or runtime can ship as a unit. Examples: [SKILL.md](/docs/aip-3),
+[DESIGN.md](/docs/aip-4), [TOOL.md](/docs/aip-14),
+[WORKFLOW.md](/docs/aip-15).
+
+Conventions:
+
+- The file's name IS the AIP's identity — title MUST lead with it
+  (`SKILL.md — skill manifest format`, not `agentskills/v1`).
+- The single file's frontmatter validates against one schema in the
+  resources pack (e.g. `SKILL.schema.json`).
+- The folder layout for installs is flat: `<workspace>/skills/<id>/SKILL.md`.
+
+### Workspace AIPs
+
+The AIP defines MULTIPLE doctypes that compose into a coordinated
+workspace. Examples: [agentcompanies/v1](/docs/aip-6) (COMPANY + ROLE +
+OBJECTIVE), [agentgovernance/v1](/docs/aip-7) (GOVERNANCE + APPROVAL +
+AUDIT + POLICY), [agentknowledge/v1](/docs/aip-10) (KNOWLEDGE + ENTRY +
+SOURCE), [agentwork/v1](/docs/aip-13) (WORK + PROJECT + INITIATIVE +
+TASK).
+
+**Normative rule** — every Workspace AIP MUST:
+
+1. Define a **root manifest doctype** named `<NAMESPACE>.md` (e.g.
+   `KNOWLEDGE.md`, `WORK.md`, `GOVERNANCE.md`). The root file declares
+   the workspace's shape: enabled item kinds, lint rules, default
+   policies, cross-AIP bindings.
+2. Title the AIP with the root filename leading: `KNOWLEDGE.md —
+   agentknowledge/v1 (LLM-maintained wiki)`.
+3. Make the root manifest the **importable entry-point** — the file an
+   `agentproto install <namespace>://<slug>` resolver reads.
+4. Support **composability** via an `extends:` frontmatter field that
+   takes a relative path to a parent `<NAMESPACE>.md`. The parent's
+   config is recursively merged into the child's.
+5. Support a **view mode** — same doctype as the root, but with
+   `extends:` set, and an optional `appliesTo:` array binding the view
+   to specific consumers (an [AIP-9](/docs/aip-9) operator, an
+   [AIP-6](/docs/aip-6) company, an [AIP-3](/docs/aip-3) skill).
+6. Define cross-field constraint: `appliesTo` present ⇒ `extends`
+   REQUIRED. A view must extend something.
+
+### Composition algorithm (normative for Workspace AIPs)
+
+When a runtime loads a `<NAMESPACE>.md` whose `extends:` is set:
+
+1. Recursively load the parent (chain depth ≤ 8; cycle detection;
+   missing parent → soft warning + use local only).
+2. Merge: scalar fields override, arrays of objects merge-by-id (each
+   array MUST declare its merge key in the schema), `metadata` is
+   deep-merged.
+3. The host MUST expose both the merged effective config AND the
+   resolution chain via debug surface.
+4. The host MUST refuse a view whose `appliesTo:` references a
+   non-existent consumer — this is a hard error, not a warning.
+
+### Why this pattern
+
+The same way `package.json` made npm a registry by giving every package
+a single canonical manifest, `<NAMESPACE>.md` makes the agentproto
+registry possible. A user installs a knowledge workspace by pointing at
+its `KNOWLEDGE.md`; an agent forks one by branching that file's parent
+chain; a third party verifies a deployed workspace by hashing the
+effective merged config. **One file, one identity, one importable
+unit** — recursive across the family.
+
+### Title convention recap
+
+| AIP shape | Title format | Example |
+|---|---|---|
+| Single-doc | `<FILENAME>.md — <description>` | `TOOL.md — tool manifest format` |
+| Workspace | `<ROOT>.md — <namespace>/v<n> (<description>)` | `KNOWLEDGE.md — agentknowledge/v1 (LLM-maintained wiki)` |
+
+This holds for every Schema and Core AIP. Meta AIPs (Process,
+Templates, Conventions) are exempt — their title may describe the
+process directly (e.g. `AIP-1: Purpose & Process`).
+
+---
+
+## Style notes for AIP authors
+
+- **Be concrete.** Replace "the system" with "the runtime"; replace "the
+  data" with the actual field name. Vague specs become contested specs.
+- **Use small examples.** A 5-line YAML example beats two paragraphs of
+  prose. Show the happy path, then enumerate edge cases.
+- **Cite prior AIPs by number.** Write `AIP-7`, not "the governance AIP".
+  The number is permanent; the title may evolve.
+- **Don't apologize.** AIPs are reference documents — write declaratively.
+  "The runtime MUST X." not "We think it would be nice if the runtime
+  could X."
+- **Resist scope creep.** One AIP, one decision. If you find yourself
+  defining two things, split them — cross-reference via `requires`.

@@ -1,0 +1,104 @@
+---
+title: "AIP-4: DESIGN.md — design token format & registry conventions"
+description: A markdown + frontmatter format for portable design tokens, and the registry conventions used by designkit.sh to share community kits.
+aip: 4
+status: Draft
+type: Schema
+created: 2026-04-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/apps/designkit
+---
+
+| Field | Value |
+|---|---|
+| AIP | 4 |
+| Title | DESIGN.md — design token format & registry conventions |
+| Status | Draft |
+| Type | Schema |
+| Domain | designkit.sh |
+| Reference Impl | [`apps/designkit`](https://github.com/agentik/agentik-studio/tree/dev/apps/designkit) |
+| Upstream | [Google Stitch — design.md](https://github.com/google-labs-code/design.md) |
+
+## Abstract
+
+`DESIGN.md` is a markdown-with-frontmatter format for declaring design
+tokens (colors, typography, spacing, radii) and atomic component cues in
+a portable way. AIP-4 specifies (a) the canonical token shape adopted by
+the agent ecosystem, building on Google Stitch's upstream `design.md`
+format, and (b) the registry conventions used by **designkit.sh** to
+distribute community design kits as installable, citable artifacts.
+
+## Motivation
+
+Agent-generated UIs and human-built apps need a shared theming substrate.
+Design tokens locked in vendor-specific JSON or Tailwind configs don't
+travel; they fragment per stack. `DESIGN.md` fixes this by being plain
+markdown with structured frontmatter — agents can author it, humans can
+read it, and any runtime can parse it.
+
+The designkit.sh registry layers on top: a public, versioned catalog of
+DESIGN.md kits (themes) authors can publish and consumers can install,
+with manifest metadata, screenshots, and license declarations.
+
+## Specification
+
+> The token format itself defers to the upstream
+> [google-labs-code/design.md](https://github.com/google-labs-code/design.md)
+> spec. AIP-4 specifies the **registry layer** and any agent-ecosystem
+> extensions to the upstream format. This section will be filled in as
+> AIP-4 moves Draft → Review.
+
+Sketch of the registry-layer additions:
+
+```yaml
+---
+schema: designkit/v1
+kit: <kebab-case-kit-id>
+title: <human-readable name>
+author: <name>
+license: <SPDX>
+homepage: <url>
+preview: <url-to-screenshot.png>
+tags: [<style>, <vibe>, <era>]
+based-on: <upstream-design.md-url>     # optional — when forking
+---
+
+# Tokens (per upstream DESIGN.md format)
+
+## Colors
+- primary: #...
+- ...
+
+## Typography
+- ...
+```
+
+The reference implementation includes 4 first-party DK presets (Heritage,
+Modern Minimal, Bold Tech, Atelier) and 58 community-imported kits.
+
+## Rationale
+
+*To be authored. Defend: upstream-first instead of fork (Google's design.md
+is gaining traction; we extend rather than diverge), markdown over JSON
+(human authorability), per-kit slugs as canonical IDs.*
+
+## Reference Implementation
+
+[`apps/designkit`](https://github.com/agentik/agentik-studio/tree/dev/apps/designkit) —
+the public registry site, CLI, and API for designkit.sh. The optional
+[`@canvakit/designkit`](https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/designkit)
+bridge is the canonical interop point with AIP-5 (CANVAKIT.md).
+
+## Backwards Compatibility
+
+Not applicable — AIP-4 anchors a new registry. Any future breaking change
+to registry conventions will require a successor AIP (`replaces: 4`).
+
+## Security Considerations
+
+*To be authored. Threat surface includes: malicious DESIGN.md kits whose
+tokens are crafted to reference malicious URLs (e.g. font CDNs serving
+exploits), kits claiming `license: MIT` while embedding non-MIT
+attribution-required assets. Registry-side scanning and a published
+guideline for kit reviewers are mitigations.*

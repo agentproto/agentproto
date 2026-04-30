@@ -1,0 +1,368 @@
+---
+title: "AIP-17: RUNNER.md — shared process boundary block"
+description: A composable schema block defining the `runner` field — engine (in-process / subprocess / sandbox), optional container image, declarative dependency needs, and resource limits — reused by every manifest format that runs code. Permissions (secrets, network) and IO are defined elsewhere; this block scopes only to the process boundary.
+aip: 17
+status: Draft
+type: Schema
+created: 2026-04-29
+updated: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7]
+resources: ./resources/aip-17/draft
+discussions-to: https://github.com/agentproto/specs/discussions/17
+---
+
+| Field | Value |
+|---|---|
+| AIP | 17 |
+| Title | RUNNER.md — shared process boundary block |
+| Status | Draft |
+| Type | Schema |
+| Domain | runner.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7) |
+| Resources | [`./resources/aip-17`](./resources/aip-17/draft) — [`SKILL.md`](./resources/aip-17/draft/skills/use-runner-block/SKILL.md), [`ADAPTER.md`](./resources/aip-17/draft/ADAPTER.md), [`RUNNER.schema.json`](./resources/aip-17/draft/RUNNER.schema.json) |
+
+## Abstract
+
+This AIP defines the `runner` schema block — **engine** (where the
+process runs), **image** (which container template), **needs**
+(declarative dependency requirements), and **limits** (resource
+caps) — and the **`defineRunner(...)`** standard signature that
+consumes it.
+
+`runner` describes a single concern: **the process boundary that
+hosts the code**. It does NOT cover what code runs (see
+[AIP-26 CODE.md](/docs/aip-26)), what data flows in/out
+([AIP-16 IO.md](/docs/aip-16)), what env vars / secrets the body
+sees ([AIP-19 SECRETS.md](/docs/aip-19)), or what hosts it can reach
+(top-level `network` block).
+
+Earlier drafts of this AIP bundled all five concerns under a single
+`runtime` block. The 2026-04-30 revision narrows the scope: each
+concern is now its own block at the manifest top level. The legacy
+`runtime` shape is preprocessed to the new layout for backward
+compatibility.
+
+This is a **schema-block AIP**, not a file format users author
+directly. There is no `RUNNER.md` file checked into a repo. The
+block is referenced by other manifest specs via JSON Schema `$ref`.
+
+## Motivation
+
+Tools, workflows, and forthcoming runnable manifest types all face
+the same question: **how should the host execute the body?** That
+question alone has four sub-axes:
+
+- **Where**: in-process vs subprocess vs container.
+- **What image**: which container template provides the OS-level
+  dependencies the body needs.
+- **What deps**: which language packages and native binaries the body
+  declares as required at startup.
+- **How much**: CPU, memory, wall-clock caps.
+
+Stuffing permissions (env, fs, network) into the same block — as
+the legacy `runtime` shape did — confused the boundary. Permissions
+are *what the body is allowed to do*; the runner is *the process
+that hosts it*. Splitting clarifies both: a host can pick a
+different runner without renegotiating permissions, and a permission
+audit doesn't have to wade through engine choices.
+
+## Design principles
+
+1. **Subprocess by default.** A manifest without an explicit `runner`
+   block is treated as `engine: "subprocess"` — the lightest
+   isolation that still puts the body in its own process.
+
+2. **Privilege is host-controlled.** The manifest *requests*; the
+   host *decides*. A request for `engine: "in-process"` from an
+   untrusted source MUST be silently downgraded to `subprocess`. The
+   downgrade MUST be observable (logged + flagged in the resolved
+   handle).
+
+3. **Image is declarative or auto-picked.** The manifest MAY name an
+   `image:` explicitly (e.g. `mcp-node-server`) or leave it
+   unspecified — in which case the host picks the lightest image
+   matching `needs:`. Auto-pick is deterministic given the same
+   needs + same registry.
+
+4. **Needs are pull, not push.** `needs.native` declares what the
+   body needs (`weasyprint`, `ffmpeg`); the host figures out where
+   that lives (apt package, brew formula, pre-baked image). The
+   manifest doesn't say `apt-get install`.
+
+5. **Limits are advisory but enforceable.** Hosts SHOULD enforce
+   `timeout_ms` / `memory_mb` / `cpu_ms` when the underlying
+   isolation primitive supports it. Hosts that can't enforce a cap
+   SHOULD warn at registration.
+
+6. **Single concern.** This block does NOT mention env, fs, network,
+   secrets, or IO. Those live in their own blocks. Bodies that mix
+   isolation requests with permission requests should look at AIP-19
+   (secrets), AIP-16 (IO/files), and the top-level `network` block.
+
+## Specification
+
+### The `runner` block
+
+```yaml
+runner:
+  engine: sandbox            # "subprocess" (default) | "sandbox" | "in-process"
+  image: mcp-node-server     # optional; sandbox engine only — auto-picked when omitted
+  needs:                     # optional; declarative dependency requirements
+    language: node            # "node" | "python" | "multi"
+    native: [weasyprint]      # OS packages (Debian/Ubuntu apt names by default)
+    npm: [stripe@^11.0.0]     # added on top of bundle's package.json
+    pip: [requests==2.31.0]   # added on top of bundle's requirements.txt
+  limits:                    # optional; resource caps
+    memory_mb: 1024
+    timeout_ms: 60000
+    cpu_ms: 30000
+```
+
+### `runner.engine`
+
+| Value | Meaning |
+|---|---|
+| `"subprocess"` (default) | Run the body in an isolated host-local subprocess. Lightweight: shares the host kernel, isolation enforced via OS primitives (Node `--permission`, `bwrap`, etc.). Suitable for pure-language tools that don't need native deps or `child_process`. |
+| `"sandbox"` | Run the body in a real container provisioned through the host's sandbox provider (E2B, Modal, Fly Machines, …). Full Linux runtime — `child_process`, native deps, free `/tmp`, network gating enforced by the provider. Use when the body needs `npm install`, system binaries, or capabilities outside the host's permission model. |
+| `"in-process"` | Run the body in the host's own process via dynamic import. Reserved for trusted, host-shipped code. The host MUST refuse `in-process` for any manifest whose source originates outside the host's trust boundary; the downgrade is silent (`→ subprocess`) and logged. |
+
+### `runner.image`
+
+Optional. Names a sandbox template id from the host's registry. Only
+meaningful when `engine: "sandbox"`. When omitted, the host
+auto-selects via the algorithm in [AIP-26 § Cache invalidation](/docs/aip-26)
++ the host's template registry: pick the lightest template that
+satisfies all `needs.native` packages and `needs.language`.
+
+The reference Guilde implementation maintains an open registry at
+`packages/mcp/core/src/sandbox/registry.ts` with templates including
+`mcp-node-server`, `mcp-python-server`, `mcp-browser-server`, plus
+custom templates teams publish.
+
+Hosts MAY refuse manifests requesting unknown image ids — the error
+SHOULD list available templates so authors can correct.
+
+### `runner.needs`
+
+Declarative dependency requirements. Hosts SHOULD use these to (a)
+auto-pick an image, (b) install missing dependencies at cold-start,
+and (c) surface them in trust UIs.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `language` | `"node" \| "python" \| "multi"` | The primary language runtime the body uses. Hosts MAY refuse manifests where `language` doesn't match the inferred extension of `run` (AIP-26). |
+| `native` | `string[]` | OS-level package names. Default convention: Debian/Ubuntu apt names. Hosts running on other distros MAY map names if reliable, otherwise refuse. |
+| `npm` | `string[]` | Additional npm packages. Format: `<name>@<semver>`. Installed via `npm install` AFTER `npm ci` (lockfile-driven baseline). |
+| `pip` | `string[]` | Additional pip packages. Format: `<name>==<version>` recommended. Installed via `pip install --user`. |
+
+`needs` is purely advisory for `engine: "in-process"` and `engine:
+"subprocess"` — the host trusts the bundle's own dependency
+manifests (package.json, requirements.txt) for those engines. For
+`engine: "sandbox"`, hosts MUST honour `needs` at cold-start.
+
+### `runner.limits`
+
+| Field | Default | Meaning |
+|---|---|---|
+| `memory_mb` | host default (RECOMMENDED 256) | Hard memory cap when the isolation primitive supports it. |
+| `timeout_ms` | host default (RECOMMENDED 600000 = 10 min) | Wall-clock cap on the run. The host kills the process past this. |
+| `cpu_ms` | host default (no cap) | CPU-time cap. Hosts that can't enforce it ignore the field. |
+
+Hosts MAY add fields for their isolation backend (e.g.
+`vcpus`, `ephemeral_storage_mb`); portable manifests SHOULD stay
+within the listed set.
+
+### Defaults
+
+| Missing | Treated as |
+|---|---|
+| `runner` (whole block) | `engine: "subprocess"`, no `image`, no `needs`, host's default `limits` |
+| `runner.image` | auto-pick via `needs` + host registry |
+| `runner.needs` | language inferred from `run` extension; no extra packages |
+| `runner.limits` | host's default caps |
+
+## The `defineRunner` standard signature
+
+Every implementation that consumes the runner block MUST expose a
+function whose signature matches the contract below.
+
+### `defineRunner` (TypeScript notation, normative)
+
+```ts
+defineRunner(definition: RunnerDefinition): RunnerHandle
+
+interface RunnerDefinition {
+  engine?: "in-process" | "subprocess" | "sandbox"
+  image?:  string
+  needs?: {
+    language?: "node" | "python" | "multi"
+    native?:   string[]
+    npm?:      string[]
+    pip?:      string[]
+  }
+  limits?: {
+    memory_mb?:  number
+    timeout_ms?: number
+    cpu_ms?:     number
+  }
+}
+
+interface RunnerHandle {
+  engine:  "in-process" | "subprocess" | "sandbox"
+  image:   string | null              // resolved (auto-pick or explicit)
+  needs:   {
+    language: "node" | "python" | "multi"
+    native:   string[]                 // never undefined; defaults to []
+    npm:      string[]
+    pip:      string[]
+  }
+  limits:  {
+    memory_mb:  number
+    timeout_ms: number
+    cpu_ms:     number
+  }
+
+  /**
+   * Apply the host's downgrade rule. Pass the manifest's source
+   * origin; if it's untrusted (workspace, ai-draft, …) and the
+   * declared engine is "in-process", returns a copy with engine
+   * forced to "subprocess" and `downgraded: true`.
+   */
+  resolveForOrigin(origin: string): RunnerHandle & { downgraded: boolean }
+}
+```
+
+### Conformance rules
+
+1. **Canonical name.** The export MUST be named `defineRunner`.
+
+2. **Defaults applied at the boundary.** A `RunnerHandle` returned
+   by `defineRunner` MUST have every field populated — empty arrays,
+   default caps, resolved image (or `null` for non-sandbox engines).
+   Bodies and adapters MUST NOT have to re-default.
+
+3. **Downgrade is host policy, not manifest choice.** A manifest
+   that requests `in-process` from an untrusted origin MUST be
+   downgraded to `subprocess`. The downgrade MUST be observable (via
+   the `downgraded` flag and a warning log).
+
+4. **Image resolution at handle time.** When `engine: "sandbox"` and
+   `image:` is omitted, the host MUST resolve to a concrete image id
+   in the handle (deterministic given needs + registry). When
+   `engine: "subprocess"` or `engine: "in-process"`, `image:` is
+   `null` in the handle.
+
+5. **No I/O at module load.** Same rule as `defineCode` /
+   `defineIO` / `defineTool` — the module containing
+   `defineRunner(...)` MUST be safely importable without side
+   effects.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineRunner` implementation
+across engines (Node `--permission`, E2B, bwrap, microVM), see
+[`./resources/aip-17/draft/ADAPTER.md`](./resources/aip-17/draft).
+
+## Compatibility
+
+### Legacy `runtime` block (pre-2026-04-30)
+
+The previous draft of this AIP combined engine + env + fs + network
++ resources under a single `runtime:` block. Hosts MUST accept the
+legacy shape and preprocess it to the new layout:
+
+```
+runtime.mode             → runner.engine
+                            ("sandbox" → "subprocess",  the legacy
+                             value mapped to host-local subprocess
+                             isolation; new "sandbox" value reserved
+                             for real-container engine)
+runtime.env: ["X"]       → secrets: { X: { vault: x.toLowerCase().replace(/_/g, "-") } }
+                            (per AIP-19 binding contract)
+runtime.fs.read          → inputsFiles (per AIP-16, key-by-key migration)
+runtime.fs.write         → outputsFiles (per AIP-16)
+runtime.network.egress   → network.egress  (top-level, no `network:` wrapper if absent)
+runtime.cpu_ms_max       → runner.limits.cpu_ms
+runtime.memory_mb_max    → runner.limits.memory_mb
+runtime.timeout_ms       → runner.limits.timeout_ms
+```
+
+Hosts SHOULD warn (not error) on legacy shape during the deprecation
+window, then remove the preprocessor in a future revision.
+
+### With AIP-26 CODE
+
+`runner` resolves the process boundary; AIP-26 resolves the bundle
+contents. Both blocks live at the manifest top level, independent.
+A code-workspace declares its own default `runner`; consuming tools
+inherit and MAY override field-by-field.
+
+### With AIP-19 SECRETS
+
+The legacy `runtime.env` allowlist moves to the AIP-19 `secrets:`
+binding block. `runner` no longer mentions credentials — that's a
+permission concern, not a process-boundary concern.
+
+### With AIP-16 IO
+
+The legacy `runtime.fs.{read,write}` move to `inputsFiles` /
+`outputsFiles` (AIP-16) for per-run staging semantics. Persistent
+mounts are not part of the AIP family — workspace tools are
+stateless across calls by design.
+
+## Security considerations
+
+1. **`engine: "in-process"` from untrusted source.** Silent downgrade
+   is the default; hosts that want to also AUDIT the attempt SHOULD
+   emit a high-severity log when the downgrade fires.
+
+2. **Image registry trust.** Custom images MUST be reviewed before
+   being added to the host registry — they run with the body's
+   privileges. The registry itself is the trust boundary, not
+   individual manifests.
+
+3. **`needs.native` injection.** A manifest that declares a
+   misleading `native: [...]` could pull packages the trust UI doesn't
+   surface. Hosts SHOULD list the resolved `native:` packages in the
+   trust UI alongside other permissions.
+
+4. **Resource cap enforcement.** A host that accepts
+   `limits.timeout_ms: 60000` but cannot enforce it lets a runaway
+   body burn host resources. Hosts SHOULD log a warning at
+   registration when caps are unenforceable.
+
+5. **Cross-engine privilege drift.** A manifest that switches
+   `engine: "sandbox"` → `"subprocess"` between revisions changes
+   the trust profile (different isolation guarantees, different fs
+   semantics). Hosts SHOULD treat any change to `engine` as cause for
+   re-review.
+
+## Open questions
+
+1. **Engine taxonomy beyond 3.** Future engines (microVM, WASM, edge
+   workers) — keep the enum closed and add per-engine, or open the
+   enum with host-specific values?
+
+2. **Resource caps per language.** `memory_mb` for Node maps to
+   `--max-old-space-size`; for Python it's vaguer. Whether to keep
+   one number or split per-language.
+
+3. **Image inheritance.** When a code-workspace declares an image and
+   a tool that uses it declares another, who wins? Current draft:
+   tool overrides workspace; should be normative.
+
+4. **`needs.system` vs `needs.native`.** Whether to split apt-style
+   packages from generic system requirements (e.g. "needs a writable
+   /tmp larger than 100 MB"). Probably YAGNI for v1.
+
+## See also
+
+- [AIP-14 — TOOL.md](/docs/aip-14) — primary consumer
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — primary consumer
+- [AIP-16 — IO.md](/docs/aip-16) — sibling block (data flow)
+- [AIP-19 — SECRETS.md](/docs/aip-19) — sibling block (env/secret binding)
+- [AIP-26 — CODE.md](/docs/aip-26) — sibling block (bundle composition)
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [`./RUNNER.schema.json`](./resources/aip-17/draft) — schema validator
+- [`./ADAPTER.md`](./resources/aip-17/draft) — implementer's guide

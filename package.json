@@ -1,0 +1,31 @@
+{
+  "name": "agentproto",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "agentproto — open standards for the AI-agent ecosystem. AIP specifications + reference TypeScript runtime: tool contracts (AIP-14), provider supertype + resolver (AIP-30), kind-specific provider runtimes (CLI / HTTP / MCP / SDK), and framework adapters (Mastra, AI SDK).",
+  "homepage": "https://agentproto.sh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agentproto/agentproto"
+  },
+  "bugs": {
+    "url": "https://github.com/agentproto/agentproto/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" --filter \"./adapters/**\" build",
+    "test": "pnpm -r --filter \"./packages/**\" --filter \"./adapters/**\" test",
+    "check-types": "pnpm -r --filter \"./packages/**\" --filter \"./adapters/**\" check-types",
+    "clean": "pnpm -r --filter \"./packages/**\" --filter \"./adapters/**\" clean"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "packageManager": "pnpm@10.4.1",
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

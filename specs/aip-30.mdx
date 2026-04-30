@@ -1,0 +1,858 @@
+---
+title: "AIP-30: PROVIDER.md — agentprovider/v1 (abstract provider supertype)"
+description: A markdown + frontmatter format for declaring a concrete implementation of one or more agent tools — its identity, kind (cli / http / mcp / sdk / builtin), install lifecycle, auth surface, sandbox profile, and per-tool dispatch bindings. The supertype every concrete provider AIP (CLI, HTTP, MCP, SDK) specialises, with the standard `defineProvider` entry-point signature.
+aip: 30
+status: Draft
+type: Schema
+created: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 16, 17, 19]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/provider-runtime
+resources: ./resources/aip-30/draft
+discussions-to: https://github.com/agentproto/specs/discussions/30
+---
+
+| Field | Value |
+|---|---|
+| AIP | 30 |
+| Title | PROVIDER.md — agentprovider/v1 (abstract provider supertype) |
+| Status | Draft |
+| Type | Schema |
+| Domain | providers.sh |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS) |
+| Specialised by | [AIP-29](/docs/aip-29) (CLI), AIP-31 (HTTP), AIP-32 (MCP), AIP-33 (SDK) |
+| Resources | [`./resources/aip-30`](./resources/aip-30/draft) — `PROVIDER.schema.json`, [`ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-30/draft/skills/author-provider/SKILL.md) |
+
+## Abstract
+
+`PROVIDER.md` packages a **concrete implementation of one or more
+agent tools** — the binding that connects abstract
+[TOOL.md (AIP-14)](/docs/aip-14) contracts to a runnable backend
+(a CLI binary, an HTTP API, an MCP server, an SDK function, a
+host-builtin). It is the **abstract supertype** of every concrete
+provider AIP: [CLI.md (AIP-29)](/docs/aip-29) is `kind: cli`,
+forthcoming HTTP.md / MCP.md / SDK.md are `kind: http` / `kind: mcp`
+/ `kind: sdk`.
+
+A PROVIDER carries everything *not* in the contract: identity, kind,
+install lifecycle, version detection, auth surface, sandbox profile,
+network policy, region, cost overrides, and the per-tool dispatch
+bindings (`implements[]`). Subtype AIPs add kind-specific fields on
+top — argv templates for CLI, endpoint shapes for HTTP, server refs
+for MCP, package paths for SDK.
+
+The format is paired with a standard entry-point function,
+**`defineProvider(...)`**, whose signature any implementation in any
+language exposes so callers, runtimes, and adapters share one
+contract.
+
+The file is human-authored, version-controlled, machine-parseable,
+and grep-able — same posture as
+[SKILL.md](/docs/aip-3),
+[TOOL.md](/docs/aip-14),
+[INTENT.md](/docs/aip-28),
+[CLI.md](/docs/aip-29).
+
+## Motivation
+
+The registry today has TOOL.md (AIP-14) for the abstract agent
+contract and CLI.md (AIP-29) for one specific concrete
+implementation kind (command-line binaries). Adding HTTP.md as
+AIP-31 today would copy 60% of CLI.md's structure: install
+lifecycle, version detection, auth surface, sandbox profile, region,
+policy tags, cost overrides. Same for MCP, same for SDK.
+
+The supertype is missing.
+
+Five problems compound when there's no abstract provider layer:
+
+1. **One tool, one provider only.** AIP-14 v1 conflated the contract
+   (schemas, mutates, approval) with the implementation (entry,
+   runner, code, secrets, network). One TOOL.md = one implementation.
+   When the same logical operation needs multiple backends
+   (`image.create` via OpenAI HTTP vs Replicate HTTP vs gh CLI vs
+   self-hosted SDK), authors must duplicate the TOOL.md per backend,
+   forking the contract and guaranteeing drift.
+
+2. **No routing layer.** Without a provider abstraction, choosing
+   "OpenAI vs Replicate vs local SDK" lives in agent prompts, in
+   if/else chains, in catalog UI configs. There's no place where the
+   runtime can apply policy ("workspace forbids third-party LLMs"),
+   capability gates ("CLI not installed"), or cost ranking ("free
+   plan uses the cheap variant").
+
+3. **Per-kind boilerplate explosion.** Each "kind" of integration
+   (CLI, HTTP, MCP, SDK, gRPC, browser-extension, …) needs install
+   lifecycle, auth state machine, sandbox enforcement. Without a
+   supertype, every new kind reinvents these fields with subtle
+   incompatibilities.
+
+4. **Catalog rendering is incoherent.** "What can this agent do?"
+   today requires walking the tool registry and the wrapper code per
+   integration. With PROVIDER as a first-class registry citizen, the
+   answer is "tools × matching providers, filtered by capability".
+
+5. **Provider swap is a refactor, not a config change.** Swapping
+   Replicate for OpenAI on `image.create` should be editing one
+   file. Today it's grep across the codebase.
+
+`PROVIDER.md` gives this layer a name and a file format.
+
+## Design principles
+
+1. **Abstract over concrete kinds, but no further.** PROVIDER is the
+   supertype only of *implementation kinds*. It is NOT a supertype of
+   TOOL (which is a contract, a different layer); not a supertype of
+   INTENT (UX); not a supertype of SKILL (expertise). The AIP series'
+   layering remains intact: SKILL → INTENT → TOOL → PROVIDER →
+   `{CLI, HTTP, MCP, SDK}`.
+
+2. **Subtype declares its own fields, supertype declares the rest.**
+   CLI subtype adds `bin`, `bin_args`, `sandbox.fs/exec/tty`,
+   `output.exit_codes/json_flag`. HTTP subtype adds `endpoint`,
+   `method`, `body_template`, `response_extract`. MCP adds
+   `server_ref`, `mcp_tool_name`. SDK adds `package`, `function_ref`.
+   Everything *else* — install, auth, version_check, sandbox.network,
+   region, policy_tags, cost_override, `implements[]` — lives in the
+   supertype.
+
+3. **Tools narrow contracts; providers narrow tools.** A TOOL declares
+   its full input schema. A PROVIDER MAY declare `schema_narrowing`
+   on its `implements[]` entries to drop optional inputs the
+   particular backend doesn't support (e.g. OpenAI DALL-E doesn't
+   accept `seed`; declare `schema_narrowing.drop_inputs: [seed]`).
+   Widening (extra inputs the contract doesn't know) is forbidden;
+   that's a different TOOL.
+
+4. **Multi-tool by design.** A single PROVIDER MAY implement multiple
+   TOOLs — one HTTP API providing `image.create`, `image.edit`,
+   `image.variation` is one PROVIDER, not three. Auth, sandbox,
+   region, policy_tags are declared once and reused. The `execute`
+   block is keyed by tool id.
+
+5. **One-tool-many-providers is the routing surface.** The inverse
+   is what makes the abstraction valuable: many PROVIDERs can declare
+   the same TOOL in their `implements[]`. The runtime resolver picks
+   one per call based on capability, policy, cost, region, and pin
+   (see [Multi-provider routing](#multi-provider-routing)).
+
+6. **Auth state is per-provider, not per-tool.** A single auth
+   surface (env vars, login flow, refresh cadence, expiry signal)
+   covers every tool a provider implements. Tools don't re-declare
+   secrets bindings; they inherit from the provider's `auth.ref`.
+
+7. **Sandbox is the declared policy contract.** Hosts MUST enforce
+   the declared `sandbox` block (network egress, fs, exec, env,
+   tty). A provider that declares `network.egress: ["api.foo.com"]`
+   and tries to dial `api.bar.com` MUST fail closed, not silently
+   succeed. The supertype's sandbox is the universal subset
+   (`network`); subtypes extend it (CLI adds `fs`, `exec`, `tty`).
+
+8. **Frontmatter is the source of truth.** When the entry exports a
+   field also declared in frontmatter and the values differ, the host
+   warns and prefers the frontmatter. Entries are for behavioural
+   adapters (custom login flows, output parsers), never for
+   redefining identity.
+
+9. **Cold-start order: providers register, tools bind.** The runtime
+   loading order is: TOOLs → PROVIDERs → tool-to-provider binding.
+   PROVIDER load failures (missing binary, version mismatch,
+   unauthed) don't fail the registry — they mark the candidate
+   unavailable for resolver phase 2.
+
+## Specification
+
+### File location
+
+Providers live in a single folder:
+
+```
+.providers/
+  openai-images-http/
+    PROVIDER.md            ← this AIP (kind: http)
+    provider.ts            ← optional entry (custom transport / response parser)
+    SECRETS.md             ← AIP-19 inventory
+    README.md              ← optional long-form
+  replicate-flux-http/
+    PROVIDER.md
+    provider.ts
+.cli/
+  gh/
+    CLI.md                 ← AIP-29 specialisation; ALSO a PROVIDER (kind: cli)
+    cli.ts
+    tools/
+      pr-create/TOOL.md
+```
+
+A PROVIDER MAY live colocated with its concrete bundle (e.g.
+`.cli/gh/CLI.md` IS a `kind: cli` PROVIDER) or alone under
+`.providers/`. The folder name SHOULD match the manifest's `id`.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable display name (1–80 chars). |
+| `id` | string | Machine identifier. Lowercase, digits, dashes, dots. 2–80 chars. Unique within the registry. |
+| `description` | string | One-paragraph purpose for an LLM caller. ≤2000 chars. |
+| `version` | semver string | Spec version of THIS provider. Bump on `implements[]` shape change, sandbox change, auth change. |
+| `kind` | enum | `"cli"` \| `"http"` \| `"mcp"` \| `"sdk"` \| `"builtin"`. Drives the subtype-specific frontmatter validation. |
+| `implements` | object[] | ≥1 entry. Per-tool dispatch bindings. See [The implements block](#the-implements-block). |
+
+#### Optional universal fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `install` | object[] | `[]` | Install paths, in order of preference. CLI/SDK use; HTTP/MCP usually omit (no install needed). Methods registry inherited from [AIP-29 § Install methods](/docs/aip-29#install-methods). |
+| `version_check` | object | none | How to detect & validate the installed version. CLI/SDK only. Same shape as [AIP-29](/docs/aip-29#version-detection). |
+| `auth` | object | none | Auth surface — env vars, state location, login flow, refresh policy, expiry signal. See [The auth block](#the-auth-block). |
+| `network` | object | none | Universal sandbox primitive: `{ egress: string[] }`. Outbound allowlist. Empty / missing = no network. Subtypes MAY extend with kind-specific blocks. |
+| `runner` | object \| string | none | [AIP-17](/docs/aip-17) runner block, inline or as a workspace-relative ref to a `RUNNER.md`. When omitted, hosts apply a subprocess default. |
+| `region` | string[] | `["global"]` | BCP-47 region tags or cloud regions (`"us-east-1"`, `"EU"`, `"global"`). Drives data-residency routing. |
+| `policy_tags` | string[] | `[]` | Free-form policy markers (`"pii-safe"`, `"self-hosted"`, `"third-party-llm"`, `"hipaa"`, `"gdpr"`) the resolver's policy filter reads. |
+| `cost_override` | object | none | `{ cost_class?, cost_units_per_call?, currency? }` overriding the contract baseline. The resolver ranks candidates by `cost_units_per_call` when contract doesn't pin a default. |
+| `timeout_override_ms` | int | none | Narrow the contract ceiling (never widen). |
+| `retry_override` | object | none | `{ max_attempts, backoff, initial_ms }` overriding contract baseline. |
+| `health_check` | object | none | Cheap probe the resolver runs to confirm reachability. `{ method: "ping" \| "exec" \| "noop", cmd?, http?, expect_exit?, every?: ISO-8601 }`. |
+| `requires` | object | `{}` | Capability requirements ([AIP-7](/docs/aip-7)). Subfields: `os: string[]`, `arch: string[]`, `min_disk_mb: int`, `min_memory_mb: int`. |
+| `examples` | object[] | `[]` | Provider-specific examples augmenting the routed tools' contract examples. |
+| `tags` | string[] | `[]` | Free-form discovery tags. |
+| `metadata` | object | `{}` | Free-form, namespaced. `metadata.<host>.…` keys tolerated by other hosts. |
+
+#### Subtype-specific fields
+
+These live in the **subtype AIP**, not in this supertype. Listed
+here for orientation; see the linked subtype spec for the canonical
+shape.
+
+| `kind` | Subtype-specific fields | Defined in |
+|---|---|---|
+| `cli` | `bin`, `bin_args`, `sandbox.fs/exec/tty`, `output.exit_codes/json_flag/json_flag_args/stream/error_stream` | [AIP-29 CLI.md](/docs/aip-29) |
+| `http` | `endpoint`, `method`, `headers`, `body_template`, `response_extract`, `streaming` | AIP-31 (forthcoming) |
+| `mcp` | `server_ref`, `transport` (`stdio` / `sse` / `http`), `mcp_tool_name`, `prompts_ref` | AIP-32 (forthcoming) |
+| `sdk` | `package`, `package_manager` (`npm` / `pip` / `cargo` / …), `function_ref`, `args_template` | AIP-33 (forthcoming) |
+| `builtin` | `host_id` (the host runtime that provides this tool natively) | This AIP, § Builtin providers |
+
+#### Discouraged
+
+`provider`, `concrete`, `transport` at the universal level — these
+are subtype concerns. Authors who feel the urge to add one of these
+to the universal block are signalling a missing subtype field that
+should land via AIP revision.
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## When to reach for this provider`** — what problems it
+  solves, what it doesn't, vs siblings implementing the same TOOL.
+- **`## Trade-offs`** — cost, region, latency, reliability vs other
+  candidates for the same TOOL.
+- **`## Gotchas`** — auth quirks, version skew, environment
+  pitfalls.
+- **`## Reference`** — links to upstream docs, status pages, support
+  channels.
+
+The body is informational. Providers MUST function with adapters
+that read only the frontmatter.
+
+### The `implements` block
+
+The most important block. Declares which TOOLs this PROVIDER
+implements and how the call binds:
+
+```yaml
+implements:
+  - tool: ./tools/image-create/TOOL.md   # ref to TOOL contract (workspace-relative or registry id)
+    version: "^1.0.0"                     # contract semver range this binding is valid for
+    schema_narrowing:                     # optional: drop optional contract inputs
+      drop_inputs: [seed, negative_prompt]
+    mapping:                              # optional: per-tool input rename / transform
+      prompt: prompt                      # explicit identity
+      style:  artistic_style              # rename
+      aspect:                             # transform (named transformer in the entry file)
+        from: aspect_ratio
+        transform: aspect_to_size
+    cost_override:                        # per-tool override; falls through to provider-level
+      cost_units_per_call: 4              # millicents
+    metadata:                             # per-tool, kind-specific hints
+      http:
+        idempotency_key_header: "Idempotency-Key"
+  - tool: ./tools/image-edit/TOOL.md
+    version: "^1.0.0"
+```
+
+Each entry binds the PROVIDER to one TOOL contract. Multiple entries
+in the same PROVIDER bind multiple TOOLs (e.g. one HTTP API serving
+three different operations). Every entry in `implements[]` MUST have
+a corresponding `execute` body if the provider has a `defineProvider`
+entry (see [The defineProvider standard signature](#the-defineprovider-standard-signature)).
+
+`schema_narrowing.drop_inputs` is the contract-narrowing safety
+valve. The runtime resolver MUST refuse to route a call that uses a
+dropped input — caller error, not silent ignore. Drift between
+contract version (`tool.version`) and what the provider actually
+supports lives here, in the open.
+
+### The `auth` block
+
+Auth surface declaration, generalised from
+[AIP-29's CLI auth](/docs/aip-29#auth) into a kind-agnostic shape:
+
+```yaml
+auth:
+  ref: ./SECRETS.md                  # AIP-19 inventory of env-var bindings
+  state:
+    paths: ["~/.config/<dir>"]       # CLI / SDK persistent state
+    env:   ["FOO_TOKEN"]
+  login:                             # interactive flow (when present)
+    cmd: "..."                       # CLI providers
+    url: "https://provider.com/oauth"  # HTTP / SDK providers (browser flow)
+    interactive: true
+    requires_callback_url: false
+    completes_when:
+      cmd: "..."                     # CLI variant
+      exit_code: 0
+      # OR
+      http: { method: GET, url: "https://api.../whoami", expect_status: 200 }
+  refresh:
+    cmd: "..."                       # OR url:
+    every: "PT24H"                   # ISO-8601 duration
+  expiry:
+    detect: "exit_code:4"            # CLI
+    # OR
+    detect: "http_status:401"        # HTTP
+    # OR
+    detect: "exception:AuthExpired"  # SDK
+```
+
+Detection vocabulary (`exit_code:N`, `http_status:N`,
+`exception:Name`, `header:X-Auth-Status:expired`) is open-ended;
+hosts MAY add new prefixes per kind. Bundles SHOULD use the
+canonical detection most natural to their kind.
+
+#### Login state machine
+
+Same three-state machine as [AIP-29 § Login state machine](/docs/aip-29#login-state-machine):
+
+```
+unknown ──(version_check / health_check ok)──▶ unauthed ──(login completes)──▶ authed
+                                                                                  │
+                                  ▲ ─────(expiry detected)───────────────────────  ┘
+```
+
+State persistence is per `(provider.id, workspace.id, user.id)`
+tuple, not per-call. Hosts MUST persist state across runs.
+
+### Builtin providers
+
+A `kind: builtin` provider expresses "this tool is implemented
+natively by the host runtime, no external integration needed":
+
+```yaml
+spec: agentprovider/v1
+name: Host fs.read
+id: host-builtin-fs-read
+description: Workspace file read, host-native (no external binary or service).
+version: 1.0.0
+kind: builtin
+implements:
+  - tool: ./tools/fs-read/TOOL.md
+    version: "^1.0.0"
+metadata:
+  builtin:
+    host_id: agentik-runtime    # which host runtime provides this
+```
+
+Builtin providers are how the runtime exposes its first-party
+capabilities without forcing them through CLI/HTTP/MCP wrappers.
+They have no `install` (already present), no `auth` (host-native),
+no `network` (no egress). They MAY declare `policy_tags` and
+`region`. Their `execute` body is the host's native function.
+
+### Stable identity
+
+`id` + `version` together form the provider's stable identity. Two
+providers with the same `id` but different major `version` values
+MUST be treated as distinct. Caches, audit logs, and tool
+registrations key on `id@major`.
+
+`version` here is the **manifest** version (provider config). For
+CLI/SDK providers, the **binary** version is covered separately by
+`version_check.range`. Bumping `version_check.range` to support a
+new gh major SHOULD bump the provider major, since tools written
+for the old binary range may break.
+
+When a provider's `implements[].schema_narrowing` changes (a tool
+gains or loses a supported optional input), the provider MUST bump
+its major version. The schema validator enforces this via diff
+against the previously-registered version.
+
+## The `defineProvider` standard signature
+
+Every implementation that consumes `PROVIDER.md` and ships
+behavioural adapters MUST expose a function named **`defineProvider`**
+whose signature matches the contract below.
+
+Most PROVIDER.md files are frontmatter-only and don't need an
+entry — the host's reference adapter handles standard CLI/HTTP/MCP/
+SDK flows generically. An entry is needed when:
+
+- The login flow needs custom callback-URL handling (browser-based
+  OAuth with refresh logic).
+- The output format isn't text/JSON/YAML (custom delimiter, pseudo-
+  CSV, binary streaming).
+- A tool's `execute` needs context-sensitive logic the standard
+  dispatch can't cover.
+
+### Signature (TypeScript notation, normative)
+
+```ts
+defineProvider(definition: ProviderDefinition): ProviderHandle
+
+interface ProviderDefinition {
+  // Identity — mirrors the manifest fields with the same names.
+  id:           string
+  name:         string
+  description:  string
+  version?:     string
+  kind:         "cli" | "http" | "mcp" | "sdk" | "builtin"
+
+  // What contracts this provider satisfies (≥1 entry).
+  implements:   ImplementsEntry[]
+
+  // Universal blocks (subset of frontmatter).
+  install?:        InstallMethod[]
+  versionCheck?:   VersionCheck
+  auth?:           AuthConfig
+  runner?:         RunnerConfig | string  // ref or inline
+  network?:        NetworkConfig          // { egress: string[] }
+  region?:         string[]
+  policyTags?:     string[]
+  costOverride?:   CostOverride
+  timeoutOverrideMs?: number
+  retryOverride?:  RetryPolicy
+  healthCheck?:    HealthCheckConfig
+
+  // The dispatch bodies — one per implemented TOOL id.
+  execute: Record<string /* tool id */, ExecuteFn>
+
+  // Optional behavioural adapters.
+  login?:        (args: LoginArgs) => Promise<LoginResult>
+  refresh?:      (args: RefreshArgs) => Promise<RefreshResult>
+  parseOutput?:  (args: ParseOutputArgs) => ParseOutputResult     // CLI / SDK
+  detectExpiry?: (args: DetectExpiryArgs) => boolean
+
+  // Bookkeeping.
+  metadata?:     Record<string, unknown>
+  tags?:         string[]
+}
+
+type ExecuteFn = (args: ExecuteArgs) => Promise<unknown>
+
+interface ExecuteArgs {
+  /** Tool-shape input, validated against the TOOL's inputSchema by the host before dispatch. */
+  input:       unknown
+  /** Per-call context — when the TOOL declares contextSchema, host validates against it before dispatch. */
+  context:     Record<string, unknown>
+  /** Resolved provider state — auth, secrets, sandbox handle, region, signal. */
+  providerCtx: ProviderContext
+  /** Caller-set abort signal. MUST be honoured. */
+  signal:      AbortSignal
+}
+
+interface LoginArgs {
+  context: ProviderContext
+  signal:  AbortSignal
+}
+
+type LoginResult =
+  | { ok: true }
+  | { ok: false; reason: "user_cancelled" | "callback_failed" | "upstream_error"; message?: string }
+
+interface RefreshArgs {
+  context: ProviderContext
+  signal:  AbortSignal
+}
+
+type RefreshResult =
+  | { ok: true; nextRefreshAt?: string /* ISO-8601 */ }
+  | { ok: false; reason: "auth_expired" | "upstream_error"; message?: string }
+
+interface ParseOutputArgs {
+  exitCode?: number     // CLI only
+  stdout:    string | Uint8Array
+  stderr:    string
+  expected:  { format: "text" | "json" | "yaml" | "binary" }
+}
+
+interface ParseOutputResult {
+  ok:     boolean
+  value?: unknown
+  error?: { code: string; message: string; retryable?: boolean }
+}
+```
+
+### Conformance rules
+
+1. **One canonical name.** The exported name MUST be `defineProvider`.
+   Implementations MAY also re-export under host-idiomatic aliases
+   (`createProvider`, `provider`, `defineCli`, `defineHttp`) — the
+   canonical name is what `PROVIDER.md` adapters reference.
+
+2. **Frontmatter is the source of truth.** When the entry exports
+   conflicting values for a field declared in frontmatter, the
+   adapter MUST surface a warning naming the field and prefer the
+   frontmatter value. Entries are for behaviour, not identity.
+
+3. **`execute` is keyed by tool id.** Every entry in
+   `implements[]` MUST have a corresponding key in the `execute`
+   record. Hosts MUST refuse to register providers whose `execute`
+   keys don't match the `implements[]` set.
+
+4. **Input validation happens at the contract layer.** The host
+   validates `args.input` against the TOOL's `inputSchema` (and
+   `contextSchema`, when declared) BEFORE calling
+   `execute[<toolId>]`. Provider bodies MUST NOT re-validate;
+   they MUST trust the host narrowed the inputs.
+
+5. **`execute` honours `signal`.** Long-running calls
+   (LLM streaming, slow CLI invocations) MUST observe the abort
+   signal and stop promptly when the caller cancels.
+
+6. **Sandbox is enforced by the host, declared by the provider.**
+   The provider's `network`/`sandbox` block is policy; the host
+   enforces. A `defineProvider` body MUST NOT subvert host
+   enforcement (e.g. by spawning child processes when the CLI
+   subtype declares `exec.allow: false`).
+
+7. **`login` / `refresh` honour `signal`.** Browser-callback flows
+   MUST abort cleanly when the caller cancels (e.g. user closes
+   the prompt). Tools blocked on a hung login flow are a UX
+   regression.
+
+8. **`parseOutput` is pure.** It consumes the raw output + exit
+   code (CLI) and returns a structured result. It MUST NOT touch
+   the network or filesystem; that's the runner's job.
+
+9. **No I/O at module load.** The module containing
+   `defineProvider` MUST be safely importable as a side-effect-free
+   unit. All I/O happens inside `execute` / `login` / `refresh` /
+   `parseOutput`.
+
+10. **Schema narrowing is non-extensive.** `schema_narrowing` MAY
+    drop optional contract inputs; MUST NOT add inputs the contract
+    doesn't know about. To add provider-specific knobs, use
+    `metadata.<kind>.…` in the implements entry.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineProvider`-conformant
+implementation, see
+[`./resources/aip-30/draft/ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Multi-provider routing
+
+When a TOOL has N providers, the resolver picks one per call. The
+algorithm runs in 6 phases — see [AIP-14 § Provider resolution](/docs/aip-14)
+for the canonical description (TOOL is the layer that owns the
+resolver contract; PROVIDER is what the resolver picks between).
+
+Briefly:
+
+```
+Phase 1 — Candidate set
+  candidates = providers implementing(tool.id, tool.version)
+  filter by tool.provider_constraints.forbid / require_kind
+  filter by schema_narrowing compat with call inputs
+
+Phase 2 — Capability gate
+  drop providers with failed install / version_check
+  drop providers in unauthed state (unless login-only invocation)
+  drop providers with stale failed health_check
+
+Phase 3 — Policy filter
+  drop providers violating workspace policy_tags allowlist
+  drop providers without matching region (data residency)
+
+Phase 4 — Pin override
+  if context.pinnedProvider: return matching candidate or pinned_provider_unavailable
+
+Phase 5 — Cost / preference rank
+  prefer tool.default_provider if surviving
+  else rank by cost_units_per_call → kind preference (builtin > sdk > http > mcp > cli)
+       → most-recent health_check pass → lex(id)
+
+Phase 6 — Bind
+  return { provider, mappedInput via implements[].mapping, providerCtx }
+```
+
+The `kind` preference order (`builtin > sdk > http > mcp > cli`) is
+heuristic, expressing "cheaper to dispatch and more reliable":
+builtin is always available, SDKs are in-process, HTTP is a network
+hop, MCP is a network hop with extra protocol overhead, CLI is a
+subprocess. Authors override per-tool with `default_provider` or
+per-call with `context.pinnedProvider`.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* a `PROVIDER.md` is via a paired
+[SKILL.md](/docs/aip-3) — distributed at
+[`./resources/aip-30/draft/skills/author-provider/SKILL.md`](./resources/aip-30/draft/skills/author-provider/SKILL.md) —
+that an agent loads when asked to wrap a backend as a provider. The
+skill walks the agent through:
+
+1. Identify the **kind** (`cli` / `http` / `mcp` / `sdk` /
+   `builtin`) and the corresponding subtype AIP.
+2. Identify **which TOOLs the provider implements**. For each: pick
+   from existing TOOL.md, scaffold a new TOOL.md via the
+   [AIP-14 author-tool skill](/docs/aip-14#authoring-with-skill-md),
+   or declare schema-narrowing for partial support.
+3. Map the **install lifecycle** (CLI/SDK only — install methods,
+   version detection regex).
+4. Map the **auth surface** (env vars, login flow, refresh cadence,
+   expiry signal).
+5. Author the **sandbox profile** (network egress, plus subtype-
+   specific `fs`/`exec`/`tty` for CLI).
+6. Declare **`implements[]`** with mappings + per-tool overrides.
+7. Add **`region`** + **`policy_tags`** if relevant.
+8. Validate against
+   [`./resources/aip-30/draft/PROVIDER.schema.json`](./resources/aip-30/draft).
+
+The agent MAY install the skill, follow the steps, and emit the
+final `PROVIDER.md` (and optional `provider.ts`) without further
+instruction.
+
+## Example
+
+```md
+---
+name: OpenAI Images (HTTP)
+id: openai-images-http
+description:
+  Image generation, edit, and variation via the OpenAI HTTP API. Implements
+  three tools — image.create, image.edit, image.variation — sharing one
+  API key, one rate limiter, and one egress allowlist.
+version: 1.0.0
+kind: http
+auth:
+  ref: ./SECRETS.md
+  state:
+    env: ["OPENAI_API_KEY"]
+  expiry:
+    detect: "http_status:401"
+network:
+  egress: ["api.openai.com"]
+region: ["global"]
+policy_tags: ["third-party-llm", "us-data-residency"]
+implements:
+  - tool: ./tools/image-create/TOOL.md
+    version: "^1.0.0"
+    schema_narrowing:
+      drop_inputs: [seed, negative_prompt]
+    mapping:
+      prompt: prompt
+      aspect: { from: aspect_ratio, transform: aspect_to_size }
+    cost_override:
+      cost_units_per_call: 4         # millicents (DALL-E 3 standard)
+    metadata:
+      http:
+        endpoint: "/v1/images/generations"
+        method: POST
+  - tool: ./tools/image-edit/TOOL.md
+    version: "^1.0.0"
+    cost_override:
+      cost_units_per_call: 6
+    metadata:
+      http:
+        endpoint: "/v1/images/edits"
+        method: POST
+  - tool: ./tools/image-variation/TOOL.md
+    version: "^1.0.0"
+    cost_override:
+      cost_units_per_call: 4
+    metadata:
+      http:
+        endpoint: "/v1/images/variations"
+        method: POST
+health_check:
+  method: http
+  http: { method: GET, url: "https://api.openai.com/v1/models", expect_status: 200 }
+  every: "PT5M"
+tags: [openai, image-generation, third-party-api]
+examples:
+  - { goal: "create a 1024×1024 image", note: "uses DALL-E 3 default" }
+  - { goal: "edit existing image with mask", note: "image.edit tool" }
+---
+
+## When to reach for this provider
+
+Use OpenAI for general image generation when DALL-E quality
+suffices and `policy_tags` allow third-party LLMs. Prefer the
+`replicate-flux-http` provider for photorealistic style (better on
+that benchmark) or the `gemini-imagen-http` provider for stylised
+art (cheaper, comparable quality).
+
+## Trade-offs
+
+- **Cost**: $0.04/standard image — middle of the pack. Replicate
+  Flux is $0.025; Stable Diffusion XL self-hosted is $0.005 +
+  hardware amortisation.
+- **Region**: US data residency only. Workspaces tagged
+  `eu-data-residency` MUST exclude this provider.
+- **Latency**: ~3–8s for 1024×1024. SDXL local is faster on warm
+  GPU; Flux is comparable.
+- **Reliability**: very high (OpenAI's status is the floor).
+
+## Gotchas
+
+- `seed` and `negative_prompt` not supported — declared in
+  `schema_narrowing.drop_inputs`. Calls using these inputs will be
+  refused by the resolver, not silently ignored.
+- Rate limit: 50 RPM on the standard tier. Provider configures
+  retry with exponential backoff; callers should NOT add their own.
+- Expiry detection on `http_status:401`. After detected expiry,
+  state transitions to `unauthed`; the host surfaces the login
+  flow (re-bind the API key, this provider doesn't OAuth).
+```
+
+## Compatibility
+
+### With AIP-14 TOOL.md (revised)
+
+PROVIDER.md slots in below the abstract TOOL.md. The TOOL no longer
+carries `code`/`run`/`runner`/`secrets`/`network` (those moved
+here). A TOOL referencing this PROVIDER's `implements[]` entry sees
+its inputs validated, its mutates respected, its approval enforced —
+same contract as before, just with the implementation hosted here.
+
+### With AIP-29 CLI.md
+
+CLI.md is a `kind: cli` specialisation of PROVIDER. Its
+`bin`/`bin_args`/`sandbox.fs/exec/tty`/`output` blocks live in the
+CLI specialisation; everything else (install, version_check, auth,
+runner, network, implements) lives at the PROVIDER level. The
+existing AIP-29 spec adds a `provider_kind: cli` frontmatter
+declaration to make the relationship explicit.
+
+`defineCli()` survives as thin sugar over `defineProvider({ kind: "cli", ... })`.
+
+### With AIP-19 SECRETS.md
+
+The provider's `auth.ref` points at a `SECRETS.md` listing the
+provider's required env-var bindings. Tools no longer carry a
+`secrets:` block — they inherit from the resolved provider.
+
+### With AIP-17 RUNNER.md
+
+Provider's `runner` block (per AIP-17) declares the process boundary
+shared across every tool the provider implements. CLI providers
+typically declare `subprocess`; future containerised providers
+declare `docker`/`firecracker`.
+
+### With AIP-28 INTENT.md
+
+INTENT routes to TOOL (abstract). The runtime resolves provider per
+call. INTENT.md doesn't reference providers directly — its
+`implements:` block points at TOOLs. Direct provider pinning
+happens at call time via `context.pinnedProvider`, not at intent
+authoring time (escape hatch only).
+
+## Security considerations
+
+`PROVIDER.md` is **declarative**: a malicious manifest can lie about
+its `network`, `sandbox`, `policy_tags`, or `auth`. Hosts MUST
+treat the manifest as untrusted input until verified — minimum:
+
+- Verify install SHA-256 (when present, especially for `curl` and
+  `download` methods).
+- Validate the binary's actual version against `version_check.range`
+  AFTER install, BEFORE invocation.
+- Enforce the declared sandbox at the OS / network level. A
+  provider that declares `network.egress: ["api.foo.com"]` and
+  attempts to dial `api.bar.com` MUST fail closed.
+
+Browser-callback login flows (`auth.login.requires_callback_url:
+true`) expose the host. Hosts MUST allocate a single-use,
+time-bound callback URL and reject inbound requests from unexpected
+origins.
+
+`policy_tags` are declarative. Hosts MUST enforce policy filters
+(workspace allowlists, region constraints) against them; they MUST
+NOT trust the provider's self-tagging without verification at
+registration time.
+
+`implements[].schema_narrowing` is a security-relevant contract: a
+provider that drops the `idempotency_key` input from a payments
+TOOL silently turns retry-safe calls into double-charge
+opportunities. Reviewers MUST read narrowing diffs as carefully as
+schema diffs.
+
+## Open questions
+
+These remain open until enough subtype implementations ship.
+
+1. **Streaming and progressive outputs.** v1 contracts are unary
+   in/out. Providers that natively stream (HTTP SSE, gRPC bidi,
+   MCP `notifications/progress`) need a v2 mechanism. Candidate:
+   `streaming: { in?: false, out?: "events" | "tokens" | "partials" }`
+   on `implements[]` entries, plus an `executeStream` body in
+   `defineProvider`. Defer to AIP-30 v2.
+
+2. **Multi-account auth (one provider, two accounts).** Today's
+   auth state is per `(provider.id, workspace.id, user.id)`. When
+   a user has two OpenAI accounts (personal + workplace), the
+   resolver can't distinguish; workaround is registering two
+   PROVIDER.md files (`openai-personal-http`, `openai-work-http`).
+   v2 candidate: `auth.accounts: object[]` + per-call account
+   selection. Document workaround now, formalise later.
+
+3. **Per-call cost variability.** `cost_units_per_call` assumes a
+   fixed cost. Providers whose cost varies with input size (LLM
+   token counts, ffmpeg duration) need a function. Candidate:
+   `cost_estimate: (input) => units` in `defineProvider`. Defer
+   to v2.
+
+4. **Health-check sufficiency.** A 200 from `/v1/models` doesn't
+   guarantee `/v1/images/generations` works. Per-tool health
+   checks? Synthetic-call canaries? Defer to v2 with
+   field-experience input.
+
+5. **Cross-kind composition.** A provider that's "CLI on macOS,
+   Docker on Linux" — single PROVIDER.md with conditional kind, or
+   two PROVIDER.md files with `requires.os` filtering? v1 prefers
+   the latter (simpler); v2 may revisit.
+
+## See also
+
+- [AIP-3 — SKILL.md](/docs/aip-3) — skills MAY require providers as
+  capabilities (indirectly via tools)
+- [AIP-7 — governance](/docs/aip-7) — sandbox + approval gating
+  enforced against the resolved provider
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts that
+  providers implement; resolver lives in TOOL's runtime
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — orchestration; per-step
+  provider resolution
+- [AIP-16 — IO.md](/docs/aip-16) — input/output blocks shared
+  across the layering
+- [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary block,
+  declared on PROVIDER
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
+  referenced from PROVIDER's `auth.ref`
+- [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above
+  TOOL; doesn't touch providers directly
+- [AIP-29 — CLI.md](/docs/aip-29) — `kind: cli` specialisation of
+  this AIP
+- AIP-31 — HTTP.md — `kind: http` specialisation (forthcoming)
+- AIP-32 — MCP.md — `kind: mcp` specialisation (forthcoming)
+- AIP-33 — SDK.md — `kind: sdk` specialisation (forthcoming)
+- [`./PROVIDER.schema.json`](./resources/aip-30/draft) — JSON Schema validator
+- [`./ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md) — additional PROVIDER.md examples

@@ -1,0 +1,591 @@
+---
+title: "AIP-13: WORK.md — agentwork/v1 (projects, initiatives, tasks)"
+description: A filesystem-first work-item format with a unified scope vocabulary that makes containment, applicability, and ownership three orthogonal axes — usable across the whole agentproto family.
+aip: 13
+status: Draft
+type: Schema
+created: 2026-04-28
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 6, 7, 9]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/work
+discussions-to: https://github.com/agentproto/specs/discussions/13
+---
+
+| Field | Value |
+|---|---|
+| AIP | 13 |
+| Title | WORK.md — agentwork/v1 (projects, initiatives, tasks) |
+| Status | Draft |
+| Type | Schema |
+| Domain | work.sh |
+| Doctypes | `work/v1` (project, initiative, task) + `work.workspace/v1` (manifest + view, written as `WORK.md`) |
+| Requires | [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7), [AIP-9](/docs/aip-9) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-10](/docs/aip-10) (knowledge), [AIP-15](/docs/aip-15) (workflows) |
+| Reference Impl | [`packages/agent-framework/src/work`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/work) |
+
+> **⚠ Deprecation notice.** This AIP defines `agentwork/v1` with
+> hardcoded `project`, `initiative`, and `task` doctypes. It is being
+> superseded by [AIP-20](/docs/aip-20) (`agentwork/v2`), which lifts
+> the per-item-kind schemas to [AIP-18](/docs/aip-18) collections. AIP-20
+> ships starter collections (`agentwork-v1-compat`) so v1 workspaces
+> remain loadable. AIP-13 stays in Draft for the duration of the
+> transition; it will move to Superseded once AIP-20 reaches Final.
+
+## Abstract
+
+`agentwork/v1` defines four filesystem-first doctypes for the day-to-day
+work an autonomous company runs. Three are work items —
+`PROJECT.md`, `INITIATIVE.md`, `TASK.md` (`work/v1`) — and the fourth is
+a workspace-root manifest (`work.workspace/v1`, written as `WORK.md`)
+that declares the tracker's shape (which item kinds are first-class, the
+status state machine, scope-axis defaults, lint policies) and binds the
+workspace to the rest of the AIP family ([AIP-9](/docs/aip-9) executor
+operator, [AIP-7](/docs/aip-7) governance, [AIP-10](/docs/aip-10)
+knowledge wiki). The same `work.workspace/v1` doctype, used recursively
+via `extends:`, also expresses **per-context views** — an operator
+([AIP-9](/docs/aip-9)), a company ([AIP-6](/docs/aip-6)), or a skill
+([AIP-3](/docs/aip-3)) ships its OWN `WORK.md` that adapts the base
+workspace for its lens (different focus kinds, ownership filters, status
+visibility) without forking the tracker. The spec also introduces a
+**unified scope vocabulary** keeping *containment* (`parent`),
+*applicability* (`scope`), and *current ownership* (`assignee` / `lead`)
+as three orthogonal axes — fixing the ambiguity that creeps into
+trackers when those concepts collapse into a single field.
+
+## Motivation
+
+Existing trackers fall into one of two traps: they conflate scope with
+hierarchy (Jira: a story's "project" both contains it and gates its
+visibility), or they conflate ownership with applicability (Asana: a
+task's "assignee" doubles as its visibility set). When work items are
+the substrate an autonomous agency operates against, the conflation
+becomes a bug — agents can't reason cleanly about "which tasks am I
+allowed to see, of those which are mine to do, and which projects do
+they belong to."
+
+Sibling specs already lean filesystem-first
+([AIP-6](/docs/aip-6) `OBJECTIVE.md`, [AIP-8](/docs/aip-8) `DELIVERABLE.md`),
+and partial scope vocabulary appears in
+[AIP-11](/docs/aip-11) and [AIP-12](/docs/aip-12) as `targets[]`. AIP-13
+codifies the work doctypes that were missing and the scope vocabulary
+that was implicit, so the whole family composes.
+
+A second gap, equally pressing: there was no machine-parseable
+**workspace root** for a tracker. Teams agreed on what a single task
+looked like but not on which kinds were enabled, which status
+transitions were legal, what counted as overdue, or who the default
+owner was when items landed without an assignee. The AIP-10 wiki spec
+(landed alongside) hit the same gap and resolved it with a
+`KNOWLEDGE.md` workspace manifest plus a **registry-of-views** pattern:
+one base shape, many `extends:`-composed lenses, each bound via
+`appliesTo` to a specific consumer. AIP-13 borrows the pattern wholesale.
+A `work.workspace/v1` doctype — written as `WORK.md` — is the canonical
+machine-readable manifest, and the same doctype recursively composes via
+`extends:` to express per-operator, per-company, and per-skill views.
+The whole family now agrees on one shape: `KNOWLEDGE.md` for the wiki,
+`WORK.md` for the tracker, both `<domain>.workspace/v1` doctypes, both
+extend-composable, both bound to consumers via `appliesTo`.
+
+## Specification
+
+A conforming `agentwork/v1` package is a directory tree co-located with
+the company root ([AIP-6](/docs/aip-6)):
+
+```
+my-company/
+├── COMPANY.md                       # AIP-6
+├── ROLE.md, OPERATOR.md, ...        # AIP-6
+├── WORK.md                          # workspace manifest (RECOMMENDED at the work-tree root)
+├── projects/
+│   └── <slug>/
+│       └── PROJECT.md
+├── initiatives/
+│   └── <slug>/
+│       └── INITIATIVE.md
+├── tasks/
+│   └── <slug>/
+│       └── TASK.md
+└── _index/
+    └── work.json                    # regenerable hot-path index
+```
+
+**Per-context views** live alongside their consumer, not under the work
+root. Conventional locations:
+
+```
+operators/eng-lead/WORK.md         # extends ../../my-company/WORK.md
+companies/acme/WORK.md             # extends ../../my-company/WORK.md
+skills/triage-tasks/WORK.md        # extends ../../my-company/WORK.md
+```
+
+A view's `extends:` field points to a parent `WORK.md` (workspace root
+OR another view), and `appliesTo:` binds the view to one or more
+operator / company / skill workspace refs. The runtime resolves the
+chain on load and exposes the merged effective config to the consumer.
+
+### Common frontmatter (all three doctypes)
+
+```yaml
+---
+schema: work/v1
+slug: <kebab-case-id>
+kind: project | initiative | task
+title: <human-readable>
+status: open | claimed | in-progress | blocked | done | archived
+
+# Containment — what this is part of (optional).
+# Removing the parent SHOULD remove the child (unlike attachments).
+parent:
+  kind: project | initiative
+  ref: <slug>
+
+# Scope — applicability. Most-restrictive wins. Inherits from parent.
+scope:
+  company: <company-slug>            # REQUIRED at the root of a chain
+  role: <role-slug>                  # OPTIONAL — narrows to AIP-6 ROLE.md
+  operator: <operator-slug>          # OPTIONAL — narrows to AIP-9 OPERATOR.md
+  project: <project-slug>            # OPTIONAL — narrows to a project
+
+# Current ownership (changes over time). Tasks have `assignee`;
+# projects/initiatives have `lead`. `null` = unclaimed / unassigned.
+assignee:                            # tasks only
+  kind: operator | user
+  ref: <slug>
+lead:                                # projects + initiatives only
+  kind: operator | user
+  ref: <slug>
+
+# Inert references (NOT containment). Removing the target SHOULD NOT
+# break this row.
+attachments:
+  artifacts: [<fileId-or-path>]
+  wiki: [<wiki-slug>]                # AIP-10 reference
+  lessons: [<lesson-slug>]           # AIP-11 reference
+  conversations: [<conv-id>]
+  deliverables: [<deliverable-slug>] # AIP-8 reference
+
+# AIP-7 governance hooks.
+governance:
+  approval_required: false
+  signers: []
+
+deadline: <ISO 8601>                 # OPTIONAL
+priority: low | normal | high        # OPTIONAL, default normal
+labels: [<topic>]                    # OPTIONAL
+metadata:                            # OPTIONAL — vendor extensions
+  <vendor>:
+    <field>: <value>
+---
+
+# <title>
+
+<body — description, acceptance criteria, scratchpad>
+```
+
+### Per-kind constraints
+
+`PROJECT.md`:
+- MUST set `kind: project`.
+- `parent.kind` MAY be `initiative` (project nested under an initiative).
+- `members[]` MAY be set when access is narrower than role-based.
+- Uses `lead`, not `assignee`.
+
+`INITIATIVE.md`:
+- MUST set `kind: initiative`.
+- `parent.kind` MAY be `project` (sub-initiative within a project).
+- Uses `lead`, not `assignee`.
+
+`TASK.md`:
+- MUST set `kind: task`.
+- `parent.kind` MAY be `project` or `initiative`.
+- Uses `assignee`, not `lead`.
+
+### Scope semantics (normative)
+
+- **Visibility** = `scope.company` narrowed by `scope.role` narrowed by
+  `scope.operator`. The most-restrictive non-empty field wins.
+  `scope.operator: alice` is invisible to anyone other than `alice` and
+  the company's auditors, regardless of `scope.role`.
+- **Inheritance**: when a child doctype's scope field is empty, the
+  runtime MUST treat it as the parent's value for that field.
+  Inheritance climbs the `parent` chain to the root.
+- **Cross-axis combination is AND**: `scope: { role: design, project:
+  onboarding }` means *"members of role:design AND members of
+  project:onboarding"*, not the union.
+- **Three null states**: `assignee=null` (free to pick up),
+  `scope.operator=null` (not narrowed to a single operator),
+  `scope.role=null` (not narrowed to a role) — each carries different
+  meaning and MUST NOT be conflated.
+
+### Containment vs attachments (normative)
+
+- Use `parent` when deletion of the referenced doctype SHOULD cascade.
+- Use `attachments.*` when the reference is informational and the
+  attached resource has its own lifecycle.
+- The runtime MUST NOT cascade-delete attachments.
+
+### `_index/work.json`
+
+A regeneratable hot-path index. Schema:
+
+```ts
+type WorkIndex = {
+  schema: "work-index/v1"
+  generated_at: string                // ISO 8601
+  entries: Array<{
+    slug: string
+    kind: "project" | "initiative" | "task"
+    title: string
+    status: string
+    scope: { company?: string; role?: string; operator?: string; project?: string }
+    parent?: { kind: string; ref: string }
+    assignee?: { kind: string; ref: string }
+    lead?: { kind: string; ref: string }
+    deadline?: string
+    priority?: string
+    labels?: string[]
+    path: string
+  }>
+}
+```
+
+Implementations MUST regenerate the index on every doctype write and
+MUST consider it stale otherwise — never trust the index without a
+write-time guarantee. The index is a derived view; it carries no field
+that the source files don't.
+
+### Workspace root manifest (`WORK.md`)
+
+`WORK.md` is the canonical, machine-parseable workspace manifest for an
+`agentwork/v1` tracker. It encodes — into a YAML frontmatter that
+runtimes can validate, merge, and diff — everything a host needs to
+know about a tracker's *shape*: which work-item kinds are enabled, what
+status transitions are legal, what scope-axis defaults new items pick
+up, what lints run on every maintenance pass, and how the workspace
+binds to the surrounding AIP family. It is the parallel for
+`agentwork/v1` of [AIP-10](/docs/aip-10)'s `KNOWLEDGE.md` —
+intentionally so. Readers familiar with one should land on its sibling
+without re-learning the model.
+
+The same `work.workspace/v1` doctype is used in TWO modes:
+
+- **Workspace-root mode** — `<work-root>/WORK.md`, no `extends`.
+  Declares the BASE shape: enabled kinds, the status state machine,
+  scope defaults, lint rules, governance binding. Lives at the root of
+  the work tree (typically alongside `COMPANY.md`).
+- **View mode** — `<consumer>/WORK.md`, `extends:` set to a parent
+  `WORK.md` path. Adapts the base for a specific operator
+  ([AIP-9](/docs/aip-9)), company ([AIP-6](/docs/aip-6)), or skill
+  ([AIP-3](/docs/aip-3)). View mode is the mechanism that lets one
+  tracker serve many lenses without forking — an engineering lead's
+  view narrows kinds to project + initiative, a triage skill's view
+  hides terminal statuses, a per-company view adds a custom kind. The
+  tracker is one; the views are many.
+
+The already-shipped per-item doctypes (`PROJECT.md`, `INITIATIVE.md`,
+`TASK.md`) remain unchanged. `WORK.md` sits ABOVE them as the workspace
+root: it declares which *kinds* are first-class, what *statuses* the
+state machine accepts, and what *defaults* new items inherit. The
+items themselves continue to declare their own `kind`, `status`,
+`scope`, and `parent`.
+
+#### Frontmatter shape
+
+```yaml
+---
+schema: work.workspace/v1
+name: <kebab-case-id>                      # required
+title: <human-readable>                    # required
+description: <one-paragraph purpose>       # required
+version: <semver>                          # required, the workspace shape version
+
+# Composition (view mode)
+extends: ../path/to/parent/WORK.md         # OPTIONAL — relative path to parent
+appliesTo:                                 # OPTIONAL — bind this view to specific consumers
+  - ws://operators/<slug>                  #   AIP-9 operator
+  - ws://companies/<slug>                  #   AIP-6 company
+  - ws://skills/<slug>                     #   AIP-3 skill
+
+# Cross-AIP refs
+executor: ws://operators/<slug>            # OPTIONAL — AIP-9 operator that runs work items
+governance: <path-or-ref>                  # OPTIONAL — AIP-7 policy or audit binding
+knowledge: ws://wikis/<slug>/KNOWLEDGE.md  # OPTIONAL — AIP-10 wiki this workspace refers to
+
+# Work model — what KINDS of items this workspace tracks
+itemKinds:                                 # array; merge-by-name against extends parent
+  - name: project | initiative | task | <custom>
+    enabled: true
+    fields: [<field>, ...]                 # canonical fields beyond the base spec
+    icon: <emoji>
+    description: <prose>
+
+# Status state machine — used by the host for transition validation
+statuses:                                  # array; merge-by-id with parent
+  - id: <kebab-id>                         # required, stable
+    label: <human-readable>
+    terminal: true | false                 # finished states (done, cancelled)
+    transitionsTo: [<status-id>, ...]      # allowed next states
+
+# Scope-axis defaults (the three orthogonal axes from above)
+scope:
+  defaultContainment: <slug>               # OPTIONAL — default parent scope
+  defaultApplicability: [<scope>, ...]     # OPTIONAL — default applicability
+  defaultOwner: ws://operators/<slug>      # OPTIONAL — default assignee/lead
+  ownershipPolicy: strict | inherit | open
+
+# Lint rules — what the host checks every maintenance pass
+lints:                                     # array; merge-by-id with parent
+  - id: <kebab-id>                         # required, stable
+    kind: missing-owner | overdue | orphan | broken-ref | stale | scope-widening | custom
+    appliesTo: <kind> | "*"
+    severity: error | warn | info
+    params:
+      <key>: <value>
+
+# Routine workflow defaults (composes with AIP-15 if available)
+defaults:
+  workflow: <ref>                          # OPTIONAL — default WORKFLOW.md path or ref
+  approvalClass: auto | always | on-mutate | policy:<ref>
+
+# Display / UX hints (agnostic to runtime)
+display:
+  homePage: <slug>                         # OPTIONAL — landing item id
+  defaultGrouping: kind | status | owner
+
+metadata:                                  # vendor extensions, namespaced
+  <vendor>:
+    <field>: <value>
+---
+
+# <body — markdown prose>
+
+Conventional sections in the body include:
+
+- ## Purpose — what this workspace is for, who uses it
+- ## Conventions — naming, style, what to avoid
+- ## When to extend vs replace — composition guidance
+- ## Examples — short snippets of typical work items
+```
+
+#### Composition semantics
+
+When a runtime loads a `WORK.md` whose frontmatter declares `extends:`,
+it MUST:
+
+1. **Walk the parent chain.** Recursively load the parent referenced by
+   `extends:`, then that parent's parent, until a manifest with no
+   `extends` is reached (the workspace root). Maximum chain depth is
+   eight. Hosts MUST detect cycles by tracking visited absolute paths.
+2. **Treat both depth overflow and cycle detection as warnings, not
+   errors.** A view whose chain is malformed MUST still load — the
+   runtime falls back to the local manifest only and surfaces a
+   `work_extends_cycle` (or `work_extends_depth_exceeded`) warning to
+   the consumer's debug surface.
+3. **Tolerate a missing parent.** If `extends:` points to a path that
+   does not exist, the runtime emits `work_extends_missing` as a
+   warning and uses the local manifest only. View activation does not
+   abort.
+4. **Merge bottom-up.** Walk the chain from the workspace root toward
+   the leaf view, merging each manifest into the accumulator using the
+   strategy below.
+
+**Merge strategy** (child wins on conflicts):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins; the runtime exposes both. |
+| `extends` | not inherited | Local-only field. |
+| `appliesTo` | not inherited | Local-only binding. |
+| `executor`, `governance`, `knowledge` | override | Child can rebind. Governance bindings flow through [AIP-7](/docs/aip-7); a parent's policy MAY restrict whether a child can rebind `governance`. |
+| `itemKinds` | merge-by-name | A child entry with the same `name` replaces the parent's; new names are appended. A child setting `enabled: false` disables the parent's kind. |
+| `itemKinds[].fields` | union | Child fields are appended to the parent's set; duplicates collapsed. |
+| `statuses` | merge-by-id | Child status with same `id` replaces parent's; new ids are appended. |
+| `statuses[].transitionsTo` | replace wholesale | Child replaces the parent's transition list if present. |
+| `statuses[].terminal` | child wins, drift warning | A child that flips a parent status's `terminal` classification SHOULD trigger a `work_status_drift` warning so reviewers notice the semantic change. |
+| `lints` | merge-by-id | Child lint with same `id` replaces parent's; new ids are appended. |
+| `lints[].severity` | child wins | Subject to governance: a policy MAY forbid softening a parent lint below `error`. |
+| `scope.*` | leaf-field override | `defaultContainment`, `defaultApplicability`, `defaultOwner`, `ownershipPolicy` each override independently. |
+| `defaults.*` | leaf-field override | `workflow` and `approvalClass` each override independently. |
+| `display.*` | leaf-field override | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+The runtime MUST expose **both** the merged effective config AND the
+resolution chain (ordered list of absolute paths consumed during merge).
+Consumers use the merged config; tooling uses the chain to explain
+*why* a field has the value it does.
+
+#### Cross-AIP refs
+
+`WORK.md` is the binding surface where `agentwork/v1` meets the rest
+of the AIP family:
+
+| Field | References | Purpose |
+|---|---|---|
+| `executor` | [AIP-9](/docs/aip-9) operator | Names the operator the host should activate to *run* work items emitted by this workspace — claim open tasks, drive transitions, surface blockers. |
+| `governance` | [AIP-7](/docs/aip-7) policy / audit ref | Binds the workspace (or view) to a governance policy. Status-transition approval, assignee-change audits, and scope-widening interventions flow through this ref. |
+| `knowledge` | [AIP-10](/docs/aip-10) `KNOWLEDGE.md` ref | Names the wiki this workspace refers to. Lets `attachments.wiki[]` on individual items resolve against the bound wiki by default. |
+| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator | A view declares which consumers it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer (`work_appliesto_unresolvable`). |
+| `defaults.workflow` | [AIP-15](/docs/aip-15) `WORKFLOW.md` | Default routine that runs against work items in this workspace (e.g. nightly stale-task sweep). |
+| `extends` | another `WORK.md` | Composition. |
+
+`appliesTo` is **not inherited**. A view binds to its own consumers; a
+parent's bindings do not leak into the child. This is the rule that
+makes the registry-of-views pattern coherent — every view declares its
+own scope.
+
+#### Workspace mode vs view mode — composability table
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<work-root>/WORK.md` | `<consumer>/WORK.md` |
+| `extends:` | absent | required (otherwise it's a workspace, not a view) |
+| `appliesTo:` | absent (a workspace has no single consumer) | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins |
+| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the workspace |
+| Use cases | tracker authors, schema designers | operator/company/skill teams who want their own lens |
+| Validation | full schema check | schema check + chain validation |
+| Lifecycle | versioned with the tracker | versioned with the consumer |
+| Status state machine | declared from scratch | inherited; child MAY add new states or change transitions |
+
+The same `work.workspace/v1` doctype, the same file name, the same
+schema. Only the location and the presence of `extends:` distinguish.
+
+#### Why a workspace manifest
+
+Without a workspace manifest, every consumer has to re-discover the
+tracker's shape from item bodies — what `status` values are legal, what
+`kinds` exist beyond the base three, who the default owner is. A YAML
+manifest collapses that discovery into one validate-once load. It also
+gives the host a stable surface for cross-AIP binding: an
+[AIP-9](/docs/aip-9) operator looking for "the work I should pick up"
+reads the workspace's `executor` and `scope.defaultOwner` to decide
+which items are theirs by default; an [AIP-7](/docs/aip-7) governance
+policy attaches to the workspace once and applies uniformly. And — the
+reason the AIP-10 `KNOWLEDGE.md` parallel matters here — `WORK.md`
+makes the tracker *composable*. Each operator/company/skill ships its
+own narrow view that extends the shared workspace, instead of every
+consumer carrying around a private copy of the rules. The workspace is
+the registry; each `WORK.md` is a registered view; consumers pick a
+view by location.
+
+### Vendor extensions
+
+Vendor fields go under `metadata.<vendor>`. Standard fields MUST NOT be
+redefined.
+
+## Rationale
+
+**Why three axes, not one.** Trackers that collapse `parent` / `scope`
+/ `assignee` into one or two fields force every product feature to
+re-derive the missing distinctions. Splitting them up-front is one
+extra YAML field for the author and removes whole categories of
+ambiguity downstream ("is this task for alice or about alice?").
+
+**Why scope inherits.** Most tasks should not need to repeat their
+project's scope. Inheritance keeps the common case terse without
+hiding the model.
+
+**Why `attachments` is separate.** Containment vs reference is the
+single most common modeling mistake in trackers. Forcing two field
+names removes it.
+
+**Why the work tree co-locates with `agentcompanies/v1`.** A company's
+work is part of the company. Splitting them across packages would
+require synchronization across roots and break the
+"a company is a folder" invariant from AIP-6.
+
+**Why no DB.** Filesystem-first matches the rest of the family.
+`_index/work.json` makes hot paths fast; products can layer on a real
+DB if they truly need cross-instance aggregation, but the spec doesn't.
+
+**Why one doctype (`work.workspace/v1`) for both workspace root and
+view.** The alternative is two doctypes — one for the root and one for
+the per-consumer adaptation. Two doctypes means two schemas to
+maintain, two validators to ship, and an asymmetric merge surface. One
+doctype with `extends:` collapses the two into a single mental model: a
+workspace IS its own view of itself, and every view IS a workspace
+bound to a different consumer. The same schema validates both, the same
+merge algorithm applies recursively, and the same authoring skill
+([`./resources/aip-13/draft/skills/author-work-workspace/SKILL.md`](https://github.com/agentik/agentik-studio/blob/dev/apps/agentik/sites/content/docs/agentproto/resources/aip-13/draft/skills/author-work-workspace/SKILL.md))
+walks an agent through both flows. This is exactly the choice
+[AIP-10](/docs/aip-10) made for `knowledge.workspace/v1` — the two
+specs deliberately mirror each other so that a host implementing one
+gets the other for free, structurally.
+
+**Why composition over inheritance hierarchies.** A tracker could ship
+a single workspace and run a query-time prompt that reshapes its lists
+per consumer. That couples consumer behaviour to runtime prompts —
+swapping runtimes loses the lens. Composition via on-disk `extends:`
+chains keeps the lens portable: the same operator, re-instantiated in a
+different runtime, still gets the same merged config because the merge
+runs against files, not prompts. This is the registry-of-views pattern:
+the tracker is the registry, each `WORK.md` is a registered view, and
+consumers pick a view by location.
+
+**Why the status state machine lives on `WORK.md`, not on each item.**
+Items declare *what state they're in*; the workspace declares *which
+states are legal and how they transition*. Putting the state machine on
+each item would force every author to repeat the rules, and would let
+two items in the same tracker disagree about whether `done` is
+terminal. Putting it on the workspace means a host can validate any
+transition with one read, and a view can refine the machine for its
+context (e.g. an audit-only view marking everything terminal) without
+mutating individual items.
+
+## Reference Implementation
+
+[`packages/agent-framework/src/work`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/work) —
+Zod-validated parser/serializer (gray-matter), `FsWorkStore` over a
+`MastraFilesystemHandle`, index regeneration on write. Mirrors the
+shape of [AIP-10](/docs/aip-10) `wiki/` and [AIP-11](/docs/aip-11) `lessons/`.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec.
+
+## Security Considerations
+
+Work items are the substrate an autonomous company plans against —
+both an authorization surface and an audit surface.
+
+- **Scope evasion.** A doctype writer claims `scope.role: design` to
+  expose a task only to designers, while embedding instructions
+  intended for finance in the body. Mitigation: scope is *visibility*,
+  not *authority* — the runtime MUST NOT treat a doctype's body as
+  authority for a role/operator the doctype's scope says it shouldn't
+  reach. Tools that act on a task's body MUST verify the acting
+  operator falls inside its scope.
+- **Inheritance subversion.** A child doctype with empty scope
+  *inherits* the parent's. An attacker who creates a parent with
+  permissive scope and chains a child through it bypasses
+  child-side narrowing. Mitigation: the inheritance climb is one-way —
+  children cannot widen scope they didn't declare. Linters MUST flag
+  scope-widening relative to the inheritance chain.
+- **Assignee impersonation.** `assignee.ref` is unauthenticated text.
+  Mitigation: assignment changes SHOULD flow through AIP-7 governance
+  for high-impact projects (`approval_required: true`).
+- **Cascade deletion of attachments.** A confused implementation
+  cascades `attachments.*` on parent deletion and silently destroys
+  unrelated wiki pages or files. Mitigation: the spec mandates that
+  attachments NOT cascade. Conformance tests MUST verify this.
+- **Index drift.** A stale `_index/work.json` exposes scope-narrowed
+  tasks via the index that don't appear when files are read directly.
+  Mitigation: the index is regenerated on every write; readers SHOULD
+  fall back to the file tree for security-relevant lookups
+  (visibility, audit) and use the index only for non-security paths
+  (UI listing, dashboards).
+- **Workspace shadowing.** A malicious view `extends:` a benign
+  workspace but overrides `lints` (softening severities), `statuses`
+  (adding a non-terminal `done` so completed work re-opens silently),
+  or `defaults.approvalClass` (turning `always` into `auto` to skip
+  governance). Mitigation: hosts MUST expose the resolution chain
+  alongside the merged config so reviewers can audit what came from
+  where; governance policies bound via the parent's `governance:`
+  field SHOULD restrict which lints, statuses, and defaults a view is
+  allowed to soften. A child that flips a parent status's `terminal`
+  classification triggers a `work_status_drift` warning.
+- **`appliesTo` impersonation.** A view binds to
+  `ws://operators/<slug>` for an operator that exists but is owned by
+  another tenant. Mitigation: hosts MUST resolve `appliesTo` refs
+  inside the same tenant scope as the view file; cross-tenant
+  bindings are rejected with `work_appliesto_unresolvable`.

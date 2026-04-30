@@ -1,0 +1,921 @@
+---
+title: "AIP-24: ASSEMBLY.md — agentassembly/v1 (multi-agent collective workspace — council, voting, peer, hierarchy)"
+description: A workspace AIP for multi-agent collectives. Unifies four collaboration patterns — council (advisory overlay), voting (quorum decision body), peer (network of equals), and hierarchy (reporting tree) — under one doctype, with synthesis rules, locked traits, and audit policy as first-class workspace concerns.
+aip: 24
+status: Draft
+type: Schema
+created: 2026-04-28
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 25]
+resources: ./resources/aip-24/draft
+discussions-to: https://github.com/agentproto/specs/discussions/24
+---
+
+| Field | Value |
+|---|---|
+| AIP | 24 |
+| Title | ASSEMBLY.md — agentassembly/v1 (multi-agent collective workspace — council, voting, peer, hierarchy) |
+| Status | Draft |
+| Type | Schema |
+| Domain | assembly.agentproto.dev |
+| Doctypes | `assembly.workspace/v1` (workspace manifest + view, written as `ASSEMBLY.md`) |
+| Modes | `advisory` \| `voting` \| `peer` \| `hierarchy` |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-25](/docs/aip-25) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-18](/docs/aip-18) (collections — for advanced cases), [AIP-20](/docs/aip-20) (work), [AIP-22](/docs/aip-22) (companies), [AIP-23](/docs/aip-23) (identities), [AIP-25](/docs/aip-25) (personas) |
+| Resources | [`./resources/aip-24`](./resources/aip-24/draft) — [`ASSEMBLY.schema.json`](./resources/aip-24/draft/ASSEMBLY.schema.json), [`ADAPTER.md`](./resources/aip-24/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-24/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-24/draft/skills/author-assembly-workspace/SKILL.md) |
+
+## Abstract
+
+`agentassembly/v1` is a **workspace AIP** that defines a single
+doctype — `assembly.workspace/v1`, written as `ASSEMBLY.md` — for
+**multi-agent collectives**. An assembly is a named group of agent
+roles that operate together under one of four collaboration
+patterns: **advisory** (silent overlay producing persona
+fragments — the implemented anchor, exemplified by Simone's
+Council of Mentors), **voting** (quorum decision body where
+members cast votes on proposals), **peer** (network of equals
+exchanging messages on a topology), and **hierarchy** (reporting
+tree where outputs cascade bottom-up). The `mode:` field selects
+the pattern; the rest of the manifest — members, synthesis rules,
+locked traits, audit policy, and cross-AIP bindings — is shared
+across all four. The workspace owns identity (workspace name,
+title, description, version), the member roster (each member is a
+ref to an [AIP-25](/docs/aip-25) `PERSONA.md` carrying assembly-
+specific role config), the synthesis rules that combine member
+outputs into a single guidance, the locked-trait list that fragments
+MUST NOT modulate (the anti-poisoning floor), and the audit policy
+governing how consultations and overlays are persisted. The same
+doctype is used recursively via `extends:` for **per-context
+views** — a per-operator overlay, a per-tenant adaptation, a stricter
+locked-trait posture for one consumer. AIP-24 does NOT define
+runtime tables for consultations or overlay fragments; those are
+host-side runtime data shaped by the manifest, with the audit
+policy declaring whether and how they are persisted. Mentors are
+NOT a separate doctype — they are personas (AIP-25) referenced from
+the assembly with role-specific configuration layered on top.
+
+## Motivation
+
+Multi-agent collectives are showing up across the agentproto
+family — Simone's Council of Mentors quietly modulates Simone's
+persona to defend against drift; a future Guilde might run a small
+voting board to approve high-cost actions; a Katchy creative
+workflow might use a peer-network of style critics to debate a
+campaign before publish; an org-tree workflow under
+[AIP-22](/docs/aip-22) might run a reporting-tree assembly where
+managers aggregate severity from their reports. These four
+patterns share more than they differ. **Members produce structured
+outputs; a synthesis rule combines those outputs; an anti-poisoning
+filter rejects outputs that violate a workspace floor; the result
+is persisted (or applied as an overlay) under an audit policy.**
+The workflow shape, the lock-check, the audit posture, and the
+composition mechanic (workspace-root + view, `extends:` chains,
+one-way switches) are the same. The collaboration pattern is the
+one knob that varies.
+
+The temptation is to ship one AIP per pattern — a CouncilAIP, a
+VotingAIP, a PeerAIP, a HierarchyAIP — and let each evolve
+independently. We have rejected that posture. The cost of four
+parallel AIPs is four loaders, four merge tables, four lock-check
+implementations, four audit policies, and four authoring skills
+that authors must learn separately. The gain is zero: every honest
+abstraction over the four patterns surfaces the same workflow
+substrate. AIP-24 collapses the four into one workspace AIP with a
+discriminating `mode:` field and per-mode synthesis rules, the same
+way [AIP-20](/docs/aip-20) collapsed work-tracker variants under
+one workspace doctype, [AIP-22](/docs/aip-22) collapsed organisation
+shapes under `office.workspace/v1`, and [AIP-18](/docs/aip-18)
+collapsed item-schema variants under `collection.schema/v1`.
+
+The **persona vs mentor** distinction matters. A persona
+([AIP-25](/docs/aip-25)) is a reusable agent definition — system
+prompt, voice register, personality fragments, evidence-gathering
+defaults. A mentor in Simone's Council is a *persona in a role*:
+the Therapist mentor IS a persona authored once, the Sentinel
+mentor IS a persona authored once, and the Council manifest binds
+each persona to a phase, a gather strategy, and a synthesis weight.
+The persona is the unit of identity; the assembly is the unit of
+collaboration. AIP-24 takes the position that mentors-as-doctype
+would be wrong: every "mentor" is just a persona in a council role.
+Inlining a mentor's prompt in the assembly manifest is an authoring
+anti-pattern — duplicates content that belongs in
+[AIP-25](/docs/aip-25), prevents a persona from being shared across
+assemblies, and forces the assembly schema to absorb the entire
+persona shape. Membership is BY REFERENCE.
+
+Anti-poisoning is **first-class**. Simone's working Council ships a
+`SIMONE_LOCKED_TRAITS` constant (`warmth`, `honest`, `voice
+register`, `refuse harm`, `kindness`, `core persona`) — a list of
+substrings that overlay fragments are checked against at write
+time, and any fragment matching a lock is dropped silently with a
+note in the synthesis trail. Without this safeguard, a malicious
+or drifty mentor could erode the underlying persona's voice over
+time: a Critic could nudge "be more terse" until the warmth is
+gone; a Sentinel could nudge "be more cautious" until the
+honesty is gone. The workspace MUST be able to declare its
+non-negotiables — the things that, if eroded, would make the
+agent a different agent rather than a slightly-tuned one — and
+those declarations MUST be additive across the `extends:` chain.
+A child view CANNOT remove a parent's locked trait; it can only
+add new ones. The HARD refusal `assembly_locked_trait_removed` is
+the spec-level invariant that keeps the safety floor monotonic
+across descendants.
+
+## Specification
+
+A conforming `agentassembly/v1` deployment is a single doctype:
+`assembly.workspace/v1`, written as `ASSEMBLY.md`. The workspace
+declares the assembly's identity, the collaboration mode, the
+member roster (referencing personas), the synthesis rules, the
+locked-trait floor, the audit policy, and the cross-AIP bindings.
+The same doctype is used in two modes per [AIP-2](/docs/aip-2):
+**workspace-root mode** (no `extends:`, declares the BASE shape) and
+**view mode** (`extends:` set, adapts the base for a specific
+consumer).
+
+### File location
+
+The filename `ASSEMBLY.md` is normative. The path is conventional.
+Conventional layout:
+
+```
+<assembly-root>/
+└── ASSEMBLY.md                       # workspace manifest (REQUIRED)
+```
+
+**Per-context views** live alongside their consumer:
+
+```
+operators/<slug>/ASSEMBLY.md          # per-operator view extending ../../<assembly-root>/ASSEMBLY.md
+companies/<slug>/ASSEMBLY.md          # per-company view
+tenants/<slug>/ASSEMBLY.md            # per-tenant view
+```
+
+A view's `extends:` field points to a parent `ASSEMBLY.md`
+(workspace root OR another view). `appliesTo:` binds the view to
+one or more operator/company/work workspace refs. The host resolves
+the chain on load and exposes the merged effective config to the
+consumer.
+
+### `ASSEMBLY.md` — frontmatter shape
+
+```yaml
+---
+schema: assembly.workspace/v1
+name: <kebab-case-id>                       # required
+title: <human-readable assembly name>       # required
+description: <one-paragraph purpose>        # required
+version: <semver>                           # required, the WORKSPACE version
+
+# Composition (view mode)
+extends: ../path/to/parent/ASSEMBLY.md      # OPTIONAL
+appliesTo:                                  # OPTIONAL — bind this view to consumers
+  - ws://operators/<slug>                   #   AIP-9 operator
+  - ws://companies/<slug>                   #   AIP-22 company
+
+# THE distinguishing field — the pattern this assembly enacts
+mode: advisory | voting | peer | hierarchy  # required, ONE-WAY across the chain
+
+# Members — array of PERSONA.md refs with assembly-role config
+members:                                    # array; merge-by-id with parent
+  - persona: ws://personas/<slug>           # AIP-25 ref (REQUIRED)
+    id: <kebab-role-id>                     # required, stable role id within the assembly
+    role: <human-label>                     # required (e.g. Therapist, Sentinel, CFO, ...)
+    phase: session | standing | sentinel | <custom>   # for advisory mode
+    triggers: [sample, sentinel-match, scheduled, manual, periodic]
+    weight: 1.0                              # for voting mode (multiplier on the cast vote)
+    voteClass: [<class>, ...]                # for voting mode (which proposal classes this member can vote on)
+    parent: <member-id>                      # for hierarchy mode (reporting parent)
+    timeout_ms: 30000                        # per-member execution cap
+    gatherInput:
+      strategy: working-memory | recent-messages | digest | last-message-only | <custom>
+      params: {}
+
+# Synthesis — how member outputs combine
+synthesis:
+  rules:                                     # array; merge-by-id with parent
+    - id: <kebab-id>
+      kind: terminal | priority | aggregate | quorum | majority | unanimity | escalate-on-severity | <custom>
+      appliesTo: [<member-id>] | "*"
+      params: {}
+      # Examples:
+      # { kind: terminal,    appliesTo: [sentinel], params: { triggerSeverity: 9 } }
+      # { kind: priority,    appliesTo: [critic],   params: { triggerKind: sycophancy } }
+      # { kind: quorum,                              params: { threshold: 0.66 } }
+      # { kind: majority }
+      # { kind: unanimity }
+  riskLevels:                                # severity → risk level mapping
+    - { range: [0, 2], label: ok }
+    - { range: [3, 4], label: watch }
+    - { range: [5, 8], label: intervene }
+    - { range: [9, 10], label: escalate }
+
+# Anti-poisoning — locked traits substring patterns
+lockedTraits:                                # array; merged with parent (UNION, never removed)
+  - warmth
+  - honesty
+  - <custom>
+matchMode: substring | regex | semantic      # default substring (matches Simone v1)
+
+# Persistence policy (audit)
+audit:
+  consultations:
+    enabled: true                            # ONE-WAY: descendants cannot disable
+    retention: forever | days:<n>
+  overlays:
+    enabled: true                            # ONE-WAY: descendants cannot disable
+    maxActive: 10                            # cap on concurrent active overlays
+    defaultTtl: P14D                         # ISO 8601 duration
+  signing: required | optional | none        # ONE-WAY on downgrade; composes with AIP-7
+
+# Cross-AIP composition
+identity: ws://identities/<slug>             # AIP-23 — base identity the assembly modulates
+governance: <path-or-ref>                    # AIP-7
+work: ws://workspaces/<slug>                 # AIP-20 — work workspace overlays apply to
+executor: ws://operators/<slug>              # AIP-9 — runtime that executes the assembly
+
+# Defaults
+defaults:
+  triggerHeuristic: every-n-messages | on-mode-change | manual
+  triggerInterval_ms: 60000                  # for periodic mode
+
+display:
+  defaultGrouping: phase | role | severity
+
+metadata:                                    # vendor extensions, namespaced under <vendor>
+  <vendor>:
+    <field>: <value>
+---
+
+# <body — markdown prose>
+```
+
+The body is free-form markdown. The frontmatter is the contract.
+
+### Modes — the four collaboration patterns
+
+`mode:` is the distinguishing field. It selects the synthesis
+substrate; the rest of the manifest (member roster, locked traits,
+audit policy, cross-AIP bindings) is shared. **`mode:` is one-way
+across the `extends:` chain** — once an ancestor declares a mode, no
+descendant may switch to a different mode. Mode change between
+parent and child is refused with `assembly_mode_change` (HARD),
+because the four modes use incompatible synthesis substrates and
+silently switching between them would invalidate every member's
+configuration (a `phase:` is meaningless for `voting`; a `weight:`
+is meaningless for `advisory`; a `parent:` is meaningless for
+`peer`).
+
+**`advisory` — silent overlay (the implemented anchor).** Members
+generate structured guidance about the agent's behavior without
+participating in the user-facing conversation. Each member has a
+`phase` (`session` for in-flight reviews, `standing` for periodic
+deep-dives, `sentinel` for safety pre-filters); the host filters
+members to the active phase, runs them in parallel via the
+parallel-think substrate, persists each consultation, applies the
+synthesis rules in declaration order, lock-checks the resulting
+fragments against `lockedTraits`, and writes the surviving
+fragments as overlay records with TTL. The agent's persona builder
+weaves the active overlays into its instructions transparently; the
+member outputs themselves never reach the user. Simone's Council is
+the canonical realisation. Synthesis rules typical of advisory
+mode: `terminal` (the Sentinel always wins), `priority` (the Critic
+forces sycophancy through), `aggregate` (modest moderation for the
+residual case).
+
+**`voting` — quorum decision body.** Members cast structured votes
+on a proposal (a candidate action, a candidate decision); a
+synthesis rule (`quorum`, `majority`, `unanimity`) tallies the
+votes and produces a single decision with the vote tally as
+evidence. Each member carries a `weight:` (a multiplier on its
+vote — 1.0 by default, higher for senior reviewers, lower for
+junior ones) and a `voteClass:` array (which proposal classes the
+member is empowered to vote on — a CFO votes on `budget`, a CTO
+votes on `architecture`, a CISO votes on `security`). The
+synthesis rule's `params` carry the threshold (`{ threshold: 0.66
+}` for two-thirds quorum). Voting mode does NOT produce overlays;
+its output is the decision artifact. `lockedTraits` still applies,
+but to the decision text rather than to overlay fragments — a
+voting body cannot vote to override a workspace's safety floor.
+
+**`peer` — network of equals.** Members exchange messages on a
+topology (fully-connected by default; restricted by the manifest's
+peer rules in advanced setups). There is no central synthesis;
+each member's output is its message log entry, optionally
+addressed to one or more other members. The host runs the round
+(or rounds), persists each message as a consultation, and exposes
+the message log as the assembly's output. Use cases: brainstorm
+sessions where members debate without a referee, multi-style
+critique panels, design dissent ceremonies. Synthesis rules in
+peer mode are typically degenerate (an `aggregate` rule that
+collects all messages into the log) or absent. `lockedTraits`
+applies to every message — a peer cannot poison the persona by
+addressing another peer.
+
+**`hierarchy` — reporting tree.** Members have a `parent:` field
+(another member's id) forming a tree. Outputs cascade bottom-up:
+leaf members produce structured outputs; their parent receives
+its children's outputs as input and produces its own (typically
+an aggregation — severity max, evidence union, summary
+synthesis); the cycle repeats up to the root. Synthesis rules in
+hierarchy mode are PER NODE: the manifest declares which kind of
+aggregation each non-leaf node performs (`aggregate`,
+`escalate-on-severity`, etc.). The output is the root's emitted
+result — a single rolled-up assessment. Use cases: a manager-line
+review where line managers summarise severity from their reports,
+a multi-stage approval pipeline where each level adds its sign-off.
+
+### Synthesis rules — semantics
+
+Synthesis rules combine member outputs into a single guidance.
+Rules apply in **declaration order**; a rule MAY declare itself
+`terminal` to short-circuit further rule processing. Each rule's
+`kind:` selects the algorithm; its `params:` carry kind-specific
+configuration; its `appliesTo:` narrows the rule to a subset of
+members.
+
+| Kind | Mode affinity | Semantics |
+|---|---|---|
+| `terminal` | advisory, voting | If the matched member's output crosses a threshold (`params.triggerSeverity` for advisory, `params.triggerVote` for voting), short-circuit: emit only this member's contribution, mark `terminal: true`, skip remaining rules. The Simone Sentinel rule is the canonical realisation. |
+| `priority` | advisory | Force the matched member's suggestion through as a high-priority overlay fragment whenever a kind-specific predicate fires (`params.triggerKind: sycophancy` matches when the member's concern mentions "sycoph", "pleas", "agree", "validat"). |
+| `aggregate` | advisory, peer | Collect outputs from `appliesTo` members; emit them as overlay fragments (advisory) or as a message-log entry (peer). Sort by severity desc, evidence count desc, take top N (`params.topN`). |
+| `quorum` | voting | Tally votes from `appliesTo` members weighted by `weight:`; if the sum of `yes` weights divided by the sum of all weights ≥ `params.threshold`, the proposal passes. |
+| `majority` | voting | Sugar for `quorum` with `threshold: 0.5` and a tie-break rule (`params.tieBreaker: chair-vote / reject / random`). |
+| `unanimity` | voting | The proposal passes IFF every `appliesTo` member votes `yes`. |
+| `escalate-on-severity` | hierarchy | Aggregate child outputs by taking the maximum severity, the union of evidence, and a synthesised concern; emit as the parent node's output. |
+| `<custom>` | any | Host-defined rule. The manifest's `kind:` is a free-form string; the host's rule registry resolves it. Hosts MUST refuse a manifest whose rule kind is not registered with `assembly_synthesis_rule_invalid`. |
+
+A single assembly MAY mix multiple rule kinds — a council manifest
+typically declares one `terminal` rule (Sentinel-wins), one
+`priority` rule (Critic-sycophancy-forced), and one `aggregate`
+rule (moderate-aggregation), in that order. Declaration order
+matters: the first `terminal` to fire ends the synthesis pipeline
+for that consultation.
+
+A subtle warning class: declaring multiple `terminal` rules at the
+same `phase` is legal but suspicious — only the first one whose
+predicate fires can ever take effect. Hosts SHOULD surface
+`assembly_synthesis_terminal_chain` as a WARNING when the merged
+rule list contains two or more `terminal` rules with overlapping
+`appliesTo` and the same phase. The chain MAY be intentional
+(graceful fallback if the more-specific rule misses), but the
+common case is an authoring error.
+
+### Member execution flow
+
+The host runs the assembly through a fixed pipeline. The pipeline
+shape is the same for all four modes; mode-specific steps fall
+under "synthesise" and "persist".
+
+```
+trigger fires
+  ↓
+gather phase-active members (advisory)
+or all members (voting / peer / hierarchy)
+  ↓
+parallel: gather inputs (per-member gatherInput.strategy)
+  ↓
+parallel: invoke members (per-member timeout_ms)
+  ↓
+persist consultations (one row per member invocation)
+  ↓
+synthesise (per-mode pipeline; rules in declaration order)
+  ↓
+lock-check outputs against lockedTraits (drop on match)
+  ↓
+persist mode-specific artifacts
+  - advisory: overlay fragments (TTL'd)
+  - voting:   decision record
+  - peer:     message log
+  - hierarchy: rolled-up output
+  ↓
+emit final guidance / decision / log / output
+```
+
+**Advisory.** Members are filtered to the active phase before
+invocation. After synthesis, surviving fragments are persisted as
+overlay records with TTL; the active fragments are queried by the
+agent's persona builder and woven into the system prompt at
+inference time. Overlay TTL eviction is enforced on every write.
+
+**Voting.** All members on the proposal's `voteClass` are
+invoked. Each casts a structured vote `{ vote: yes | no | abstain,
+rationale: string, evidence: ... }`. Synthesis tallies; the result
+is persisted as a decision record.
+
+**Peer.** All members are invoked once per round; their outputs
+are messages addressed (optionally) to other peers. Multi-round
+peer mode is supported by emitting follow-up triggers on a
+schedule; the host iterates until the topology declares the round
+closed (`params.maxRounds` or `params.terminationRule`).
+
+**Hierarchy.** Members are invoked **bottom-up**. Leaf members
+(no children pointing at them) run first. Their outputs are passed
+to their `parent:` member; the parent runs with the child outputs
+as input. Recursion proceeds up the tree to the root. The root's
+output is the assembly's output.
+
+### Locked-trait enforcement
+
+`lockedTraits` is a list of substrings (or regexes, or semantic
+patterns — selected by `matchMode`) that an output's text MUST NOT
+contain. The check runs at **persistence time** for each candidate
+artifact:
+
+- Advisory: every fragment about to be written.
+- Voting: the decision text about to be persisted.
+- Peer: every message about to be appended to the log.
+- Hierarchy: the rolled-up output at every node.
+
+A match drops the artifact (advisory: silent drop with a note in
+`synthesisNotes`; voting/peer/hierarchy: refuse the artifact, mark
+the consultation as `lock-violated`). The host MUST persist the
+violation (the consultation row is kept; the artifact is not
+written) so reviewers can audit which member's output was rejected
+and why. Violations surface as `assembly_overlay_lock_violation`
+(per-overlay HARD; the fragment is dropped, never persisted).
+
+`matchMode` selects the algorithm:
+- `substring` — case-insensitive substring match. Cheap, robust,
+  matches Simone v1.
+- `regex` — RFC 3987-ish regex, anchored or not per the rule.
+  Useful when the trait is a phrase ("voice register") whose
+  variants must all be caught.
+- `semantic` — a host-provided embedding match against the trait's
+  semantic neighborhood. Hosts that don't support semantic match
+  MUST fall back to `substring` and emit a load-time warning
+  (`assembly_locked_trait_match_mode_unsupported`).
+
+`lockedTraits` is **additive across the `extends:` chain**. A
+parent declares the floor; descendants MAY add more locked traits
+but MUST NOT remove any. Removing a parent's locked trait is
+refused with `assembly_locked_trait_removed` (HARD). This is the
+core anti-poisoning posture: the safety floor monotonically rises
+across descendants.
+
+### Audit policy
+
+`audit.consultations.enabled: true` MUST cause the host to persist
+one row per member invocation — member id, mode, output, trigger
+metadata, lock-check result. The retention policy
+(`retention: forever | days:<n>`) governs eviction. Once an
+ancestor sets `enabled: true`, descendants MUST NOT disable —
+violations refuse with `assembly_audit_disable` (HARD).
+
+`audit.overlays.enabled: true` MUST cause the host to persist
+overlay fragments produced by advisory mode (and analogous
+artifacts in voting/peer/hierarchy mode where applicable). The
+`maxActive` cap is enforced at write time — older fragments are
+evicted until the cap is satisfied. The `defaultTtl` (ISO 8601
+duration) sets the eviction clock for fragments that don't
+specify their own TTL. `audit.overlays.enabled` is the same kind
+of one-way switch.
+
+`audit.signing` selects the signing posture (composes with
+[AIP-7](/docs/aip-7)). When `required`, every persisted artifact
+(consultation, overlay, decision, message) MUST carry a signature
+verifiable against the bound governance policy. When `optional`,
+artifacts MAY be signed but signatures are not required. When
+`none`, no signing is performed. Once an ancestor sets `required`,
+descendants MUST NOT downgrade — violations refuse with
+`assembly_signing_downgrade` (HARD).
+
+The runtime tables (the consultations table, the overlay
+fragments table, the decisions table, the message log table) are
+host-side data, not spec-level doctypes. AIP-24 declares the
+*policy* for those tables; the *shape* is a host concern. (Simone's
+working implementation persists `council_consultations` and
+`persona_overlays` tables; AIP-24 does NOT prescribe those names.)
+
+### Composition (`extends:` chain)
+
+When a host loads an `ASSEMBLY.md` whose `extends:` is set, it MUST:
+
+1. **Walk the parent chain.** Recursively load the parent referenced
+   by `extends:`; that parent's parent if it has one; until a
+   manifest with no `extends:` is reached. Maximum chain depth is
+   eight. Hosts MUST detect cycles by tracking visited absolute
+   paths.
+2. **Treat depth overflow and cycle detection as warnings**, not
+   errors. A view whose chain is malformed MUST still load — the
+   runtime falls back to the local manifest only and surfaces
+   `assembly_extends_cycle` (or `assembly_extends_depth_exceeded`)
+   as a warning.
+3. **Tolerate a missing parent.** If `extends:` points to a path
+   that does not exist, the host emits `assembly_extends_missing`
+   as a warning and uses the local manifest only.
+4. **Merge bottom-up.** Walk the chain from the workspace root
+   toward the leaf view, merging each manifest into the accumulator
+   using the strategy below.
+
+**Merge strategy** (child wins on conflicts unless one-way switch):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins. |
+| `extends` | local-only | Not inherited. |
+| `appliesTo` | local-only | Not inherited. Each view declares its own scope. |
+| `mode` | child wins (one-way) | Once set at any ancestor, descendants MUST NOT change. HARD: `assembly_mode_change`. |
+| `members` | merge-by-id | Effective key is `members[].id` (the role id, NOT the persona ref). Child entry with same id → child replaces parent's; new ids appended. |
+| `members[].persona` | override | A child MAY swap the persona ref for a given role. |
+| `synthesis.rules` | merge-by-id | Same rule id → child replaces parent's. New ids appended. |
+| `synthesis.riskLevels` | override | Whole-array override; child's risk-level mapping replaces parent's. |
+| `lockedTraits` | UNION | Additive only. Child MUST NOT remove parent's entries. HARD: `assembly_locked_trait_removed`. |
+| `matchMode` | override | A child MAY tighten (substring → regex → semantic). |
+| `audit.consultations.enabled` | child wins (one-way) | Once `true` at any ancestor, descendants MUST NOT set `false`. HARD: `assembly_audit_disable`. |
+| `audit.overlays.enabled` | child wins (one-way) | Same posture. HARD: `assembly_audit_disable`. |
+| `audit.consultations.retention` / `audit.overlays.maxActive` / `audit.overlays.defaultTtl` | leaf-field override | |
+| `audit.signing` | child wins (one-way on downgrade) | Once `required` at any ancestor, descendants MUST NOT downgrade. HARD: `assembly_signing_downgrade`. |
+| `identity`, `governance`, `work`, `executor` | override | Child can rebind. Subject to governance gating. |
+| `defaults.*` | leaf-field override | |
+| `display.*` | leaf-field override | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+The host MUST expose **both** the merged effective config AND the
+resolution chain (ordered list of absolute paths consumed during
+merge) on its debug surface.
+
+#### One-way switches (HARD refusals)
+
+Four fields are **one-way switches**: once enabled or set at any
+ancestor, descendants MUST NOT relax them. Attempting to relax
+surfaces a HARD refusal — the view does NOT degrade to local-only,
+it fails to load.
+
+| Field | Switch direction | Refusal code |
+|---|---|---|
+| `mode` | Once set at any ancestor, child cannot change to a different mode. | `assembly_mode_change` |
+| `audit.consultations.enabled: true` / `audit.overlays.enabled: true` | Once true at any ancestor, child cannot set false. | `assembly_audit_disable` |
+| `audit.signing: required` | Once required at any ancestor, child cannot downgrade. | `assembly_signing_downgrade` |
+| `lockedTraits` (entries) | Once present at any ancestor, child cannot remove. | `assembly_locked_trait_removed` |
+
+These four rules are why a deployed v1 assembly is trustworthy: an
+auditor inspecting any view can verify that the assembly's
+collaboration substrate, audit posture, signing posture, and
+safety floor hold across every descendant. Without the one-way
+invariants, a malicious or careless view could silently switch a
+voting body to peer mode, disable consultation persistence, drop
+the locked-trait floor, or downgrade signing — all without the
+parent author's knowledge.
+
+#### `appliesTo` enforcement
+
+`appliesTo` is **not inherited**. A view's bindings are local; the
+parent's bindings do not leak into the child. Cross-field
+constraint: **`appliesTo` present ⇒ `extends` REQUIRED**. A
+workspace that binds to a consumer must extend a parent — a
+binding without an extension is semantically a workspace-root with
+a consumer claim, which the registry-of-views pattern rejects as
+ill-formed.
+
+Hosts MUST refuse a view whose `appliesTo` references a non-existent
+consumer with `assembly_appliesto_unresolvable` (HARD).
+
+### Cross-AIP composition
+
+`ASSEMBLY.md` is a coordination manifest — it composes with several
+neighbouring AIPs to wire up identity, governance, work, and the
+runtime executor.
+
+| Field | Target AIP | Purpose |
+|---|---|---|
+| `members[].persona` | [AIP-25](/docs/aip-25) `PERSONA.md` | The unit of identity for each role. The persona declares the system prompt, voice register, and persona fragments; the assembly declares the role-specific configuration (phase, weight, vote class, gather strategy). |
+| `identity` | [AIP-23](/docs/aip-23) identity | The base identity the assembly modulates. Advisory mode's overlays modify this identity at inference time; voting/peer/hierarchy modes' artifacts attribute to it. |
+| `governance` | [AIP-7](/docs/aip-7) policy / audit | Approvals, signing, audit retention. The signing posture composes with `audit.signing`. |
+| `work` | [AIP-20](/docs/aip-20) `WORK.md` | The work workspace whose items the assembly's overlays/decisions/messages attach to. A council that watches a particular work tracker; a voting body that approves work items. |
+| `executor` | [AIP-9](/docs/aip-9) operator | The runtime that executes the assembly. The operator's runtime calls `defineAssemblyWorkspace`, runs the member-execution-flow pipeline, and persists the artifacts. |
+| `appliesTo` | [AIP-9](/docs/aip-9) operator, [AIP-22](/docs/aip-22) company, [AIP-20](/docs/aip-20) work | View binding. |
+| `extends` | another `ASSEMBLY.md` | Composition. |
+
+A host MUST verify that every cross-AIP ref it loads resolves —
+unresolvable refs surface as `assembly_xref_unresolvable` (HARD for
+`identity`/`governance`/`work`/`executor`; warn for `appliesTo`
+elements where the consumer may be intentionally provisioned later
+within the same load round).
+
+`members[].persona` is the most important cross-AIP ref. A persona
+that does not resolve at load time is a HARD refusal —
+`assembly_member_persona_unresolvable`. The assembly cannot run
+without its members, and silently degrading to a smaller roster
+would invalidate every synthesis rule's `appliesTo`.
+
+### Body conventions
+
+The frontmatter ends; the body is markdown. Conventional sections:
+
+- `## Purpose` — what this assembly is for, who it serves.
+- `## Mode rationale` — why advisory (or voting / peer / hierarchy)
+  is the right pattern here.
+- `## Member roster` — human-readable rendering of the members,
+  their phases (advisory) or weights (voting) or topology (peer)
+  or tree (hierarchy).
+- `## Synthesis rationale` — why these rules in this order.
+- `## Threat model` — what the locked-trait floor defends against.
+- `## When to extend vs replace` — composition guidance for
+  downstream view authors.
+
+The body is free-form. The contract lives in the frontmatter.
+
+## Workspace root manifest (ASSEMBLY.md)
+
+Per the convention codified in [AIP-2](/docs/aip-2), every Workspace
+AIP MUST define a root manifest doctype. AIP-24's root manifest is
+the same `assembly.workspace/v1` doctype used in two modes:
+
+- **Workspace-root mode** — `<assembly-root>/ASSEMBLY.md`, no
+  `extends:`. Declares the BASE shape: identity, mode, members,
+  synthesis rules, locked-trait floor, audit policy.
+- **View mode** — `<consumer>/ASSEMBLY.md`, `extends:` set. Adapts
+  the base for a specific operator, company, work workspace —
+  rebinds the executor, swaps a persona for a single role,
+  tightens the locked-trait floor for one consumer's higher-risk
+  posture.
+
+The same schema validates both modes; the host distinguishes by
+checking whether `extends:` is set. The same merge algorithm
+applies recursively.
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<assembly-root>/ASSEMBLY.md` | `<consumer>/ASSEMBLY.md` |
+| `extends:` | absent | required |
+| `appliesTo:` | absent | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins |
+| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the parent |
+| Use cases | assembly authors, safety teams | per-operator overlays, per-tenant adaptations, stricter postures |
+| Validation | full schema check | schema check + chain validation + four one-way-switch checks |
+| Lifecycle | versioned with the assembly | versioned with the consumer |
+
+## Rationale
+
+**Why one spec covers all four modes.** The four collaboration
+patterns — advisory, voting, peer, hierarchy — share more than they
+differ. They share the workflow shape (gather → invoke → persist →
+synthesise → lock-check → persist artifact); they share the
+locked-trait floor; they share the audit policy; they share the
+composition mechanic (workspace-root + view, `extends:` chains,
+one-way switches). The collaboration pattern is the single knob
+that varies. Shipping four separate AIPs would mean four parallel
+loaders, four merge tables, four lock-check implementations, four
+audit policies, and four authoring skills authors must learn
+independently. The convergence under one workspace AIP with a
+discriminating `mode:` field lets a host implement one loader and
+get all four modes structurally for free — same loader, same merge
+algorithm, same effective-config exposure surface, same lock-check
+substrate, same audit pipeline. The AIP-22 / AIP-20 / AIP-21
+family converged on the same posture.
+
+**Why `mode` is one-way locked.** Modes are not interchangeable.
+A `phase:` field is meaningless for `voting`; a `weight:` field is
+meaningless for `advisory`; a `parent:` is meaningless for `peer`;
+a `voteClass:` is meaningless for `hierarchy`. Switching modes
+between parent and child would silently invalidate every member's
+configuration — phases would be ignored, weights would be discarded,
+hierarchy parents would not be followed. The host could fall back
+to a default per the new mode, but defaults are exactly what the
+locked-trait posture prevents: silent erosion of the assembly's
+declared invariants. Refusing mode change at the chain layer makes
+the failure loud and authorial. Authors who genuinely want a
+different mode write a new workspace-root manifest, not a view of
+the old one.
+
+**Why locked traits are union-only across chains.** Locked traits
+are the safety floor — the assembly's non-negotiables. The whole
+point of a workspace-root + view composition mechanic is that the
+parent's invariants survive descendants. If a child could remove a
+parent's locked trait (`warmth`, `honesty`, `refuse harm`), a
+malicious view could tunnel under the parent's safety posture and
+ship a poisoned overlay. Additive-only traits make the safety
+floor monotonic: a descendant can ALWAYS tighten (add new
+non-negotiables), never relax. This is the same posture
+[AIP-7](/docs/aip-7) takes on signing requirements and
+[AIP-20](/docs/aip-20) takes on audit. The cost is that authors
+must be intentional when adding a trait at a parent layer — a
+top-level `warmth` lock binds every descendant forever — but the
+cost is the right cost: it forces explicit consent to safety
+relaxation by re-rooting the workspace rather than silently
+removing the trait.
+
+**Why members reference personas instead of inlining them.**
+Mentors, voting members, peers, hierarchy nodes — every member is,
+structurally, a *persona in a role*. The persona has its own
+identity, system prompt, voice register, and personality
+fragments; the role is the assembly-specific configuration (phase,
+weight, vote class, parent). Inlining the persona's content in
+the assembly manifest would (a) duplicate content that belongs in
+[AIP-25](/docs/aip-25), (b) prevent the same persona from being
+used across multiple assemblies (a Therapist persona MAY appear in
+both a Council assembly and a Voting board), (c) force the
+assembly schema to absorb the entire persona shape, breaking the
+clean separation between identity and collaboration, and (d) make
+audit harder — a persona-level threat (drift, poisoning) needs a
+persona-level audit trail, which only works if the persona is its
+own authored artifact. The `members[].persona` ref is the bridge.
+
+**Why advisory mode is the implemented anchor.** Simone's Council
+of Mentors is the realised advisory implementation: five mentors
+(Therapist, Stoic, Elder, Critic, Sentinel), three phases (session
+/ standing / sentinel), four synthesis rules (sentinel-wins,
+critic-sycophancy-forced, severity-eight-unilateral,
+moderate-aggregation), six locked traits (warmth, honest, voice
+register, refuse harm, kindness, core persona). The codified
+behavior in `packages/agent-framework/src/council/` and
+`packages/simone/src/council/` is the spec's truth. Voting, peer,
+and hierarchy modes are NEW under this AIP — they are designed by
+analogy to the advisory pattern (the synthesis rule shape, the
+lock-check, the audit pipeline are the same), but they are not yet
+implemented. Their semantics are normative as defined here;
+implementations SHOULD ship advisory first, then layer voting /
+peer / hierarchy on the same substrate.
+
+**Why audit is mandatory.** Multi-agent collectives are by their
+nature opaque. A user interacting with Simone does not see the
+Council deliberating; a board member voting on a proposal sees
+their own vote, not the others'; a peer in a network sees only
+the messages addressed to them. Without audit, a third party
+cannot verify what the assembly actually decided, what it advised,
+or what it suppressed. AIP-24 takes the position that
+*third-party verifiability* is a defining property of a
+trustworthy assembly: the consultations are persisted (not just
+the final guidance), the lock-check rejections are persisted (not
+just the surviving fragments), and the signing posture composes
+with [AIP-7](/docs/aip-7) for cryptographic integrity. The audit
+one-way switches (`enabled`, `signing`) make the posture
+non-relaxable across descendants, which is what makes the audit
+trail trustworthy.
+
+**Why no starter library.** Sibling Workspace AIPs ship starter
+libraries (AIP-22's `agentcompanies-v1-compat`, AIP-20's work
+templates) because per-domain defaults are sensible and the migration
+path needs a floor. AIP-24 does not. The four modes have radically
+different domain-specific defaults — an advisory council's mentors
+are nothing like a voting board's voters, are nothing like a peer
+critique's peers, are nothing like a hierarchy's reporting tree.
+Shipping a starter for any one mode would either (a) bake in
+domain-specific assumptions (Simone-flavored mentors as the
+"default" council) that don't generalise, or (b) ship four
+parallel starters that authors would still have to fork. The
+example assemblies in
+[`./resources/aip-24/draft/EXAMPLES.md`](./resources/aip-24/draft/EXAMPLES.md)
+serve the same purpose as a starter — copy-the-closest-pattern —
+without claiming to be normative defaults.
+
+## Reference Implementation
+
+The advisory mode is implemented in the agentik-studio monorepo:
+
+- [`packages/agent-framework/src/council/`](https://github.com/jeremyandre/agentik-studio/tree/main/packages/agent-framework/src/council) —
+  the framework substrate: `types.ts` (Mentor, MentorOutput,
+  PersonaFragment, CouncilGuidance, SynthesisRule, CouncilStore),
+  `council.workflow.ts` (the gather → invoke → persist → synthesise
+  → lock-check → persist pipeline), `synthesizer.ts` (the rule
+  application algorithm), `persona-overlay.ts` (the lock-check
+  implementation and overlay eviction planner), `triggers.ts` (the
+  trigger heuristics).
+- [`packages/simone/src/council/`](https://github.com/jeremyandre/agentik-studio/tree/main/packages/simone/src/council) —
+  Simone's app-specific realisation: five mentors, four synthesis
+  rules, the `SIMONE_LOCKED_TRAITS` constant, the
+  sentinel-prefilter for early-exit on safety patterns. The
+  database schema (`council_consultations`, `persona_overlays`)
+  in `packages/simone/src/domain/council/schema.ts` is the
+  reference shape for the consultations and overlay tables.
+
+Voting, peer, and hierarchy modes are NOT yet implemented. The
+spec leads the implementation. Once the in-flight `assembly`
+package lands under `packages/agent-framework/src/assembly/`, this
+AIP will absorb the working schemas in full as part of moving
+Draft → Review.
+
+## Backwards Compatibility
+
+n/a — AIP-24 is a new spec. The Simone Council was implemented
+ahead of any AIP and will be retro-fitted to `agentassembly/v1`
+once the spec reaches Final. The migration path is mechanically
+trivial: the existing `SimoneCouncilConfig` becomes an
+`ASSEMBLY.md` workspace-root manifest with `mode: advisory`, the
+five `createXxxMentor` calls become five `members[].persona` refs
+to AIP-25 personas, the `simoneSynthesisRules` array becomes the
+manifest's `synthesis.rules` entries, the `SIMONE_LOCKED_TRAITS`
+constant becomes the manifest's `lockedTraits` array. The
+`council_consultations` and `persona_overlays` tables remain
+host-side runtime data unchanged.
+
+## Security Considerations
+
+Multi-agent collectives are a **write surface** for the agent's
+behavior — advisory overlays modulate the persona, voting decisions
+authorise actions, peer messages exchange context, hierarchy
+outputs roll up severity. Threats:
+
+- **Persona poisoning via member refs.** A malicious view swaps a
+  benign persona ref for a poisoned one (`members[].persona:
+  ws://personas/<adversarial>`); the swapped persona's outputs
+  contain instructions designed to erode the host persona's voice.
+  Mitigation: the `lockedTraits` floor MUST be union-only across
+  the chain (`assembly_locked_trait_removed` HARD); every output
+  is checked against the locked traits at persistence time
+  (`assembly_overlay_lock_violation` per-overlay HARD); the
+  consultation row is persisted regardless so reviewers can see
+  what was attempted. The persona ref itself flows through
+  [AIP-25](/docs/aip-25)'s integrity checks (signed personas,
+  hash-verified prompts).
+
+- **Synthesis rule manipulation.** A malicious view inserts a new
+  `terminal` rule at a low `triggerSeverity` so that one member's
+  output dominates the synthesis pipeline. Mitigation: synthesis
+  rules merge by id, so the rule must either replace an existing
+  one (auditable through the resolution chain) or be a new id
+  (which surfaces as a NEW rule in the merged manifest, again
+  auditable). Governance ([AIP-7](/docs/aip-7)) policies SHOULD
+  gate synthesis rule additions in production assemblies.
+
+- **Quorum manipulation (voting mode).** A view bumps a member's
+  `weight:` to dominate quorum tallies, or shrinks `voteClass:` to
+  exclude dissenting voters from a proposal class. Mitigation: the
+  audit log persists every vote with its weight and class —
+  reviewers can detect weight inflation and class shrinking through
+  the resolution chain. Governance policies SHOULD require
+  multi-party approval for changes to `weight:` and `voteClass:`
+  in voting assemblies.
+
+- **Mode change attacks.** A view changes `mode:` from `voting` to
+  `advisory` to silently disable the quorum check for one
+  consumer's session. Mitigation: covered by the
+  `assembly_mode_change` HARD refusal — modes are one-way across
+  the chain.
+
+- **Cross-tenant member borrowing.** A view declares a member's
+  persona as `ws://personas/<other-tenant>/<slug>` to borrow a
+  persona from a different tenant's namespace. Mitigation: hosts
+  MUST resolve persona refs inside the same tenant scope as the
+  view file; cross-tenant refs are refused with
+  `assembly_member_persona_unresolvable`. Governance policies
+  ([AIP-7](/docs/aip-7)) MAY further constrain which persona
+  registries an assembly can pull from.
+
+- **Overlay TTL manipulation (advisory mode).** A view sets
+  `audit.overlays.defaultTtl` to an extreme value (P1Y, P0D) to
+  either keep poisoned fragments alive forever or to evict
+  legitimate fragments before they take effect. Mitigation: the
+  TTL is bounded by the host runtime (sensible defaults: 1 day
+  ≤ TTL ≤ 30 days for advisory overlays); governance policies
+  SHOULD declare a tenant-level TTL range that views cannot
+  exceed.
+
+- **Audit downgrade.** A view sets `audit.consultations.enabled:
+  false` or `audit.signing: optional` to silence the audit trail
+  for one consumer's session. Mitigation: covered by the
+  `assembly_audit_disable` and `assembly_signing_downgrade` HARD
+  refusals. Once a parent in the chain enables audit or required
+  signing, no descendant can downgrade.
+
+- **Lock-check bypass via match-mode.** A view sets `matchMode:
+  semantic` against a host that does not implement semantic match;
+  the host falls back to substring without enforcing the more
+  permissive semantic check. Mitigation: hosts MUST emit
+  `assembly_locked_trait_match_mode_unsupported` as a load-time
+  warning; governance policies MAY refuse to activate the view
+  until a semantic-capable host is available. The fallback
+  posture (substring) is strictly more permissive in surface
+  area — fragments that would have matched semantically might
+  pass substring — but the additive-only nature of locked traits
+  means the floor is at least as tight as the parent's substring
+  posture.
+
+- **Member id collision.** A view declares two `members[]` entries
+  with the same `id:` (or merges with the parent's roster in a way
+  that produces duplicates). Mitigation: hosts MUST refuse the
+  manifest with `assembly_member_id_collision` (HARD). The merge
+  algorithm uses `id` as the merge key; collisions within a single
+  manifest layer are conflicts; collisions ACROSS layers are
+  intentional overrides (child replaces parent's by id), which is
+  the supported pattern.
+
+- **Vendor metadata as policy bypass.** A vendor extension under
+  `metadata.<vendor>` carries a flag the host honours that softens
+  one-way switches. Mitigation: hosts MUST treat vendor metadata
+  as advisory. Nothing under `metadata.*` may change the meaning
+  of any field defined in this AIP. The four one-way switches are
+  spec-level invariants; vendor namespaces cannot bypass them.
+
+The threat model assumes the filesystem itself is trusted (or
+verified through [AIP-1](/docs/aip-1)'s hash/signature mechanisms)
+and that personas reachable via `members[].persona` are themselves
+authored under [AIP-25](/docs/aip-25)'s integrity posture. AIP-24
+inherits both postures without restating them.
+
+## See also
+
+- [AIP-1 — agent.json](/docs/aip-1)
+- [AIP-2 — AIP template & registry-of-views pattern](/docs/aip-2)
+- [AIP-3 — SKILL.md](/docs/aip-3)
+- [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP, mirror composition mechanic
+- [AIP-22 — agentoffice/v1](/docs/aip-22) — sibling Workspace AIP, mirror composition mechanic
+- [AIP-23 — agentidentity/v1](/docs/aip-23) — base identity that advisory overlays modulate
+- [AIP-25 — agentpersona/v1](/docs/aip-25) — the unit of identity each assembly member references
+- [`./resources/aip-24/draft/ASSEMBLY.schema.json`](./resources/aip-24/draft/ASSEMBLY.schema.json) — frontmatter validator
+- [`./resources/aip-24/draft/ADAPTER.md`](./resources/aip-24/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-24/draft/EXAMPLES.md`](./resources/aip-24/draft/EXAMPLES.md) — reference manifests for all four modes
+- [`./resources/aip-24/draft/skills/author-assembly-workspace/SKILL.md`](./resources/aip-24/draft/skills/author-assembly-workspace/SKILL.md) — agent-side authoring skill

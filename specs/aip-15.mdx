@@ -1,0 +1,722 @@
+---
+title: "AIP-15: WORKFLOW.md — agentworkflow/v1 (abstract orchestration manifest)"
+description: >-
+  A markdown + frontmatter format for declaring a multi-step agent workflow's
+  abstract orchestration shape — its steps, branching, parallelism, approval
+  gates, suspend/resume, and compensation. Pairs with the standard
+  `defineWorkflow` / `defineStep` signatures. Implementation lives entirely
+  in the per-step TOOL.md contracts and their AIP-30 PROVIDER bindings;
+  workflows themselves are pure orchestration data.
+aip: 15
+status: Draft
+type: Schema
+created: 2026-04-28
+updated: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 14, 16, 30]
+resources: ./resources/aip-15/draft
+discussions-to: https://github.com/agentproto/specs/discussions/15
+---
+
+| Field | Value |
+|---|---|
+| AIP | 15 |
+| Title | WORKFLOW.md — agentworkflow/v1 (abstract orchestration manifest) |
+| Status | Draft |
+| Type | Schema |
+| Domain | workflows.sh |
+| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Resources | [`./resources/aip-15`](./resources/aip-15/draft) — [`SKILL.md`](./resources/aip-15/draft/skills/author-workflow/SKILL.md), `ADAPTER.md`, `WORKFLOW.schema.json`, `EXAMPLES.md` |
+
+## Abstract
+
+`WORKFLOW.md` is a markdown-with-frontmatter file format that packages
+a single multi-step agent workflow — its identity, input/output
+schemas, ordered + branching + parallel steps, approval gates,
+suspend/resume points, retry + compensation policy, and resource
+budget. The format is paired with two standard entry-point functions,
+**`defineWorkflow(...)`** and **`defineStep(...)`**, whose signatures
+any implementation in any language exposes so callers, runtimes, and
+adapters share one contract.
+
+It is the workflow analogue of [TOOL.md](/docs/aip-14): same posture
+(human-authored, version-controlled, machine-parseable), same
+manifest+signature pairing, same governance hookup via
+[AIP-7](/docs/aip-7).
+
+## Motivation
+
+A workflow's **logical shape** — what steps run in what order, what
+triggers a branch, what causes a wait, who approves a risky step — is
+independent of any specific runtime's concurrency model, persistence
+backend, or syntactic flavour. Authoring a workflow once SHOULD give
+the same logical run anywhere.
+
+Every workflow runtime needs the same small core of primitives:
+named steps, sequence, branching, parallelism, suspend/resume,
+retry, compensation. The same shapes show up under different verbs
+and different syntaxes. `WORKFLOW.md` extracts the logical shape
+into a portable file; **`defineWorkflow`** + **`defineStep`** are the
+standard entry points implementations expose so the manifest's `entry`
+loads the same way under any host.
+
+The manifest is also the source of truth for governance
+([AIP-7](/docs/aip-7)) audit, work-item tracking
+([AIP-13](/docs/aip-13)), and skill-based agent authoring (the
+companion [`SKILL.md`](./resources/aip-15/draft) generates both `TOOL.md`
+and `WORKFLOW.md` files when an agent is asked to build automation).
+
+## Design principles
+
+1. **Steps over choreography.** The manifest declares a finite set of
+   named steps and a directed acyclic graph (DAG) of relationships
+   between them. No free-form code in the manifest — the DAG is data.
+   Step bodies live in `entry` files; the manifest references them.
+
+2. **Approval is a step kind.** A workflow that pauses for human
+   approval has a step of `kind: "approval"`. It's not a runtime
+   concern bolted onto a tool step — it's a first-class node so
+   governance and the planner reason about it the same way.
+
+3. **Branching is data, not control flow.** A `kind: "branch"` step
+   declares conditions and target step ids. The runtime evaluates,
+   the manifest doesn't run. This keeps the spec decidable and the
+   adapter trivial.
+
+4. **Parallelism is explicit.** A `kind: "parallel"` step lists child
+   step ids that run concurrently. No implicit fan-out from input
+   shapes (which Mastra and others sometimes infer).
+
+5. **Suspend points are named.** A workflow can pause at any
+   `kind: "suspend"` step, persist run state, and resume later when a
+   matching event arrives. The manifest names the events; the runtime
+   wires the listeners.
+
+6. **Compensation is opt-in.** Each step MAY declare
+   `compensation: <step-id>` whose body undoes the step's effect.
+   Sagas are an alignment of these references, not a separate
+   primitive.
+
+7. **Unopinionated about runtime.** No fields named `mastra*`,
+   `temporal*`, etc. Runtime concerns live in adapter docs.
+
+## Specification
+
+### File location
+
+Workflows live in a single folder:
+
+```
+.workflows/
+  invoice-approval/
+    WORKFLOW.md      ← this AIP
+    workflow.ts      ← optional entry (step bodies referenced here)
+    PROCEDURE.md     ← optional vendor-neutral procedure (agencies.sh)
+    README.md        ← optional long-form
+```
+
+The folder name SHOULD match the manifest's `id`. Workflows MAY
+reference tools via [TOOL.md](/docs/aip-14) `id`s without an entry
+file at all; the manifest then defines the workflow purely
+declaratively.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. Case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Display name (1–80 chars). |
+| `id` | string | Machine identifier. Lowercase, digits, dashes. 2–64 chars. Unique within the registry. |
+| `description` | string | One-paragraph purpose, written for the LLM caller. ≤2000 chars. |
+| `version` | semver | Spec version of THIS file. Bump on incompatible step graph or schema changes. |
+| `inputs` | JSON Schema | Workflow-level inputs. Available to any step via `$workflow.inputs.*`. |
+| `outputs` | JSON Schema | Workflow-level outputs. The `summarize` / final step's output is mapped here. |
+| `steps` | object[] | Ordered array of step declarations (see [Steps](#steps)). |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `start` | step id | first step | The step the runtime executes first. |
+| `suspendable` | boolean | derived | `true` iff any step has `kind: "suspend"` or `kind: "approval"`. Adapters MAY use this to pick storage (durable vs in-memory). |
+| `triggers` | object[] | `[]` | Events that start the workflow. See [Triggers](#triggers). |
+| `requires` | object | `{}` | Capability requirements per [AIP-7](/docs/aip-7). Same shape as [TOOL.md](/docs/aip-14). |
+| `approval` | string | `"per-step"` | Default approval class applied to every step lacking its own `approval`. Same vocabulary as [AIP-14](/docs/aip-14): `"auto"`, `"always"`, `"on-mutate"`, `"policy:<ref>"`. |
+| `risk_level` | 0–3 | max of step risks | Workflow-level autonomy gate. Used when the *whole* workflow is dispatched via a parent agent. |
+| `timeout_ms` | int | `600000` (10 min) | Hard wall-clock cap on the entire run. |
+| `max_steps` | int | `100` | Defence against infinite loops. |
+| `retry` | object | none | Workflow-level retry on uncaught errors: `{ max_attempts, backoff, initial_ms }`. Step-level retries take precedence. |
+| `cost_class` | string | `"metered"` | Same as [TOOL.md](/docs/aip-14). Baseline; per-step cost ladders up. |
+| `tags` | string[] | `[]` | Discovery tags. |
+| `metadata` | object | `{}` | Free-form, namespaced for adapter hints. |
+| `inputsFiles` | object | `{}` | File-contract IN per [AIP-16](/docs/aip-16). Map of `<key>` → `{ path, mode?, contentType? }`. Host stages each from the workspace at `path` into the per-run fs root at filename `<key>` BEFORE the workflow starts. |
+| `outputsFiles` | object | `{}` | File-contract OUT per [AIP-16](/docs/aip-16). Map of `<key>` → `{ path, mode?, contentType? }`. Host syncs each from the per-run fs root at filename `<key>` to the workspace at `path` AFTER the workflow completes. `path` supports `<runId>` / `<workflowId>` / `<isoDate>` interpolation. |
+
+#### Removed (formerly part of AIP-15, moved to per-step TOOL.md + their AIP-30 PROVIDER bindings)
+
+| Field | New home |
+|---|---|
+| `code` | The TOOL.md a step references is implemented by a PROVIDER which carries `provider.code` (per AIP-26). Workflows have no own bundle. |
+| `run` | Same — `provider.run`. |
+| `runner` | Same — `provider.runner` (per AIP-17). Per-step provider resolution; workflows don't pin runner. |
+| `secrets` | Same — `provider.auth.ref` pointing at SECRETS.md (per AIP-19). |
+| `network` | Same — `provider.network.egress`. The egress allowlist is per-provider, not per-workflow. |
+| Inline-entry tool steps (`tool: { entry: "./workflow.ts#stepFn" }`) | **Forbidden**. Every `kind: "tool"` step MUST reference an external TOOL.md by id (per AIP-14). Inline bodies break the contract/provider split — the body lives in the provider. Authors who need a one-off body author a sibling TOOL.md + PROVIDER.md. |
+
+A WORKFLOW.md carrying any of these fields is invalid. Workflows are
+**pure orchestration** — step DAGs, branching, parallelism, approvals,
+suspend/resume, compensation. Bodies, transport, install, auth,
+sandbox all live below in the per-step TOOL.md → PROVIDER chain.
+
+### Inputs / outputs / file contract
+
+The four IO blocks `inputs`, `outputs`, `inputsFiles`, and
+`outputsFiles` follow the contract defined in
+[AIP-16](/docs/aip-16) — the lifecycle (host stages declared
+workspace files into a per-run scratch root, syncs declared outputs
+back, injects the reserved `_workflowFsRoot` input field), the path
+interpolation tokens, the concurrency rules, and the error
+semantics are all normative there. AIP-15 imports them unchanged.
+
+Workflow-specific bindings:
+
+- The run identifier used to key the scratch root is the workflow
+  run's `runId`.
+- The path interpolation token `<workflowId>` is the workflow
+  manifest's `id`.
+- Step bodies access the scratch root via
+  `inputData._workflowFsRoot` (the standard reserved key).
+
+### Runner / Secrets / Network
+
+These three blocks compose the workflow's execution context:
+
+- **`runner`** ([AIP-17](/docs/aip-17)) — process boundary: engine
+  (`subprocess` (default) | `sandbox` | `in-process`), optional
+  container image, declarative `needs` (language/native/npm/pip),
+  resource limits.
+- **`secrets`** ([AIP-19](/docs/aip-19)) — env-var bindings:
+  vault slugs, OAuth providers, plain values.
+- **`network`** (top-level) — egress allowlist for outbound HTTP.
+
+The downgrade rule (untrusted-source `in-process` requests forced
+to `subprocess`) and host responsibilities are normative in
+AIP-17. AIP-15 imports them unchanged.
+
+Workflow-specific notes:
+
+- Hosts MAY refuse step kinds that require host-side persistence
+  (`kind: "suspend"`, `kind: "approval"`, deep `kind: "subworkflow"`
+  chains) when `runner.engine: "sandbox"` is in use. When refused,
+  the host MUST reject the workflow at registration with a clear
+  error.
+- A workflow body authored under `.workflows/` SHOULD be treated
+  as untrusted by the host and silently downgraded to `subprocess`
+  if it requests `in-process`.
+
+### Steps
+
+Each entry in `steps[]`:
+
+#### Common fields (every step kind)
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Kebab-case, unique within the workflow. |
+| `name` | string | Display label. |
+| `kind` | enum | `"tool"`, `"branch"`, `"parallel"`, `"suspend"`, `"approval"`, `"map"`, `"loop"`, `"subworkflow"`. |
+| `description` | string | One-line purpose. |
+| `inputs` | object | Mapping from upstream values to this step's input. Keys are the step's input fields; values are JSON-pointer-style references like `$workflow.inputs.productUrl`, `$steps.fetch-page.outputs.html`, or literals (`{ "kind": "literal", "value": 42 }`). |
+| `outputs` | JSON Schema | Schema of this step's output. Other steps reference it via `$steps.<id>.outputs.*`. |
+| `next` | step id \| `"$end"` | Default successor. Branch steps override this with their `branches`. |
+
+#### Step-kind specific fields
+
+##### `kind: "tool"`
+
+Run a single tool. The `tool:` field MUST reference an external
+TOOL.md by id (per AIP-14). Inline-entry bodies are forbidden — the
+body lives on the AIP-30 PROVIDER that implements the TOOL contract,
+and provider resolution happens at step-execution time per AIP-30's
+resolver.
+
+```yaml
+- id: fetch-page
+  kind: tool
+  tool: pricing-snapshot           # TOOL.md id (REQUIRED — string id, no inline body)
+  inputs:
+    productUrl: $workflow.inputs.productUrl
+  outputs: { type: object, properties: { html: { type: string } } }
+  next: parse
+  retry:
+    max_attempts: 3
+    backoff: exponential
+    initial_ms: 1000
+  timeout_ms: 20000
+  approval: auto
+  risk_level: 0
+  compensation: undo-fetch         # optional
+  # Optional per-step provider pin (escape hatch — usually omit):
+  # pinned_provider: apollo-pricing-http
+```
+
+When the workflow runtime executes this step, the runtime:
+
+1. Loads the TOOL.md by id from the registry.
+2. Runs the AIP-30 resolver against the call's context to pick a
+   PROVIDER (or honours `pinned_provider` when present).
+3. Validates `inputs` against the contract's `inputSchema`.
+4. Dispatches to the resolved provider's `execute[<toolId>]`.
+5. Validates the result against the contract's `outputSchema`.
+6. Maps the result into the workflow's running state per the step's
+   `outputs` declaration.
+
+The workflow itself is **provider-agnostic**. The same workflow runs
+against OpenAI HTTP, Replicate HTTP, or self-hosted SDK depending on
+workspace policy and resolver decisions per call.
+
+##### `kind: "branch"`
+
+Conditionally route to one of N successors.
+
+```yaml
+- id: route
+  kind: branch
+  branches:
+    - when: $steps.parse.outputs.tier == "free"
+      next: handle-free
+    - when: $steps.parse.outputs.tier == "paid"
+      next: handle-paid
+  default: $end                    # taken if no branch matches
+```
+
+`when` is a small expression language (see [Expressions](#expressions)).
+Adapters MUST support equality, ordering on numbers and strings,
+boolean `&&` / `||` / `!`, and `null` checks. Adapters MAY support
+more; spec-strict workflows stay within the minimum.
+
+##### `kind: "parallel"`
+
+Run named child step graphs concurrently; rejoin when all complete.
+
+```yaml
+- id: enrich
+  kind: parallel
+  branches:
+    - id: stripe
+      next: gather                 # converges
+      steps: [...]                 # nested step list
+    - id: hubspot
+      next: gather
+      steps: [...]
+  next: gather
+```
+
+Each branch is itself a step list. The parent step's `outputs` is the
+merged shape of its branches. Adapters MAY emit a single concurrent
+flow or fan-out across worker queues.
+
+##### `kind: "suspend"`
+
+Pause the run until an external event resumes it.
+
+```yaml
+- id: wait-for-payment
+  kind: suspend
+  resume:
+    on: ["stripe.charge.succeeded", "manual.cancel"]
+    timeout_ms: 86400000           # 24h
+    on_timeout: cancel             # cancel | continue | <step-id>
+  outputs:
+    type: object
+    properties:
+      eventName:    { type: string }
+      eventPayload: { type: object }
+  next: charge-succeeded
+```
+
+Storage: the runtime persists run state at the suspend point and
+re-dispatches on a matching event. The manifest does not name the
+storage; that's adapter-specific.
+
+##### `kind: "approval"`
+
+Pause for a human decision. A specialised suspend.
+
+```yaml
+- id: legal-review
+  kind: approval
+  prompt: "Review the contract draft and approve or reject."
+  artifacts:
+    - $steps.draft-contract.outputs.fileId
+  approvers:
+    - role: legal
+    - role: founder                # any one approver suffices
+  timeout_ms: 86400000
+  on_timeout: escalate
+  on_reject:
+    next: revise
+  on_approve:
+    next: send
+```
+
+Governance: every approval step writes to the audit log per
+[AIP-7](/docs/aip-7) — actor, decision, timestamp, justification —
+without the workflow needing to call the audit machinery.
+
+##### `kind: "map"`
+
+For-each over a collection. Each item runs the same nested step graph;
+results aggregate into an array.
+
+```yaml
+- id: process-each-line
+  kind: map
+  over: $steps.parse.outputs.lines
+  parallelism: 5                   # concurrent items; 0 = unbounded
+  steps: [...]
+  outputs:
+    type: array
+    items: { type: object, properties: { ... } }
+```
+
+##### `kind: "loop"`
+
+Repeat the nested step graph while a condition holds. Bounded by
+`max_iterations`.
+
+```yaml
+- id: refine
+  kind: loop
+  while: $steps.evaluate.outputs.score < 0.8
+  max_iterations: 5
+  steps: [...]
+```
+
+##### `kind: "subworkflow"`
+
+Invoke another `WORKFLOW.md`. Inputs are mapped, outputs flow into
+this step's `outputs`.
+
+```yaml
+- id: ship
+  kind: subworkflow
+  workflow: deploy-to-prod         # WORKFLOW.md id
+  inputs:
+    branch: main
+    artifact: $steps.build.outputs.artifactPath
+```
+
+### Expressions
+
+The minimum expression grammar adapters MUST support:
+
+```
+expr     := value | binary | unary | path
+value    := string | number | bool | null
+path     := '$workflow.inputs.' field ( '.' field )*
+          | '$steps.' step-id '.outputs.' field ( '.' field )*
+binary   := expr op expr
+op       := '==' | '!=' | '<' | '<=' | '>' | '>=' | '&&' | '||'
+unary    := '!' expr
+```
+
+No function calls, no loops in expressions, no string interpolation.
+Workflows that need richer logic encode it as a tool step with a
+dedicated body.
+
+### Triggers
+
+A workflow MAY declare events that start it.
+
+```yaml
+triggers:
+  - kind: schedule
+    cron: "0 9 * * MON"
+    timezone: Europe/Paris
+  - kind: webhook
+    path: /pricing-update
+  - kind: event
+    name: stripe.invoice.finalized
+  - kind: manual
+    label: "Run pricing snapshot now"
+```
+
+Adapters MUST honour `kind: "manual"` (a UI trigger). Other kinds are
+optional and capability-gated; adapters that don't support them MUST
+refuse the workflow at registration time with a clear error.
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## Overview`** — narrative, when to use vs not.
+- **`## Diagram`** — mermaid graph TD / sequenceDiagram / stateDiagram.
+- **`## Step responsibilities`** — table of step → owner / SLO.
+- **`## Errors & recovery`** — what causes each `next: error-…` route.
+- **`## Examples`** — sample run with input + step trace + output.
+
+The body is informational. Workflows MUST function with adapters that
+read only the frontmatter.
+
+## The `defineWorkflow` and `defineStep` standard signatures
+
+Every implementation that consumes `WORKFLOW.md` MUST expose two
+functions whose signatures match the contracts below:
+**`defineStep`** declares one step, **`defineWorkflow`** assembles
+steps into a runnable workflow.
+
+### `defineStep` (TypeScript notation, normative)
+
+```ts
+defineStep(definition: StepDefinition): StepHandle
+
+interface StepDefinition {
+  // Identity — mirrors the manifest fields with the same names.
+  id:           string
+  name?:        string
+  description?: string
+  kind:         "tool" | "branch" | "parallel" | "suspend"
+              | "approval" | "map" | "loop" | "subworkflow"
+
+  inputs?:      InputMapping     // see manifest spec
+  outputs?:     JSONSchema | unknown
+
+  // Common per-step controls — same vocabulary as TOOL.md.
+  approval?:    ApprovalClass
+  riskLevel?:   0 | 1 | 2 | 3
+  timeoutMs?:   number
+  retry?:       RetryPolicy
+  compensation?: string          // step-id reference
+
+  // Kind-specific fields — see manifest spec for the full list.
+  // (`tool`, `branch`, `parallel`, `suspend`, `approval`, `map`,
+  // `loop`, `subworkflow` each carry their own extras.)
+  [kindSpecific: string]: unknown
+}
+```
+
+### `defineWorkflow` (TypeScript notation, normative)
+
+```ts
+defineWorkflow(definition: WorkflowDefinition): WorkflowHandle
+
+interface WorkflowDefinition {
+  // Identity — mirrors the manifest fields with the same names.
+  id:           string
+  name?:        string
+  description:  string
+  version?:     string
+
+  // Schemas — JSON Schema or zod/pydantic-compatible value.
+  inputSchema:  JSONSchema | unknown
+  outputSchema: JSONSchema | unknown
+
+  // The step graph. Either provided up front, or assembled via the
+  // builder methods below (see `WorkflowHandle`).
+  steps?:       StepHandle[]
+  start?:       string           // step-id of the first step
+
+  // Workflow-level policies — same vocabulary as the manifest.
+  approval?:    ApprovalClass
+  riskLevel?:   0 | 1 | 2 | 3
+  timeoutMs?:   number
+  maxSteps?:    number
+  retry?:       RetryPolicy
+  costClass?:   "trivial" | "metered" | "expensive"
+  triggers?:    Trigger[]
+  tags?:        string[]
+  metadata?:    Record<string, unknown>
+}
+
+/**
+ * The handle returned by defineWorkflow. Builder methods append
+ * steps in order; `commit()` finalises and validates the graph.
+ *
+ * Implementations MAY return a fluent builder OR accept the full
+ * step list up front via `steps:`. Both patterns produce the same
+ * registered workflow — choose the one that fits the host idiom.
+ */
+interface WorkflowHandle {
+  step(step:    StepHandle):  WorkflowHandle
+  branch(step:  StepHandle):  WorkflowHandle    // kind: "branch"
+  parallel(step: StepHandle): WorkflowHandle    // kind: "parallel"
+  approval(step: StepHandle): WorkflowHandle    // kind: "approval"
+  suspend(step:  StepHandle): WorkflowHandle    // kind: "suspend"
+  commit(): WorkflowHandle                      // finalise + validate
+}
+```
+
+### Conformance rules
+
+1. **Canonical names.** Exports MUST be named `defineWorkflow` and
+   `defineStep`. Implementations MAY also re-export under host-specific
+   aliases but the canonical names are what `WORKFLOW.md` adapters
+   and SKILL.md authoring guides reference.
+
+2. **Schemas validated at boundaries.** The host MUST validate the
+   workflow's `inputSchema` before the first step runs and each step's
+   `inputs` mapping before its body executes. Steps MUST NOT
+   re-validate; they receive parsed input.
+
+3. **Step kinds are exhaustive.** `defineStep` accepts only the eight
+   kinds enumerated. Unknown kinds MUST be rejected at registration
+   with a clear error — runtimes MAY add proprietary extensions, but
+   they live OUTSIDE the standard signature.
+
+4. **`approval`, `riskLevel`, `timeoutMs`, `retry`, `compensation`
+   are enforced by the host**, not the step body. Steps assume
+   permission was granted and budget is in place.
+
+5. **Compensation is idempotent.** When the host walks back through
+   completed steps to undo on failure, each compensation step MUST
+   tolerate being called repeatedly without observable extra effect.
+   Implementations MUST NOT re-validate compensation completion as a
+   single-shot constraint.
+
+6. **No I/O at module load.** Same rule as `defineTool`. The module
+   containing `defineWorkflow(...)` MUST be safely importable without
+   side effects. All I/O happens inside step bodies.
+
+7. **Suspend points persist.** When a step has `kind: "suspend"` or
+   `kind: "approval"`, the implementation MUST persist enough run
+   state to resume from that step on a matching event after process
+   restart. In-memory-only implementations MUST refuse to register
+   suspendable workflows or document the limitation explicitly.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineWorkflow` /
+`defineStep` conformant implementation in a specific language or
+framework, see [`./resources/aip-15/draft/ADAPTER.md`](./resources/aip-15/draft).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Compensation (sagas)
+
+A workflow that mutates external state SHOULD declare compensation
+steps so partial failures roll back cleanly. Convention:
+
+1. Each step that mutates declares `compensation: <step-id>`.
+2. The compensation step takes the original step's outputs as inputs.
+3. If a downstream step throws, the runtime walks back through
+   already-completed steps in reverse, executing each compensation.
+
+```yaml
+- id: charge-card
+  kind: tool
+  tool: stripe-charge
+  inputs: { amount: $workflow.inputs.amount, customer: $workflow.inputs.customerId }
+  outputs: { type: object, properties: { chargeId: { type: string } } }
+  compensation: refund-card
+
+- id: refund-card
+  kind: tool
+  tool: stripe-refund
+  inputs: { chargeId: $steps.charge-card.outputs.chargeId }
+  outputs: { type: object }
+```
+
+Compensation MUST itself be idempotent — adapters MAY retry.
+
+## Stable identity
+
+`id` + major `version` form the workflow's stable identity. Run
+records, audit rows, and capability grants key on `id@major`.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* a `WORKFLOW.md` is via a paired
+[SKILL.md](/docs/aip-3) — distributed at
+[`./resources/aip-15/draft/skills/author-workflow/SKILL.md`](./resources/aip-15/draft/skills/author-workflow/SKILL.md) — that an agent
+loads when asked to build a workflow. The skill walks the agent
+through:
+
+1. Decompose the goal into named steps (the planner phase).
+2. Pick `kind` for each step (tool / branch / parallel / approval / …).
+3. Declare `inputs` mappings using the path grammar.
+4. Decide which steps need approval and which run `auto`.
+5. Add compensation for every mutating step.
+6. Validate the manifest against
+   [`./resources/aip-15/draft/WORKFLOW.schema.json`](./resources/aip-15/draft)
+   and emit the final pair.
+
+## Compatibility
+
+### With AIP-26 / AIP-17 / AIP-19 (2026-04-30 revision)
+
+The 2026-04-30 revision adds top-level `code:`, `run:`, `runner:`,
+`secrets:`, `network:` blocks defined in their respective sibling
+AIPs, and removes the legacy `entry:` and `runtime:` shapes from
+the manifest. The migration mirrors AIP-14 § Compatibility:
+
+```
+manifest.entry           → manifest.run            (single-file → string-path form)
+manifest.runtime.mode    → manifest.runner.engine
+manifest.runtime.env     → manifest.secrets        (per AIP-19)
+manifest.runtime.fs      → manifest.inputsFiles / outputsFiles  (per AIP-16)
+manifest.runtime.network → manifest.network        (top-level)
+manifest.runtime.cpu_ms_max     → manifest.runner.limits.cpu_ms
+manifest.runtime.memory_mb_max  → manifest.runner.limits.memory_mb
+manifest.runtime.timeout_ms     → manifest.runner.limits.timeout_ms
+```
+
+Hosts SHOULD accept both shapes during the deprecation window.
+
+### With pre-AIP runtime-specific workflow definitions
+
+For authors arriving from runtime-idiomatic workflow factories
+(Mastra `createWorkflow`, Temporal, etc.):
+
+1. Add `WORKFLOW.md` next to the existing entry, copying step ids
+   and schemas.
+2. Re-express the step bodies behind the standard `defineStep`
+   signature; assemble them via `defineWorkflow().step(...).commit()`.
+3. Run the manifest through `WORKFLOW.schema.json` to verify the
+   shape and the path-expression grammar in `inputs` mappings.
+
+Hosts MAY accept both legacy and `WORKFLOW.md`-shaped registrations
+during a migration period; the audit-log + work-item shapes from
+[AIP-7](/docs/aip-7) and [AIP-13](/docs/aip-13) are identical either
+way as long as `mutates` / `requires` / `approval` are populated on
+each step.
+
+## Security considerations
+
+`WORKFLOW.md` is **declarative**: a malicious manifest can lie about
+`mutates` or grant itself unsafe `approval: "auto"` on a destructive
+step. Hosts MUST treat the manifest as untrusted until verified, and
+[AIP-7](/docs/aip-7) capability gating MUST run regardless of
+manifest claims.
+
+The expression grammar is intentionally minimal so manifests can be
+statically analysed without sandboxing — a manifest cannot execute
+code on the host's behalf.
+
+`triggers: kind: "webhook"` exposes a network surface and MUST be
+gated by an explicit host capability. `kind: "schedule"` exposes
+recurring cost and MUST be governed by quota policy.
+
+For runtime isolation considerations (env stripping, sandbox vs
+in-process privilege, egress enforcement), see
+[AIP-17 § Security considerations](/docs/aip-17#security-considerations).
+
+## Open questions
+
+1. **Variable scoping**: should `$steps.<id>.outputs` be visible
+   inside parallel branches, or only after the join? Current draft:
+   only after the join.
+2. **Streaming step outputs**: tools that yield progressive results
+   inside a workflow — surfaced as `outputs.stream` on the step?
+3. **Distributed runtimes**: do we need a `placement` hint
+   (`local` / `worker:<queue>` / `serverless`) or punt to runtime?
+4. **Cross-workflow signals**: a workflow in run A waits for an event
+   raised by run B — same workflow id, different runs. Adapters
+   handle this differently; spec is silent for now.
+5. **Sub-second timing primitives**: `kind: "wait"` for explicit
+   delays — useful enough to standardise, or punt?
+
+These remain open until enough adapters ship to settle empirically.

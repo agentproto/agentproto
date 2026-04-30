@@ -1,0 +1,682 @@
+---
+title: "AIP-14: TOOL.md — agenttool/v1 (abstract agent contract)"
+description: A markdown + frontmatter format for declaring a single agent tool's abstract contract — its identity, input/output schemas, side-effect profile, approval class, and resource budget. Pairs with the standard `defineTool` signature any implementation exposes. Implementation-specific concerns (transport, code, runner, auth, sandbox) live on the AIP-30 PROVIDER layer.
+aip: 14
+status: Draft
+type: Schema
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/tool-runtime
+created: 2026-04-28
+updated: 2026-04-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 16, 30]
+resources: ./resources/aip-14/draft
+discussions-to: https://github.com/agentproto/specs/discussions/14
+---
+
+| Field | Value |
+|---|---|
+| AIP | 14 |
+| Title | TOOL.md — agenttool/v1 (abstract agent contract) |
+| Status | Draft |
+| Type | Schema |
+| Domain | tools.sh |
+| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Implemented by | Any [AIP-30 PROVIDER](/docs/aip-30) declaring the tool in its `implements[]` |
+| Resources | [`./resources/aip-14`](./resources/aip-14/draft) — [`SKILL.md`](./resources/aip-14/draft/skills/author-tool/SKILL.md), `ADAPTER.md`, `TOOL.schema.json`, `EXAMPLES.md` |
+
+## Abstract
+
+`TOOL.md` is a markdown-with-frontmatter file format that packages the
+**abstract contract of a single agent tool** — its identity,
+input/output schemas, side-effect profile, approval class, and
+resource budget. It is the *what* layer of the AIP series: what the
+agent calls, what it expects in, what it returns, and what governance
+gate it sits behind.
+
+The format is paired with a standard entry-point function,
+**`defineTool(...)`**, whose signature any implementation in any
+language exposes. The signature describes the contract (schemas,
+mutates, approval, requires) — **not** the body. Implementation
+bodies, transport bindings, install lifecycle, auth, and sandbox
+all live on the [AIP-30 PROVIDER](/docs/aip-30) layer.
+
+A single TOOL.md MAY be implemented by zero, one, or many providers
+— the registry's runtime resolves provider per call based on
+capability, policy, cost, and region. This is the layering's payoff:
+one contract, many backends, no duplication.
+
+The file is human-authored, version-controlled, machine-parseable,
+and grep-able — same posture as
+[SKILL.md](/docs/aip-3),
+[INTENT.md](/docs/aip-28),
+[CANVAKIT.md](/docs/aip-5),
+[DESIGN.md](/docs/aip-4).
+
+## Motivation
+
+A tool's **logical shape** — what it does, what it takes in, what it
+returns, what side effects it has, what approval class it requires —
+is independent of how the tool is packaged for any given backend. A
+tool authored once SHOULD be loadable wherever an agent runs, and
+implemented by whichever backend best fits the deployment's policy.
+
+Five problems disappear when the contract layer is split from the
+implementation layer:
+
+1. **Provider swap stops being a refactor.** Today a tool that calls
+   OpenAI is a hard-coded OpenAI tool. To swap to Replicate, you fork
+   the tool, change the body, point callers at the fork. With the
+   contract/provider split, swapping providers is editing a config:
+   the tool stays unchanged, a new PROVIDER.md declares it implements
+   the same contract.
+
+2. **Multi-provider routing becomes data.** "Pick the cheapest
+   provider that satisfies workspace policy and supports my style
+   input" is now a runtime decision the resolver makes from declared
+   metadata — not an `if/else` chain in the agent prompt.
+
+3. **Governance gates the contract, not the implementation.**
+   Approval class, mutates, requires capabilities — these are
+   contract properties enforced regardless of which provider serves
+   the call. An OpenAI provider can't downgrade approval below what
+   the contract declares.
+
+4. **Catalogs render from data.** "What can this agent do?" is
+   answerable by walking the TOOL.md registry. Each tool's matching
+   providers are derived from the resolver's filter chain, so the
+   catalog can show "create-image (3 providers, 1 unauthed)" without
+   reading any code.
+
+5. **Testing decouples.** The contract has its own examples (input/
+   output pairs that every provider MUST satisfy). Each provider may
+   add its own examples (provider-specific edge cases). The two
+   layers test independently.
+
+`TOOL.md` is the contract layer. [AIP-30 PROVIDER](/docs/aip-30) is
+the implementation layer. The two together replace what AIP-14
+formerly bundled into one file.
+
+## Design principles
+
+1. **Contract before implementation.** The manifest declares what
+   the tool *does*, not *how* it's served. The body of any TOOL.md
+   is informational prose; the executable body lives on a PROVIDER
+   that declares this tool in its `implements[]`.
+
+2. **Side effects are first-class.** Every tool declares its
+   mutation surface (`mutates`), its required capabilities
+   (`requires`), and its approval class (`approval`). Governance
+   ([AIP-7](/docs/aip-7)) reads these fields directly from the
+   contract — no separate audit metadata, no per-provider
+   re-declaration.
+
+3. **Schemas are JSON Schema.** Inputs and outputs are JSON Schema
+   draft 2020-12. Every runtime can consume JSON Schema; framework-
+   specific schema libraries (zod, pydantic, attrs) project to/from
+   JSON Schema. Authors may write zod/pydantic in the entry file and
+   the adapter generates the JSON Schema, but the manifest stores
+   the canonical form.
+
+4. **Providers narrow contracts; widening is forbidden.** A provider
+   MAY declare `schema_narrowing.drop_inputs` to drop optional
+   contract inputs the backend doesn't support (the resolver refuses
+   calls using dropped inputs). A provider MUST NOT add inputs the
+   contract doesn't know — that's a different tool.
+
+5. **Unopinionated about backend kind.** The contract says nothing
+   about CLI vs HTTP vs MCP vs SDK. Any of those can implement any
+   tool. Per-call kind preference (cheaper-to-dispatch wins) is the
+   resolver's heuristic, not the tool's concern.
+
+6. **Composable with siblings.** `TOOL.md` may live alone in a tool
+   folder, alongside provider folders that implement it, or in a
+   shared catalog directory. The manifest is the index; provider
+   files are the bodies.
+
+## Specification
+
+### File location
+
+Tools live in a single folder, separate from the providers that
+implement them:
+
+```
+.tools/
+  pricing-snapshot/
+    TOOL.md          ← this AIP
+    README.md        ← optional long-form
+
+.providers/
+  apollo-pricing-http/
+    PROVIDER.md      ← AIP-30, implements: pricing-snapshot
+  diffbot-pricing-http/
+    PROVIDER.md      ← AIP-30, implements: pricing-snapshot
+```
+
+The folder name SHOULD match the manifest's `id`. Tools MAY be
+nested under a category (e.g. `.tools/finance/pricing-snapshot/`);
+consumers MUST NOT depend on directory depth.
+
+A tool MAY co-exist with a single provider in the same folder when
+the implementation is provably 1:1 (e.g. host-builtin):
+
+```
+.tools/fs-read/
+  TOOL.md
+  PROVIDER.md        ← kind: builtin, single implementation
+```
+
+When more than one implementation is anticipated, separate folders
+make the multi-provider layout explicit and easy to scan.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable display name (1–80 chars). |
+| `id` | string | Machine identifier. Lowercase, digits, dashes, dots. 2–80 chars. Dots denote namespace (`image.create`, `github.pr.merge`). Unique within the registry that hosts the tool. |
+| `description` | string | One-paragraph purpose, written for the LLM caller. ≤2000 chars. |
+| `version` | semver string | Spec version of THIS file. Bump on breaking change to inputs/outputs/side-effect profile. |
+| `inputs` | JSON Schema | The IO `inputs` block defined by [AIP-16](/docs/aip-16). Draft 2020-12. May be `{ "type": "object", "properties": {} }` for nullary tools. |
+| `outputs` | JSON Schema | The IO `outputs` block defined by [AIP-16](/docs/aip-16). Draft 2020-12. Errors are out-of-band (see [Errors](#errors)). |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `idempotent` | boolean | `false` | Safe to retry without observable extra effect. Logical idempotency, contract-level (network-level retry safety belongs to PROVIDER's `retry_override`). |
+| `mutates` | string[] | `[]` | Resources the tool may modify. Format: `<class>:<scope>` (`workspace:/path`, `network:hostname`, `database:<table>`, `secret:<slug>`, `external:<service>`). Empty = pure read. Every provider implementing this tool MUST honour the declared set; surfaces audit logs. |
+| `requires` | object | `{}` | Capability requirements (governance gating per [AIP-7](/docs/aip-7)). Subfields: `network: string[]`, `secrets: string[]`, `tools: string[]` (other tool ids it calls). Providers MAY add to this set; MUST NOT remove from it. |
+| `approval` | string | `"auto"` | Approval class. `"auto"` (run without prompt), `"always"` (always prompt), `"on-mutate"` (prompt when `mutates` is non-empty), or `"policy:<ref>"` (defer to a named policy). Contract-level — providers can't downgrade. |
+| `risk_level` | 0–3 | `0` | Caller-side autonomy gate. 0 = read-only, 1 = scoped writes, 2 = external side effects, 3 = irreversible. Used by [AIP-7](/docs/aip-7) approval policies. |
+| `cost_class` | string | `"trivial"` | `"trivial"` (no metered call), `"metered"` (counts against quota), `"expensive"` (warn the user before invoking). Baseline; providers MAY override via `cost_override.cost_class`. |
+| `timeout_ms` | int | `30000` | Hard wall-clock contract ceiling. Providers MAY narrow via `timeout_override_ms`; MUST NOT widen. |
+| `retry` | object | none | Baseline retry policy: `{ max_attempts: int, backoff: "fixed"\|"exponential", initial_ms: int }`. Providers MAY override via `retry_override`. |
+| `default_provider` | string \| null | null | Optional `provider.id` to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. |
+| `provider_constraints` | object | `{}` | Author-side allowlist/denylist on which provider kinds the contract permits: `{ forbid?: string[], require_kind?: ProviderKind[] }`. Use to declare "this tool MUST NOT be served via untrusted HTTP" (`forbid: ["http"]` for self-hosted-only tools). |
+| `tags` | string[] | `[]` | Free-form discovery tags (`finance`, `read-only`, `media`). |
+| `examples` | object[] | `[]` | Each `{ name, input, output, note? }`. Provider-agnostic examples that EVERY conformant provider MUST satisfy. Provider-specific edge cases live on the PROVIDER's own examples. |
+| `metadata` | object | `{}` | Free-form. Authors MAY stash adapter-specific hints under namespaced keys (`metadata.mastra.…`, `metadata.langchain.…`). Consumers MUST tolerate unknown keys. |
+
+#### Removed (formerly part of AIP-14, moved to AIP-30 PROVIDER)
+
+| Field | New home |
+|---|---|
+| `code` | `provider.code` (per AIP-26 reference) |
+| `run` | `provider.run` |
+| `runner` | `provider.runner` (per AIP-17 reference) |
+| `secrets` | `provider.auth.ref` (points at SECRETS.md per AIP-19) |
+| `network` | `provider.network.egress` |
+| `entry` | `provider.execute[<toolId>]` |
+
+A TOOL.md that still carries any of these fields is invalid under
+the post-refactor schema. Authors migrating from the pre-AIP-30
+shape MUST move these fields to a PROVIDER.md sibling.
+
+#### Discouraged
+
+`async`, `streaming`, `priority`, `model`, `temperature` are
+provider concerns, not tool identity. Provider entries declare
+streaming via the kind-specific `metadata.<kind>.streaming` block;
+the contract stays unary in/out for v1.
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## Description`** — long-form purpose, when to call, when NOT to.
+- **`## Examples`** — inputs and expected outputs, paired with the
+  `examples` frontmatter array if used.
+- **`## Errors`** — error classes the tool can return + how callers
+  should handle them.
+- **`## Provider notes`** — anticipated providers, known schema
+  narrowings, routing recommendations. Optional but useful when
+  multiple providers are expected.
+
+The body is informational. Tools MUST function with resolvers that
+read only the frontmatter.
+
+### Context-injected state (the `contextSchema` pattern)
+
+Tools commonly need host-supplied state at invocation time —
+governance config, a database connection, an HTTP fetcher, a tenant
+id. The contract declares what it needs via `contextSchema`; the
+host validates and narrows the context before dispatching to the
+resolved provider's `execute` body.
+
+This pattern is the contract-level equivalent of FastAPI's
+`Depends(...)`, NestJS's request-scoped providers, and gRPC's
+per-call metadata: state that varies per call without varying the
+contract.
+
+```ts
+const signArtifactTool = defineTool({
+  id: "governance.sign-artifact",
+  inputSchema:  signArtifactInputSchema,
+  outputSchema: signArtifactOutputSchema,
+  contextSchema: z.object({                     // ← contract obligation
+    governanceConfig: governanceConfigSchema,
+  }),
+  // NO execute. The body lives on PROVIDER (per AIP-30).
+})
+```
+
+When a TOOL declares `contextSchema`, the host MUST validate
+`args.context` against it BEFORE calling the resolved provider's
+`execute[<toolId>]`. Providers receive a narrowed, typed context
+and MUST NOT re-validate.
+
+Hosts wire the per-call context. A multi-tenant runtime, for
+example, derives `governanceConfig` from
+`requestContext.tenantId` per invocation. The same TOOL contract
+is shared by every tenant; the same PROVIDER serves every tenant;
+context flows in per-call.
+
+### Errors
+
+Tools return errors out-of-band relative to `outputs`. The
+convention is:
+
+```ts
+type ToolResult<T> =
+  | { ok: true;  value: T }
+  | { ok: false; error: { code: string; message: string; retryable?: boolean; cause?: unknown } }
+```
+
+Hosts MUST wrap provider runtime errors into this envelope. The
+`outputs` schema describes the *success* shape only — providers
+need not fork the schema for errors.
+
+`code` SHOULD be one of the standard codes: `"input_invalid"`,
+`"input_unsupported"` (per provider's `schema_narrowing`),
+`"unauthorised"`, `"auth_required"`, `"not_found"`,
+`"rate_limited"`, `"timeout"`, `"upstream_error"`,
+`"no_route"`, `"pinned_provider_unavailable"`, `"internal"`.
+Tool-specific codes MAY use a domain prefix
+(`"stripe:card_declined"`).
+
+### Stable identity
+
+`id` + `version` together form the tool's stable identity. Two
+tools with the same `id` but different major `version` values MUST
+be treated as distinct. Caches, audit logs, and capability grants
+key on `id@major`.
+
+When the contract changes (input schema gains a required field, an
+output property type narrows), the tool MUST bump major. Providers
+implementing the tool see this as a contract-version bump in their
+`implements[].version` range; they MAY continue to declare
+`"^1.0.0"` and refuse to bind against the new contract until they
+update.
+
+### Side-effect declaration (`mutates`)
+
+The `mutates` array drives:
+
+- **Approval gating** ([AIP-7](/docs/aip-7)): an approval policy
+  can refuse a tool whose `mutates` includes `database:` without an
+  explicit ack.
+- **Idempotency planners** for orchestration: workflows
+  ([AIP-15](/docs/aip-15)) decide whether to retry vs route to
+  compensation.
+- **Audit logs**: the post-call audit row records the contract's
+  `mutates` so external auditors reconstruct effect graphs without
+  re-reading provider code.
+
+A tool MUST declare every class of mutation any of its providers
+might perform. A provider whose body observably writes resources
+not declared in the contract MUST be refused at runtime — not
+silently allowed. (The contract is the safety floor, not a starting
+suggestion.)
+
+## The `defineTool` standard signature
+
+Every implementation that consumes `TOOL.md` MUST expose a function
+named **`defineTool`** whose signature matches the contract below.
+The function returns a value the host registers as a contract — not
+an executable.
+
+### Signature (TypeScript notation, normative)
+
+```ts
+defineTool(definition: ToolDefinition): ToolHandle
+
+interface ToolDefinition {
+  // Identity — mirrors the manifest fields with the same names.
+  id:           string
+  name?:        string
+  description:  string
+  version?:     string
+
+  // Schemas — JSON Schema OR a value reducible to JSON Schema
+  // (e.g. zod, pydantic). Implementations SHOULD accept both and
+  // canonicalise to JSON Schema internally.
+  inputSchema:  JSONSchema | unknown
+  outputSchema: JSONSchema | unknown
+
+  // Optional schema for the per-call context object. When provided,
+  // the host MUST validate context against it before dispatching to
+  // the resolved provider's execute body. The provider receives the
+  // narrowed, typed context.
+  //
+  // Use this to declare the host-injected state the tool requires —
+  // e.g. `{ governanceConfig, dbConnection, secrets }`. This is what
+  // makes a TOOL contract reusable across tenants/workspaces: the
+  // contract is static; the context flows in per-call.
+  contextSchema?: JSONSchema | unknown
+
+  // Side-effect declaration — same vocabulary as the manifest.
+  mutates?:     string[]
+  requires?:    Capabilities
+  approval?:    ApprovalClass
+  riskLevel?:   0 | 1 | 2 | 3
+  costClass?:   "trivial" | "metered" | "expensive"  // baseline
+  timeoutMs?:   number                                // ceiling
+  retry?:       RetryPolicy                           // baseline
+  idempotent?:  boolean
+
+  // Provider routing
+  defaultProvider?:     string
+  providerConstraints?: { forbid?: string[]; requireKind?: ProviderKind[] }
+
+  // Bookkeeping
+  tags?:        string[]
+  examples?:    Array<{ name: string; input: unknown; output: unknown; note?: string }>
+  metadata?:    Record<string, unknown>
+
+  // NO execute(). The body lives on PROVIDER (per AIP-30).
+}
+
+type ProviderKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
+```
+
+### Conformance rules
+
+1. **One canonical name.** The exported name MUST be `defineTool`.
+   Implementations MAY also re-export under host-specific aliases
+   (`createTool`, `tool`, `registerTool`); the canonical name is
+   what `TOOL.md` adapters reference.
+
+2. **No `execute` on the contract.** `defineTool` MUST NOT accept an
+   `execute` field. Bodies live on PROVIDER (per AIP-30); hosts
+   that find an `execute` field on a tool definition MUST surface a
+   migration warning pointing at AIP-30.
+
+3. **Schema canonicalisation.** Implementations accepting
+   zod/pydantic in `inputSchema`/`outputSchema` MUST canonicalise
+   to JSON Schema for the manifest before hand-off to the registry.
+   The audit log entry MUST record the canonical JSON Schema, not
+   the framework-specific form.
+
+4. **`contextSchema` is contract obligation.** When declared,
+   every conformant provider MUST accept the same context shape.
+   Providers MAY narrow via their own internal validation, but the
+   contract's `contextSchema` is the floor.
+
+5. **`mutates` is the truth.** If any provider's body observably
+   writes resources outside the contract's declared `mutates` set,
+   the host MUST surface a spec violation (warn at registration,
+   refuse at runtime, or both). Audit logs ([AIP-7](/docs/aip-7))
+   consume the contract's declared `mutates` directly; undeclared
+   writes corrupt the audit trail.
+
+6. **No I/O at module load.** The module containing `defineTool`
+   MUST be safely importable as a side-effect-free unit. No tool
+   contract should perform I/O — bodies do that on PROVIDER, never
+   here.
+
+### Implementer's guide
+
+For step-by-step guidance on building a `defineTool`-conformant
+implementation in a specific language or framework, see
+[`./resources/aip-14/draft/ADAPTER.md`](./resources/aip-14/draft/ADAPTER.md).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection.
+
+## Authoring with `SKILL.md`
+
+The canonical way to *generate* a `TOOL.md` is via a paired
+[SKILL.md](/docs/aip-3) — distributed at
+[`./resources/aip-14/draft/skills/author-tool/SKILL.md`](./resources/aip-14/draft/skills/author-tool/SKILL.md) —
+that an agent loads when asked to define a tool contract. The skill
+walks the agent through:
+
+1. Pick `id`, write `name` and `description`.
+2. Decide `mutates` and `requires` (the safety contract).
+3. Sketch `inputs` and `outputs` schemas.
+4. Decide `approval` class based on `mutates`.
+5. Identify the provider(s) that will implement this tool. For
+   each, run the [AIP-30 author-provider skill](/docs/aip-30) to
+   produce a sibling PROVIDER.md.
+6. Validate the manifest against
+   [`./resources/aip-14/draft/TOOL.schema.json`](./resources/aip-14/draft).
+
+The agent MAY install the skill, follow the steps, and emit the
+final `TOOL.md` (and one or more `PROVIDER.md` siblings) without
+further instruction. This pattern — agents authoring their own tool
+contracts and provider bindings as portable manifests — is what
+makes the format valuable beyond convenience.
+
+## Example
+
+```md
+---
+name: Pricing Snapshot
+id: pricing-snapshot
+description: Fetch the current pricing tiers for a SaaS product from its public marketing pages and return a normalised tier list.
+version: 1.0.0
+idempotent: true
+mutates: ["network:*"]
+requires:
+  network: ["*"]
+approval: "auto"
+risk_level: 0
+cost_class: "metered"
+timeout_ms: 20000
+retry:
+  max_attempts: 2
+  backoff: "exponential"
+  initial_ms: 500
+inputs:
+  type: object
+  properties:
+    productUrl:
+      type: string
+      format: uri
+      description: Public marketing/pricing page URL.
+  required: ["productUrl"]
+outputs:
+  type: object
+  properties:
+    tiers:
+      type: array
+      items:
+        type: object
+        properties:
+          name:       { type: string }
+          priceUsdMo: { type: number, minimum: 0 }
+          features:   { type: array, items: { type: string } }
+        required: [name, priceUsdMo]
+    capturedAt: { type: string, format: date-time }
+  required: [tiers, capturedAt]
+provider_constraints:
+  require_kind: ["http", "sdk"]    # no shell-spawning CLI for scraping
+default_provider: apollo-pricing-http
+tags: [finance, scraping, read-only]
+examples:
+  - name: Stripe billing page
+    input:  { productUrl: "https://stripe.com/pricing" }
+    output:
+      tiers:
+        - { name: "Standard", priceUsdMo: 0, features: [pay-as-you-go] }
+      capturedAt: "2026-04-28T20:00:00Z"
+---
+
+## Description
+
+Use when the user asks for the current price of a SaaS product and
+already provides the public pricing URL. Returns normalized tier
+data. Do NOT use for products that gate pricing behind a sales call —
+return an explicit `error.code: "private_pricing"` in that case.
+
+## Errors
+
+| Code | Meaning | Caller action |
+|---|---|---|
+| `not_found` | URL returned 404 | Surface to user; suggest a different URL. |
+| `private_pricing` | Page exists but no public tiers detected | Surface to user; recommend contacting sales. |
+| `rate_limited` | Upstream rate-limited us | Resolver's retry handles; don't re-call manually. |
+| `upstream_error` | Page changed shape | File a bug; tool needs an update. |
+
+## Provider notes
+
+Two anticipated providers:
+
+- `apollo-pricing-http` — primary. Apollo's public price-extraction API.
+- `diffbot-pricing-http` — fallback. Diffbot's structured-page API; more
+  expensive but works on heavily-JS-rendered pages where Apollo fails.
+
+Provider routing: default to Apollo (`default_provider`); fall through
+to Diffbot only when Apollo returns `upstream_error: parse_failed`.
+This routing is encoded in the resolver via per-call retry-with-fallback,
+not in the tool — the contract stays provider-agnostic.
+```
+
+A canonical PROVIDER.md serving this contract:
+
+```md
+---
+name: Apollo pricing extraction (HTTP)
+id: apollo-pricing-http
+description: Apollo HTTP API for public-page price extraction.
+version: 1.0.0
+kind: http
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["APOLLO_API_KEY"] }
+  expiry: { detect: "http_status:401" }
+network:
+  egress: ["api.apollo.io"]
+implements:
+  - tool: ./tools/pricing-snapshot/TOOL.md
+    version: "^1.0.0"
+    cost_override:
+      cost_units_per_call: 5
+    metadata:
+      http:
+        endpoint: "/v1/pricing/extract"
+        method: POST
+        body_template: { url: "${input.productUrl}" }
+---
+```
+
+## Compatibility
+
+### From the pre-AIP-30 bundled shape
+
+A pre-refactor TOOL.md carried `code`/`run`/`runner`/`secrets`/
+`network`/`entry` directly. Migration to the post-refactor shape:
+
+1. Author a sibling PROVIDER.md per [AIP-30](/docs/aip-30) carrying
+   the moved fields:
+   - `code` / `run` → `provider.code` / `provider.run`
+   - `runner` → `provider.runner`
+   - `secrets` (per-manifest bindings) → `provider.auth.ref` pointing
+     at a `SECRETS.md`
+   - `network` → `provider.network.egress`
+   - `entry`'s `execute` body → `provider.execute[<toolId>]`
+2. Set `provider.implements[0].tool` to the (now-amputated) TOOL.md.
+3. Remove the moved fields from TOOL.md; add `default_provider`
+   pointing at the new PROVIDER.md's `id`.
+4. Validate both files against the v1 schemas (no v1/v2 dual-shape
+   machinery — we ship a clean v1).
+
+This refactor is a single-PR operation. No deprecation window, no
+codemod release. Internal consumers migrate in lockstep with the
+spec rewrite. The previous shape lives in git history, not in the
+spec namespace.
+
+### With pre-AIP runtime-specific tool definitions
+
+For authors arriving from runtime-idiomatic tool factories
+(Mastra `createTool`, LangChain tools, Anthropic SDK tool defs):
+
+1. Add `TOOL.md` for the contract: id, schemas, mutates, approval,
+   requires.
+2. Add `PROVIDER.md` for the implementation: kind, auth, sandbox,
+   implements (per AIP-30).
+3. Re-export the existing body as the PROVIDER's
+   `execute[<toolId>]`.
+4. Run both manifests through their schemas to verify shape.
+
+Hosts MAY accept legacy runtime-specific tool registrations during
+a migration period; the audit-log shape from
+[AIP-7](/docs/aip-7) remains identical as long as
+`mutates`/`requires`/`approval` are populated on the contract side.
+
+## Security considerations
+
+`TOOL.md` is **declarative**: a malicious manifest can lie about
+`mutates` or `requires`. Hosts MUST treat the manifest as untrusted
+input until verified (signature, hash on a trust list, or sandbox
+enforcement at the provider level). [AIP-7](/docs/aip-7)'s
+capability gating MUST run regardless of what `requires` claims.
+
+`approval: "auto"` does not bypass user-side policies — it expresses
+the **author's** view that no per-call prompt is needed. Hosts
+compose this with their own policy; the more restrictive answer
+wins.
+
+`provider_constraints.forbid` is a security-relevant declaration:
+a tool that handles PII can declare `forbid: ["http"]` to prevent
+the resolver from ever picking a third-party HTTP provider for it.
+Hosts MUST honour the declaration; provider authors MUST NOT route
+around it.
+
+## Open questions
+
+1. **Streaming outputs.** Tools that yield progressive results — do
+   we extend `outputSchema` with a streaming block, or punt to
+   provider-kind-specific extensions? Defer until concrete
+   streaming providers ship enough to settle the abstraction.
+
+2. **Cost reporting.** Should `cost_class` evolve into a numeric
+   `cost_units` field tied to a per-host meter? Today providers
+   override with `cost_units_per_call`; the contract baseline could
+   match.
+
+3. **Schema-narrowing at the contract level.** Currently
+   `schema_narrowing` is a provider-side declaration. Should the
+   contract also be able to declare which inputs are
+   "optional-but-most-providers-support" vs "optional-and-rare"?
+   The resolver could prefer providers covering more optional
+   inputs at equal cost.
+
+4. **Per-tool budget overrides.** A workspace might want to cap
+   "image.create" calls per user per day. The cap is a meter at
+   the workspace level — but where does the meter key come from?
+   Tool's `id`? Provider's `quota_key`? Both?
+
+These remain open until enough adapters and providers ship to
+settle the answers empirically.
+
+## See also
+
+- [AIP-3 — SKILL.md](/docs/aip-3) — multi-step expertise that uses
+  tool contracts
+- [AIP-7 — governance, approval, audit](/docs/aip-7) — `requires`,
+  `approval`, `mutates`
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — sibling consumer of tool
+  contracts
+- [AIP-16 — IO.md](/docs/aip-16) — `inputs` / `outputs` blocks
+  shared with WORKFLOW
+- [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above TOOL
+- [AIP-30 — PROVIDER.md](/docs/aip-30) — implementation layer
+  binding contracts to backends
+- [`./TOOL.schema.json`](./resources/aip-14/draft) — schema validator
+- [`./ADAPTER.md`](./resources/aip-14/draft) — implementer's guide

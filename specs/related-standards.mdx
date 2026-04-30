@@ -1,0 +1,233 @@
+---
+title: Related Standards & Initiatives
+description: The peer specifications, foundations, and ecosystems the Agent Protocol registry defers to, builds on, or runs adjacent to. AIPs are not built in isolation — they live in the gaps these initiatives leave.
+---
+
+# Related Standards & Initiatives
+
+The agent ecosystem has a growing set of specifications and consortia. The
+AIP registry is **deliberately scoped** to the layer above MCP/A2A
+transport and below vendor frameworks — *the "AI company" layer*. This
+page enumerates the initiatives we explicitly defer to, build on, or
+cross-reference, so implementers know how the pieces fit together.
+
+If you're working on something that overlaps with one of these and feel
+the AIP registry is reinventing it — open a discussion. We'd rather
+align than fork.
+
+---
+
+## Tier 1 — Foundation-level agent protocols
+
+Specifications with multi-vendor adoption that AIPs explicitly compose
+with.
+
+### MCP — Model Context Protocol
+
+- **Site:** [modelcontextprotocol.io](https://modelcontextprotocol.io/)
+- **Spec:** [modelcontextprotocol.io/specification](https://modelcontextprotocol.io/specification/)
+- **Stewardship:** Anthropic → Linux Foundation / Agentic AI Foundation (Dec 2025)
+- **Scope:** Model ↔ tool / resource / prompt server protocol over JSON-RPC 2.0
+- **AIP relationship:**
+  AIPs operate **above** MCP. AIP-9 operators *consume* MCP tool servers
+  as one source of bound tools; AIP-3 skills *can package* MCP server
+  references; we do **not** redefine MCP transport.
+
+### A2A — Agent-to-Agent Protocol
+
+- **Site:** [a2a-protocol.org](https://a2a-protocol.org/)
+- **Spec:** [a2a-protocol.org/latest/specification](https://a2a-protocol.org/latest/specification/)
+- **Stewardship:** Google → Linux Foundation (Jun 2025)
+- **Scope:** Discoverable `AgentCard` + `Task` lifecycle for inter-agent communication
+- **AIP relationship:**
+  An AIP-9 operator MAY publish itself as an A2A `AgentCard` (the
+  operator profile maps directly). AIP-10 (artifacts) is positioned to
+  PR into A2A `Task.artifact` — we want artifact envelopes to ride A2A,
+  not parallel to it.
+
+### AGNTCY — Internet of Agents
+
+- **Site:** [agntcy.org](https://agntcy.org/) · [docs](https://docs.agntcy.org/)
+- **Stewardship:** Cisco/Dell/Google/Oracle/Red Hat → Linux Foundation
+- **Sub-specs:** OASF (Open Agentic Schema Framework, OCI-anchored), SLIM (Secure Low-latency Interactive Messaging), Identity (DIDs + W3C Verifiable Credentials), Agent Directory
+- **AIP relationship:**
+  AGNTCY's identity layer (DIDs + VCs) is the layer AIP-7 governance
+  signatures should ultimately ride on. AIPs do not re-spec identity.
+  OASF is a sibling registry to AIPs — different scope (discovery /
+  manifest), not competing.
+
+### AITP — Agent Interaction & Transaction Protocol
+
+- **Site:** [aitp.dev](https://aitp.dev/)
+- **Repo:** [github.com/nearai/aitp](https://github.com/nearai/aitp)
+- **Stewardship:** NEAR
+- **Scope:** Threads + capability modules — AITP-01 (payments), AITP-02 (decisions), AITP-03 (data), AITP-04/05 (wallet)
+- **AIP relationship:**
+  **AIPs explicitly defer to AITP for agent-mediated transactions and
+  payments.** No `agentpayment/v1` is planned — AITP-01 is the
+  reference. AITP's per-capability numbering is also philosophically
+  aligned with AIP numbering, and we cross-reference accordingly.
+
+### Anthropic Agent Skills (`SKILL.md`)
+
+- **Docs:** [platform.claude.com/docs/agents-and-tools/agent-skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
+- **Repo:** [github.com/anthropics/skills](https://github.com/anthropics/skills)
+- **Status:** Open standard since Dec 2025; OpenAI Codex adopted
+- **AIP relationship:**
+  AIP-3 (`SKILL.md`) is **aligned with**, not a fork of, the Anthropic
+  format. Our scope is the *registry conventions* on top — provenance,
+  cross-skill dependencies, capability declarations — not the skill
+  body itself.
+
+---
+
+## Tier 2 — Foundations & consortia
+
+### Agentic AI Foundation (AAIF)
+
+- **Site:** [agenticai.foundation](https://agenticai.foundation/) (under Linux Foundation)
+- **Members:** Anthropic, OpenAI, Google, AWS, Microsoft, plus 50+ implementers
+- **Scope:** Neutral home for MCP and adjacent agent protocols
+- **AIP relationship:**
+  AIPs that target broad adoption (artifacts, observability profile,
+  knowledge format) should be socialized through AAIF working groups
+  before publication.
+
+### Linux Foundation AI & Data
+
+- **Site:** [lfaidata.foundation](https://lfaidata.foundation/)
+- **Scope:** Umbrella for AI/data open-source projects, including AGNTCY and AAIF
+- **AIP relationship:**
+  Cross-references only. The AIP process itself is structured like
+  BIP / EIP / PEP — a numbered-proposal repo, not a foundation project.
+
+---
+
+## Tier 3 — Web standards we build on
+
+### OpenAPI
+
+- **Site:** [openapis.org](https://www.openapis.org/) · **Spec:** [github.com/OAI/OpenAPI-Specification](https://github.com/OAI/OpenAPI-Specification)
+- **Scope:** Machine-readable contracts for HTTP APIs
+- **AIP relationship:**
+  Tool definitions inside AIP-3 skills SHOULD include OpenAPI fragments
+  when wrapping HTTP APIs. The AIP registry uses OpenAPI for its own
+  contract metadata.
+
+### JSON Schema
+
+- **Site:** [json-schema.org](https://json-schema.org/)
+- **AIP relationship:**
+  All AIP frontmatter and doctype shapes are JSON-Schema-compatible
+  (Zod is our authoring tool but the emitted schemas are pure
+  JSON Schema). Implementers can validate AIP-conforming files with any
+  JSON Schema validator.
+
+### Design Tokens Community Group (DTCG)
+
+- **Site:** [tr.designtokens.org](https://tr.designtokens.org/format/)
+- **Scope:** W3C-aligned token format
+- **AIP relationship:**
+  AIP-4 (DESIGN.md) is upstream-friendly with DTCG token shapes. We are
+  not a fork — DESIGN.md exists because Google Stitch needed a
+  prose-first authorable variant. Token semantics align.
+
+### W3C Verifiable Credentials & DIDs
+
+- **VCs:** [w3.org/TR/vc-data-model](https://www.w3.org/TR/vc-data-model-2.0/)
+- **DIDs:** [w3.org/TR/did-core](https://www.w3.org/TR/did-core/)
+- **AIP relationship:**
+  AIP-7 governance signatures are key-format-agnostic; the spec
+  RECOMMENDS Ed25519 or DID-anchored VC signatures for production
+  deployments. AGNTCY's identity layer rides on these.
+
+### OAuth 2.1
+
+- **Spec:** [RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749) + [OAuth 2.1 draft](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1)
+- **AIP relationship:**
+  Operator → external-service authentication is OAuth-based. AIPs do
+  not respec OAuth; tool bindings inside AIP-9 declare which OAuth
+  scopes they require.
+
+### OpenTelemetry GenAI Semantic Conventions
+
+- **Spec:** [opentelemetry.io/docs/specs/semconv/gen-ai](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+- **AIP relationship:**
+  A planned AIP (`agentobservability/v1`) is positioned as a *profile*
+  of OTel GenAI semconv — pinning required attributes (operator-id,
+  skill-id, governance-event-id) for AIP-conforming runtimes. We do
+  not re-invent tracing.
+
+---
+
+## Tier 4 — Peer ecosystems
+
+Decentralized / web3 agent ecosystems running parallel work. We are not
+inside these but track them and welcome cross-references.
+
+### Olas / Autonolas
+
+- **Site:** [olas.network](https://olas.network/)
+- **Scope:** Autonomous services framework — multi-agent on-chain
+- **AIP relationship:**
+  Conceptual overlap with AIP-8 (agencies) and AIP-9 (operators).
+  Different stack assumptions (on-chain governance) but parallel goals.
+
+### Fetch.ai
+
+- **Site:** [fetch.ai](https://fetch.ai/)
+- **Scope:** Decentralized agent network, DeltaV agent search
+- **AIP relationship:**
+  Discovery layer overlap with AGNTCY's Agent Directory. AIPs do not
+  duplicate.
+
+### ai16z / Eliza
+
+- **Repo:** [github.com/elizaOS/eliza](https://github.com/elizaOS/eliza)
+- **Scope:** Open agent framework with character files and personalities
+- **AIP relationship:**
+  Eliza's character file is conceptually adjacent to AIP-6
+  `OPERATOR.md`. We've considered but not formally aligned — open
+  question for the community.
+
+### OpenAgents.org
+
+- **Site:** [openagents.org](https://openagents.org/)
+- **Scope:** JWT-style AgentID identity scheme
+- **AIP relationship:**
+  Identity layer overlap with AGNTCY/A2A. AIPs reference but do not
+  endorse a single identity scheme.
+
+### SingularityNET / Bittensor / Virtuals Protocol
+
+- Marketplaces and agent economies. **AIPs are stack-agnostic** — any
+  AIP-conforming operator can run inside these ecosystems if the host
+  implements the runtime contract.
+
+---
+
+## Vendor frameworks (informational, not standards)
+
+These are influential but proprietary or framework-specific. AIPs aim
+to be *implementable inside* each of these without being beholden to
+any one of them.
+
+| Framework | Status | AIP angle |
+|---|---|---|
+| OpenAI Agents SDK | Vendor SDK | AIP-9 operator should be expressible as an OpenAI Agent |
+| LangGraph (LangChain) | Vendor framework | AIP-12 workflows (planned) align conceptually |
+| CrewAI | Vendor framework | Role/goal/backstory ≈ AIP-6 OPERATOR.md fields |
+| AutoGen → MS Agent Framework | Vendor framework | Multi-agent conversation overlaps AIP-9 participation |
+| Mastra | Vendor framework | Reference impl of many AIPs lives here (`@mastra/*`) |
+| Vercel AI SDK | Vendor SDK | Provider-agnostic surface; AIP-9 operators portable |
+| Smithery / Composio | Tool catalogs | Adjacent to AGNTCY OASF + MCP Registry |
+
+---
+
+## How to suggest additions to this page
+
+Open a PR against
+[github.com/agentproto/specs](https://github.com/agentproto/specs).
+Initiatives qualify if they have **shipping code** or **multi-vendor
+adoption**. We do not list aspirational specs without an
+implementation.

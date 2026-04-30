@@ -1,0 +1,568 @@
+---
+title: "AIP-10: KNOWLEDGE.md — agentknowledge/v1 (LLM-maintained wiki)"
+description: A filesystem-first knowledge-base format where an LLM curates, links, and lints a markdown wiki on top of immutable raw sources, turning agent knowledge into a compounding artifact instead of a per-query retrieval miss.
+aip: 10
+status: Draft
+type: Schema
+created: 2026-04-27
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/wiki
+discussions-to: https://github.com/agentproto/specs/discussions/10
+---
+
+| Field | Value |
+|---|---|
+| AIP | 10 |
+| Title | KNOWLEDGE.md — agentknowledge/v1 (LLM-maintained wiki) |
+| Status | Draft |
+| Type | Schema |
+| Domain | knowledge.sh |
+| Doctypes | `knowledge.entry/v1` (curated), `knowledge.source/v1` (immutable), `knowledge.workspace/v1` (manifest + view) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators) |
+| Reference Impl | [`packages/agent-framework/src/wiki`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/wiki) |
+
+## Abstract
+
+`agentknowledge/v1` defines a markdown-based wiki format that an LLM owns
+end-to-end. Three doctypes cooperate: raw sources stay immutable
+(`knowledge.source/v1`), curated entries are rewritten by the agent on every
+ingest (`knowledge.entry/v1`), and a workspace manifest declares the wiki's
+shape — entity types, lint rules, retention, curation policy — in a
+machine-parseable file (`knowledge.workspace/v1`, written as `KNOWLEDGE.md`).
+The same workspace doctype, used recursively via `extends:`, also expresses
+**per-context views**: an operator ([AIP-9](/docs/aip-9)), a company
+([AIP-6](/docs/aip-6)), or a skill ([AIP-3](/docs/aip-3)) can ship its OWN
+`KNOWLEDGE.md` that adapts the base workspace for its lens — different entity
+focus, tone, conflict-resolution rules — without forking the wiki itself. A
+sibling free-form prose file (`AGENTS.md`) is RECOMMENDED for human readers,
+maintained alongside the canonical machine config. Together these turn agent
+knowledge into a compounding, composable artifact instead of a stateless RAG
+retrieval, and make the resulting knowledge base portable across runtimes.
+
+## Motivation
+
+Most agent knowledge today lives in one of two places: an opaque vector
+store rebuilt at query time (RAG), or a vendor-specific "memory" object
+that doesn't survive across runtimes. Both treat knowledge as a *retrieval
+problem*. Neither produces an artifact a human or a different agent can
+read, audit, or fork.
+
+Andrej Karpathy's "LLM Wiki" pattern (April 2026) reframes the problem:
+treat raw sources as source code, treat the LLM as a compiler, and let it
+produce a structured wiki — a *compiled* knowledge artifact that compounds
+across ingests. AIP-10 codifies that pattern as a portable file format so
+that:
+
+- A wiki built in one runtime can be opened, queried, and extended in
+  another.
+- The workspace manifest (`KNOWLEDGE.md`) becomes the unit of trade —
+  domain experts ship a workspace shape, runtimes execute it; a sibling
+  human-readable `AGENTS.md` documents intent for readers and reviewers.
+- Cross-references, contradictions, and provenance live in the files
+  themselves, not in a query-time prompt.
+- **Different consumers can read the same wiki through different lenses.**
+  An operator focused on research wants Concept entries surfaced first;
+  the same wiki seen by a sales operator wants Customer and Deal entries.
+  Rather than fork the wiki per consumer, AIP-10 lets each consumer ship
+  a small `KNOWLEDGE.md` that **extends** the workspace and overrides the
+  bits that matter for its context. The wiki is one; the views are many.
+
+This last point is the structural reason `KNOWLEDGE.md` is one doctype used
+in two modes: a **workspace-root manifest** at the wiki root, and a **view**
+in any operator/company/skill folder that wants its own lens. Composition is
+the same mechanism used by Tailwind presets, designkit overrides, and the
+profile registry pattern that shows up across this AIP family — the wiki
+ships a base shape, and consumers compose narrower shapes on top.
+
+Prior art: Karpathy's
+[`llm-wiki` gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
+[`AGENTS.md`](https://agents.md), Anthropic's "Agent Skills" pattern
+([AIP-3](/docs/aip-3)), the filesystem-first lineage of
+[AIP-6](/docs/aip-6)/[AIP-7](/docs/aip-7)/[AIP-8](/docs/aip-8).
+
+## Specification
+
+A conforming `agentknowledge/v1` package is a directory tree of four layers:
+the workspace manifest, the immutable sources, the curated entries, and the
+optional human-readable schema file. Per-context views live wherever the
+consumer that owns them lives.
+
+```
+my-wiki/
+├── KNOWLEDGE.md           # workspace manifest (REQUIRED, root, machine config)
+├── AGENTS.md              # human-readable schema (RECOMMENDED, prose companion)
+├── _index.md              # generated catalog (REQUIRED, root)
+├── _log.md                # append-only activity log (REQUIRED, root)
+├── sources/               # raw sources (immutable; LLM reads, never writes)
+│   ├── 2026-04-15-paper.pdf
+│   └── 2026-04-20-meeting.md
+├── entities/              # one page per real-world entity
+│   └── andrej-karpathy.md
+├── concepts/              # one page per abstract concept
+│   └── compounding-knowledge.md
+├── summaries/             # one page per ingested source
+│   └── 2026-04-15-paper.md
+└── timelines/             # optional ordered narratives
+    └── 2026-q2-research.md
+```
+
+**Per-context views** live alongside their consumer, not under the wiki root.
+Conventional locations:
+
+```
+operators/research-analyst/KNOWLEDGE.md        # extends ../../my-wiki/KNOWLEDGE.md
+companies/acme/KNOWLEDGE.md                    # extends ../../my-wiki/KNOWLEDGE.md
+skills/sales-assist/KNOWLEDGE.md               # extends ../../my-wiki/KNOWLEDGE.md
+```
+
+A view's `extends:` field points to a parent `KNOWLEDGE.md` (workspace root
+OR another view), and `appliesTo:` binds the view to one or more
+operator/company/skill workspace refs. The runtime resolves the chain on
+load and exposes the merged effective config to the consumer.
+
+### Layer 1 — Raw sources (`sources/`)
+
+The runtime MUST treat any file under `sources/` as immutable. The LLM
+reads these files but MUST NOT modify, rename, or delete them. New
+sources are added by humans (or upstream automation) and trigger ingest.
+
+### Layer 2 — Wiki pages (everywhere except `sources/`, `KNOWLEDGE.md`, and `AGENTS.md`)
+
+Every wiki page is markdown with YAML frontmatter:
+
+```yaml
+---
+schema: knowledge/v1
+slug: <kebab-case-page-id>
+kind: entity | concept | summary | comparison | timeline
+title: <human-readable title>
+sources:                              # provenance — refs into sources/
+  - sources/2026-04-15-paper.pdf
+  - sources/2026-04-20-meeting.md
+confidence: 0 .. 1                    # OPTIONAL, default 1.0
+updated_at: <ISO 8601>
+supersedes: [<slug>]                  # OPTIONAL — earlier pages this replaces
+contradicts: [<slug>]                 # OPTIONAL — pages whose claims conflict
+metadata:                             # OPTIONAL — vendor extensions
+  <vendor>:
+    <field>: <value>
+---
+
+# <title>
+
+<body — prose, tables, code, headings>
+```
+
+Cross-references between pages MUST use the wikilink syntax `[[slug]]` or
+markdown links to relative `.md` paths. The runtime MUST be able to
+resolve both forms.
+
+### Layer 3 — Human-readable schema (`AGENTS.md`)
+
+A RECOMMENDED root file describing, in prose, how the LLM should curate
+the wiki. It exists for human readers and review tooling — it is the
+companion artifact to the canonical machine-readable
+[`KNOWLEDGE.md`](#layer-4--workspace-manifest-knowledgemd) (Layer 4).
+Conforming wikis SHOULD ship both: `KNOWLEDGE.md` for runtimes and
+linters to consume programmatically, `AGENTS.md` for humans to read
+during onboarding, review, or governance approval.
+
+Earlier drafts of this AIP made `AGENTS.md` REQUIRED and treated it as
+the schema of record. That role now belongs to `KNOWLEDGE.md`; the prose
+file is downgraded to RECOMMENDED so that automated pipelines can ship
+without it, while community spec compatibility (notably
+[agents.md](https://agents.md)) is preserved for hosts that want to
+co-publish.
+
+When present, `AGENTS.md` SHOULD contain at least:
+
+- **Page conventions** — required frontmatter, naming, allowed `kind`s,
+  body structure for each kind. (Mirrors `entityTypes` in
+  `KNOWLEDGE.md`.)
+- **Ingest workflow** — what the LLM does when a new source appears in
+  `sources/`: which pages to read, which pages to update, when to create
+  new pages, how to update `_index.md` and append to `_log.md`.
+- **Contradiction policy** — how to resolve conflicts (recency,
+  source authority, observation count) and how to flag unresolved
+  conflicts via `contradicts`. (Mirrors
+  `curation.conflictResolution` in `KNOWLEDGE.md`.)
+- **Lint rules** — which orphans/stale-claims/missing-concepts the LLM
+  should surface during a maintenance pass. (Mirrors `lints` in
+  `KNOWLEDGE.md`.)
+
+A host MAY treat `AGENTS.md` as the source of truth for human-facing
+display and `KNOWLEDGE.md` as the source of truth for programmatic
+behaviour. When the two disagree, runtimes MUST prefer `KNOWLEDGE.md`;
+linters SHOULD surface the divergence as a `wiki_schema_drift` finding so
+human authors can re-sync the prose.
+
+### Layer 4 — Workspace manifest (`KNOWLEDGE.md`)
+
+`KNOWLEDGE.md` is the canonical, machine-parseable workspace manifest.
+It encodes everything `AGENTS.md` describes in prose — entity types,
+lint rules, retention, curation policy — into a YAML frontmatter that
+runtimes can validate, merge, and diff. The body of `KNOWLEDGE.md`
+remains free-form markdown for any prose the manifest author wants to
+ship inline.
+
+The same doctype, `knowledge.workspace/v1`, is used in TWO modes:
+
+- **Workspace-root mode** — `<wiki>/KNOWLEDGE.md`, no `extends`. Declares
+  the base shape: what entity types exist, what lints run, what tone the
+  curator agent uses, what retention applies to sources.
+- **View mode** — `<consumer>/KNOWLEDGE.md`, `extends:` set to a parent
+  `KNOWLEDGE.md` path. Adapts the base for a specific operator
+  ([AIP-9](/docs/aip-9)), company ([AIP-6](/docs/aip-6)), or skill
+  ([AIP-3](/docs/aip-3)). View mode is the mechanism that lets one wiki
+  serve many lenses without forking.
+
+#### Frontmatter shape
+
+```yaml
+---
+schema: knowledge.workspace/v1
+name: <kebab-case-id>                # required
+title: <human-readable>              # required
+description: <one-paragraph purpose> # required
+version: <semver>                    # required, the WORKSPACE version
+                                     #   (bump on shape changes)
+
+# Composition (view mode only)
+extends: ../path/to/parent/KNOWLEDGE.md  # OPTIONAL — relative path to
+                                         #   parent; recursive merge
+appliesTo:                                # OPTIONAL — bind this view to
+                                          #   specific consumers
+  - ws://operators/<slug>                 #   AIP-9 operator
+  - ws://companies/<slug>                 #   AIP-6 company
+  - ws://skills/<slug>                    #   AIP-3 skill
+
+# Cross-AIP refs
+curator: ws://operators/<slug>          # OPTIONAL — AIP-9 operator that
+                                        #   curates this workspace
+governance: <path-or-ref>               # OPTIONAL — AIP-7 policy or
+                                        #   audit binding
+
+# Entity model — what TYPES of entries this workspace recognizes
+entityTypes:                            # array; merge-by-name vs parent
+  - name: <PascalCase>
+    fields: [<field>, ...]              # canonical fields
+    icon: <emoji>                       # OPTIONAL display hint
+    description: <prose>                # OPTIONAL
+    parent: <PascalCase>                # OPTIONAL — extends another
+                                        #   local type
+
+# Lint rules — what the curator agent checks every maintenance pass
+lints:                                  # array; merge-by-id vs parent
+  - id: <kebab-id>                      # required, stable
+    kind: require-source | max-age | min-confidence | broken-ref
+        | orphan | custom
+    appliesTo: <EntityType> | "*"
+    severity: error | warn | info
+    params:                             # kind-specific
+      <key>: <value>
+
+# Source registry behavior
+sources:
+  retention: forever | days:<n>
+  signing: required | optional | none   # composes with AIP-7 signing
+  hashAlgo: sha256 | sha512 | blake3
+  authorityDefault: primary | secondary | rumour
+
+# Curation behavior
+curation:
+  tone: <free-form>                     # e.g. "academic", "sales"
+  depth: shallow | medium | deep
+  autoLink: byName | manual | off
+  conflictResolution: defer | recency | authority
+                    | observation-count | keep-both
+  newEntryThreshold: <prose>            # when to promote a mention to
+                                        #   a full entry
+
+# Query hints — how consumers should retrieve from this view
+queryHints:
+  preferRecent: true | false
+  preferAuthoritative: true | false
+  scopeTo: [<EntityType>, ...]          # OPTIONAL — narrow query default
+
+# Display / UX hints (agnostic to runtime)
+display:
+  homePage: <slug>                      # OPTIONAL — landing entry
+  defaultGrouping: kind | tag | source
+
+metadata:                               # vendor extensions, namespaced
+  <vendor>:
+    <field>: <value>
+---
+
+# <body — markdown prose>
+
+Conventional sections in the body include:
+
+- ## Purpose — what this workspace is for, who uses it
+- ## Conventions — naming, style, what to avoid
+- ## When to extend vs replace — composition guidance
+- ## Examples — short snippets of typical entries
+```
+
+#### Composition semantics
+
+When a runtime loads a `KNOWLEDGE.md` whose frontmatter declares
+`extends:`, it MUST:
+
+1. **Walk the parent chain.** Recursively load the parent referenced by
+   `extends:`, then that parent's parent, until a manifest with no
+   `extends` is reached (the workspace root). Maximum chain depth is
+   eight. Hosts MUST detect cycles by tracking visited absolute paths.
+2. **Treat both depth overflow and cycle detection as warnings, not
+   errors.** A view whose chain is malformed MUST still load — the
+   runtime falls back to the local manifest only and surfaces a
+   `knowledge_extends_cycle` (or `knowledge_extends_depth_exceeded`)
+   warning to the consumer's debug surface.
+3. **Tolerate a missing parent.** If `extends:` points to a path that
+   does not exist, the runtime emits `knowledge_extends_missing` as a
+   warning and uses the local manifest only. View activation does not
+   abort.
+4. **Merge bottom-up.** Walk the chain from the workspace root toward
+   the leaf view, merging each manifest into the accumulator using the
+   strategy below.
+
+**Merge strategy** (child wins on conflicts):
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins; the runtime exposes both. |
+| `extends` | not inherited | Local-only field. |
+| `appliesTo` | not inherited | Local-only binding. |
+| `curator`, `governance` | override | Child can rebind. |
+| `entityTypes` | merge-by-name | A child entry with the same `name` replaces the parent's; new names are appended. Subtyping is explicit via `parent:`. |
+| `entityTypes[].fields` | union | Child fields are appended to parent's; duplicates collapsed. |
+| `lints` | merge-by-id | Child lint with same `id` replaces parent's; new ids are appended. |
+| `sources.*` | override per leaf field | `retention`, `signing`, `hashAlgo`, `authorityDefault` each independently override. |
+| `curation.*` | override per leaf field | Same shape as `sources`. |
+| `queryHints.*` | override per leaf field | `scopeTo` is replaced wholesale by child if present. |
+| `display.*` | override per leaf field | |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+
+The runtime MUST expose **both** the merged effective config AND the
+resolution chain (ordered list of absolute paths consumed during
+merge). Consumers use the merged config; tooling uses the chain to
+explain *why* a field has the value it does.
+
+#### Cross-AIP refs
+
+`KNOWLEDGE.md` is the binding surface where `agentknowledge/v1` meets
+the rest of the AIP family:
+
+| Field | References | Purpose |
+|---|---|---|
+| `curator` | [AIP-9](/docs/aip-9) operator | Names the operator the host should activate when running ingest, curation, or lint passes against this workspace. |
+| `governance` | [AIP-7](/docs/aip-7) policy / audit ref | Binds the workspace (or view) to a governance policy. Schema-poisoning mitigations and source-mutation audits flow through this ref. |
+| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator | A view declares which consumers it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer (`knowledge_appliesto_unresolvable`). |
+| `extends` | another `KNOWLEDGE.md` | Composition. |
+
+`appliesTo` is **not inherited**. A view binds to its own consumers; a
+parent's bindings do not leak into the child. This is the rule that
+makes the registry-of-views pattern coherent — every view declares its
+own scope.
+
+#### Workspace mode vs view mode — composability table
+
+| Aspect | Workspace-root mode | View mode |
+|---|---|---|
+| File path | `<wiki>/KNOWLEDGE.md` | `<consumer>/KNOWLEDGE.md` |
+| `extends:` | absent | required (otherwise it's a workspace, not a view) |
+| `appliesTo:` | absent (a workspace has no single consumer) | OPTIONAL but conventional |
+| Effective shape | the manifest as written | merge of the chain, child wins |
+| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the workspace |
+| Use cases | wiki authors, schema designers | operator/company/skill teams who want their own lens |
+| Validation | full schema check | schema check + chain validation |
+| Lifecycle | versioned with the wiki | versioned with the consumer |
+
+The same `knowledge.workspace/v1` doctype, the same file name, the same
+schema. Only the location and the presence of `extends:` distinguish.
+
+### Required generated files
+
+`_index.md` — content catalog. Lists every page (excluding `sources/`)
+grouped by `kind`, with the `slug`, `title`, and a one-line summary
+extracted from the page body. The runtime MUST regenerate `_index.md`
+on every ingest.
+
+`_log.md` — append-only activity log. Every ingest, query that produced
+a new page, and lint pass MUST append a line:
+
+```
+## [<ISO 8601>] <event-type> | <subject>
+
+- <bullet 1>
+- <bullet 2>
+```
+
+`event-type` ∈ { `ingest`, `query`, `lint`, `manual` }.
+
+### Ingest contract
+
+When a runtime ingests source `S`:
+
+1. The runtime MUST read `S` and the current `AGENTS.md`.
+2. It MUST identify wiki pages affected by `S` (entities mentioned,
+   concepts touched, conflicting claims) by reading `_index.md` plus
+   the relevant page bodies.
+3. It MUST produce *page diffs* — minimal markdown patches per affected
+   page — and apply them atomically (all or nothing). Monolithic
+   rewrites of unaffected pages are non-conforming.
+4. It MUST create new pages for entities/concepts not yet covered.
+5. It MUST update `_index.md` and append to `_log.md` in the same
+   transaction.
+6. It SHOULD set `confidence` and `supersedes` based on the schema's
+   contradiction policy. Unresolved conflicts MUST be flagged via
+   `contradicts`.
+
+### Query contract
+
+Querying a wiki MUST be possible with file reads alone — no runtime DB
+or vector index is required to be conforming. A runtime MAY add
+auxiliary indices (BM25, embeddings, graph) on top, but the wiki files
+remain the source of truth.
+
+### Lint contract
+
+A maintenance pass MUST detect:
+
+- **Orphans** — pages with no inbound links from `_index.md` or other
+  pages.
+- **Stale claims** — pages whose `sources` are all older than a
+  schema-defined threshold and have not been re-confirmed.
+- **Unresolved contradictions** — pages with `contradicts` populated.
+- **Broken refs** — wikilinks/markdown links pointing to missing pages.
+
+Lint output is appended to `_log.md` as an event of type `lint`.
+
+### Vendor extensions
+
+Implementations MAY add fields under `metadata.<vendor>` (e.g.
+`metadata.guilde`, `metadata.simone`). Vendor fields MUST NOT change the
+meaning of any field defined in this AIP, and a runtime MUST ignore
+vendor extensions it does not understand.
+
+## Rationale
+
+**Why filesystem-first.** Following AIP-6/7/8: the wiki *is* the folder.
+Adapters project it into databases or vector stores; the canonical
+representation stays portable.
+
+**Why mandatory `_index.md` and `_log.md`.** The ingest contract requires
+the LLM to update both atomically. Making them part of the spec — rather
+than implementation detail — lets a third party verify after the fact
+that the wiki was maintained according to its schema, and lets a runtime
+detect a poorly-applied ingest by inspecting log + index alone.
+
+**Why a workspace manifest (`KNOWLEDGE.md`).** Prose describes intent;
+machines need contracts. Earlier drafts of this AIP made `AGENTS.md` the
+schema of record, which works for a single team but breaks the moment
+multiple consumers want to share a wiki. A YAML manifest is what lets a
+runtime *know*, without re-reading prose, that an entry of type
+`Investor` is required to have a `lead_partner` field, that lint rule
+`require-source` runs at severity `error` on Concepts, that this wiki
+retains sources `forever`. The manifest is also the surface that
+composition operates on — merging YAML is mechanical, merging prose is
+interpretive. Splitting the canonical config (`KNOWLEDGE.md`) from the
+human-readable companion (`AGENTS.md`) lets each artifact do what it's
+good at, and avoids forcing tooling to parse natural language.
+
+**Why one doctype for both workspace root and view.** The alternative is
+two doctypes — `knowledge.workspace/v1` for the root and
+`knowledge.workspace.view/v1` for the per-consumer adaptation. Two
+doctypes means two schemas to maintain, two validators to ship, and an
+asymmetric merge surface. One doctype with `extends:` collapses the two
+into a single mental model: a workspace IS its own view of itself, and
+every view IS a workspace bound to a different consumer. The same
+schema validates both, the same merge algorithm applies recursively,
+and the same authoring skill ([`./resources/aip-10/draft/skills/author-knowledge/SKILL.md`](https://github.com/agentik/agentik-studio/blob/dev/apps/agentik/sites/content/docs/agentproto/resources/aip-10/draft/skills/author-knowledge/SKILL.md))
+walks an agent through both flows.
+
+**Why composition over inheritance hierarchies.** A wiki could ship a
+single workspace and then run a query-time prompt that reshapes results
+per consumer. That couples consumer behaviour to runtime prompts —
+which means swapping runtimes loses the lens. Composition via on-disk
+`extends:` chains keeps the lens portable: the same operator,
+re-instantiated in a different runtime, still gets the same merged
+config because the merge runs against files, not prompts. This is the
+registry-of-views pattern: the wiki is the registry, each `KNOWLEDGE.md`
+is a registered view, and consumers pick a view by location.
+
+**Why `AGENTS.md` is RECOMMENDED, not REQUIRED.** Conforming wikis
+SHOULD ship both `KNOWLEDGE.md` and `AGENTS.md`. Automated pipelines —
+and there will be many in the lifetime of this AIP — only need
+`KNOWLEDGE.md` to operate. Forcing them to also write prose creates
+drift between the two files; downgrading `AGENTS.md` to a recommendation
+acknowledges that prose is for humans and machines should be free to
+operate on machine config alone. Linters SHOULD flag drift between the
+two when both are present.
+
+**Why `contradicts` and `supersedes` are first-class.** Knowledge is not
+monotonic. A spec that pretends contradictions don't exist forces the
+LLM to silently overwrite — losing provenance and audit ability. Making
+both relations explicit lets humans and other agents reason about why
+a page reads the way it does.
+
+**Why no vector store in the spec.** Retrieval is a runtime concern.
+Mandating a specific index would couple the spec to today's tooling;
+forbidding indices would punish runtimes that already have them. The
+spec defines what's on disk; runtimes choose how to reach it.
+
+**Why depth-cap and cycle-detection are warnings, not errors.** A
+malformed `extends:` chain is a configuration bug — but a consumer
+whose view fails to load loses ALL of its lens, including the parts
+that don't depend on the broken parent. The runtime degrades gracefully
+to the local manifest and surfaces the issue, instead of refusing to
+activate the consumer. This matches the broader AIP family's preference
+for partial-availability over hard-fail.
+
+## Reference Implementation
+
+[`packages/agent-framework/src/wiki`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/wiki) —
+parser, ingest pipeline, lint pass, and BM25 retrieval. Used by Guilde
+(per-guild knowledge base, Librarian operator) and Simone (per-user
+personal codex, written by the Council standing pass).
+
+The implementation defines the working schema during the Draft phase;
+this AIP will absorb the normative text in full as part of moving Draft → Review.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec.
+
+## Security Considerations
+
+The wiki is *write surface* for an LLM. Threats:
+
+- **Prompt injection via sources** — a malicious source instructs the
+  LLM to make harmful edits across the wiki. Mitigation: ingest runs in
+  a sandboxed prompt context; the LLM MUST NOT execute instructions
+  embedded in source bodies, only summarize them.
+- **Schema poisoning** — an attacker rewrites `KNOWLEDGE.md` (or
+  `AGENTS.md`) to relax contradiction policy, expand the LLM's authority,
+  or silently raise lint severities to `info`. Mitigation: both files
+  SHOULD be subject to the same governance gate ([AIP-7](/docs/aip-7))
+  as any contract — changes go through approval. The `governance:`
+  field in `KNOWLEDGE.md` makes this binding explicit; views that
+  override the parent's governance MUST be reviewable through the same
+  gate (a child cannot escape a parent's policy by pointing
+  `governance:` elsewhere unless the parent permits it).
+- **View shadowing** — a malicious view `extends:` a benign workspace
+  but overrides `lints` or `curation.conflictResolution` to silently
+  weaken the curator agent. Mitigation: hosts MUST expose the
+  resolution chain alongside the merged config so reviewers can audit
+  what came from where; governance policies SHOULD restrict which
+  lints a view is allowed to soften.
+- **Confidence laundering** — an LLM marks low-quality syntheses as
+  `confidence: 1.0`. Mitigation: confidence values written by the LLM
+  during ingest are advisory; downstream consumers MAY weight them
+  against source recency and observation count.
+- **Cross-tenant leakage** — when multiple tenants share a runtime, a
+  wiki ingest pulls a source from the wrong tenant. Mitigation: runtime
+  MUST scope `sources/` reads to the wiki's tenant; the spec is
+  filesystem-first and inherits whatever isolation the host provides.
