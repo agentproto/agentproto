@@ -1,0 +1,32 @@
+name: Notify site
+
+# When specs/ or runtime packages change on main, trigger the site
+# rebuild via repository_dispatch. The site's deploy workflow is
+# subscribed to type: content-changed and rebuilds with fresh content.
+#
+# Why a dispatch instead of a Vercel webhook: deploys live in GH
+# Actions for both repos. Single CI/CD surface, single audit trail.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "specs/**"
+      - "packages/**"
+      - "adapters/**"
+
+jobs:
+  dispatch:
+    name: Dispatch content-changed to agentproto/site
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger site rebuild
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # PAT (or fine-grained token) with `repo` scope on
+          # agentproto/site. Stored as a secret on this repo.
+          token: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          repository: agentproto/site
+          event-type: content-changed
+          client-payload: '{"sha": "${{ github.sha }}", "ref": "${{ github.ref }}"}'
