@@ -1,0 +1,29 @@
+# Project-level config — read by `agentik` CLI commands when invoked
+# from this directory or any subdirectory. Single source of truth for
+# GCP coords + GitHub linkage so individual `agentik infra <cmd>`
+# invocations don't need flag spam.
+#
+# Schema: infra/cli/src/config/project-schema.ts
+# Loader: walks up from cwd; stops at the first agentik.yaml or a .git/.
+
+gcp:
+  # Project ID must be globally unique across GCP. `agentproto` may
+  # already be taken — if `gcloud projects create` fails with
+  # "resource already exists" or "permission denied" on a project
+  # owned elsewhere, fall back to `agentproto-sh` (matching the public
+  # domain) or another suffix.
+  project: agentproto
+  organization: "311698320353"
+  billing: 01349D-AC0D78-587465
+  region: europe-west1
+  runtime_sa: agentproto-site
+  # deployer omitted → falls back to the global shared deployer
+  # (dev-infra-global@agentik-studio.iam.gserviceaccount.com)
+
+github:
+  repo: agentproto/site
+  # wif_pool / wif_provider use defaults (github-actions / github)
+
+product:
+  name: agentproto
+  domain: agentproto.sh
