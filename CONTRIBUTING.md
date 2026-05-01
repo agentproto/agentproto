@@ -8,15 +8,15 @@ This file is the GitHub-side quick reference.
 
 ```bash
 # 1. Fork this repo
-git clone https://github.com/agentproto/specs
-cd specs
+git clone https://github.com/agentproto/agentproto
+cd agentproto
 git checkout -b propose-<your-slug>
 
 # 2. Copy the template
-cp AIPS/aip-template.md AIPS/aip-XXXX.md
+cp specs/aip-template.mdx specs/aip-XXXX.mdx
 
 # 3. Fill in frontmatter + the 7 required sections
-$EDITOR AIPS/aip-XXXX.md
+$EDITOR specs/aip-XXXX.mdx
 
 # 4. Open a PR. Editors assign a real number on PR open.
 git push origin propose-<your-slug>
@@ -112,7 +112,7 @@ catalogue.
 ## Discussion before drafting
 
 For substantive design questions, open a thread in
-[Discussions](https://github.com/agentproto/specs/discussions) before
+[Discussions](https://github.com/agentproto/agentproto/discussions) before
 opening a PR. Early feedback is cheap; spec rewrites are expensive.
 
 ## Code of conduct

@@ -6,40 +6,29 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel superseded runs on the same ref so a fast-followup push doesn't
-# pile up — important for spec PRs that get nudged repeatedly.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-test:
-    name: Build + test
+  lint-specs:
+    name: Lint AIP frontmatter
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.4.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Type-check all packages
-        run: pnpm -r --filter "./packages/**" --filter "./adapters/**" check-types
-
-      - name: Build all packages
-        run: pnpm -r --filter "./packages/**" --filter "./adapters/**" build
-
-      - name: Run tests
-        run: pnpm -r --filter "./packages/**" --filter "./adapters/**" test
+      - name: Verify every spec has required frontmatter
+        run: |
+          set -e
+          fail=0
+          for f in specs/aip-*.mdx; do
+            for key in aip title author status type created; do
+              if ! grep -qE "^${key}:" "$f"; then
+                echo "::error file=$f::missing frontmatter key '$key'"
+                fail=1
+              fi
+            done
+          done
+          exit $fail
