@@ -1,6 +1,6 @@
 ---
 title: "AIP-14: TOOL.md — agenttool/v1 (abstract agent contract)"
-description: A markdown + frontmatter format for declaring a single agent tool's abstract contract — its identity, input/output schemas, side-effect profile, approval class, and resource budget. Pairs with the standard `defineTool` signature any implementation exposes. Implementation-specific concerns (transport, code, runner, auth, sandbox) live on the AIP-30 PROVIDER layer.
+description: A markdown + frontmatter format for declaring a single agent tool's abstract contract — its identity, input/output schemas, side-effect profile, approval class, and resource budget. Pairs with the standard `defineTool` signature any implementation exposes. Implementation-specific concerns (transport, code, runner, auth, sandbox) live on the AIP-30 DRIVER layer.
 aip: 14
 status: Draft
 type: Schema
@@ -20,8 +20,8 @@ discussions-to: https://github.com/agentproto/specs/discussions/14
 | Status | Draft |
 | Type | Schema |
 | Domain | tools.sh |
-| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (PROVIDER) |
-| Implemented by | Any [AIP-30 PROVIDER](/docs/aip-30) declaring the tool in its `implements[]` |
+| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER) |
+| Implemented by | Any [AIP-30 DRIVER](/docs/aip-30) declaring the tool in its `implements[]` |
 | Resources | [`./resources/aip-14`](./resources/aip-14/draft) — [`SKILL.md`](./resources/aip-14/draft/skills/author-tool/SKILL.md), `ADAPTER.md`, `TOOL.schema.json`, `EXAMPLES.md` |
 
 ## Abstract
@@ -38,10 +38,10 @@ The format is paired with a standard entry-point function,
 language exposes. The signature describes the contract (schemas,
 mutates, approval, requires) — **not** the body. Implementation
 bodies, transport bindings, install lifecycle, auth, and sandbox
-all live on the [AIP-30 PROVIDER](/docs/aip-30) layer.
+all live on the [AIP-30 DRIVER](/docs/aip-30) layer.
 
-A single TOOL.md MAY be implemented by zero, one, or many providers
-— the registry's runtime resolves provider per call based on
+A single TOOL.md MAY be implemented by zero, one, or many drivers
+— the registry's runtime resolves driver per call based on
 capability, policy, cost, and region. This is the layering's payoff:
 one contract, many backends, no duplication.
 
@@ -63,36 +63,36 @@ implemented by whichever backend best fits the deployment's policy.
 Five problems disappear when the contract layer is split from the
 implementation layer:
 
-1. **Provider swap stops being a refactor.** Today a tool that calls
+1. **Driver swap stops being a refactor.** Today a tool that calls
    OpenAI is a hard-coded OpenAI tool. To swap to Replicate, you fork
    the tool, change the body, point callers at the fork. With the
-   contract/provider split, swapping providers is editing a config:
-   the tool stays unchanged, a new PROVIDER.md declares it implements
+   contract/driver split, swapping drivers is editing a config:
+   the tool stays unchanged, a new DRIVER.md declares it implements
    the same contract.
 
-2. **Multi-provider routing becomes data.** "Pick the cheapest
-   provider that satisfies workspace policy and supports my style
+2. **Multi-driver routing becomes data.** "Pick the cheapest
+   driver that satisfies workspace policy and supports my style
    input" is now a runtime decision the resolver makes from declared
    metadata — not an `if/else` chain in the agent prompt.
 
 3. **Governance gates the contract, not the implementation.**
    Approval class, mutates, requires capabilities — these are
-   contract properties enforced regardless of which provider serves
-   the call. An OpenAI provider can't downgrade approval below what
+   contract properties enforced regardless of which driver serves
+   the call. An OpenAI driver can't downgrade approval below what
    the contract declares.
 
 4. **Catalogs render from data.** "What can this agent do?" is
    answerable by walking the TOOL.md registry. Each tool's matching
-   providers are derived from the resolver's filter chain, so the
-   catalog can show "create-image (3 providers, 1 unauthed)" without
+   drivers are derived from the resolver's filter chain, so the
+   catalog can show "create-image (3 drivers, 1 unauthed)" without
    reading any code.
 
 5. **Testing decouples.** The contract has its own examples (input/
-   output pairs that every provider MUST satisfy). Each provider may
-   add its own examples (provider-specific edge cases). The two
+   output pairs that every driver MUST satisfy). Each driver may
+   add its own examples (driver-specific edge cases). The two
    layers test independently.
 
-`TOOL.md` is the contract layer. [AIP-30 PROVIDER](/docs/aip-30) is
+`TOOL.md` is the contract layer. [AIP-30 DRIVER](/docs/aip-30) is
 the implementation layer. The two together replace what AIP-14
 formerly bundled into one file.
 
@@ -100,14 +100,14 @@ formerly bundled into one file.
 
 1. **Contract before implementation.** The manifest declares what
    the tool *does*, not *how* it's served. The body of any TOOL.md
-   is informational prose; the executable body lives on a PROVIDER
+   is informational prose; the executable body lives on a DRIVER
    that declares this tool in its `implements[]`.
 
 2. **Side effects are first-class.** Every tool declares its
    mutation surface (`mutates`), its required capabilities
    (`requires`), and its approval class (`approval`). Governance
    ([AIP-7](/docs/aip-7)) reads these fields directly from the
-   contract — no separate audit metadata, no per-provider
+   contract — no separate audit metadata, no per-driver
    re-declaration.
 
 3. **Schemas are JSON Schema.** Inputs and outputs are JSON Schema
@@ -117,10 +117,10 @@ formerly bundled into one file.
    the adapter generates the JSON Schema, but the manifest stores
    the canonical form.
 
-4. **Providers narrow contracts; widening is forbidden.** A provider
+4. **Drivers narrow contracts; widening is forbidden.** A driver
    MAY declare `schema_narrowing.drop_inputs` to drop optional
    contract inputs the backend doesn't support (the resolver refuses
-   calls using dropped inputs). A provider MUST NOT add inputs the
+   calls using dropped inputs). A driver MUST NOT add inputs the
    contract doesn't know — that's a different tool.
 
 5. **Unopinionated about backend kind.** The contract says nothing
@@ -129,15 +129,15 @@ formerly bundled into one file.
    resolver's heuristic, not the tool's concern.
 
 6. **Composable with siblings.** `TOOL.md` may live alone in a tool
-   folder, alongside provider folders that implement it, or in a
-   shared catalog directory. The manifest is the index; provider
+   folder, alongside driver folders that implement it, or in a
+   shared catalog directory. The manifest is the index; driver
    files are the bodies.
 
 ## Specification
 
 ### File location
 
-Tools live in a single folder, separate from the providers that
+Tools live in a single folder, separate from the drivers that
 implement them:
 
 ```
@@ -146,28 +146,28 @@ implement them:
     TOOL.md          ← this AIP
     README.md        ← optional long-form
 
-.providers/
+.drivers/
   apollo-pricing-http/
-    PROVIDER.md      ← AIP-30, implements: pricing-snapshot
+    DRIVER.md      ← AIP-30, implements: pricing-snapshot
   diffbot-pricing-http/
-    PROVIDER.md      ← AIP-30, implements: pricing-snapshot
+    DRIVER.md      ← AIP-30, implements: pricing-snapshot
 ```
 
 The folder name SHOULD match the manifest's `id`. Tools MAY be
 nested under a category (e.g. `.tools/finance/pricing-snapshot/`);
 consumers MUST NOT depend on directory depth.
 
-A tool MAY co-exist with a single provider in the same folder when
+A tool MAY co-exist with a single driver in the same folder when
 the implementation is provably 1:1 (e.g. host-builtin):
 
 ```
 .tools/fs-read/
   TOOL.md
-  PROVIDER.md        ← kind: builtin, single implementation
+  DRIVER.md        ← kind: builtin, single implementation
 ```
 
 When more than one implementation is anticipated, separate folders
-make the multi-provider layout explicit and easy to scan.
+make the multi-driver layout explicit and easy to scan.
 
 ### Frontmatter
 
@@ -189,39 +189,39 @@ case-sensitive.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `idempotent` | boolean | `false` | Safe to retry without observable extra effect. Logical idempotency, contract-level (network-level retry safety belongs to PROVIDER's `retry_override`). |
-| `mutates` | string[] | `[]` | Resources the tool may modify. Format: `<class>:<scope>` (`workspace:/path`, `network:hostname`, `database:<table>`, `secret:<slug>`, `external:<service>`). Empty = pure read. Every provider implementing this tool MUST honour the declared set; surfaces audit logs. |
-| `requires` | object | `{}` | Capability requirements (governance gating per [AIP-7](/docs/aip-7)). Subfields: `network: string[]`, `secrets: string[]`, `tools: string[]` (other tool ids it calls). Providers MAY add to this set; MUST NOT remove from it. |
-| `approval` | string | `"auto"` | Approval class. `"auto"` (run without prompt), `"always"` (always prompt), `"on-mutate"` (prompt when `mutates` is non-empty), or `"policy:<ref>"` (defer to a named policy). Contract-level — providers can't downgrade. |
+| `idempotent` | boolean | `false` | Safe to retry without observable extra effect. Logical idempotency, contract-level (network-level retry safety belongs to DRIVER's `retry_override`). |
+| `mutates` | string[] | `[]` | Resources the tool may modify. Format: `<class>:<scope>` (`workspace:/path`, `network:hostname`, `database:<table>`, `secret:<slug>`, `external:<service>`). Empty = pure read. Every driver implementing this tool MUST honour the declared set; surfaces audit logs. |
+| `requires` | object | `{}` | Capability requirements (governance gating per [AIP-7](/docs/aip-7)). Subfields: `network: string[]`, `secrets: string[]`, `tools: string[]` (other tool ids it calls). Drivers MAY add to this set; MUST NOT remove from it. |
+| `approval` | string | `"auto"` | Approval class. `"auto"` (run without prompt), `"always"` (always prompt), `"on-mutate"` (prompt when `mutates` is non-empty), or `"policy:<ref>"` (defer to a named policy). Contract-level — drivers can't downgrade. |
 | `risk_level` | 0–3 | `0` | Caller-side autonomy gate. 0 = read-only, 1 = scoped writes, 2 = external side effects, 3 = irreversible. Used by [AIP-7](/docs/aip-7) approval policies. |
-| `cost_class` | string | `"trivial"` | `"trivial"` (no metered call), `"metered"` (counts against quota), `"expensive"` (warn the user before invoking). Baseline; providers MAY override via `cost_override.cost_class`. |
-| `timeout_ms` | int | `30000` | Hard wall-clock contract ceiling. Providers MAY narrow via `timeout_override_ms`; MUST NOT widen. |
-| `retry` | object | none | Baseline retry policy: `{ max_attempts: int, backoff: "fixed"\|"exponential", initial_ms: int }`. Providers MAY override via `retry_override`. |
-| `default_provider` | string \| null | null | Optional `provider.id` to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. |
-| `provider_constraints` | object | `{}` | Author-side allowlist/denylist on which provider kinds the contract permits: `{ forbid?: string[], require_kind?: ProviderKind[] }`. Use to declare "this tool MUST NOT be served via untrusted HTTP" (`forbid: ["http"]` for self-hosted-only tools). |
+| `cost_class` | string | `"trivial"` | `"trivial"` (no metered call), `"metered"` (counts against quota), `"expensive"` (warn the user before invoking). Baseline; drivers MAY override via `cost_override.cost_class`. |
+| `timeout_ms` | int | `30000` | Hard wall-clock contract ceiling. Drivers MAY narrow via `timeout_override_ms`; MUST NOT widen. |
+| `retry` | object | none | Baseline retry policy: `{ max_attempts: int, backoff: "fixed"\|"exponential", initial_ms: int }`. Drivers MAY override via `retry_override`. |
+| `default_driver` | string \| null | null | Optional `driver.id` to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. |
+| `driver_constraints` | object | `{}` | Author-side allowlist/denylist on which driver kinds the contract permits: `{ forbid?: string[], require_kind?: DriverKind[] }`. Use to declare "this tool MUST NOT be served via untrusted HTTP" (`forbid: ["http"]` for self-hosted-only tools). |
 | `tags` | string[] | `[]` | Free-form discovery tags (`finance`, `read-only`, `media`). |
-| `examples` | object[] | `[]` | Each `{ name, input, output, note? }`. Provider-agnostic examples that EVERY conformant provider MUST satisfy. Provider-specific edge cases live on the PROVIDER's own examples. |
+| `examples` | object[] | `[]` | Each `{ name, input, output, note? }`. Driver-agnostic examples that EVERY conformant driver MUST satisfy. Driver-specific edge cases live on the DRIVER's own examples. |
 | `metadata` | object | `{}` | Free-form. Authors MAY stash adapter-specific hints under namespaced keys (`metadata.mastra.…`, `metadata.langchain.…`). Consumers MUST tolerate unknown keys. |
 
-#### Removed (formerly part of AIP-14, moved to AIP-30 PROVIDER)
+#### Removed (formerly part of AIP-14, moved to AIP-30 DRIVER)
 
 | Field | New home |
 |---|---|
-| `code` | `provider.code` (per AIP-26 reference) |
-| `run` | `provider.run` |
-| `runner` | `provider.runner` (per AIP-17 reference) |
-| `secrets` | `provider.auth.ref` (points at SECRETS.md per AIP-19) |
-| `network` | `provider.network.egress` |
-| `entry` | `provider.execute[<toolId>]` |
+| `code` | `driver.code` (per AIP-26 reference) |
+| `run` | `driver.run` |
+| `runner` | `driver.runner` (per AIP-17 reference) |
+| `secrets` | `driver.auth.ref` (points at SECRETS.md per AIP-19) |
+| `network` | `driver.network.egress` |
+| `entry` | `driver.execute[<toolId>]` |
 
 A TOOL.md that still carries any of these fields is invalid under
 the post-refactor schema. Authors migrating from the pre-AIP-30
-shape MUST move these fields to a PROVIDER.md sibling.
+shape MUST move these fields to a DRIVER.md sibling.
 
 #### Discouraged
 
 `async`, `streaming`, `priority`, `model`, `temperature` are
-provider concerns, not tool identity. Provider entries declare
+driver concerns, not tool identity. Driver entries declare
 streaming via the kind-specific `metadata.<kind>.streaming` block;
 the contract stays unary in/out for v1.
 
@@ -234,9 +234,9 @@ Markdown body following the frontmatter. Recommended sections:
   `examples` frontmatter array if used.
 - **`## Errors`** — error classes the tool can return + how callers
   should handle them.
-- **`## Provider notes`** — anticipated providers, known schema
+- **`## Driver notes`** — anticipated drivers, known schema
   narrowings, routing recommendations. Optional but useful when
-  multiple providers are expected.
+  multiple drivers are expected.
 
 The body is informational. Tools MUST function with resolvers that
 read only the frontmatter.
@@ -247,10 +247,10 @@ Tools commonly need host-supplied state at invocation time —
 governance config, a database connection, an HTTP fetcher, a tenant
 id. The contract declares what it needs via `contextSchema`; the
 host validates and narrows the context before dispatching to the
-resolved provider's `execute` body.
+resolved driver's `execute` body.
 
 This pattern is the contract-level equivalent of FastAPI's
-`Depends(...)`, NestJS's request-scoped providers, and gRPC's
+`Depends(...)`, NestJS's request-scoped drivers, and gRPC's
 per-call metadata: state that varies per call without varying the
 contract.
 
@@ -262,19 +262,19 @@ const signArtifactTool = defineTool({
   contextSchema: z.object({                     // ← contract obligation
     governanceConfig: governanceConfigSchema,
   }),
-  // NO execute. The body lives on PROVIDER (per AIP-30).
+  // NO execute. The body lives on DRIVER (per AIP-30).
 })
 ```
 
 When a TOOL declares `contextSchema`, the host MUST validate
-`args.context` against it BEFORE calling the resolved provider's
-`execute[<toolId>]`. Providers receive a narrowed, typed context
+`args.context` against it BEFORE calling the resolved driver's
+`execute[<toolId>]`. Drivers receive a narrowed, typed context
 and MUST NOT re-validate.
 
 Hosts wire the per-call context. A multi-tenant runtime, for
 example, derives `governanceConfig` from
 `requestContext.tenantId` per invocation. The same TOOL contract
-is shared by every tenant; the same PROVIDER serves every tenant;
+is shared by every tenant; the same DRIVER serves every tenant;
 context flows in per-call.
 
 ### Errors
@@ -288,12 +288,12 @@ type ToolResult<T> =
   | { ok: false; error: { code: string; message: string; retryable?: boolean; cause?: unknown } }
 ```
 
-Hosts MUST wrap provider runtime errors into this envelope. The
-`outputs` schema describes the *success* shape only — providers
+Hosts MUST wrap driver runtime errors into this envelope. The
+`outputs` schema describes the *success* shape only — drivers
 need not fork the schema for errors.
 
 `code` SHOULD be one of the standard codes: `"input_invalid"`,
-`"input_unsupported"` (per provider's `schema_narrowing`),
+`"input_unsupported"` (per driver's `schema_narrowing`),
 `"unauthorised"`, `"auth_required"`, `"not_found"`,
 `"rate_limited"`, `"timeout"`, `"upstream_error"`,
 `"no_route"`, `"pinned_provider_unavailable"`, `"internal"`.
@@ -308,7 +308,7 @@ be treated as distinct. Caches, audit logs, and capability grants
 key on `id@major`.
 
 When the contract changes (input schema gains a required field, an
-output property type narrows), the tool MUST bump major. Providers
+output property type narrows), the tool MUST bump major. Drivers
 implementing the tool see this as a contract-version bump in their
 `implements[].version` range; they MAY continue to declare
 `"^1.0.0"` and refuse to bind against the new contract until they
@@ -326,10 +326,10 @@ The `mutates` array drives:
   compensation.
 - **Audit logs**: the post-call audit row records the contract's
   `mutates` so external auditors reconstruct effect graphs without
-  re-reading provider code.
+  re-reading driver code.
 
-A tool MUST declare every class of mutation any of its providers
-might perform. A provider whose body observably writes resources
+A tool MUST declare every class of mutation any of its drivers
+might perform. A driver whose body observably writes resources
 not declared in the contract MUST be refused at runtime — not
 silently allowed. (The contract is the safety floor, not a starting
 suggestion.)
@@ -361,7 +361,7 @@ interface ToolDefinition {
 
   // Optional schema for the per-call context object. When provided,
   // the host MUST validate context against it before dispatching to
-  // the resolved provider's execute body. The provider receives the
+  // the resolved driver's execute body. The driver receives the
   // narrowed, typed context.
   //
   // Use this to declare the host-injected state the tool requires —
@@ -380,19 +380,19 @@ interface ToolDefinition {
   retry?:       RetryPolicy                           // baseline
   idempotent?:  boolean
 
-  // Provider routing
-  defaultProvider?:     string
-  providerConstraints?: { forbid?: string[]; requireKind?: ProviderKind[] }
+  // Driver routing
+  defaultDriver?:     string
+  driverConstraints?: { forbid?: string[]; requireKind?: DriverKind[] }
 
   // Bookkeeping
   tags?:        string[]
   examples?:    Array<{ name: string; input: unknown; output: unknown; note?: string }>
   metadata?:    Record<string, unknown>
 
-  // NO execute(). The body lives on PROVIDER (per AIP-30).
+  // NO execute(). The body lives on DRIVER (per AIP-30).
 }
 
-type ProviderKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
+type DriverKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
 ```
 
 ### Conformance rules
@@ -403,7 +403,7 @@ type ProviderKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
    what `TOOL.md` adapters reference.
 
 2. **No `execute` on the contract.** `defineTool` MUST NOT accept an
-   `execute` field. Bodies live on PROVIDER (per AIP-30); hosts
+   `execute` field. Bodies live on DRIVER (per AIP-30); hosts
    that find an `execute` field on a tool definition MUST surface a
    migration warning pointing at AIP-30.
 
@@ -414,11 +414,11 @@ type ProviderKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
    the framework-specific form.
 
 4. **`contextSchema` is contract obligation.** When declared,
-   every conformant provider MUST accept the same context shape.
-   Providers MAY narrow via their own internal validation, but the
+   every conformant driver MUST accept the same context shape.
+   Drivers MAY narrow via their own internal validation, but the
    contract's `contextSchema` is the floor.
 
-5. **`mutates` is the truth.** If any provider's body observably
+5. **`mutates` is the truth.** If any driver's body observably
    writes resources outside the contract's declared `mutates` set,
    the host MUST surface a spec violation (warn at registration,
    refuse at runtime, or both). Audit logs ([AIP-7](/docs/aip-7))
@@ -427,7 +427,7 @@ type ProviderKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
 
 6. **No I/O at module load.** The module containing `defineTool`
    MUST be safely importable as a side-effect-free unit. No tool
-   contract should perform I/O — bodies do that on PROVIDER, never
+   contract should perform I/O — bodies do that on DRIVER, never
    here.
 
 ### Implementer's guide
@@ -450,16 +450,16 @@ walks the agent through:
 2. Decide `mutates` and `requires` (the safety contract).
 3. Sketch `inputs` and `outputs` schemas.
 4. Decide `approval` class based on `mutates`.
-5. Identify the provider(s) that will implement this tool. For
-   each, run the [AIP-30 author-provider skill](/docs/aip-30) to
-   produce a sibling PROVIDER.md.
+5. Identify the driver(s) that will implement this tool. For
+   each, run the [AIP-30 author-driver skill](/docs/aip-30) to
+   produce a sibling DRIVER.md.
 6. Validate the manifest against
    [`./resources/aip-14/draft/TOOL.schema.json`](./resources/aip-14/draft).
 
 The agent MAY install the skill, follow the steps, and emit the
-final `TOOL.md` (and one or more `PROVIDER.md` siblings) without
+final `TOOL.md` (and one or more `DRIVER.md` siblings) without
 further instruction. This pattern — agents authoring their own tool
-contracts and provider bindings as portable manifests — is what
+contracts and driver bindings as portable manifests — is what
 makes the format valuable beyond convenience.
 
 ## Example
@@ -504,9 +504,9 @@ outputs:
         required: [name, priceUsdMo]
     capturedAt: { type: string, format: date-time }
   required: [tiers, capturedAt]
-provider_constraints:
+driver_constraints:
   require_kind: ["http", "sdk"]    # no shell-spawning CLI for scraping
-default_provider: apollo-pricing-http
+default_driver: apollo-pricing-http
 tags: [finance, scraping, read-only]
 examples:
   - name: Stripe billing page
@@ -533,21 +533,21 @@ return an explicit `error.code: "private_pricing"` in that case.
 | `rate_limited` | Upstream rate-limited us | Resolver's retry handles; don't re-call manually. |
 | `upstream_error` | Page changed shape | File a bug; tool needs an update. |
 
-## Provider notes
+## Driver notes
 
-Two anticipated providers:
+Two anticipated drivers:
 
 - `apollo-pricing-http` — primary. Apollo's public price-extraction API.
 - `diffbot-pricing-http` — fallback. Diffbot's structured-page API; more
   expensive but works on heavily-JS-rendered pages where Apollo fails.
 
-Provider routing: default to Apollo (`default_provider`); fall through
+Driver routing: default to Apollo (`default_driver`); fall through
 to Diffbot only when Apollo returns `upstream_error: parse_failed`.
 This routing is encoded in the resolver via per-call retry-with-fallback,
-not in the tool — the contract stays provider-agnostic.
+not in the tool — the contract stays driver-agnostic.
 ```
 
-A canonical PROVIDER.md serving this contract:
+A canonical DRIVER.md serving this contract:
 
 ```md
 ---
@@ -582,17 +582,17 @@ implements:
 A pre-refactor TOOL.md carried `code`/`run`/`runner`/`secrets`/
 `network`/`entry` directly. Migration to the post-refactor shape:
 
-1. Author a sibling PROVIDER.md per [AIP-30](/docs/aip-30) carrying
+1. Author a sibling DRIVER.md per [AIP-30](/docs/aip-30) carrying
    the moved fields:
-   - `code` / `run` → `provider.code` / `provider.run`
-   - `runner` → `provider.runner`
-   - `secrets` (per-manifest bindings) → `provider.auth.ref` pointing
+   - `code` / `run` → `driver.code` / `driver.run`
+   - `runner` → `driver.runner`
+   - `secrets` (per-manifest bindings) → `driver.auth.ref` pointing
      at a `SECRETS.md`
-   - `network` → `provider.network.egress`
-   - `entry`'s `execute` body → `provider.execute[<toolId>]`
-2. Set `provider.implements[0].tool` to the (now-amputated) TOOL.md.
-3. Remove the moved fields from TOOL.md; add `default_provider`
-   pointing at the new PROVIDER.md's `id`.
+   - `network` → `driver.network.egress`
+   - `entry`'s `execute` body → `driver.execute[<toolId>]`
+2. Set `driver.implements[0].tool` to the (now-amputated) TOOL.md.
+3. Remove the moved fields from TOOL.md; add `default_driver`
+   pointing at the new DRIVER.md's `id`.
 4. Validate both files against the v1 schemas (no v1/v2 dual-shape
    machinery — we ship a clean v1).
 
@@ -608,9 +608,9 @@ For authors arriving from runtime-idiomatic tool factories
 
 1. Add `TOOL.md` for the contract: id, schemas, mutates, approval,
    requires.
-2. Add `PROVIDER.md` for the implementation: kind, auth, sandbox,
+2. Add `DRIVER.md` for the implementation: kind, auth, sandbox,
    implements (per AIP-30).
-3. Re-export the existing body as the PROVIDER's
+3. Re-export the existing body as the DRIVER's
    `execute[<toolId>]`.
 4. Run both manifests through their schemas to verify shape.
 
@@ -624,7 +624,7 @@ a migration period; the audit-log shape from
 `TOOL.md` is **declarative**: a malicious manifest can lie about
 `mutates` or `requires`. Hosts MUST treat the manifest as untrusted
 input until verified (signature, hash on a trust list, or sandbox
-enforcement at the provider level). [AIP-7](/docs/aip-7)'s
+enforcement at the driver level). [AIP-7](/docs/aip-7)'s
 capability gating MUST run regardless of what `requires` claims.
 
 `approval: "auto"` does not bypass user-side policies — it expresses
@@ -632,37 +632,37 @@ the **author's** view that no per-call prompt is needed. Hosts
 compose this with their own policy; the more restrictive answer
 wins.
 
-`provider_constraints.forbid` is a security-relevant declaration:
+`driver_constraints.forbid` is a security-relevant declaration:
 a tool that handles PII can declare `forbid: ["http"]` to prevent
-the resolver from ever picking a third-party HTTP provider for it.
-Hosts MUST honour the declaration; provider authors MUST NOT route
+the resolver from ever picking a third-party HTTP driver for it.
+Hosts MUST honour the declaration; driver authors MUST NOT route
 around it.
 
 ## Open questions
 
 1. **Streaming outputs.** Tools that yield progressive results — do
    we extend `outputSchema` with a streaming block, or punt to
-   provider-kind-specific extensions? Defer until concrete
-   streaming providers ship enough to settle the abstraction.
+   driver-kind-specific extensions? Defer until concrete
+   streaming drivers ship enough to settle the abstraction.
 
 2. **Cost reporting.** Should `cost_class` evolve into a numeric
-   `cost_units` field tied to a per-host meter? Today providers
+   `cost_units` field tied to a per-host meter? Today drivers
    override with `cost_units_per_call`; the contract baseline could
    match.
 
 3. **Schema-narrowing at the contract level.** Currently
-   `schema_narrowing` is a provider-side declaration. Should the
+   `schema_narrowing` is a driver-side declaration. Should the
    contract also be able to declare which inputs are
-   "optional-but-most-providers-support" vs "optional-and-rare"?
-   The resolver could prefer providers covering more optional
+   "optional-but-most-drivers-support" vs "optional-and-rare"?
+   The resolver could prefer drivers covering more optional
    inputs at equal cost.
 
 4. **Per-tool budget overrides.** A workspace might want to cap
    "image.create" calls per user per day. The cap is a meter at
    the workspace level — but where does the meter key come from?
-   Tool's `id`? Provider's `quota_key`? Both?
+   Tool's `id`? Driver's `quota_key`? Both?
 
-These remain open until enough adapters and providers ship to
+These remain open until enough adapters and drivers ship to
 settle the answers empirically.
 
 ## See also
@@ -676,7 +676,7 @@ settle the answers empirically.
 - [AIP-16 — IO.md](/docs/aip-16) — `inputs` / `outputs` blocks
   shared with WORKFLOW
 - [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above TOOL
-- [AIP-30 — PROVIDER.md](/docs/aip-30) — implementation layer
+- [AIP-30 — DRIVER.md](/docs/aip-30) — implementation layer
   binding contracts to backends
 - [`./TOOL.schema.json`](./resources/aip-14/draft) — schema validator
 - [`./ADAPTER.md`](./resources/aip-14/draft) — implementer's guide

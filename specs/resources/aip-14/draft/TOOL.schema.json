@@ -100,12 +100,12 @@
       },
       "description": "Baseline retry policy. Providers MAY override via retry_override."
     },
-    "default_provider": {
+    "default_driver": {
       "type": ["string", "null"],
       "pattern": "^[a-z0-9][a-z0-9.\\-]{1,79}$",
       "description": "Optional provider.id to use when the resolver has no other signal. Null = pick by resolver policy."
     },
-    "provider_constraints": {
+    "driver_constraints": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

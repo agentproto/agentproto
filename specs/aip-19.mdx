@@ -139,7 +139,7 @@ Each `<slug-entry>` shape:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `kind` | enum | `"opaque"` | `"opaque"` (single string), `"oauth"` (`{ accessToken, refreshToken, expiresAt }` envelope), `"keypair"` (`{ public, private }`), `"json"` (structured arbitrary). |
-| `backend` | string | host-resolved | URI pointing to the vault entry: `vault://<provider>/<path>`. Omitted by default — host driver maps slug → backend by convention. Setting it explicitly is reviewable infrastructure exposure. |
+| `backend` | string | host-resolved | URI pointing to the vault entry: `vault://<driver>/<path>`. Omitted by default — host driver maps slug → backend by convention. Setting it explicitly is reviewable infrastructure exposure. |
 | `access` | object | `{ reveal: [], rotate: [] }` | Grants. See [Access](#access). |
 | `audit` | object | host defaults | Audit retention + classification. See [Audit](#audit). |
 | `tags` | string[] | `[]` | Discovery tags (`finance`, `prod`, `customer-pii-related`). |
@@ -276,7 +276,7 @@ source. v1 specifies three sources:
 | Source | Form | Resolution |
 |---|---|---|
 | Vault | `{ vault: <slug> }` | Resolved against the workspace's SECRETS.md inventory; reveal lifecycle and access checks apply per [§ Access](#access) and [§ Reveal lifecycle](#reveal-lifecycle). |
-| OAuth | `{ oauth: <provider> }` | Resolved against an OAuth connector configured for the workspace (e.g. `github`, `google`, `stripe`). The host returns a fresh access token. |
+| OAuth | `{ oauth: <driver> }` | Resolved against an OAuth connector configured for the workspace (e.g. `github`, `google`, `stripe`). The host returns a fresh access token. |
 | Plain value | `{ value: <literal> }` | A literal string passed verbatim. Not a secret — for non-sensitive config that benefits from being declared alongside the real secrets (region codes, feature flags, default locales). |
 
 #### Example — TOOL.md consumer
@@ -326,7 +326,7 @@ Hosts MUST reject manifests where:
 - An entry has zero source fields.
 - An entry has more than one source field (ambiguous).
 - A `vault:` slug doesn't exist in the workspace inventory.
-- An `oauth:` provider isn't configured for the workspace.
+- An `oauth:` driver isn't configured for the workspace.
 - A `value:` is non-string (objects, arrays, numbers, booleans are
   rejected — env values are strings; manifests can stringify
   upstream if needed).
@@ -406,7 +406,7 @@ interface SecretDefinition {
   name:         string
   description:  string
   kind?:        "opaque" | "oauth" | "keypair" | "json"
-  backend?:     string                            // vault://<provider>/<path>
+  backend?:     string                            // vault://<driver>/<path>
   access?:      AccessGrants
   audit?:       AuditConfig
   tags?:        string[]
@@ -540,7 +540,7 @@ strong as the host's enforcement of it.
   malicious body. SECRETS.md mitigates *which* bodies see the
   value; the sandbox mitigates what they can do with it.
 - **Backend pointer leak.** An explicit `backend:` URI in a
-  `SECRETS.md` reveals the vault provider + path topology. Default
+  `SECRETS.md` reveals the vault driver + path topology. Default
   to host-resolved bindings; require reviewer sign-off when an
   explicit backend pointer appears.
 

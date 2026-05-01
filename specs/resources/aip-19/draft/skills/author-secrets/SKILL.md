@@ -177,7 +177,7 @@ overhead.
 
 Set `backend:` only when:
 
-- The slug lives in a non-default vault (cross-region, secondary provider,
+- The slug lives in a non-default vault (cross-region, secondary driver,
   isolated tenant).
 - An auditor specifically requested explicit backend pointers in the manifest.
 

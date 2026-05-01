@@ -5,7 +5,7 @@ description: >-
   abstract orchestration shape — its steps, branching, parallelism, approval
   gates, suspend/resume, and compensation. Pairs with the standard
   `defineWorkflow` / `defineStep` signatures. Implementation lives entirely
-  in the per-step TOOL.md contracts and their AIP-30 PROVIDER bindings;
+  in the per-step TOOL.md contracts and their AIP-30 DRIVER bindings;
   workflows themselves are pure orchestration data.
 aip: 15
 status: Draft
@@ -25,7 +25,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/15
 | Status | Draft |
 | Type | Schema |
 | Domain | workflows.sh |
-| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER) |
 | Resources | [`./resources/aip-15`](./resources/aip-15/draft) — [`SKILL.md`](./resources/aip-15/draft/skills/author-workflow/SKILL.md), `ADAPTER.md`, `WORKFLOW.schema.json`, `EXAMPLES.md` |
 
 ## Abstract
@@ -155,21 +155,21 @@ YAML frontmatter, delimited by `---` lines. Case-sensitive.
 | `inputsFiles` | object | `{}` | File-contract IN per [AIP-16](/docs/aip-16). Map of `<key>` → `{ path, mode?, contentType? }`. Host stages each from the workspace at `path` into the per-run fs root at filename `<key>` BEFORE the workflow starts. |
 | `outputsFiles` | object | `{}` | File-contract OUT per [AIP-16](/docs/aip-16). Map of `<key>` → `{ path, mode?, contentType? }`. Host syncs each from the per-run fs root at filename `<key>` to the workspace at `path` AFTER the workflow completes. `path` supports `<runId>` / `<workflowId>` / `<isoDate>` interpolation. |
 
-#### Removed (formerly part of AIP-15, moved to per-step TOOL.md + their AIP-30 PROVIDER bindings)
+#### Removed (formerly part of AIP-15, moved to per-step TOOL.md + their AIP-30 DRIVER bindings)
 
 | Field | New home |
 |---|---|
-| `code` | The TOOL.md a step references is implemented by a PROVIDER which carries `provider.code` (per AIP-26). Workflows have no own bundle. |
-| `run` | Same — `provider.run`. |
-| `runner` | Same — `provider.runner` (per AIP-17). Per-step provider resolution; workflows don't pin runner. |
-| `secrets` | Same — `provider.auth.ref` pointing at SECRETS.md (per AIP-19). |
-| `network` | Same — `provider.network.egress`. The egress allowlist is per-provider, not per-workflow. |
-| Inline-entry tool steps (`tool: { entry: "./workflow.ts#stepFn" }`) | **Forbidden**. Every `kind: "tool"` step MUST reference an external TOOL.md by id (per AIP-14). Inline bodies break the contract/provider split — the body lives in the provider. Authors who need a one-off body author a sibling TOOL.md + PROVIDER.md. |
+| `code` | The TOOL.md a step references is implemented by a DRIVER which carries `driver.code` (per AIP-26). Workflows have no own bundle. |
+| `run` | Same — `driver.run`. |
+| `runner` | Same — `driver.runner` (per AIP-17). Per-step driver resolution; workflows don't pin runner. |
+| `secrets` | Same — `driver.auth.ref` pointing at SECRETS.md (per AIP-19). |
+| `network` | Same — `driver.network.egress`. The egress allowlist is per-driver, not per-workflow. |
+| Inline-entry tool steps (`tool: { entry: "./workflow.ts#stepFn" }`) | **Forbidden**. Every `kind: "tool"` step MUST reference an external TOOL.md by id (per AIP-14). Inline bodies break the contract/driver split — the body lives in the driver. Authors who need a one-off body author a sibling TOOL.md + DRIVER.md. |
 
 A WORKFLOW.md carrying any of these fields is invalid. Workflows are
 **pure orchestration** — step DAGs, branching, parallelism, approvals,
 suspend/resume, compensation. Bodies, transport, install, auth,
-sandbox all live below in the per-step TOOL.md → PROVIDER chain.
+sandbox all live below in the per-step TOOL.md → DRIVER chain.
 
 ### Inputs / outputs / file contract
 
@@ -199,7 +199,7 @@ These three blocks compose the workflow's execution context:
   container image, declarative `needs` (language/native/npm/pip),
   resource limits.
 - **`secrets`** ([AIP-19](/docs/aip-19)) — env-var bindings:
-  vault slugs, OAuth providers, plain values.
+  vault slugs, OAuth drivers, plain values.
 - **`network`** (top-level) — egress allowlist for outbound HTTP.
 
 The downgrade rule (untrusted-source `in-process` requests forced
@@ -239,8 +239,8 @@ Each entry in `steps[]`:
 
 Run a single tool. The `tool:` field MUST reference an external
 TOOL.md by id (per AIP-14). Inline-entry bodies are forbidden — the
-body lives on the AIP-30 PROVIDER that implements the TOOL contract,
-and provider resolution happens at step-execution time per AIP-30's
+body lives on the AIP-30 DRIVER that implements the TOOL contract,
+and driver resolution happens at step-execution time per AIP-30's
 resolver.
 
 ```yaml
@@ -259,7 +259,7 @@ resolver.
   approval: auto
   risk_level: 0
   compensation: undo-fetch         # optional
-  # Optional per-step provider pin (escape hatch — usually omit):
+  # Optional per-step driver pin (escape hatch — usually omit):
   # pinned_provider: apollo-pricing-http
 ```
 
@@ -267,14 +267,14 @@ When the workflow runtime executes this step, the runtime:
 
 1. Loads the TOOL.md by id from the registry.
 2. Runs the AIP-30 resolver against the call's context to pick a
-   PROVIDER (or honours `pinned_provider` when present).
+   DRIVER (or honours `pinned_provider` when present).
 3. Validates `inputs` against the contract's `inputSchema`.
-4. Dispatches to the resolved provider's `execute[<toolId>]`.
+4. Dispatches to the resolved driver's `execute[<toolId>]`.
 5. Validates the result against the contract's `outputSchema`.
 6. Maps the result into the workflow's running state per the step's
    `outputs` declaration.
 
-The workflow itself is **provider-agnostic**. The same workflow runs
+The workflow itself is **driver-agnostic**. The same workflow runs
 against OpenAI HTTP, Replicate HTTP, or self-hosted SDK depending on
 workspace policy and resolver decisions per call.
 

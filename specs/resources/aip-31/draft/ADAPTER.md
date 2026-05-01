@@ -1,6 +1,6 @@
 # ADAPTER.md — implementing AIP-31 in a host runtime
 
-Implementer's guide for `kind: http` providers. Inherits all
+Implementer's guide for `kind: http` drivers. Inherits all
 [AIP-30 ADAPTER](../../../aip-30/draft/ADAPTER.md) responsibilities;
 this doc covers HTTP-specific dispatch.
 
@@ -21,7 +21,7 @@ A conforming host's HTTP runtime implements:
    `timeout_override_ms` (or contract ceiling).
 5. **Response parsing** — extract via `response_extract` JSONPath-lite,
    OR call `parseResponse()` when the entry provides one.
-6. **Error mapping** — translate HTTP statuses to provider error codes:
+6. **Error mapping** — translate HTTP statuses to driver error codes:
    200/2xx → ok; 401/403 → auth_required; 429 → rate_limited; 5xx →
    upstream_error (retryable); 4xx other → upstream_error (not retryable).
 
@@ -93,7 +93,7 @@ HTTP-specific audit fields:
 
 ```json
 {
-  "type": "provider.invoked",
+  "type": "driver.invoked",
   "kind": "http",
   "url_template": "POST /v1/images/generations",
   "request_size_bytes": 1024,
@@ -111,11 +111,11 @@ secrets).
 
 `packages/http-runtime` exposes:
 
-- `defineHttpProvider(...)` (sugar for `defineProvider({ kind: "http", ... })`)
+- `defineHttpDriver(...)` (sugar for `defineDriver({ kind: "http", ... })`)
 - `dispatchHttp(handle, toolId, args)` — unary
 - `dispatchHttpStream(handle, toolId, args)` — async iterator
 - `expandTemplate(template, vars)` — body / query templating
 - `extractResponse(body, jsonPath)` — JSONPath-lite
 
-The runtime composes with `provider-runtime` (resolver) and
+The runtime composes with `driver-runtime` (resolver) and
 `tool-runtime` (contract validation).

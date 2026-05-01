@@ -1,13 +1,13 @@
 ---
 schema: skills/v1
 name: author-http
-title: Author an HTTP provider (AIP-31)
+title: Author an HTTP driver (AIP-31)
 description:
-  Walk through authoring a kind:http PROVIDER.md — wraps a third-party HTTP
+  Walk through authoring a kind:http DRIVER.md — wraps a third-party HTTP
   API (OpenAI / Stripe / Replicate / GitHub / Anthropic / etc.) as a
-  conformant provider implementing one or more abstract TOOL contracts.
+  conformant driver implementing one or more abstract TOOL contracts.
 version: 1.0.0
-tags: [aip-31, http, providers, authoring]
+tags: [aip-31, http, drivers, authoring]
 inputs:
   - name: api_name
     type: string
@@ -32,16 +32,16 @@ examples:
       tools: "./tools/image-create/TOOL.md"
       auth_pattern: "bearer-header"
     output:
-      - .providers/openai-images-http/PROVIDER.md
-      - .providers/openai-images-http/SECRETS.md
+      - .drivers/openai-images-http/DRIVER.md
+      - .drivers/openai-images-http/SECRETS.md
 ---
 
-# Author an HTTP provider (AIP-31)
+# Author an HTTP driver (AIP-31)
 
-Use when wrapping a third-party HTTP API as a conformant provider for
+Use when wrapping a third-party HTTP API as a conformant driver for
 an AIP-14 TOOL contract. The skill produces a frontmatter-only
-PROVIDER.md when `body_template` + `response_extract` cover the
-dispatch shape, OR a PROVIDER.md + provider.ts when conditional
+DRIVER.md when `body_template` + `response_extract` cover the
+dispatch shape, OR a DRIVER.md + driver.ts when conditional
 request shaping is needed.
 
 ## Process
@@ -54,7 +54,7 @@ request shaping is needed.
    - `key-query` → no `default_headers`, per-tool `query_template.key:
      "${secrets.X}"`.
    - `oauth` → declare `auth.login.url`, `auth.refresh`,
-     `requires_callback_url: true`. Refresh logic in `provider.ts`.
+     `requires_callback_url: true`. Refresh logic in `driver.ts`.
    - `custom` → write the entry's `login` / `refresh` / `parseResponse`.
 3. **Per-tool dispatch**: for each TOOL ref, author `metadata.http`:
    - `endpoint` (relative to base_url)
@@ -70,7 +70,7 @@ request shaping is needed.
    - `policy_tags` (third-party-llm, third-party-api, gdpr-compliant)
 5. **Health check** (recommended): `health_check.method: http,
    http: { method: GET, url: "<status-or-models-endpoint>", expect_status: 200 }, every: "PT5M"`.
-6. **Validate** against `HTTP.schema.json` AND `PROVIDER.schema.json`.
+6. **Validate** against `HTTP.schema.json` AND `DRIVER.schema.json`.
 7. **Wire**: `loadProvider(...)` in the host; the resolver picks per
    call.
 
@@ -82,6 +82,6 @@ request shaping is needed.
 - **Missing `idempotency_key_header`** when the tool mutates external
   state — risks double-charges on retry.
 - **Body templating for conditional fields** — when fields depend on
-  input presence, use `provider.ts buildRequest()` instead of
+  input presence, use `driver.ts buildRequest()` instead of
   `body_template`.
 - **TLS skip** — never. Hosts MUST validate certificates.

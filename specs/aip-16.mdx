@@ -79,7 +79,7 @@ Those are separate AIPs, separately reviewable.
    `inputsFiles` does not require a non-empty `inputs`.
 
 4. **Host stages files; bodies use plain paths.** Bodies never
-   import a host-specific filesystem provider. The host materialises
+   import a host-specific filesystem driver. The host materialises
    declared files at known paths under a per-run scratch root and
    syncs declared outputs back. Same body, any host.
 
@@ -211,7 +211,7 @@ cross-run state MUST use a tool, not file state.
 
 Three reasons:
 
-1. **Portability.** Bodies don't import host-specific providers.
+1. **Portability.** Bodies don't import host-specific drivers.
    Same body runs under any conforming host.
 2. **Auditability.** The host logs every staged read and every
    synced write through the standard audit channel

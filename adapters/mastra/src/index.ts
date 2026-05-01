@@ -4,7 +4,7 @@
  *
  * One function: {@link toMastraTool} takes a typed `ToolImplementation`
  * (an `(contract, body)` pair produced by
- * {@link "@agentproto/provider".implementTool}) and returns a Mastra
+ * {@link "@agentproto/driver".implementTool}) and returns a Mastra
  * `createTool({...})` result. Same role as the AI SDK / LangChain
  * adapters — re-express the canonical typed binding in a host
  * framework's tool shape, without re-declaring the contract metadata.
@@ -21,7 +21,7 @@
  * wraps `runTool` in `implementTool` once — the adapter is unchanged.
  *
  * ```ts
- * import { implementTool, runTool } from "@agentproto/provider"
+ * import { implementTool, runTool } from "@agentproto/driver"
  *
  * // Static body:
  * const impl = implementTool(handle, async ({ input, context }) => …)
@@ -38,21 +38,21 @@
 import { createTool } from "@mastra/core/tools"
 import { toToolError, type ToolContext } from "@agentproto/tool"
 import type {
-  ProviderContext,
+  DriverContext,
   ToolImplementation,
-} from "@agentproto/provider"
+} from "@agentproto/driver"
 
 /**
- * Default {@link ProviderContext} used when the caller doesn't pass
+ * Default {@link DriverContext} used when the caller doesn't pass
  * one. `kind: "builtin"` reflects the typical adapter use-case
  * (in-process bodies that don't read provider secrets / sandbox
- * handles). Override via `bind.providerCtx` for non-builtin bodies.
+ * handles). Override via `bind.driverCtx` for non-builtin bodies.
  */
-const DEFAULT_PROVIDER_CTX: ProviderContext = Object.freeze({
+const DEFAULT_PROVIDER_CTX: DriverContext = Object.freeze({
   secrets: {},
   authState: "authed",
   providerId: "mastra-adapter",
-  providerKind: "builtin",
+  driverKind: "builtin",
   implementsEntry: { tool: "mastra-adapter", version: "0.0.0" },
 })
 
@@ -78,7 +78,7 @@ export interface ToMastraToolOptions<TContext extends ToolContext> {
   /** Where the body's `context` arg comes from per call. */
   source: MastraContextSource<TContext>
   /** Optional provider context (for non-builtin bodies). */
-  providerCtx?: ProviderContext
+  driverCtx?: DriverContext
 }
 
 /**
@@ -126,7 +126,7 @@ export function toMastraTool<
         return await impl.body({
           input: typedInput,
           context,
-          providerCtx: options.providerCtx ?? DEFAULT_PROVIDER_CTX,
+          driverCtx: options.driverCtx ?? DEFAULT_PROVIDER_CTX,
           signal:
             (mastraContext as { abortSignal?: AbortSignal } | undefined)
               ?.abortSignal ?? new AbortController().signal,
@@ -140,4 +140,4 @@ export function toMastraTool<
 }
 
 export { ToolError } from "@agentproto/tool"
-export type { ToolImplementation } from "@agentproto/provider"
+export type { ToolImplementation } from "@agentproto/driver"

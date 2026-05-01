@@ -13,12 +13,12 @@ agentproto/
 ├── packages/
 │   ├── tool/                          @agentproto/tool         AIP-14 — defineTool, ToolHandle, validators
 │   ├── tooling/                       @agentproto/tooling      Internal: shared TS + tsup config
-│   └── provider/
-│       ├── core/                      @agentproto/provider     AIP-30 — defineProvider, runTool, implementTool, resolver
-│       ├── cli/                       @agentproto/provider-cli AIP-29 — CLI/subprocess specialisation
-│       ├── http/                      @agentproto/provider-http  HTTP API specialisation
-│       ├── mcp/                       @agentproto/provider-mcp   MCP server specialisation
-│       └── sdk/                       @agentproto/provider-sdk   SDK / dynamic-import specialisation
+│   └── driver/
+│       ├── core/                      @agentproto/driver     AIP-30 — defineDriver, runTool, implementTool, resolver
+│       ├── cli/                       @agentproto/driver-cli AIP-29 — CLI/subprocess specialisation
+│       ├── http/                      @agentproto/driver-http  HTTP API specialisation
+│       ├── mcp/                       @agentproto/driver-mcp   MCP server specialisation
+│       └── sdk/                       @agentproto/driver-sdk   SDK / dynamic-import specialisation
 └── adapters/
     ├── mastra/                        @agentproto/adapter-mastra Mastra createTool projection
     └── ai-sdk/                        @agentproto/adapter-ai-sdk Vercel AI SDK Tool projection
@@ -26,13 +26,13 @@ agentproto/
 
 The two-axis design:
 
-- **Providers** (`packages/provider/<kind>/`) implement TOOL contracts via
+- **Drivers** (`packages/driver/<kind>/`) implement TOOL contracts via
   a transport (cli, http, mcp, sdk, builtin). Each is a sibling under
-  `provider/`.
+  `driver/`.
 - **Adapters** (`adapters/<framework>/`) re-express ToolImplementations
   in a host framework's tool shape. Each is a sibling under `adapters/`.
 
-The test that splits them: does `defineProvider({ kind: "X" })` make
+The test that splits them: does `defineDriver({ kind: "X" })` make
 sense? For `cli`/`http`/`mcp`/`sdk`/`builtin` yes — they're transports.
 For `mastra`/`ai-sdk` no — they're host frameworks that consume tools.
 
@@ -40,8 +40,8 @@ For `mastra`/`ai-sdk` no — they're host frameworks that consume tools.
 
 ```
 ITool        @agentproto/tool        defineTool(...)              the contract (no body)
-Tool         @agentproto/provider    implementTool(handle, body)  contract + typed body
-Provider     @agentproto/provider    defineProvider({...})        bundle of tools + shared infra
+Tool         @agentproto/driver    implementTool(handle, body)  contract + typed body
+Driver     @agentproto/driver    defineDriver({...})        bundle of tools + shared infra
 ```
 
 Same shape as `IERC20` ↔ `MyToken is IERC20`, ported to TypeScript.
@@ -58,7 +58,7 @@ Author a tool:
 
 ```ts
 import { defineTool } from "@agentproto/tool"
-import { implementTool, defineProvider } from "@agentproto/provider"
+import { implementTool, defineDriver } from "@agentproto/driver"
 import { z } from "zod"
 
 const greetTool = defineTool({
@@ -74,7 +74,7 @@ const greetBuiltin = implementTool(greetTool, async ({ input, context }) => ({
     context.locale === "fr" ? `Bonjour ${input.name}` : `Hello ${input.name}`,
 }))
 
-const greetProvider = defineProvider({
+const greetProvider = defineDriver({
   id: "greet-builtin",
   name: "Greet (builtin)",
   description: "In-process greeter.",
@@ -105,7 +105,7 @@ same repo. Browse them at <https://agentproto.sh/docs>.
 Key specs:
 
 - [AIP-14 — TOOL.md](https://agentproto.sh/docs/aip-14)
-- [AIP-30 — PROVIDER.md](https://agentproto.sh/docs/aip-30)
+- [AIP-30 — DRIVER.md](https://agentproto.sh/docs/aip-30)
 - [AIP-29 — CLI.md](https://agentproto.sh/docs/aip-29)
 - [AIP-17 — RUNNER.md](https://agentproto.sh/docs/aip-17)
 

@@ -2,46 +2,46 @@
 
 This document is the implementer's guide for any runtime, framework, or
 language that wants to **load, register, and invoke** AIP-30
-[`PROVIDER.md`](/docs/aip-30) files. It is normative for the parts marked
+[`DRIVER.md`](/docs/aip-30) files. It is normative for the parts marked
 **MUST** and informative for the parts marked **SHOULD**.
 
-The audience is a runtime author — someone exposing `defineProvider` to
-provider authors and operating a multi-provider tool catalog. Provider
-authors themselves should read [`./skills/author-provider/SKILL.md`](./skills/author-provider/SKILL.md), not this file.
+The audience is a runtime author — someone exposing `defineDriver` to
+driver authors and operating a multi-driver tool catalog. Driver
+authors themselves should read [`./skills/author-driver/SKILL.md`](./skills/author-driver/SKILL.md), not this file.
 
 ## Contract overview
 
 A conforming host implements seven responsibilities, in roughly this order
-when a PROVIDER.md is registered and exercised:
+when a DRIVER.md is registered and exercised:
 
-1. **Parse the manifest** — read `PROVIDER.md`, validate against
-   [`./PROVIDER.schema.json`](./PROVIDER.schema.json), then dispatch to the
+1. **Parse the manifest** — read `DRIVER.md`, validate against
+   [`./DRIVER.schema.json`](./DRIVER.schema.json), then dispatch to the
    subtype-specific schema (`kind: cli` → AIP-29 schema, `kind: http` →
    AIP-31, etc.) for kind-specific fields.
 2. **Install** (CLI/SDK only) — try install methods in order until one
    succeeds; verify SHA-256 when supplied.
 3. **Version-check** (CLI/SDK only) — run `version_check.cmd`, parse,
-   compare against `version_check.range`. Refuse the provider on mismatch.
+   compare against `version_check.range`. Refuse the driver on mismatch.
 4. **Authenticate** — drive the auth state machine using `auth.login` /
    `auth.refresh` / `auth.expiry.detect`.
 5. **Bind tools** — for each entry in `implements[]`, validate the
    referenced TOOL.md exists, the contract semver intersects, and the
-   `mapping`/`schema_narrowing` are coherent. Refuse the provider if any
+   `mapping`/`schema_narrowing` are coherent. Refuse the driver if any
    binding is broken.
 6. **Health-check** — run the periodic `health_check` per `every`, mark
-   the provider available/unavailable for resolver Phase 2.
-7. **Dispatch** — when the resolver picks this provider for a call,
-   validate input + context (host's job, not provider's), invoke
+   the driver available/unavailable for resolver Phase 2.
+7. **Dispatch** — when the resolver picks this driver for a call,
+   validate input + context (host's job, not driver's), invoke
    `execute[<toolId>]`, route output through `parseOutput` if declared.
 
-## `defineProvider` — the entry-point function
+## `defineDriver` — the entry-point function
 
 ### Required behaviour
 
-A host that implements `defineProvider` MUST:
+A host that implements `defineDriver` MUST:
 
-1. **Accept the `ProviderDefinition` shape** documented in
-   [AIP-30 § The `defineProvider` standard signature](/docs/aip-30#the-defineprovider-standard-signature).
+1. **Accept the `DriverDefinition` shape** documented in
+   [AIP-30 § The `defineDriver` standard signature](/docs/aip-30#the-defineprovider-standard-signature).
    Every field listed there MUST be honoured at runtime.
 
 2. **Frontmatter is the source of truth.** When the entry exports
@@ -50,13 +50,13 @@ A host that implements `defineProvider` MUST:
    frontmatter value. Entries are for behaviour, not identity.
 
 3. **`execute[<toolId>]` MUST exist for every `implements[]` entry.**
-   Hosts MUST refuse to register providers whose `execute` keys don't
+   Hosts MUST refuse to register drivers whose `execute` keys don't
    match the declared `implements` set. Surface as
    `error.code = "execute_binding_mismatch"` with the missing tool id.
 
 4. **Validate inputs against the contract before dispatch.** The host
    reads the resolved TOOL.md's `inputSchema` and validates `args.input`
-   BEFORE calling `execute[<toolId>]`. The provider body MUST NOT
+   BEFORE calling `execute[<toolId>]`. The driver body MUST NOT
    re-validate. When the TOOL declares a `contextSchema`, the host
    ALSO validates `args.context` before dispatch.
 
@@ -87,25 +87,25 @@ A host that implements `defineProvider` MUST:
      `unauthed`, surface `auth_required` to caller, optionally
      auto-trigger `login` if interactive context allows.
 
-8. **Persist auth state** per `(provider.id, workspace.id, user.id)`
+8. **Persist auth state** per `(driver.id, workspace.id, user.id)`
    tuple across runs. The user MUST NOT re-login at every session.
 
 9. **Apply `cost_override` to the resolver's ranking.** When a
-   provider declares `cost_units_per_call` (in millicents), the
-   resolver Phase 5 ranks by ascending value. Providers that omit
+   driver declares `cost_units_per_call` (in millicents), the
+   resolver Phase 5 ranks by ascending value. Drivers that omit
    `cost_override` use the contract's `cost_class` baseline ranking.
 
 10. **Apply `region` policy.** When `context.regionConstraint` is
     set (workspace policy or call-level pin), the resolver Phase 3
-    drops providers whose `region:` array doesn't intersect. The
+    drops drivers whose `region:` array doesn't intersect. The
     intersection MUST be exact-match or `"global"` (the default
     for omitted region declarations).
 
 11. **Apply `policy_tags` filter.** Workspace policy is an allowlist
-    or denylist of tags; resolver Phase 3 drops providers violating
+    or denylist of tags; resolver Phase 3 drops drivers violating
     it. Tag matching is exact-string, case-sensitive.
 
-12. **No I/O at module load.** The module containing `defineProvider`
+12. **No I/O at module load.** The module containing `defineDriver`
     MUST be safely importable as a side-effect-free unit. All I/O
     happens inside `execute`, `login`, `refresh`, `parseOutput`,
     `healthCheck`.
@@ -114,15 +114,15 @@ A host that implements `defineProvider` MUST:
 
 A host MAY:
 
-- Re-export `defineProvider` under host-idiomatic aliases
-  (`createProvider`, `provider`). Subtype-specific aliases like
+- Re-export `defineDriver` under host-idiomatic aliases
+  (`createProvider`, `driver`). Subtype-specific aliases like
   `defineCli` SHOULD pre-fill `kind: cli` and forward to the
-  canonical `defineProvider`.
+  canonical `defineDriver`.
 - Cache resolver decisions when policy + auth state + health are
   stable. Cache key MUST include `(tool.id@major,
   policy_fingerprint, pinnedProvider, region)`. Invalidate on
-  provider register/unregister and any auth state transition.
-- Surface a "test provider" affordance to surface adapters
+  driver register/unregister and any auth state transition.
+- Surface a "test driver" affordance to surface adapters
   (catalogue UIs) so users can verify auth + connectivity before
   invoking through the actual workflow.
 
@@ -172,7 +172,7 @@ async function executeHttp(handle, toolId, args) {
     ? expandBodyTemplate(impl.metadata.http.body_template, args.input)
     : args.input
   const headers = {
-    "Authorization": `Bearer ${args.providerCtx.secrets.OPENAI_API_KEY}`,
+    "Authorization": `Bearer ${args.driverCtx.secrets.OPENAI_API_KEY}`,
     "Content-Type": "application/json",
     ...impl.metadata.http.headers,
   }
@@ -217,7 +217,7 @@ async function executeSdk(handle, toolId, args) {
 
 ### `kind: builtin`
 
-Builtin providers dispatch through the host runtime's native function
+Builtin drivers dispatch through the host runtime's native function
 registry. No external invocation:
 
 ```ts
@@ -230,11 +230,11 @@ async function executeBuiltin(handle, toolId, args) {
 
 ## Errors
 
-Providers return errors out-of-band relative to the routed tool's
+Drivers return errors out-of-band relative to the routed tool's
 `outputs`. The host wraps results in:
 
 ```ts
-type ProviderResult<T> =
+type DriverResult<T> =
   | { ok: true;  value: T;  ms: number }
   | { ok: false; error: { code: string; message: string; retryable?: boolean }; ms: number }
 ```
@@ -250,8 +250,8 @@ Standard error codes hosts MUST emit:
 | `tool_unavailable` | The TOOL.md ref in `implements[]` couldn't be loaded. |
 | `execute_binding_mismatch` | `implements[]` contains a tool id with no corresponding `execute[<toolId>]`. |
 | `input_unsupported` | Call uses an input listed in `schema_narrowing.drop_inputs`. |
-| `policy_violation` | Resolver dropped this provider but caller pinned it. |
-| `region_mismatch` | Resolver dropped this provider for region; caller pinned it. |
+| `policy_violation` | Resolver dropped this driver but caller pinned it. |
+| `region_mismatch` | Resolver dropped this driver for region; caller pinned it. |
 | `pinned_provider_unavailable` | `context.pinnedProvider` set but candidate filtered out earlier. |
 | `output_parse_failed` | Subtype output couldn't be parsed (CLI exit non-zero with unstructured stderr, HTTP non-JSON response, etc.). |
 | `cancelled` | Caller aborted via `signal`. |
@@ -271,7 +271,7 @@ time, one at dispatch-completion time.
 
 ```json
 {
-  "type": "provider.resolved",
+  "type": "driver.resolved",
   "tool_id": "image.create",
   "tool_version": "1.0.0",
   "user_id": "u_abc",
@@ -292,7 +292,7 @@ time, one at dispatch-completion time.
 
 ```json
 {
-  "type": "provider.invoked",
+  "type": "driver.invoked",
   "provider_id": "replicate-flux-http",
   "provider_version": "1.0.0",
   "tool_id": "image.create",
@@ -308,28 +308,28 @@ time, one at dispatch-completion time.
 ```
 
 `input_keys` lists keys, not values (PII safety). The two-row format
-lets operators audit "why was this provider picked" separately from
+lets operators audit "why was this driver picked" separately from
 "what was the call result".
 
 ## Reference implementation
 
 The canonical TypeScript implementation lives at
-[`packages/provider-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/provider-runtime).
+[`packages/driver-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/driver-runtime).
 It exposes:
 
-- `defineProvider(definition: ProviderDefinition): ProviderHandle`
-- `loadProvider(path: string): Promise<ProviderHandle>`
+- `defineDriver(definition: DriverDefinition): DriverHandle`
+- `loadProvider(path: string): Promise<DriverHandle>`
 - `installProvider(handle): Promise<InstallResult>`
 - `verifyProvider(handle): Promise<VerifyResult>`
 - `loginProvider(handle, context): Promise<LoginResult>`
-- `runTool(toolHandle, { input, context, signal }): Promise<ProviderResult>`
-- `resolveProvider(toolHandle, context): Promise<ResolvedProvider>`
+- `runTool(toolHandle, { input, context, signal }): Promise<DriverResult>`
+- `resolveDriver(toolHandle, context): Promise<ResolvedProvider>`
 
 Subtype-specific runtimes (`packages/cli-runtime`,
 `packages/http-runtime`, `packages/mcp-runtime`,
-`packages/sdk-runtime`) wrap `provider-runtime` with the subtype's
+`packages/sdk-runtime`) wrap `driver-runtime` with the subtype's
 dispatch logic. Hosts in other languages should mirror this surface
-(the contract is the manifest + `defineProvider` shape, not the
+(the contract is the manifest + `defineDriver` shape, not the
 package).
 
 ## Migration notes
@@ -339,26 +339,26 @@ package).
 The pre-refactor TOOL.md carried `code`/`run`/`runner`/`secrets`/
 `network` directly. Migration:
 
-1. Author a `PROVIDER.md` for the tool's existing implementation.
-   Move `code`/`run` → `provider.code` (per AIP-26 reference) and
-   `provider.run`. Move `runner` → `provider.runner`. Move `secrets`
-   → `provider.auth.ref` (point at a sibling SECRETS.md). Move
-   `network` → `provider.network`.
-2. Set `provider.implements[0].tool` to the (now-amputated) TOOL.md.
-3. Move the `entry`'s `execute()` body → `provider.execute[toolId]`.
+1. Author a `DRIVER.md` for the tool's existing implementation.
+   Move `code`/`run` → `driver.code` (per AIP-26 reference) and
+   `driver.run`. Move `runner` → `driver.runner`. Move `secrets`
+   → `driver.auth.ref` (point at a sibling SECRETS.md). Move
+   `network` → `driver.network`.
+2. Set `driver.implements[0].tool` to the (now-amputated) TOOL.md.
+3. Move the `entry`'s `execute()` body → `driver.execute[toolId]`.
 4. Validate the new pair against the v2 schemas; the host's
-   `tool-runtime` and `provider-runtime` packages.
+   `tool-runtime` and `driver-runtime` packages.
 
 ### From hand-rolled wrappers (Mastra MCP servers, LangChain ShellTool)
 
-1. Author a `PROVIDER.md` per wrapper. Map the wrapper's bootstrap
-   (install, version-check, auth) into PROVIDER frontmatter blocks.
+1. Author a `DRIVER.md` per wrapper. Map the wrapper's bootstrap
+   (install, version-check, auth) into DRIVER frontmatter blocks.
 2. Convert each wrapped operation into a TOOL.md sibling (per
-   AIP-14). Reference each TOOL from `provider.implements[]`.
-3. Move auth + sandbox + output-parsing logic into a `defineProvider`
+   AIP-14). Reference each TOOL from `driver.implements[]`.
+3. Move auth + sandbox + output-parsing logic into a `defineDriver`
    entry with `kind: cli` (or appropriate subtype).
-4. Decommission the wrapper after the provider covers the same
+4. Decommission the wrapper after the driver covers the same
    surface.
 
-The wrapper stays functional during migration; PROVIDER.md is
+The wrapper stays functional during migration; DRIVER.md is
 additive.

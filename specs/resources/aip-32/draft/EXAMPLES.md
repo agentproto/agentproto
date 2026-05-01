@@ -1,6 +1,6 @@
-# EXAMPLES.md — MCP provider patterns
+# EXAMPLES.md — MCP driver patterns
 
-Reference `PROVIDER.md` files for `kind: mcp`. Each wraps an existing
+Reference `DRIVER.md` files for `kind: mcp`. Each wraps an existing
 or imagined Model Context Protocol server.
 
 ## Patterns covered
@@ -234,7 +234,7 @@ auth:
     completes_when:
       http: { method: GET, url: "https://api.github.com/user", expect_status: 200 }
   refresh:
-    cmd: ""               # custom; see provider.ts
+    cmd: ""               # custom; see driver.ts
     every: "PT1H"
   expiry:
     detect: "http_status:401"

@@ -110,7 +110,7 @@ Based on `resolved.engine`:
 | Engine       | Implementation                                                     |
 | ------------ | ------------------------------------------------------------------ |
 | `subprocess` | `child_process.spawn("node", ["--permission", ...flags, bundle])`  |
-| `sandbox`    | `provider.create(resolved.image, env, resolved.limits.timeout_ms)` |
+| `sandbox`    | `driver.create(resolved.image, env, resolved.limits.timeout_ms)` |
 | `in-process` | `await import(bundle)`                                             |
 
 ### 4. Honour `needs` at cold-start (sandbox engine only)

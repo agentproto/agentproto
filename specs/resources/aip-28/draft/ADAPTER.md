@@ -294,5 +294,5 @@ extracting the routing into INTENT.md frontmatter:
    does it.
 4. Update the prompt to address the intent by `id`, not the tools.
 
-The agent's prompt shrinks; routing becomes data; provider swaps become
+The agent's prompt shrinks; routing becomes data; driver swaps become
 edits to one frontmatter field.

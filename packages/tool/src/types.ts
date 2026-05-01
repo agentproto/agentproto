@@ -69,23 +69,23 @@ export interface ToolDefinition<
    * this in Phase 5 (cost ranking) when no other signal differentiates
    * candidates. Null/undefined = pick by resolver policy.
    */
-  defaultProvider?: string
+  defaultDriver?: string
 
   /**
    * Author-side allowlist/denylist on which provider kinds the contract
    * permits. Use to express "this tool MUST NOT be served via untrusted
    * HTTP" (`forbid: ["http"]`) for self-hosted-only contracts.
    */
-  providerConstraints?: ProviderConstraints
+  driverConstraints?: DriverConstraints
 }
 
-export type ProviderKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
+export type DriverKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
 
-export interface ProviderConstraints {
+export interface DriverConstraints {
   /** Provider kinds the contract refuses. */
-  forbid?: readonly ProviderKind[]
+  forbid?: readonly DriverKind[]
   /** Whitelist of allowed provider kinds. Empty/missing = all permitted. */
-  requireKind?: readonly ProviderKind[]
+  requireKind?: readonly DriverKind[]
 }
 
 export type ToolContext = Record<string, unknown> & {
@@ -136,8 +136,8 @@ export interface ToolHandle<
   readonly tags: readonly string[]
   readonly metadata: Record<string, unknown>
   readonly idempotent: boolean
-  readonly defaultProvider?: string
-  readonly providerConstraints: Required<ProviderConstraints>
+  readonly defaultDriver?: string
+  readonly driverConstraints: Required<DriverConstraints>
 }
 
 /**

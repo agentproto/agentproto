@@ -1,13 +1,13 @@
 ---
 schema: skills/v1
 name: author-sdk
-title: Author an SDK provider (AIP-33)
+title: Author an SDK driver (AIP-33)
 description:
-  Walk through authoring a kind:sdk PROVIDER.md — wraps an in-process
+  Walk through authoring a kind:sdk DRIVER.md — wraps an in-process
   SDK package (npm / pip / cargo / go / workspace-local) as a conformant
-  provider implementing one or more abstract TOOL contracts.
+  driver implementing one or more abstract TOOL contracts.
 version: 1.0.0
-tags: [aip-33, sdk, providers, authoring]
+tags: [aip-33, sdk, drivers, authoring]
 inputs:
   - name: package_name
     type: string
@@ -34,13 +34,13 @@ examples:
       tools: "./tools/image-create/TOOL.md, ./tools/chat-completion/TOOL.md"
       function_refs: "image-create:Client.images.generate,chat-completion:Client.chat.completions.create"
     output:
-      - .providers/openai-sdk/PROVIDER.md
-      - .providers/openai-sdk/SECRETS.md
+      - .drivers/openai-sdk/DRIVER.md
+      - .drivers/openai-sdk/SECRETS.md
 ---
 
-# Author an SDK provider (AIP-33)
+# Author an SDK driver (AIP-33)
 
-Use when wrapping an in-process SDK as a conformant provider for
+Use when wrapping an in-process SDK as a conformant driver for
 AIP-14 TOOL contracts. SDKs are the right kind for self-hosted
 models, first-party convenience wrappers, and performance-critical
 paths where subprocess (CLI) or network (HTTP, MCP) latency is
@@ -84,7 +84,7 @@ unacceptable.
    - `region` (US, EU, self-hosted, global).
    - `policy_tags` (third-party-llm, self-hosted, pii-safe,
      no-third-party).
-7. **Validate** against `SDK.schema.json` AND `PROVIDER.schema.json`.
+7. **Validate** against `SDK.schema.json` AND `DRIVER.schema.json`.
 8. **Wire**: `loadProvider(...)`; the SDK runtime imports the
    package + resolves function refs at registration.
 
@@ -101,7 +101,7 @@ unacceptable.
   files, register handlers); hosts SHOULD warn on unexpected I/O at
   registration.
 - **Streaming generators not cancelled on abort** — hosts MUST
-  honour `signal.abort()` and break the loop. Provider authors test
+  honour `signal.abort()` and break the loop. Driver authors test
   this explicitly.
 - **Missing `package_version`** — without it, the resolver can't
   enforce version compatibility; SDK upgrades silently break tools.

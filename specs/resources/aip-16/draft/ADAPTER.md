@@ -109,14 +109,14 @@ macOS) don't trip downstream consumers.
 For each `(key, entry)` in `inputsFiles`:
 
 - Read the workspace at `entry.path`. Workspace-relative; the host's workspace
-  provider resolves it.
+  driver resolves it.
 - Write the bytes to `<fsRoot>/<key>` (key is the filename — no subdirectories
   from the contract itself; bodies MAY create subdirectories underneath).
 - On read failure, throw before the body starts. Audit-log the failure; no run
   kicks off.
 
 The implementation SHOULD support both binary and text file reads; hosts whose
-workspace provider returns strings should encode via UTF-8 before writing to
+workspace driver returns strings should encode via UTF-8 before writing to
 disk.
 
 ### 3. Inject `_workflowFsRoot`
@@ -212,7 +212,7 @@ A conforming host SHOULD provide a `validateIO(manifestPath)` helper that:
 
 ## What this guide does NOT cover
 
-- The host's workspace provider implementation (file-backed vs S3-backed vs
+- The host's workspace driver implementation (file-backed vs S3-backed vs
   database-backed).
 - The host's runtime isolation (env stripping, fs scoping, network egress) —
   that's a separate AIP. IO is pure data-shape.

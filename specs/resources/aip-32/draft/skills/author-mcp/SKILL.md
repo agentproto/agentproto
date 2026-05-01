@@ -1,13 +1,13 @@
 ---
 schema: skills/v1
 name: author-mcp
-title: Author an MCP provider (AIP-32)
+title: Author an MCP driver (AIP-32)
 description:
-  Walk through authoring a kind:mcp PROVIDER.md — wraps a Model Context
-  Protocol server (Anthropic-spec) as a conformant provider implementing
+  Walk through authoring a kind:mcp DRIVER.md — wraps a Model Context
+  Protocol server (Anthropic-spec) as a conformant driver implementing
   one or more abstract TOOL contracts.
 version: 1.0.0
-tags: [aip-32, mcp, providers, authoring]
+tags: [aip-32, mcp, drivers, authoring]
 inputs:
   - name: server_kind
     type: string
@@ -31,14 +31,14 @@ examples:
       server_ref: "@modelcontextprotocol/server-filesystem"
       tools_to_wrap: "read_file:fs-read,write_file:fs-write,list_directory:fs-list"
     output:
-      - .providers/filesystem-mcp/PROVIDER.md
+      - .drivers/filesystem-mcp/DRIVER.md
 ---
 
-# Author an MCP provider (AIP-32)
+# Author an MCP driver (AIP-32)
 
 Use when wrapping an MCP server (local or remote) as a conformant
-provider for AIP-14 TOOL contracts. The skill produces a
-frontmatter-only PROVIDER.md when standard MCP dispatch suffices.
+driver for AIP-14 TOOL contracts. The skill produces a
+frontmatter-only DRIVER.md when standard MCP dispatch suffices.
 
 ## Process
 
@@ -66,7 +66,7 @@ frontmatter-only PROVIDER.md when standard MCP dispatch suffices.
    `policy_tags` (self-hosted, third-party-api).
 8. **Optional integration**: declare `prompts[]` for skill_block
    integration and `resources[]` for ref_kind integration.
-9. **Validate** against `MCP.schema.json` AND `PROVIDER.schema.json`.
+9. **Validate** against `MCP.schema.json` AND `DRIVER.schema.json`.
 10. **Wire**: `loadProvider(...)`; the runtime spawns/connects on
     first call, lists tools, validates declared `tool_name`s exist.
 

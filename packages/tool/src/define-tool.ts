@@ -2,8 +2,8 @@ import type { ZodType } from "zod"
 import { ToolError } from "./errors.js"
 import type {
   ApprovalClass,
-  ProviderConstraints,
-  ProviderKind,
+  DriverConstraints,
+  DriverKind,
   ToolCapabilities,
   ToolContext,
   ToolDefinition,
@@ -12,7 +12,7 @@ import type {
 } from "./types.js"
 
 const ID_RE = /^[a-z0-9][a-z0-9._-]{1,79}$/
-const PROVIDER_KINDS: readonly ProviderKind[] = [
+const PROVIDER_KINDS: readonly DriverKind[] = [
   "cli",
   "http",
   "mcp",
@@ -60,7 +60,7 @@ export function defineTool<
     )
   }
 
-  const constraints = freezeProviderConstraints(definition.providerConstraints)
+  const constraints = freezeProviderConstraints(definition.driverConstraints)
 
   const handle: ToolHandle<TInput, TOutput, TContext> = Object.freeze({
     id: definition.id,
@@ -80,8 +80,8 @@ export function defineTool<
     tags: Object.freeze([...(definition.tags ?? [])]),
     metadata: Object.freeze({ ...(definition.metadata ?? {}) }),
     idempotent: definition.idempotent ?? false,
-    defaultProvider: definition.defaultProvider,
-    providerConstraints: constraints,
+    defaultDriver: definition.defaultDriver,
+    driverConstraints: constraints,
   })
 
   return handle
@@ -182,17 +182,17 @@ function freezeCapabilities(
 }
 
 function freezeProviderConstraints(
-  c: ProviderConstraints | undefined
-): Required<ProviderConstraints> {
-  const forbid = (c?.forbid ?? []).filter((k): k is ProviderKind =>
-    PROVIDER_KINDS.includes(k as ProviderKind)
+  c: DriverConstraints | undefined
+): Required<DriverConstraints> {
+  const forbid = (c?.forbid ?? []).filter((k): k is DriverKind =>
+    PROVIDER_KINDS.includes(k as DriverKind)
   )
-  const requireKind = (c?.requireKind ?? []).filter((k): k is ProviderKind =>
-    PROVIDER_KINDS.includes(k as ProviderKind)
+  const requireKind = (c?.requireKind ?? []).filter((k): k is DriverKind =>
+    PROVIDER_KINDS.includes(k as DriverKind)
   )
   return Object.freeze({
-    forbid: Object.freeze(forbid) as readonly ProviderKind[],
-    requireKind: Object.freeze(requireKind) as readonly ProviderKind[],
+    forbid: Object.freeze(forbid) as readonly DriverKind[],
+    requireKind: Object.freeze(requireKind) as readonly DriverKind[],
   })
 }
 

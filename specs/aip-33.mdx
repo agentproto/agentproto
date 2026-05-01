@@ -1,15 +1,15 @@
 ---
-title: "AIP-33: SDK.md — agentsdk/v1 (in-process SDK provider specialisation)"
+title: "AIP-33: SDK.md — agentsdk/v1 (in-process SDK driver specialisation)"
 description: >-
-  A markdown + frontmatter format for declaring an in-process SDK provider — an
+  A markdown + frontmatter format for declaring an in-process SDK driver — an
   npm/pip/cargo/go package that exposes named functions implementing one or
   more abstract TOOL contracts directly in the host runtime, without
-  subprocess spawn or network hop. Specialises AIP-30 PROVIDER for the
+  subprocess spawn or network hop. Specialises AIP-30 DRIVER for the
   `kind: sdk` case.
 aip: 33
 status: Draft
 type: Schema
-provider_kind: sdk
+driver_kind: sdk
 created: 2026-04-30
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 16, 17, 19, 30]
@@ -21,25 +21,25 @@ discussions-to: https://github.com/agentproto/specs/discussions/33
 | Field | Value |
 |---|---|
 | AIP | 33 |
-| Title | SDK.md — agentsdk/v1 (in-process SDK provider specialisation) |
+| Title | SDK.md — agentsdk/v1 (in-process SDK driver specialisation) |
 | Status | Draft |
 | Type | Schema |
-| Family | [Provider](/docs/family-provider) |
-| Provider kind | `sdk` |
-| Specialises | [AIP-30 PROVIDER.md](/docs/aip-30) |
-| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Family | [Driver](/docs/family-driver) |
+| Driver kind | `sdk` |
+| Specialises | [AIP-30 DRIVER.md](/docs/aip-30) |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER) |
 | Resources | [`./resources/aip-33`](./resources/aip-33/draft) — `SDK.schema.json`, [`ADAPTER.md`](./resources/aip-33/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-33/draft/skills/author-sdk/SKILL.md) |
 
 ## Abstract
 
 `SDK.md` is the `kind: sdk` specialisation of
-[AIP-30 PROVIDER](/docs/aip-30). It packages an **in-process** SDK
+[AIP-30 DRIVER](/docs/aip-30). It packages an **in-process** SDK
 integration — an npm / pip / cargo / go package whose named functions
 implement one or more abstract TOOL contracts. No subprocess, no
 network, no IPC: the host runtime imports the package and dispatches
 directly.
 
-SDK providers serve three use-cases:
+SDK drivers serve three use-cases:
 
 1. **Self-hosted models** (local Llama via `@meta/llama-sdk`, local
    SDXL via `@host/sdxl-runner`) — fastest dispatch, lowest cost,
@@ -50,16 +50,16 @@ SDK providers serve three use-cases:
 3. **Performance-critical paths** where subprocess (CLI) or network
    (HTTP, MCP) latency is unacceptable.
 
-The frontmatter inherits everything from PROVIDER and adds
+The frontmatter inherits everything from DRIVER and adds
 SDK-specific fields: `package`, `package_manager`, per-tool
 `function_ref` and optional `args_template`. The format pairs with
-`defineProvider({ kind: "sdk", ... })`.
+`defineDriver({ kind: "sdk", ... })`.
 
 ## Motivation
 
 In-process tool execution is a real category that CLI / HTTP / MCP
 don't cover. Today such tools are just "code in the same repo as the
-agent" — they bypass the provider model entirely, which means:
+agent" — they bypass the driver model entirely, which means:
 
 1. **No catalog visibility.** A function is a function; nothing
    declares "this implements `image.create`". Catalog UIs can't list
@@ -69,18 +69,18 @@ agent" — they bypass the provider model entirely, which means:
    contract layer doesn't enforce `mutates` / `approval` /
    `risk_level`. Audit logs miss it.
 
-3. **No multi-provider routing.** When a self-hosted local model is
+3. **No multi-driver routing.** When a self-hosted local model is
    one of three candidates (alongside OpenAI HTTP and Replicate
    HTTP), the resolver should pick it for pii-tagged workspaces. If
-   the local SDK isn't a registered provider, the resolver doesn't
+   the local SDK isn't a registered driver, the resolver doesn't
    know it exists.
 
 4. **Versioning collision.** A package declares one version; the
    contract declares another; without a binding manifest, the two
    drift silently.
 
-5. **Auth state still matters.** Even in-process providers may need
-   secrets (API keys, model paths, license tokens). PROVIDER's `auth`
+5. **Auth state still matters.** Even in-process drivers may need
+   secrets (API keys, model paths, license tokens). DRIVER's `auth`
    block applies; without SDK.md, every wrapper reinvents secret
    resolution.
 
@@ -92,21 +92,21 @@ favours self-hosted execution.
 
 1. **Inherit, don't repeat.** Identity, auth, install (npm/pip
    install), version_check (npm-version / pip-version), policy_tags,
-   region all come from PROVIDER. SDK only adds package + function
+   region all come from DRIVER. SDK only adds package + function
    refs.
 
 2. **No subprocess, no network.** The defining property. SDK
-   providers run in the host's own process. The `network.egress`
+   drivers run in the host's own process. The `network.egress`
    field declares network NEEDED by the SDK (some SDKs make HTTP
    calls under the hood); it's still enforced.
 
 3. **Function refs are resolvable at module-load.** When the host
-   loads the SDK provider, it imports the package and resolves the
+   loads the SDK driver, it imports the package and resolves the
    declared function refs at registration time. Refs that don't
    exist fail registration, not first call.
 
 4. **Args templates for renaming.** Like HTTP's `body_template`, SDK
-   providers can rename input keys via `args_template`. Most SDK
+   drivers can rename input keys via `args_template`. Most SDK
    functions take inputs verbatim, so `args_template` is rarely
    needed.
 
@@ -114,7 +114,7 @@ favours self-hosted execution.
    available in-process. Hosts MAY enforce capability sandboxing
    (e.g. denying `child_process` access for sandboxed npm packages),
    but the strong sandbox guarantee belongs to CLI / HTTP / MCP. SDK
-   providers SHOULD declare `policy_tags: ["self-hosted"]` and
+   drivers SHOULD declare `policy_tags: ["self-hosted"]` and
    `network.egress` honestly.
 
 6. **Streaming is natural.** Unlike CLI, SDK functions can be async
@@ -125,13 +125,13 @@ favours self-hosted execution.
 
 ### File location
 
-SDK providers live in a single folder:
+SDK drivers live in a single folder:
 
 ```
-.providers/
+.drivers/
   host-sdxl-sdk/
-    PROVIDER.md            ← this AIP, kind: sdk
-    provider.ts            ← optional entry (custom dispatch / streaming)
+    DRIVER.md            ← this AIP, kind: sdk
+    driver.ts            ← optional entry (custom dispatch / streaming)
     SECRETS.md             ← AIP-19 inventory (when API keys needed)
     package.json           ← when the SDK itself is co-located
 ```
@@ -140,7 +140,7 @@ Convention: `id` ends with `-sdk`. The folder name SHOULD match `id`.
 
 ### Frontmatter
 
-Inherits all fields from [AIP-30 PROVIDER.md](/docs/aip-30) plus the
+Inherits all fields from [AIP-30 DRIVER.md](/docs/aip-30) plus the
 SDK-specific fields below.
 
 #### Required SDK-specific fields
@@ -155,7 +155,7 @@ SDK-specific fields below.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `package_version` | string | inferred from `version_check` | Semver range pinned for this provider. |
+| `package_version` | string | inferred from `version_check` | Semver range pinned for this driver. |
 | `entrypoint` | string | language default | Module path within the package (`dist/index.js`, `lib/main.py`, `src/lib.rs`). Most languages have a clear default; declare only when non-standard. |
 | `import_style` | enum | `"esm"` | `"esm"` \| `"cjs"` \| `"python"` \| `"rust-crate"` \| `"go-module"`. Drives how the host loads the package. |
 | `streaming` | object | none | Default streaming config for tools the SDK can stream. v1: `{ mode: "async-iterator" \| "callback" }`. |
@@ -183,7 +183,7 @@ Every entry in `implements[]` adds:
 | `"Client.images.create"` | `new pkg.Client(opts).images.create` | `pkg.Client(...).images.create` |
 
 The fourth pattern (constructor + method) requires the SDK runtime
-to instantiate a client per provider; the constructor args come from
+to instantiate a client per driver; the constructor args come from
 `auth.state.env` resolved secrets plus optional `client_options`.
 
 ### Args templating
@@ -251,7 +251,7 @@ entry's custom dispatch.
 
 ### Auth shapes
 
-SDK providers' `auth` typically uses:
+SDK drivers' `auth` typically uses:
 
 - **Env-var injection** at module load (`OPENAI_API_KEY` set in the
   process env, `OpenAI()` reads it).
@@ -268,14 +268,14 @@ auth:
 ### Stable identity
 
 Per AIP-30. Bumping `package_version` to a new major requires
-bumping the provider's major. Bumping the SDK function signature
+bumping the driver's major. Bumping the SDK function signature
 (rename, removed param) is a breaking change at the SDK layer that
 propagates: schema-narrowing changes in `args_template` are major.
 
-## The `defineProvider({ kind: "sdk", ... })` signature
+## The `defineDriver({ kind: "sdk", ... })` signature
 
 ```ts
-interface ProviderDefinition<"sdk"> extends ProviderDefinition {
+interface DriverDefinition<"sdk"> extends DriverDefinition {
   kind: "sdk"
   package: string
   packageManager: "npm" | "pnpm" | "yarn" | "pip" | "poetry" | "cargo" | "go" | "local"
@@ -286,19 +286,19 @@ interface ProviderDefinition<"sdk"> extends ProviderDefinition {
 
   // Optional behavioural adapters.
   buildArgs?: (args: BuildArgsArgs) => unknown[]
-  parseResult?: (args: ParseResultArgs) => ProviderResult<unknown>
+  parseResult?: (args: ParseResultArgs) => DriverResult<unknown>
   loadModule?: (args: LoadModuleArgs) => Promise<unknown>     // custom module-load
 }
 ```
 
-A frontmatter-only SDK provider works for SDKs whose function
+A frontmatter-only SDK driver works for SDKs whose function
 signature matches the contract input verbatim. Custom entries handle
 constructor-based SDKs (auth in constructor), positional-arg SDKs,
 and streaming-via-callback patterns.
 
 ## Authoring with `SKILL.md`
 
-The canonical way to *generate* an SDK `PROVIDER.md` is via the
+The canonical way to *generate* an SDK `DRIVER.md` is via the
 paired [author-sdk skill](./resources/aip-33/draft/skills/author-sdk/SKILL.md).
 The skill walks the agent through:
 
@@ -318,7 +318,7 @@ The skill walks the agent through:
 name: OpenAI SDK (in-process)
 id: openai-sdk
 description:
-  OpenAI SDK as an in-process provider. Wraps the official `openai` npm
+  OpenAI SDK as an in-process driver. Wraps the official `openai` npm
   package; implements image.create and chat.completion via direct
   function calls. No subprocess, no extra network hop beyond what the
   SDK itself does.
@@ -377,7 +377,7 @@ tags: [openai, in-process, sdk]
 ---
 ```
 
-A self-hosted local-model SDK provider:
+A self-hosted local-model SDK driver:
 
 ```md
 ---
@@ -423,7 +423,7 @@ for additional patterns.
 
 ## Compatibility
 
-### With AIP-30 PROVIDER.md
+### With AIP-30 DRIVER.md
 
 Strict specialisation. Universal fields validate against AIP-30's
 schema; SDK-specific fields validate against AIP-33's. Hosts run
@@ -431,7 +431,7 @@ both schemas in sequence at registration.
 
 ### With AIP-14 TOOL.md
 
-SDK providers reference TOOL.md contracts. The contract's
+SDK drivers reference TOOL.md contracts. The contract's
 `inputSchema` is what the runtime validates; `args_template` reshapes
 for the SDK function signature. The contract's `outputSchema` is
 what `result_extract` produces from the SDK function's return value.
@@ -444,20 +444,20 @@ The `install` block's `method` choice MUST be consistent with
 
 ### With AIP-17 RUNNER.md
 
-SDK providers run in the host's process. `runner` is typically
+SDK drivers run in the host's process. `runner` is typically
 omitted or declared as `{ engine: "in-process" }`; if declared,
-host's RUNNER must be `in-process` — SDK providers cannot run in a
+host's RUNNER must be `in-process` — SDK drivers cannot run in a
 sandboxed subprocess (that's CLI's job).
 
 ## Security considerations
 
-- **In-process means full host privileges.** SDK providers run in
+- **In-process means full host privileges.** SDK drivers run in
   the same process as the agent and can access anything the agent
-  can. Hosts MUST treat SDK providers with the same trust model as
+  can. Hosts MUST treat SDK drivers with the same trust model as
   first-party code; they're NOT a sandbox.
 - **Module load is side-effect-prone.** Some SDKs run code at import
   time (registering global handlers, opening files). Hosts SHOULD
-  scan import logs and refuse providers whose module load triggers
+  scan import logs and refuse drivers whose module load triggers
   unexpected I/O.
 - **Secrets in constructor args.** When auth is via constructor
   (`new Client({ apiKey: secrets.X })`), the secret enters the SDK's
@@ -467,41 +467,41 @@ sandboxed subprocess (that's CLI's job).
   consumed leak memory. Hosts MUST cancel generators on caller
   abort (`signal`) and MUST NOT leak iterators across calls.
 - **Versioning lock-step.** When the SDK's package major bumps, the
-  provider's major MUST bump too. Hosts SHOULD reject loading an
+  driver's major MUST bump too. Hosts SHOULD reject loading an
   SDK whose installed version doesn't match `package_version`.
 
 ## Open questions
 
-1. **Polyglot SDK providers.** v1 declares one package + one
-   `package_manager`. A provider that wraps the same logic in TS
-   and Python today needs two providers; v2 may add multi-language
+1. **Polyglot SDK drivers.** v1 declares one package + one
+   `package_manager`. A driver that wraps the same logic in TS
+   and Python today needs two drivers; v2 may add multi-language
    declaration.
 2. **In-process sandbox.** Strong process-level isolation isn't
    available; capability-level (deny `child_process`, deny `fs`)
    varies by language. v2 may codify language-specific sandbox
    primitives.
 3. **Hot-reload.** SDK packages can be hot-replaced during dev; the
-   provider runtime needs a reload hook. v2.
+   driver runtime needs a reload hook. v2.
 4. **Bundle size and load time.** Some SDKs (Anthropic's, OpenAI's,
    AWS') are heavy. Cold-start cost is real. v2 may add
-   `lazy_load: true` for providers that defer module-load until
+   `lazy_load: true` for drivers that defer module-load until
    first call.
 
 ## See also
 
-- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts SDK providers
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts SDK drivers
   implement
 - [AIP-17 — RUNNER.md](/docs/aip-17) — runner block (`in-process` for
-  SDK providers)
+  SDK drivers)
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
 - [AIP-29 — CLI.md](/docs/aip-29) — sibling specialisation,
   `kind: cli`
-- [AIP-30 — PROVIDER.md](/docs/aip-30) — abstract supertype
+- [AIP-30 — DRIVER.md](/docs/aip-30) — abstract supertype
 - [AIP-31 — HTTP.md](/docs/aip-31) — sibling specialisation,
   `kind: http`
 - [AIP-32 — MCP.md](/docs/aip-32) — sibling specialisation,
   `kind: mcp`
-- [Provider family](/docs/family-provider) — index of related AIPs
+- [Driver family](/docs/family-driver) — index of related AIPs
 - [`./SDK.schema.json`](./resources/aip-33/draft) — JSON Schema validator
 - [`./ADAPTER.md`](./resources/aip-33/draft/ADAPTER.md) — implementer's guide
 - [`./EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md) — additional patterns

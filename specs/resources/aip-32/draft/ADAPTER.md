@@ -1,6 +1,6 @@
 # ADAPTER.md — implementing AIP-32 in a host runtime
 
-Implementer's guide for `kind: mcp` providers. Inherits all
+Implementer's guide for `kind: mcp` drivers. Inherits all
 [AIP-30 ADAPTER](../../../aip-30/draft/ADAPTER.md) responsibilities;
 this doc covers MCP-specific dispatch.
 
@@ -13,10 +13,10 @@ Per `server.kind`:
 | `binary` | `spawn(server.path, server.args, { stdio: 'pipe', env: { ...host_env, ...server.env } })` | Long-lived subprocess; reused across calls; killed on idle timeout or host shutdown. |
 | `npm`    | `spawn('npx', [server.package, ...server.args], { stdio: 'pipe', env })` | Same as binary. |
 | `docker` | `docker run -i --rm -e KEY=VALUE server.image server.args` | Docker container with stdin attached for stdio. |
-| `remote` | HTTP/SSE connection upgrade to `server.url` | Long-lived connection per provider; reconnect on drop with exponential backoff. |
+| `remote` | HTTP/SSE connection upgrade to `server.url` | Long-lived connection per driver; reconnect on drop with exponential backoff. |
 
 For local servers (binary/npm/docker stdio), one subprocess per
-provider per host process. Multi-tenant routing happens via
+driver per host process. Multi-tenant routing happens via
 `tools/call.arguments` — never bind tenant state at spawn time.
 
 ## MCP protocol handshake
@@ -29,8 +29,8 @@ After connection:
    `capabilities` (tools, prompts, resources).
 3. Send `notifications/initialized`.
 4. Send `tools/list` and validate each declared `metadata.mcp.tool_name`
-   in the provider's `implements[]` exists in the response.
-   Mismatches fail the provider at registration.
+   in the driver's `implements[]` exists in the response.
+   Mismatches fail the driver at registration.
 5. (Optional) Send `prompts/list` and `resources/list` for the
    declared `prompts[]` / `resources[]` registrations.
 
@@ -63,7 +63,7 @@ MCP-specific audit fields:
 
 ```json
 {
-  "type": "provider.invoked",
+  "type": "driver.invoked",
   "kind": "mcp",
   "mcp_tool_name": "read_file",
   "transport": "stdio",
@@ -77,7 +77,7 @@ MCP-specific audit fields:
 
 `packages/mcp-runtime` exposes:
 
-- `defineMcpProvider(...)` (sugar)
+- `defineMcpDriver(...)` (sugar)
 - `connectMcpServer(handle)` — spawn or connect per `server.kind` + `transport`
 - `callMcpTool(handle, toolName, args)` — wraps `tools/call`
 - `listMcpTools(handle)` — wraps `tools/list`

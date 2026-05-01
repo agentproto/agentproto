@@ -9,6 +9,6 @@ export default createTsupConfig({
   format: ["esm"],
   splitting: false,
   dts: true,
-  external: ["zod", "ai", "@agentproto/provider", "@agentproto/tool"],
+  external: ["zod", "ai", "@agentproto/driver", "@agentproto/tool"],
   noExternal: [],
 })

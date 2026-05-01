@@ -588,7 +588,7 @@ tags: [renewal, composition, subworkflow]
 The host stages declared workspace files into a per-run scratch directory before
 the workflow starts, then syncs declared outputs back at the end. The body
 reads/writes plain paths under `<inputData._workflowFsRoot>/<key>` — it never
-imports a host-specific filesystem provider.
+imports a host-specific filesystem driver.
 
 ```md
 ---

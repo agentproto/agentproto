@@ -5,7 +5,7 @@
  * `defineTool({...})` and the runtime returns a `ToolHandle` carrying
  * identity, schemas, side-effect profile, approval class, and
  * provider routing hints. Bodies live on AIP-30 PROVIDER manifests;
- * invocation goes through `@agentproto/provider`.
+ * invocation goes through `@agentproto/driver`.
  *
  * Spec: https://agentproto.sh/docs/aip-14
  */
@@ -32,8 +32,8 @@ export type {
   ToolContext,
   ToolCapabilities,
   ApprovalClass,
-  ProviderConstraints,
-  ProviderKind,
+  DriverConstraints,
+  DriverKind,
   RetryPolicy,
   ToolResult,
   ValidationResult,

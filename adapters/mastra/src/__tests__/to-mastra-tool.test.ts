@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { z } from "zod"
 import { defineTool, ToolError } from "@agentproto/tool"
-import { implementTool } from "@agentproto/provider"
+import { implementTool } from "@agentproto/driver"
 import { toMastraTool } from "../index.js"
 
 describe("toMastraTool — basic projection", () => {

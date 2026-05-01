@@ -102,7 +102,7 @@ collection-typed form so consumers get extension-friendly constraints:
 |---|---|---|
 | `signature.signer` | `RefIn<"identity">` | `operator:atlas`, `user:abc123`, `persona:atlas`, `email:jeremy@agentik.net` |
 | `signature.artifact` | `RefIn<"file">` | `local:engagements/acme/proposal.md`, `github:agentik/studio@main:CONTRIBUTING.md` |
-| `signature.evidence.target` (when applicable) | `RefIn<"file">` | typed-name evidence references no target; esign-external evidence MAY carry a `Ref<url>` to the provider envelope |
+| `signature.evidence.target` (when applicable) | `RefIn<"file">` | typed-name evidence references no target; esign-external evidence MAY carry a `Ref<url>` to the driver envelope |
 | `audit-event.actor` | `RefIn<"identity">` (nullable for system events) | same as signer |
 | `audit-event.entity` | `RefIn<"file"\|"identity">` | the artifact or principal the event is about |
 | `audit-event.anchor` (emitted by anchor sinks) | `RefIn<"anchor">` | `ots:local:engagements/.../247.ots`, `eth_tx:1:0xabc…` |

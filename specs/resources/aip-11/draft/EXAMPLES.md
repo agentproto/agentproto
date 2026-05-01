@@ -270,7 +270,7 @@ title:
   rate-limited.
 trigger:
   description:
-    The agent needs to embed N>10 texts and the embedding provider returns 429
+    The agent needs to embed N>10 texts and the embedding driver returns 429
     responses for sequential calls.
   tags: [embeddings, rate-limit, batch]
   targets:
@@ -292,13 +292,13 @@ failure_count: 0
 
 ## When this applies
 
-The indexer role is processing a corpus and the embedding provider exposes a
+The indexer role is processing a corpus and the embedding driver exposes a
 batch endpoint (typical max 96 items per call) and returns 429 on sequential
 single-item calls.
 
 ## What to do (or avoid)
 
-- Default to the batch endpoint with the provider's documented max batch size.
+- Default to the batch endpoint with the driver's documented max batch size.
 - Avoid the prior heuristic of "retry aggressively on 429" — that lesson
   optimised the wrong axis (recovery, not prevention) and silently inflated
   cost.

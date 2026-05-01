@@ -13,7 +13,7 @@ export default createTsupConfig({
     "zod",
     "@mastra/core",
     "@mastra/core/tools",
-    "@agentproto/provider",
+    "@agentproto/driver",
     "@agentproto/tool",
   ],
   noExternal: [],

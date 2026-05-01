@@ -174,7 +174,7 @@ inputsFiles:
 anything whose primary input is a binary blob too big to inline. The host stages
 `uploads/scan.png` from the workspace into `<fsRoot>/source` before the body
 runs; the body reads `path.join(inputData._workflowFsRoot, "source")` and never
-touches the workspace provider directly. Note the explicit `_workflowFsRoot`
+touches the workspace driver directly. Note the explicit `_workflowFsRoot`
 field in `inputs.properties` — when `inputsFiles` is non-empty, the manifest's
 `inputs` schema MUST allow it (the host's `defineIO` augments automatically, but
 declaring it explicitly documents the contract).
@@ -575,7 +575,7 @@ keeps agent reasoning, governance audits, and registry diff-checks honest.
 - **Pre-supplying `_workflowFsRoot` from the caller.** The host injects it; any
   value the caller pre-supplied is overwritten. Tests that try to "fake" the
   root by passing it in will silently see it replaced with the host's real
-  per-run path. Stub the host's scratch-root provider in tests instead.
+  per-run path. Stub the host's scratch-root driver in tests instead.
 - **Constructing `outputsFiles.path` from author-controlled values.** The four
   interpolation tokens (`<runId>`, `<workflowId>`, `<toolId>`, `<isoDate>`) are
   the only ones expanded. `<targetLocale>` from inputs is NOT a token — it

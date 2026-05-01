@@ -1,6 +1,6 @@
-# EXAMPLES.md — SDK provider patterns
+# EXAMPLES.md — SDK driver patterns
 
-Reference `PROVIDER.md` files for `kind: sdk`. Each loads an in-process
+Reference `DRIVER.md` files for `kind: sdk`. Each loads an in-process
 package and dispatches contracts to its named functions.
 
 ## Patterns covered
@@ -22,7 +22,7 @@ takes a single object argument that maps to the contract input.
 name: OpenAI SDK (in-process)
 id: openai-sdk
 description:
-  OpenAI SDK as in-process provider. Wraps the `openai` npm package;
+  OpenAI SDK as in-process driver. Wraps the `openai` npm package;
   implements image.create and chat.completion via direct method calls.
 version: 1.0.0
 kind: sdk
@@ -129,14 +129,14 @@ tags: [sdxl, self-hosted, pii-safe]
 ## 3. Python SDK with constructor auth (Anthropic)
 
 Python SDK loaded via pip. Constructor takes the API key; the
-provider's entry handles instantiation.
+driver's entry handles instantiation.
 
 ```md
 ---
 name: Anthropic Python SDK
 id: anthropic-py-sdk
 description:
-  Anthropic SDK as in-process Python provider. Constructor-based auth.
+  Anthropic SDK as in-process Python driver. Constructor-based auth.
   Implements chat-completion via Client.messages.create.
 version: 1.0.0
 kind: sdk
@@ -181,7 +181,7 @@ tags: [anthropic, python, sdk]
 ```
 
 The `Client.messages.create` ref tells the SDK runtime to instantiate
-`anthropic.Client(api_key=...)` once per provider load (using the
+`anthropic.Client(api_key=...)` once per driver load (using the
 resolved `ANTHROPIC_API_KEY`) and call `.messages.create(...)` per
 invocation.
 

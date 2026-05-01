@@ -9,17 +9,17 @@ The audience is a runtime author — someone exposing `defineTool` to tool
 authors. Tool authors themselves should read [`./skills/author-tool/SKILL.md`](./skills/author-tool/SKILL.md), not this file.
 
 After AIP-30 ships, TOOL.md is the **abstract contract layer**. Bodies,
-transport, install, auth, and sandbox all live on PROVIDER.md (per
+transport, install, auth, and sandbox all live on DRIVER.md (per
 AIP-30). The host implementing TOOL.md is responsible for:
 
 1. Validating contracts.
-2. Resolving providers per call.
+2. Resolving drivers per call.
 3. Validating inputs/context against the contract before dispatch.
-4. Routing the validated call to the chosen provider's `execute`.
+4. Routing the validated call to the chosen driver's `execute`.
 5. Wrapping results into the standard envelope.
 
-Provider-side responsibilities (install, auth state, sandbox enforcement,
-output parsing) belong to [`packages/provider-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/provider-runtime) and the kind-specific subtypes —
+Driver-side responsibilities (install, auth state, sandbox enforcement,
+output parsing) belong to [`packages/driver-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/driver-runtime) and the kind-specific subtypes —
 not to tool-runtime.
 
 ## Contract overview
@@ -31,13 +31,13 @@ registered:
    [`./TOOL.schema.json`](./TOOL.schema.json), surface errors. Reject
    manifests carrying removed fields (`entry`, `code`, `run`, `runner`,
    `secrets`, `network`) with a migration message pointing at AIP-30.
-2. **Bind to providers** — for each registered PROVIDER.md whose
+2. **Bind to drivers** — for each registered DRIVER.md whose
    `implements[]` references this tool, validate the binding (semver
    intersection, schema narrowing coherence, mapping coverage).
 3. **Expose the resolver** — when a caller invokes the tool, run the
-   6-phase resolver to pick a provider, then dispatch.
+   6-phase resolver to pick a driver, then dispatch.
 4. **Audit** — emit per-call audit rows recording the contract, the
-   resolved provider, and the outcome.
+   resolved driver, and the outcome.
 
 ## `defineTool` — the entry-point function
 
@@ -51,30 +51,30 @@ A host that implements `defineTool` MUST:
 
 2. **Reject `execute` on the contract.** If `defineTool` receives an
    `execute` field, surface a migration error pointing at AIP-30. Bodies
-   live on providers; the contract has no body.
+   live on drivers; the contract has no body.
 
 3. **Validate `input` against `inputSchema` before dispatch.** When the
-   resolver picks a provider and the host calls
-   `provider.execute[<toolId>]`, the input MUST already be validated.
-   The provider body MUST NOT re-validate.
+   resolver picks a driver and the host calls
+   `driver.execute[<toolId>]`, the input MUST already be validated.
+   The driver body MUST NOT re-validate.
 
 4. **Validate `context` against `contextSchema` (when declared) before
-   dispatch.** Same rule as input. Providers receive a narrowed typed
+   dispatch.** Same rule as input. Drivers receive a narrowed typed
    context.
 
 5. **Apply `schema_narrowing`** at resolver time. If the call uses an
-   input listed in the picked provider's `schema_narrowing.drop_inputs`,
+   input listed in the picked driver's `schema_narrowing.drop_inputs`,
    surface `error.code = "input_unsupported"` BEFORE dispatch — not at
-   the provider body.
+   the driver body.
 
-6. **Honour `default_provider`** in resolver Phase 5 (cost ranking).
+6. **Honour `default_driver`** in resolver Phase 5 (cost ranking).
    When no other signal differentiates candidates, prefer the contract's
    pinned default.
 
-7. **Honour `provider_constraints`** in resolver Phase 1 (candidate
-   filter). Drop providers whose `kind` is in
-   `provider_constraints.forbid` or absent from
-   `provider_constraints.require_kind` (when set).
+7. **Honour `driver_constraints`** in resolver Phase 1 (candidate
+   filter). Drop drivers whose `kind` is in
+   `driver_constraints.forbid` or absent from
+   `driver_constraints.require_kind` (when set).
 
 8. **Wrap thrown errors into the standard envelope.**
    `{ ok: false, error: { code, message, retryable?, cause? } }`.
@@ -85,12 +85,12 @@ A host that implements `defineTool` MUST:
    (`stripe:card_declined`).
 
 9. **Enforce `timeout_ms`** at the contract ceiling. If the picked
-   provider declares `timeout_override_ms` narrower than
-   `timeout_ms`, the host uses the narrower value. If a provider
+   driver declares `timeout_override_ms` narrower than
+   `timeout_ms`, the host uses the narrower value. If a driver
    tries to widen, the host MUST refuse the override.
 
 10. **Apply `retry`** at resolver-coordinated time. Retry within a
-    single dispatch is the host's job, not the provider's. Providers
+    single dispatch is the host's job, not the driver's. Drivers
     that observe transient failures MUST throw a retryable error
     (`retryable: true`); the host decides whether to retry.
 
@@ -137,7 +137,7 @@ async function dispatch(toolId, args) {
   const tool = registry.tools.get(toolId)
   if (!tool) throw new Error("tool_unknown")
 
-  // Phase 1-5: resolver picks a provider
+  // Phase 1-5: resolver picks a driver
   const resolved = await resolver.resolve(tool, args.context)
   if (!resolved.ok) {
     return { ok: false, error: { code: resolved.errorCode, message: resolved.message } }
@@ -158,22 +158,22 @@ async function dispatch(toolId, args) {
   }
 
   // Apply schema_narrowing — refuse calls using dropped inputs
-  for (const dropped of resolved.provider.implements[toolId].schema_narrowing?.drop_inputs ?? []) {
+  for (const dropped of resolved.driver.implements[toolId].schema_narrowing?.drop_inputs ?? []) {
     if (args.input[dropped] !== undefined) {
-      return { ok: false, error: { code: "input_unsupported", message: `Input '${dropped}' not supported by provider ${resolved.provider.id}` } }
+      return { ok: false, error: { code: "input_unsupported", message: `Input '${dropped}' not supported by driver ${resolved.driver.id}` } }
     }
   }
 
   // Apply mapping
-  const mapped = applyMapping(args.input, resolved.provider.implements[toolId].mapping)
+  const mapped = applyMapping(args.input, resolved.driver.implements[toolId].mapping)
 
-  // Dispatch to provider with retry + timeout enforcement
-  return await runWithRetry(tool.retry ?? resolved.provider.retry_override, async (signal) => {
+  // Dispatch to driver with retry + timeout enforcement
+  return await runWithRetry(tool.retry ?? resolved.driver.retry_override, async (signal) => {
     return await runWithTimeout(tool.timeout_ms, signal, async () => {
-      return await resolved.provider.execute[toolId]({
+      return await resolved.driver.execute[toolId]({
         input: mapped,
         context: args.context,
-        providerCtx: resolved.providerCtx,
+        driverCtx: resolved.driverCtx,
         signal,
       })
     })
@@ -182,7 +182,7 @@ async function dispatch(toolId, args) {
 ```
 
 The host owns: validation, narrowing-refusal, mapping, retry, timeout,
-and audit. The provider owns: the body. Clean split.
+and audit. The driver owns: the body. Clean split.
 
 ## Side-effect declaration enforcement
 
@@ -196,19 +196,19 @@ The `mutates` array drives:
   compensation.
 - **Audit logs**: the post-call audit row records the contract's
   `mutates` so external auditors reconstruct effect graphs without
-  re-reading provider code.
+  re-reading driver code.
 
-A tool's contract MUST declare every class of mutation any provider
-might perform. A provider whose body observably writes resources not
+A tool's contract MUST declare every class of mutation any driver
+might perform. A driver whose body observably writes resources not
 declared in the contract MUST be refused at runtime — not silently
 allowed.
 
 How hosts detect undeclared mutations:
 
-- **CLI providers**: by tracking the binary's filesystem writes (per
+- **CLI drivers**: by tracking the binary's filesystem writes (per
   the sandbox's `fs.write` allowlist) and network egress; any write
   outside `tool.mutates` is logged + refused.
-- **HTTP providers**: by inspecting outbound calls; any host-detected
+- **HTTP drivers**: by inspecting outbound calls; any host-detected
   side effect (POST/PUT/DELETE to an endpoint not in `tool.mutates`)
   is logged.
 - **SDK / builtin**: by host-static analysis at registration
@@ -220,7 +220,7 @@ permissive hosts warn loudly. Both are conformant.
 ## Errors
 
 Tools return errors out-of-band relative to `outputs`. The host wraps
-provider runtime errors into the standard envelope:
+driver runtime errors into the standard envelope:
 
 ```ts
 type ToolResult<T> =
@@ -233,17 +233,17 @@ Standard error codes hosts MUST emit:
 | Code | When |
 |---|---|
 | `input_invalid` | Caller's input failed `inputSchema` validation. `field:` names the offending input. |
-| `input_unsupported` | Caller's input includes a key listed in resolved provider's `schema_narrowing.drop_inputs`. |
-| `no_route` | No provider survived the resolver's filter chain. Surface the closest-rejected candidates in `cause`. |
+| `input_unsupported` | Caller's input includes a key listed in resolved driver's `schema_narrowing.drop_inputs`. |
+| `no_route` | No driver survived the resolver's filter chain. Surface the closest-rejected candidates in `cause`. |
 | `pinned_provider_unavailable` | `context.pinnedProvider` set but the candidate failed an earlier resolver phase. |
 | `policy_violation` | Resolver rejected this call due to workspace policy + caller pinning combination. |
 | `timeout` | Call exceeded `timeout_ms` (or narrowed `timeout_override_ms`). |
 | `cancelled` | Caller aborted via `signal`. |
 | `internal` | Unhandled host error. |
 
-Provider-level codes (`auth_required`, `rate_limited`,
+Driver-level codes (`auth_required`, `rate_limited`,
 `upstream_error`, `output_parse_failed`) propagate through unchanged
-from the provider runtime.
+from the driver runtime.
 
 ## Audit log shape
 
@@ -269,7 +269,7 @@ Hosts SHOULD emit one audit entry per tool dispatch:
 
 `input_keys` lists keys, not values (PII safety). `tool_mutates` is the
 contract-declared set; an audit consumer can join this against the
-provider's actual side effects to detect spec violations.
+driver's actual side effects to detect spec violations.
 
 ## Reference implementation
 
@@ -282,9 +282,9 @@ It exposes:
 - `dispatchTool(toolId, { input, context, signal }): Promise<ToolResult>`
 - `validateInput(toolHandle, input): ValidationResult`
 
-The dispatcher composes with `provider-runtime` (per AIP-30) for
+The dispatcher composes with `driver-runtime` (per AIP-30) for
 resolver + per-kind execution. tool-runtime's job is the contract layer
-only; provider-runtime's job is the implementation layer.
+only; driver-runtime's job is the implementation layer.
 
 ## Migration notes
 
@@ -293,15 +293,15 @@ only; provider-runtime's job is the implementation layer.
 A pre-refactor TOOL.md carried `code`, `run`, `runner`, `secrets`,
 `network`, `entry` directly. To migrate:
 
-1. Author a sibling `PROVIDER.md` per [AIP-30](/docs/aip-30) carrying
+1. Author a sibling `DRIVER.md` per [AIP-30](/docs/aip-30) carrying
    the moved fields:
-   - `code` / `run` → `provider.code` / `provider.run`
-   - `runner` → `provider.runner`
-   - `secrets` → `provider.auth.ref` (point at a sibling SECRETS.md)
-   - `network` → `provider.network.egress`
-   - `entry`'s `execute` body → `provider.execute[<toolId>]`
-2. Set `provider.implements[0].tool` to the (now-amputated) TOOL.md.
-3. Remove the moved fields from TOOL.md; add `default_provider` if
+   - `code` / `run` → `driver.code` / `driver.run`
+   - `runner` → `driver.runner`
+   - `secrets` → `driver.auth.ref` (point at a sibling SECRETS.md)
+   - `network` → `driver.network.egress`
+   - `entry`'s `execute` body → `driver.execute[<toolId>]`
+2. Set `driver.implements[0].tool` to the (now-amputated) TOOL.md.
+3. Remove the moved fields from TOOL.md; add `default_driver` if
    relevant.
 4. Validate both files against their v1 schemas.
 
@@ -313,9 +313,9 @@ rewrite.
 
 1. Add `TOOL.md` for the contract: id, schemas, mutates, approval,
    requires.
-2. Add `PROVIDER.md` for the implementation per [AIP-30](/docs/aip-30):
+2. Add `DRIVER.md` for the implementation per [AIP-30](/docs/aip-30):
    kind, auth, sandbox, implements.
-3. Re-export the existing body as the PROVIDER's
+3. Re-export the existing body as the DRIVER's
    `execute[<toolId>]`.
 4. Run both manifests through their schemas.
 

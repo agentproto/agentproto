@@ -1,7 +1,7 @@
-# EXAMPLES.md — HTTP provider patterns
+# EXAMPLES.md — HTTP driver patterns
 
-Reference `PROVIDER.md` files exemplifying common HTTP-API patterns. Each
-example is a self-contained `kind: http` provider implementing one or more
+Reference `DRIVER.md` files exemplifying common HTTP-API patterns. Each
+example is a self-contained `kind: http` driver implementing one or more
 abstract TOOL contracts.
 
 ## Patterns covered
@@ -18,7 +18,7 @@ abstract TOOL contracts.
 ## 1. API key in header (OpenAI)
 
 The most common HTTP pattern: bearer-token auth, JSON request, JSON
-response. Frontmatter-only — no provider.ts entry needed.
+response. Frontmatter-only — no driver.ts entry needed.
 
 ```md
 ---
@@ -103,7 +103,7 @@ implements:
 ## 3. OAuth bearer with refresh (GitHub)
 
 OAuth flows need a custom login URL and refresh logic. Frontmatter
-declares the surface; refresh is implemented in provider.ts.
+declares the surface; refresh is implemented in driver.ts.
 
 ```md
 ---
@@ -129,7 +129,7 @@ auth:
     completes_when:
       http: { method: GET, url: "https://api.github.com/user", expect_status: 200 }
   refresh:
-    cmd: ""                          # custom flow; see provider.ts
+    cmd: ""                          # custom flow; see driver.ts
     every: "PT1H"
   expiry:
     detect: "http_status:401"
@@ -152,13 +152,13 @@ implements:
 ---
 ```
 
-`provider.ts` exports a custom `refresh()` per AIP-30.
+`driver.ts` exports a custom `refresh()` per AIP-30.
 
 ---
 
 ## 4. Multi-tool sharing one auth (Replicate)
 
-One PROVIDER, three TOOLs sharing auth, sandbox, egress.
+One DRIVER, three TOOLs sharing auth, sandbox, egress.
 
 ```md
 ---
@@ -273,9 +273,9 @@ the `[DONE]` terminator.
 ## 6. Custom buildRequest entry (conditional fields)
 
 When `body_template` can't express the request shape (conditional
-fields, computed values), declare provider.ts.
+fields, computed values), declare driver.ts.
 
-`PROVIDER.md`:
+`DRIVER.md`:
 
 ```md
 ---
@@ -304,16 +304,16 @@ implements:
       http:
         endpoint: "/v1/chat/completions"
         method: POST
-        # body_template omitted — provider.ts handles via buildRequest
+        # body_template omitted — driver.ts handles via buildRequest
 ---
 ```
 
-`provider.ts`:
+`driver.ts`:
 
 ```ts
-import { defineProvider } from "@agentproto/provider-runtime"
+import { defineDriver } from "@agentproto/driver-runtime"
 
-export default defineProvider({
+export default defineDriver({
   id: "openai-chat-http",
   kind: "http",
   baseUrl: "https://api.openai.com",

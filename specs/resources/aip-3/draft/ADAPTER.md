@@ -95,7 +95,7 @@ to:
 - the audit log entry recording the skill activation,
 - any external catalog that lists skills (LSP-style auto-complete, marketplace,
   doc generator),
-- the LLM-facing skill description (most providers want JSON Schema for
+- the LLM-facing skill description (most drivers want JSON Schema for
   tool/skill arg shapes).
 
 If the entry's schema doesn't match the manifest's `inputs` shape after

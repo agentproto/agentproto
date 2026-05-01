@@ -88,15 +88,15 @@ Five problems compound across the registry:
    from data — it requires reading prompts and tool registries by
    hand. Product teams ship features that nobody can find.
 
-5. **Provider lock-in by accident.** Every surface that says
-   `callTool("openai-dalle", …)` hard-codes the provider. Swapping
+5. **Driver lock-in by accident.** Every surface that says
+   `callTool("openai-dalle", …)` hard-codes the driver. Swapping
    to Replicate is a refactor across the codebase, not a config
    change.
 
 `INTENT.md` gives this layer a name and a file format. It is the
 data product teams ship to expose new capabilities, the surface
 designers write copy against, the routing point ops teams swap
-providers at, and the catalog source of truth for "what can this
+drivers at, and the catalog source of truth for "what can this
 agent do".
 
 ## Design principles
@@ -106,8 +106,8 @@ agent do".
    markdown; the routing is data; the user-facing copy is i18n
    maps. Implementations live in tools.
 
-2. **Provider-agnostic by default.** An intent's `implements` block
-   may route between several tools. Provider choice is data, not
+2. **Driver-agnostic by default.** An intent's `implements` block
+   may route between several tools. Driver choice is data, not
    code. Swapping Replicate for OpenAI is editing one frontmatter
    field, not chasing call sites.
 
@@ -209,7 +209,7 @@ Markdown body following the frontmatter. Recommended sections:
 - **`## Behaviour`** — what the user sees: the form, the
   confirmation prompt, the result rendering.
 - **`## Routing`** — explanation of why the routing rules look the
-  way they do (provider quirks, cost trade-offs).
+  way they do (driver quirks, cost trade-offs).
 - **`## Examples`** — paired with `examples` frontmatter, expanded
   with screenshots/mock dialogues.
 

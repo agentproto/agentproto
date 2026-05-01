@@ -108,7 +108,7 @@ for:
 
 - the audit log,
 - catalog APIs,
-- any LLM-facing description (most providers want JSON Schema).
+- any LLM-facing description (most drivers want JSON Schema).
 
 If entry schemas don't match manifest schemas after canonicalisation, `commit()`
 MUST refuse.

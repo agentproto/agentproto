@@ -100,7 +100,7 @@ host pipes stdio over a streamable-http bridge.
 Pipeline:
 
 1. Resolve `image` (explicit or auto-picked).
-2. `provider.create(imageId, env, timeoutMs)` — provision the container.
+2. `driver.create(imageId, env, timeoutMs)` — provision the container.
 3. Upload the bundle tarball (per [AIP-26](/docs/aip-26)).
 4. If `needs.native`: `apt-get install <packages>` (Debian-based templates) at
    startup.

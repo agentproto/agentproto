@@ -696,7 +696,7 @@ instead of the company root.
   surface.
 - **The host's UI for org-chart rendering, employee directories, or HRIS-style
   views.** AIP-22 carries the data; rendering is a runtime concern.
-- **Payroll, equity, time-tracking, identity providers** — runtime concerns far
+- **Payroll, equity, time-tracking, identity drivers** — runtime concerns far
   outside the spec.
 - **Multi-tenant isolation, quotas, billing** — runtime concerns.
 

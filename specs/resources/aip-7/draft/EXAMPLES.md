@@ -730,7 +730,7 @@ invariants carry through unchanged — Acme's contract assumes them.
 ```
 
 **When to use.** Multi-tenant deployments where each tenant's contract dictates
-posture. The pattern is "inherit the floor from the provider, ratchet up to meet
+posture. The pattern is "inherit the floor from the driver, ratchet up to meet
 the customer's contract, bind the customer's [AIP-13](/docs/aip-13) and
 [AIP-10](/docs/aip-10) workspaces so audit + work + knowledge all live in the
 customer's tooling".

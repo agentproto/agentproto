@@ -2,8 +2,8 @@
 
 Reference `TOOL.md` files exemplifying common patterns. Each example is a
 self-contained **abstract contract**. Implementations live on sibling
-[AIP-30 PROVIDER.md](/docs/aip-30) files; one TOOL.md may have 0, 1, or
-many implementing providers. Authors should copy the closest pattern and
+[AIP-30 DRIVER.md](/docs/aip-30) files; one TOOL.md may have 0, 1, or
+many implementing drivers. Authors should copy the closest pattern and
 edit fields rather than draft from scratch.
 
 ## Patterns covered
@@ -13,8 +13,8 @@ edit fields rather than draft from scratch.
 3. [Always-approval (irreversible)](#3-always-approval-irreversible)
 4. [Long-running with retry baseline](#4-long-running-with-retry-baseline)
 5. [Capability-gated (governance via `requires`)](#5-capability-gated-governance-via-requires)
-6. [Provider-constrained (PII-safe self-hosted only)](#6-provider-constrained-pii-safe-self-hosted-only)
-7. [Multi-provider routable (default + fallback)](#7-multi-provider-routable-default--fallback)
+6. [Driver-constrained (PII-safe self-hosted only)](#6-driver-constrained-pii-safe-self-hosted-only)
+7. [Multi-driver routable (default + fallback)](#7-multi-driver-routable-default--fallback)
 8. [Context-injected state (`contextSchema`)](#8-context-injected-state-contextschema)
 
 ---
@@ -92,7 +92,7 @@ provides the public pricing URL. Returns normalized tier data.
 | `rate_limited`    | Upstream rate-limited us | Resolver's retry handles.                    |
 ```
 
-A sibling PROVIDER.md serving this contract:
+A sibling DRIVER.md serving this contract:
 
 ```md
 ---
@@ -235,8 +235,8 @@ tags: [destructive, workspace, admin]
 
 ## 4. Long-running with retry baseline
 
-Tools whose providers may transiently fail (network blips, rate limits)
-declare a retry policy at the contract level. Providers MAY narrow via
+Tools whose drivers may transiently fail (network blips, rate limits)
+declare a retry policy at the contract level. Drivers MAY narrow via
 their own `retry_override`.
 
 ```md
@@ -281,11 +281,11 @@ examples:
 ---
 ```
 
-This contract has multiple providers (OpenAI DALL-E, Replicate Flux, local
-SDXL); the resolver picks per call. Some providers will declare
+This contract has multiple drivers (OpenAI DALL-E, Replicate Flux, local
+SDXL); the resolver picks per call. Some drivers will declare
 `schema_narrowing.drop_inputs: [seed, negative_prompt]` because they don't
 support those — the resolver refuses calls using those inputs against the
-narrowing provider.
+narrowing driver.
 
 ---
 
@@ -336,11 +336,11 @@ call: only operators holding the `governance.signing-key` secret AND the
 
 ---
 
-## 6. Provider-constrained (PII-safe self-hosted only)
+## 6. Driver-constrained (PII-safe self-hosted only)
 
-When the contract handles sensitive data, use `provider_constraints` to
+When the contract handles sensitive data, use `driver_constraints` to
 forbid third-party HTTP / MCP servers and require self-hosted SDK or
-builtin providers.
+builtin drivers.
 
 ```md
 ---
@@ -357,7 +357,7 @@ approval: auto
 risk_level: 0
 cost_class: trivial
 timeout_ms: 5000
-provider_constraints:
+driver_constraints:
   forbid: [http, mcp]              # PII never leaves the workspace
   require_kind: [sdk, builtin]
 inputs:
@@ -387,16 +387,16 @@ tags: [pii, security, self-hosted-only]
 ---
 ```
 
-The resolver will refuse any HTTP or MCP provider declaring this tool in
+The resolver will refuse any HTTP or MCP driver declaring this tool in
 its `implements[]`. Only `kind: sdk` (in-process Microsoft Presidio
 wrapper, e.g.) or `kind: builtin` (host-native redactor) candidates pass
 Phase 1.
 
 ---
 
-## 7. Multi-provider routable (default + fallback)
+## 7. Multi-driver routable (default + fallback)
 
-The pattern that justifies the layering. One contract, many providers,
+The pattern that justifies the layering. One contract, many drivers,
 explicit default.
 
 ```md
@@ -414,7 +414,7 @@ approval: auto
 risk_level: 0
 cost_class: metered
 timeout_ms: 30000
-default_provider: anthropic-summarise-http  # cheapest
+default_driver: anthropic-summarise-http  # cheapest
 inputs:
   type: object
   properties:
@@ -435,7 +435,7 @@ tags: [productivity, llm, summarisation]
 ---
 ```
 
-Likely providers:
+Likely drivers:
 
 - `anthropic-summarise-http` (HTTP, $0.001/call, default) — Anthropic
   Sonnet, neutral style baseline.
@@ -455,7 +455,7 @@ call.
 
 Tools needing host state (governance config, db connection, tenant id)
 declare a `contextSchema` so the host validates and narrows the context
-before dispatching to the resolved provider's body.
+before dispatching to the resolved driver's body.
 
 ```md
 ---
@@ -485,7 +485,7 @@ outputs:
   required: [rows, row_count]
 tags: [database, multi-tenant, read]
 metadata:
-  contextSchema:                # contract obligation across providers
+  contextSchema:                # contract obligation across drivers
     type: object
     properties:
       tenant_id:    { type: string, pattern: "^t_[a-z0-9]{16}$" }
@@ -495,10 +495,10 @@ metadata:
 ```
 
 The host validates `args.context` against the `contextSchema` BEFORE
-dispatching. The provider receives a narrowed, typed context — no casts,
+dispatching. The driver receives a narrowed, typed context — no casts,
 no defensive re-validation. Multi-tenant routing happens at the host layer
 (deriving `tenant_id` and `db_connection` per call); the contract and the
-provider both stay tenant-agnostic.
+driver both stay tenant-agnostic.
 
 ---
 
@@ -508,17 +508,17 @@ A few things authors are tempted to do but should NOT:
 
 - **Adding `entry`, `code`, `run`, `runner`, `secrets`, or `network` to
   TOOL.md.** These fields belonged to the pre-AIP-30 bundled shape; in
-  the post-refactor world they live exclusively on PROVIDER.md.
+  the post-refactor world they live exclusively on DRIVER.md.
   Manifests carrying these fields will fail the v1 schema.
 
 - **Implementing the body inline via `execute`.** `defineTool` no longer
-  accepts an `execute` field. Bodies live on PROVIDER's `execute[<toolId>]`.
+  accepts an `execute` field. Bodies live on DRIVER's `execute[<toolId>]`.
 
-- **Provider-specific inputs in the contract schema.** If `seed` is
+- **Driver-specific inputs in the contract schema.** If `seed` is
   Replicate-only and `negative_prompt` is OpenAI-only, the contract
-  carries both as optional. Providers narrow what they don't support
+  carries both as optional. Drivers narrow what they don't support
   via `schema_narrowing.drop_inputs`. Don't fork the contract per
-  provider.
+  driver.
 
 - **`approval: auto` with non-empty `mutates`.** The schema's `allOf`
   rule rejects this combination. Use `on-mutate` or `always`.
@@ -527,7 +527,7 @@ A few things authors are tempted to do but should NOT:
   contract = breaking change = major bump (or, in pre-1.0: registry-wide
   find/replace, since we control all consumers).
 
-- **Forgetting `mutates` declarations.** A provider whose body writes
+- **Forgetting `mutates` declarations.** A driver whose body writes
   resources outside the contract's `mutates` set fails the audit-log
   consistency check. The contract must declare every class of mutation
-  any provider might perform.
+  any driver might perform.

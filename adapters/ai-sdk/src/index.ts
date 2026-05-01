@@ -4,7 +4,7 @@
  *
  * One function: {@link toAiSdkTool} takes a typed `ToolImplementation`
  * (an `(contract, body)` pair produced by
- * {@link "@agentproto/provider".implementTool}) and returns an AI SDK
+ * {@link "@agentproto/driver".implementTool}) and returns an AI SDK
  * `Tool` that drops into `streamText({ tools })`, `generateText`, or
  * any downstream consumer that speaks the AI SDK tool surface (Mastra
  * wraps it, LangChain has interop, …).
@@ -20,21 +20,21 @@ import { dynamicTool } from "ai"
 import type { Tool as AiTool, ToolCallOptions } from "ai"
 import type { ToolContext } from "@agentproto/tool"
 import type {
-  ProviderContext,
+  DriverContext,
   ToolImplementation,
-} from "@agentproto/provider"
+} from "@agentproto/driver"
 
 /**
- * Default {@link ProviderContext} used when the caller doesn't pass
+ * Default {@link DriverContext} used when the caller doesn't pass
  * one. `kind: "builtin"` reflects the typical adapter use-case
  * (in-process bodies that don't read provider secrets / sandbox
- * handles). Override via `bind.providerCtx` for non-builtin bodies.
+ * handles). Override via `bind.driverCtx` for non-builtin bodies.
  */
-const DEFAULT_PROVIDER_CTX: ProviderContext = Object.freeze({
+const DEFAULT_PROVIDER_CTX: DriverContext = Object.freeze({
   secrets: {},
   authState: "authed",
   providerId: "ai-sdk-adapter",
-  providerKind: "builtin",
+  driverKind: "builtin",
   implementsEntry: { tool: "ai-sdk-adapter", version: "0.0.0" },
 })
 
@@ -43,10 +43,10 @@ export interface ToAiSdkToolOptions<TContext extends ToolContext> {
   context: TContext
   /**
    * Optional provider context — typically only needed for non-builtin
-   * adapters that read `providerCtx.secrets` or `providerCtx.region`.
+   * adapters that read `driverCtx.secrets` or `driverCtx.region`.
    * Builtin bodies usually leave this defaulted.
    */
-  providerCtx?: ProviderContext
+  driverCtx?: DriverContext
 }
 
 /**
@@ -91,11 +91,11 @@ export function toAiSdkTool<TInput, TOutput, TContext extends ToolContext>(
       return impl.body({
         input: typedInput,
         context: bind.context,
-        providerCtx: bind.providerCtx ?? DEFAULT_PROVIDER_CTX,
+        driverCtx: bind.driverCtx ?? DEFAULT_PROVIDER_CTX,
         signal: options.abortSignal ?? new AbortController().signal,
       })
     },
   })
 }
 
-export type { ToolImplementation } from "@agentproto/provider"
+export type { ToolImplementation } from "@agentproto/driver"

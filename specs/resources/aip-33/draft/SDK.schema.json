@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentproto.sh/docs/aip-33/SDK.schema.json",
   "title": "SDK.md frontmatter — agentsdk/v1",
-  "description": "Validates the SDK-specific frontmatter of an AIP-33 PROVIDER.md (kind: sdk). Universal PROVIDER fields validate via AIP-30's schema.",
+  "description": "Validates the SDK-specific frontmatter of an AIP-33 DRIVER.md (kind: sdk). Universal PROVIDER fields validate via AIP-30's schema.",
   "type": "object",
   "additionalProperties": true,
   "required": ["kind", "package", "package_manager"],

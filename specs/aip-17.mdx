@@ -124,7 +124,7 @@ runner:
 | Value | Meaning |
 |---|---|
 | `"subprocess"` (default) | Run the body in an isolated host-local subprocess. Lightweight: shares the host kernel, isolation enforced via OS primitives (Node `--permission`, `bwrap`, etc.). Suitable for pure-language tools that don't need native deps or `child_process`. |
-| `"sandbox"` | Run the body in a real container provisioned through the host's sandbox provider (E2B, Modal, Fly Machines, …). Full Linux runtime — `child_process`, native deps, free `/tmp`, network gating enforced by the provider. Use when the body needs `npm install`, system binaries, or capabilities outside the host's permission model. |
+| `"sandbox"` | Run the body in a real container provisioned through the host's sandbox driver (E2B, Modal, Fly Machines, …). Full Linux runtime — `child_process`, native deps, free `/tmp`, network gating enforced by the driver. Use when the body needs `npm install`, system binaries, or capabilities outside the host's permission model. |
 | `"in-process"` | Run the body in the host's own process via dynamic import. Reserved for trusted, host-shipped code. The host MUST refuse `in-process` for any manifest whose source originates outside the host's trust boundary; the downgrade is silent (`→ subprocess`) and logged. |
 
 ### `runner.image`

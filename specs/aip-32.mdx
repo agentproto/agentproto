@@ -1,15 +1,15 @@
 ---
-title: "AIP-32: MCP.md — agentmcp/v1 (MCP provider specialisation)"
+title: "AIP-32: MCP.md — agentmcp/v1 (MCP driver specialisation)"
 description: >-
   A markdown + frontmatter format for declaring a Model Context Protocol
-  provider — its server reference, transport (stdio / SSE / HTTP), per-tool
+  driver — its server reference, transport (stdio / SSE / HTTP), per-tool
   MCP tool-name binding, prompts/resources composition, and lifecycle.
-  Specialises AIP-30 PROVIDER for the `kind: mcp` case. Wraps Anthropic-spec
+  Specialises AIP-30 DRIVER for the `kind: mcp` case. Wraps Anthropic-spec
   MCP servers (filesystem, github, postgres, …) as agent tools.
 aip: 32
 status: Draft
 type: Schema
-provider_kind: mcp
+driver_kind: mcp
 created: 2026-04-30
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 16, 19, 30]
@@ -21,19 +21,19 @@ discussions-to: https://github.com/agentproto/specs/discussions/32
 | Field | Value |
 |---|---|
 | AIP | 32 |
-| Title | MCP.md — agentmcp/v1 (MCP provider specialisation) |
+| Title | MCP.md — agentmcp/v1 (MCP driver specialisation) |
 | Status | Draft |
 | Type | Schema |
-| Family | [Provider](/docs/family-provider) |
-| Provider kind | `mcp` |
-| Specialises | [AIP-30 PROVIDER.md](/docs/aip-30) |
-| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (PROVIDER) |
+| Family | [Driver](/docs/family-driver) |
+| Driver kind | `mcp` |
+| Specialises | [AIP-30 DRIVER.md](/docs/aip-30) |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER) |
 | Resources | [`./resources/aip-32`](./resources/aip-32/draft) — `MCP.schema.json`, [`ADAPTER.md`](./resources/aip-32/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-32/draft/skills/author-mcp/SKILL.md) |
 
 ## Abstract
 
 `MCP.md` is the `kind: mcp` specialisation of
-[AIP-30 PROVIDER](/docs/aip-30). It packages a
+[AIP-30 DRIVER](/docs/aip-30). It packages a
 [Model Context Protocol](https://modelcontextprotocol.io) server
 integration — its server reference (binary, container, or remote
 URL), transport (stdio / SSE / HTTP), and per-tool mapping from
@@ -42,19 +42,19 @@ abstract TOOL contracts to MCP tool names.
 MCP is Anthropic's open protocol for connecting LLMs to data sources,
 tools, and prompts via a JSON-RPC-like interface. Reference servers
 exist for filesystems, git, GitHub, postgres, sqlite, Brave search,
-etc. This AIP wraps those servers as conformant providers in the
+etc. This AIP wraps those servers as conformant drivers in the
 AIP-30 supertype.
 
-The frontmatter inherits everything from PROVIDER and adds MCP-
+The frontmatter inherits everything from DRIVER and adds MCP-
 specific fields: `server`, `transport`, `mcp_tools` mapping, plus
 optional `prompts` and `resources` composition. The format pairs
-with `defineProvider({ kind: "mcp", ... })`.
+with `defineDriver({ kind: "mcp", ... })`.
 
 ## Motivation
 
 MCP is rapidly becoming the de-facto protocol for "give an LLM access
 to a tool". Anthropic ships ~15 reference servers; community servers
-proliferate. Without a shared MCP-provider format:
+proliferate. Without a shared MCP-driver format:
 
 1. **Each MCP server has its own setup story.** "Run via npx", "build
    from source", "docker pull then expose stdio" — five flavours of
@@ -68,7 +68,7 @@ proliferate. Without a shared MCP-provider format:
 
 3. **Auth state is per-server.** GitHub MCP server needs OAuth;
    filesystem MCP server needs no auth; postgres MCP server needs
-   a connection string. The PROVIDER auth shape covers all three;
+   a connection string. The DRIVER auth shape covers all three;
    without it, callers handle each separately.
 
 4. **Routing across same-purpose servers.** Multiple MCP servers may
@@ -78,19 +78,19 @@ proliferate. Without a shared MCP-provider format:
    alternatives.
 
 5. **Lifecycle.** MCP servers spawn, connect, list tools, get torn
-   down. Without a provider format, every host re-implements the
+   down. Without a driver format, every host re-implements the
    lifecycle.
 
 ## Design principles
 
 1. **Inherit, don't repeat.** Identity, auth, install, sandbox,
-   policy_tags, region all come from PROVIDER. MCP only adds what's
+   policy_tags, region all come from DRIVER. MCP only adds what's
    MCP-specific: server location, transport, tool-name mapping.
 
 2. **Server is data, not code.** `server` declares "where the MCP
    server lives" (binary path, npm package + args, docker image, or
    remote URL). The host's MCP runtime spawns / connects per the
-   declaration; provider authors write zero connection code in the
+   declaration; driver authors write zero connection code in the
    common case.
 
 3. **`mcp_tools` is the binding.** Each entry in `implements[]`
@@ -99,7 +99,7 @@ proliferate. Without a shared MCP-provider format:
    `mcp.tools/call({ name, arguments })` with the validated input.
 
 4. **Transport-agnostic at the contract layer.** stdio, SSE, and HTTP
-   transports all conform to the same MCP semantics; provider
+   transports all conform to the same MCP semantics; driver
    declares transport, host's MCP client handles dispatch.
 
 5. **Prompts and resources are first-class.** MCP exposes prompts and
@@ -116,14 +116,14 @@ proliferate. Without a shared MCP-provider format:
 
 ### File location
 
-MCP providers live in a single folder:
+MCP drivers live in a single folder:
 
 ```
-.providers/
+.drivers/
   filesystem-mcp/
-    PROVIDER.md            ← this AIP, kind: mcp
-    provider.ts            ← optional entry (custom resource handler)
-    server.json            ← MCP server config (sometimes inlined into PROVIDER.md)
+    DRIVER.md            ← this AIP, kind: mcp
+    driver.ts            ← optional entry (custom resource handler)
+    server.json            ← MCP server config (sometimes inlined into DRIVER.md)
     SECRETS.md             ← AIP-19 inventory (when auth is needed)
 ```
 
@@ -131,7 +131,7 @@ Convention: `id` ends with `-mcp`. The folder name SHOULD match `id`.
 
 ### Frontmatter
 
-Inherits all fields from [AIP-30 PROVIDER.md](/docs/aip-30) plus the
+Inherits all fields from [AIP-30 DRIVER.md](/docs/aip-30) plus the
 MCP-specific fields below.
 
 #### Required MCP-specific fields
@@ -146,7 +146,7 @@ MCP-specific fields below.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `protocol_version` | string | latest known | MCP protocol version this provider targets. v1 default tracks the latest stable MCP release. |
+| `protocol_version` | string | latest known | MCP protocol version this driver targets. v1 default tracks the latest stable MCP release. |
 | `prompts` | object[] | `[]` | MCP prompts the server exposes. Each `{ name, description, integrate_as }`. v1 supports `integrate_as: "skill_block"` (composes into AIP-3 SKILL.md) or `"raw"` (exposed verbatim). |
 | `resources` | object[] | `[]` | MCP resources the server exposes. Each `{ uri_template, description, integrate_as }`. v1 `integrate_as: "ref_kind"` registers a new AIP-27 REF kind. |
 | `connection_options` | object | `{}` | Transport-specific connection params: timeout_ms, max_retries, keepalive. |
@@ -221,10 +221,10 @@ Host connects directly; no spawn, no install.
 | Transport | Use when | Lifecycle |
 |---|---|---|
 | `stdio` | MCP server is a local subprocess (binary, npm, docker -i). | Spawn-on-first-use, keep alive across calls, terminate on host shutdown or idle timeout. |
-| `sse` | MCP server is remote, supports server-sent-events for bidirectional streaming. | HTTP connection upgrade; one connection per provider, multiplexed across calls. |
+| `sse` | MCP server is remote, supports server-sent-events for bidirectional streaming. | HTTP connection upgrade; one connection per driver, multiplexed across calls. |
 | `http` | MCP server is remote, request-response per call. | One HTTP request per `tools/call`. |
 
-Providers SHOULD prefer stdio for local servers and sse for remote
+Drivers SHOULD prefer stdio for local servers and sse for remote
 managed services with bidirectional needs.
 
 ### MCP tool mapping
@@ -263,7 +263,7 @@ The host's MCP runtime:
 ### Prompts integration (preview)
 
 When the MCP server exposes prompts (via `prompts/list`), the
-PROVIDER MAY declare integration:
+DRIVER MAY declare integration:
 
 ```yaml
 prompts:
@@ -280,7 +280,7 @@ quality; full integration with AIP-3 is on the roadmap.
 ### Resources integration (preview)
 
 When the MCP server exposes resources (via `resources/list`), the
-PROVIDER MAY declare integration:
+DRIVER MAY declare integration:
 
 ```yaml
 resources:
@@ -299,10 +299,10 @@ MCP-server-backed resources via the unified REF format. v1 preview.
 Per AIP-30. Bumping the MCP protocol version, the server source
 (npm package version major), or the transport is a major change.
 
-## The `defineProvider({ kind: "mcp", ... })` signature
+## The `defineDriver({ kind: "mcp", ... })` signature
 
 ```ts
-interface ProviderDefinition<"mcp"> extends ProviderDefinition {
+interface DriverDefinition<"mcp"> extends DriverDefinition {
   kind: "mcp"
   server: McpServer
   transport: "stdio" | "sse" | "http"
@@ -313,7 +313,7 @@ interface ProviderDefinition<"mcp"> extends ProviderDefinition {
 
   // Optional behavioural adapters.
   buildArguments?: (args: BuildArgumentsArgs) => Record<string, unknown>
-  parseToolResult?: (args: ParseToolResultArgs) => ProviderResult<unknown>
+  parseToolResult?: (args: ParseToolResultArgs) => DriverResult<unknown>
 }
 
 type McpServer =
@@ -323,13 +323,13 @@ type McpServer =
   | { kind: "remote"; url: string; auth?: McpRemoteAuth }
 ```
 
-A frontmatter-only MCP provider is valid when `argument_mapping` +
+A frontmatter-only MCP driver is valid when `argument_mapping` +
 `result_extract` cover the dispatch shape — most reference MCP servers
 fit this pattern.
 
 ## Authoring with `SKILL.md`
 
-The canonical way to *generate* an MCP `PROVIDER.md` is via the paired
+The canonical way to *generate* an MCP `DRIVER.md` is via the paired
 [author-mcp skill](./resources/aip-32/draft/skills/author-mcp/SKILL.md).
 The skill walks the agent through:
 
@@ -412,7 +412,7 @@ remote MCP server.
 
 ## Compatibility
 
-### With AIP-30 PROVIDER.md
+### With AIP-30 DRIVER.md
 
 Strict specialisation. Universal fields validate against AIP-30's
 schema; MCP-specific fields validate against AIP-32's. Hosts run both
@@ -420,7 +420,7 @@ in sequence.
 
 ### With AIP-14 TOOL.md
 
-MCP providers reference TOOL.md contracts. The contract's
+MCP drivers reference TOOL.md contracts. The contract's
 `inputSchema` is what the runtime validates; `argument_mapping`
 renames keys for the MCP server. The contract's `outputSchema` is
 what `result_extract` produces.
@@ -441,14 +441,14 @@ as new REF kinds. Other AIPs can then reference MCP resources via
 
 The reference-server registry at
 [github.com/modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers)
-provides ~15 servers. Each can be wrapped as a `kind: mcp` provider
+provides ~15 servers. Each can be wrapped as a `kind: mcp` driver
 following the patterns in EXAMPLES.md. The author-mcp skill
 templates the wrapping.
 
 ## Security considerations
 
 - **Spawned subprocess sandbox.** Stdio MCP servers spawn a
-  subprocess per provider. The PROVIDER's `network.egress` and (for
+  subprocess per driver. The DRIVER's `network.egress` and (for
   CLI-style) sandbox apply to the subprocess. Hosts MUST NOT allow
   the MCP subprocess to escape the declared sandbox.
 - **MCP tool definitions are server-supplied.** A malicious MCP
@@ -472,10 +472,10 @@ templates the wrapping.
    preview. Full integration with AIP-3 SKILL.md and AIP-27 REF.md
    needs more concrete server examples to settle.
 2. **MCP protocol versioning.** Anthropic ships breaking changes via
-   protocol version. v1 doesn't yet codify how providers express
+   protocol version. v1 doesn't yet codify how drivers express
    "supports both v1 and v2"; defer to v2 with field experience.
 3. **Multi-tenant stdio servers.** Stdio servers are subprocess-
-   per-provider; multi-tenant routing today means subprocess-per-
+   per-driver; multi-tenant routing today means subprocess-per-
    tenant. Scaling needs a connection-pool model — v2.
 4. **Streaming on stdio.** MCP supports streaming via newline-
    delimited JSON-RPC notifications; the AIP-31 streaming pattern
@@ -484,17 +484,17 @@ templates the wrapping.
 ## See also
 
 - [Model Context Protocol](https://modelcontextprotocol.io) — upstream protocol
-- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts MCP providers
+- [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts MCP drivers
   implement
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
 - [AIP-29 — CLI.md](/docs/aip-29) — sibling specialisation,
   `kind: cli`
-- [AIP-30 — PROVIDER.md](/docs/aip-30) — abstract supertype
+- [AIP-30 — DRIVER.md](/docs/aip-30) — abstract supertype
 - [AIP-31 — HTTP.md](/docs/aip-31) — sibling specialisation,
   `kind: http`
 - [AIP-33 — SDK.md](/docs/aip-33) — sibling specialisation,
   `kind: sdk`
-- [Provider family](/docs/family-provider) — index of related AIPs
+- [Driver family](/docs/family-driver) — index of related AIPs
 - [`./MCP.schema.json`](./resources/aip-32/draft) — JSON Schema validator
 - [`./ADAPTER.md`](./resources/aip-32/draft/ADAPTER.md) — implementer's guide
 - [`./EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md) — additional patterns

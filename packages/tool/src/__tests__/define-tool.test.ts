@@ -25,8 +25,8 @@ describe("defineTool — basic shape", () => {
     expect(tool.timeoutMs).toBe(30_000)
     expect(tool.mutates).toEqual([])
     expect(tool.idempotent).toBe(false)
-    expect(tool.providerConstraints.forbid).toEqual([])
-    expect(tool.providerConstraints.requireKind).toEqual([])
+    expect(tool.driverConstraints.forbid).toEqual([])
+    expect(tool.driverConstraints.requireKind).toEqual([])
   })
 
   it("defaults approval to 'on-mutate' when mutates is non-empty", () => {
@@ -81,12 +81,12 @@ describe("defineTool — basic shape", () => {
       description: "PII redaction. Self-hosted only.",
       inputSchema: z.object({ text: z.string() }),
       outputSchema: z.object({ redacted: z.string() }),
-      defaultProvider: "host-presidio-sdk",
-      providerConstraints: { forbid: ["http", "mcp"], requireKind: ["sdk", "builtin"] },
+      defaultDriver: "host-presidio-sdk",
+      driverConstraints: { forbid: ["http", "mcp"], requireKind: ["sdk", "builtin"] },
     })
-    expect(tool.defaultProvider).toBe("host-presidio-sdk")
-    expect(tool.providerConstraints.forbid).toEqual(["http", "mcp"])
-    expect(tool.providerConstraints.requireKind).toEqual(["sdk", "builtin"])
+    expect(tool.defaultDriver).toBe("host-presidio-sdk")
+    expect(tool.driverConstraints.forbid).toEqual(["http", "mcp"])
+    expect(tool.driverConstraints.requireKind).toEqual(["sdk", "builtin"])
   })
 })
 

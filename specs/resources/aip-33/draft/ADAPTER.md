@@ -1,6 +1,6 @@
 # ADAPTER.md — implementing AIP-33 in a host runtime
 
-Implementer's guide for `kind: sdk` providers. Inherits all
+Implementer's guide for `kind: sdk` drivers. Inherits all
 [AIP-30 ADAPTER](../../../aip-30/draft/ADAPTER.md) responsibilities;
 this doc covers SDK-specific dispatch.
 
@@ -18,7 +18,7 @@ Per `import_style`:
 
 The host's SDK runtime resolves function refs at registration time
 (`loadProvider`), not at first call. Refs that don't resolve fail
-the provider with `error.code = "function_ref_unresolvable"`.
+the driver with `error.code = "function_ref_unresolvable"`.
 
 For class-based refs (`Client.images.create`):
 
@@ -26,7 +26,7 @@ For class-based refs (`Client.images.create`):
 2. Instantiate `Client(...)` with constructor args derived from
    `auth.state.env` resolved secrets + optional `client_options`.
 3. Walk dot notation on the instance (`.images.create`).
-4. Cache the instance per `(provider.id, workspace.id, user.id)` for
+4. Cache the instance per `(driver.id, workspace.id, user.id)` for
    reuse across calls.
 
 ## Args templating
@@ -91,7 +91,7 @@ async generator.
 
 ## Sandbox limitations
 
-SDK providers run in the host's process. Strong process-level
+SDK drivers run in the host's process. Strong process-level
 isolation isn't available. Hosts MAY enforce capability sandboxing:
 
 - **Node.js**: `vm.createContext()` with `child_process` denied,
@@ -101,7 +101,7 @@ isolation isn't available. Hosts MAY enforce capability sandboxing:
 - **Rust/Go**: more limited; rely on policy_tags + auditing.
 
 The `network.egress` field is enforced by host network policy
-(iptables, proxy) — same enforcement as HTTP / MCP providers.
+(iptables, proxy) — same enforcement as HTTP / MCP drivers.
 
 ## Audit
 
@@ -109,7 +109,7 @@ SDK-specific audit fields:
 
 ```json
 {
-  "type": "provider.invoked",
+  "type": "driver.invoked",
   "kind": "sdk",
   "package": "openai",
   "package_version": "4.55.0",
@@ -121,19 +121,19 @@ SDK-specific audit fields:
 ```
 
 `memory_delta_mb` is best-effort — process-wide memory delta during
-the call. SDK providers MAY mask memory leaks; periodic full-process
+the call. SDK drivers MAY mask memory leaks; periodic full-process
 audits catch this.
 
 ## Reference implementation
 
 `packages/sdk-runtime` exposes:
 
-- `defineSdkProvider(...)` (sugar for `defineProvider({ kind: "sdk", ... })`)
+- `defineSdkDriver(...)` (sugar for `defineDriver({ kind: "sdk", ... })`)
 - `loadSdkPackage(handle)` — module load + function ref resolution at registration
 - `dispatchSdk(handle, toolId, args)` — unary
 - `dispatchSdkStream(handle, toolId, args)` — async iterator
 - `applyArgsTemplate(template, input, context, secrets)` — substitution
 - `extractResponse(value, jsonPath)` — JSONPath-lite
 
-The runtime composes with `provider-runtime` for the resolver and
+The runtime composes with `driver-runtime` for the resolver and
 `tool-runtime` for contract validation.

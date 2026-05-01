@@ -1,13 +1,13 @@
 ---
-title: "AIP-30: PROVIDER.md — agentprovider/v1 (abstract provider supertype)"
-description: A markdown + frontmatter format for declaring a concrete implementation of one or more agent tools — its identity, kind (cli / http / mcp / sdk / builtin), install lifecycle, auth surface, sandbox profile, and per-tool dispatch bindings. The supertype every concrete provider AIP (CLI, HTTP, MCP, SDK) specialises, with the standard `defineProvider` entry-point signature.
+title: "AIP-30: DRIVER.md — agentdriver/v1 (abstract driver supertype)"
+description: A markdown + frontmatter format for declaring a concrete implementation of one or more agent tools — its identity, kind (cli / http / mcp / sdk / builtin), install lifecycle, auth surface, sandbox profile, and per-tool dispatch bindings. The supertype every concrete driver AIP (CLI, HTTP, MCP, SDK) specialises, with the standard `defineDriver` entry-point signature.
 aip: 30
 status: Draft
 type: Schema
 created: 2026-04-30
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 16, 17, 19]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/provider-runtime
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/driver-runtime
 resources: ./resources/aip-30/draft
 discussions-to: https://github.com/agentproto/specs/discussions/30
 ---
@@ -15,26 +15,26 @@ discussions-to: https://github.com/agentproto/specs/discussions/30
 | Field | Value |
 |---|---|
 | AIP | 30 |
-| Title | PROVIDER.md — agentprovider/v1 (abstract provider supertype) |
+| Title | DRIVER.md — agentdriver/v1 (abstract driver supertype) |
 | Status | Draft |
 | Type | Schema |
-| Domain | providers.sh |
+| Domain | drivers.sh |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS) |
 | Specialised by | [AIP-29](/docs/aip-29) (CLI), AIP-31 (HTTP), AIP-32 (MCP), AIP-33 (SDK) |
-| Resources | [`./resources/aip-30`](./resources/aip-30/draft) — `PROVIDER.schema.json`, [`ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-30/draft/skills/author-provider/SKILL.md) |
+| Resources | [`./resources/aip-30`](./resources/aip-30/draft) — `DRIVER.schema.json`, [`ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-30/draft/skills/author-driver/SKILL.md) |
 
 ## Abstract
 
-`PROVIDER.md` packages a **concrete implementation of one or more
+`DRIVER.md` packages a **concrete implementation of one or more
 agent tools** — the binding that connects abstract
 [TOOL.md (AIP-14)](/docs/aip-14) contracts to a runnable backend
 (a CLI binary, an HTTP API, an MCP server, an SDK function, a
 host-builtin). It is the **abstract supertype** of every concrete
-provider AIP: [CLI.md (AIP-29)](/docs/aip-29) is `kind: cli`,
+driver AIP: [CLI.md (AIP-29)](/docs/aip-29) is `kind: cli`,
 forthcoming HTTP.md / MCP.md / SDK.md are `kind: http` / `kind: mcp`
 / `kind: sdk`.
 
-A PROVIDER carries everything *not* in the contract: identity, kind,
+A DRIVER carries everything *not* in the contract: identity, kind,
 install lifecycle, version detection, auth surface, sandbox profile,
 network policy, region, cost overrides, and the per-tool dispatch
 bindings (`implements[]`). Subtype AIPs add kind-specific fields on
@@ -42,7 +42,7 @@ top — argv templates for CLI, endpoint shapes for HTTP, server refs
 for MCP, package paths for SDK.
 
 The format is paired with a standard entry-point function,
-**`defineProvider(...)`**, whose signature any implementation in any
+**`defineDriver(...)`**, whose signature any implementation in any
 language exposes so callers, runtimes, and adapters share one
 contract.
 
@@ -64,9 +64,9 @@ policy tags, cost overrides. Same for MCP, same for SDK.
 
 The supertype is missing.
 
-Five problems compound when there's no abstract provider layer:
+Five problems compound when there's no abstract driver layer:
 
-1. **One tool, one provider only.** AIP-14 v1 conflated the contract
+1. **One tool, one driver only.** AIP-14 v1 conflated the contract
    (schemas, mutates, approval) with the implementation (entry,
    runner, code, secrets, network). One TOOL.md = one implementation.
    When the same logical operation needs multiple backends
@@ -74,7 +74,7 @@ Five problems compound when there's no abstract provider layer:
    self-hosted SDK), authors must duplicate the TOOL.md per backend,
    forking the contract and guaranteeing drift.
 
-2. **No routing layer.** Without a provider abstraction, choosing
+2. **No routing layer.** Without a driver abstraction, choosing
    "OpenAI vs Replicate vs local SDK" lives in agent prompts, in
    if/else chains, in catalog UI configs. There's no place where the
    runtime can apply policy ("workspace forbids third-party LLMs"),
@@ -89,22 +89,22 @@ Five problems compound when there's no abstract provider layer:
 
 4. **Catalog rendering is incoherent.** "What can this agent do?"
    today requires walking the tool registry and the wrapper code per
-   integration. With PROVIDER as a first-class registry citizen, the
-   answer is "tools × matching providers, filtered by capability".
+   integration. With DRIVER as a first-class registry citizen, the
+   answer is "tools × matching drivers, filtered by capability".
 
-5. **Provider swap is a refactor, not a config change.** Swapping
+5. **Driver swap is a refactor, not a config change.** Swapping
    Replicate for OpenAI on `image.create` should be editing one
    file. Today it's grep across the codebase.
 
-`PROVIDER.md` gives this layer a name and a file format.
+`DRIVER.md` gives this layer a name and a file format.
 
 ## Design principles
 
-1. **Abstract over concrete kinds, but no further.** PROVIDER is the
+1. **Abstract over concrete kinds, but no further.** DRIVER is the
    supertype only of *implementation kinds*. It is NOT a supertype of
    TOOL (which is a contract, a different layer); not a supertype of
    INTENT (UX); not a supertype of SKILL (expertise). The AIP series'
-   layering remains intact: SKILL → INTENT → TOOL → PROVIDER →
+   layering remains intact: SKILL → INTENT → TOOL → DRIVER →
    `{CLI, HTTP, MCP, SDK}`.
 
 2. **Subtype declares its own fields, supertype declares the rest.**
@@ -116,34 +116,34 @@ Five problems compound when there's no abstract provider layer:
    region, policy_tags, cost_override, `implements[]` — lives in the
    supertype.
 
-3. **Tools narrow contracts; providers narrow tools.** A TOOL declares
-   its full input schema. A PROVIDER MAY declare `schema_narrowing`
+3. **Tools narrow contracts; drivers narrow tools.** A TOOL declares
+   its full input schema. A DRIVER MAY declare `schema_narrowing`
    on its `implements[]` entries to drop optional inputs the
    particular backend doesn't support (e.g. OpenAI DALL-E doesn't
    accept `seed`; declare `schema_narrowing.drop_inputs: [seed]`).
    Widening (extra inputs the contract doesn't know) is forbidden;
    that's a different TOOL.
 
-4. **Multi-tool by design.** A single PROVIDER MAY implement multiple
+4. **Multi-tool by design.** A single DRIVER MAY implement multiple
    TOOLs — one HTTP API providing `image.create`, `image.edit`,
-   `image.variation` is one PROVIDER, not three. Auth, sandbox,
+   `image.variation` is one DRIVER, not three. Auth, sandbox,
    region, policy_tags are declared once and reused. The `execute`
    block is keyed by tool id.
 
-5. **One-tool-many-providers is the routing surface.** The inverse
+5. **One-tool-many-drivers is the routing surface.** The inverse
    is what makes the abstraction valuable: many PROVIDERs can declare
    the same TOOL in their `implements[]`. The runtime resolver picks
    one per call based on capability, policy, cost, region, and pin
-   (see [Multi-provider routing](#multi-provider-routing)).
+   (see [Multi-driver routing](#multi-driver-routing)).
 
-6. **Auth state is per-provider, not per-tool.** A single auth
+6. **Auth state is per-driver, not per-tool.** A single auth
    surface (env vars, login flow, refresh cadence, expiry signal)
-   covers every tool a provider implements. Tools don't re-declare
-   secrets bindings; they inherit from the provider's `auth.ref`.
+   covers every tool a driver implements. Tools don't re-declare
+   secrets bindings; they inherit from the driver's `auth.ref`.
 
 7. **Sandbox is the declared policy contract.** Hosts MUST enforce
    the declared `sandbox` block (network egress, fs, exec, env,
-   tty). A provider that declares `network.egress: ["api.foo.com"]`
+   tty). A driver that declares `network.egress: ["api.foo.com"]`
    and tries to dial `api.bar.com` MUST fail closed, not silently
    succeed. The supertype's sandbox is the universal subset
    (`network`); subtypes extend it (CLI adds `fs`, `exec`, `tty`).
@@ -154,9 +154,9 @@ Five problems compound when there's no abstract provider layer:
    adapters (custom login flows, output parsers), never for
    redefining identity.
 
-9. **Cold-start order: providers register, tools bind.** The runtime
-   loading order is: TOOLs → PROVIDERs → tool-to-provider binding.
-   PROVIDER load failures (missing binary, version mismatch,
+9. **Cold-start order: drivers register, tools bind.** The runtime
+   loading order is: TOOLs → PROVIDERs → tool-to-driver binding.
+   DRIVER load failures (missing binary, version mismatch,
    unauthed) don't fail the registry — they mark the candidate
    unavailable for resolver phase 2.
 
@@ -164,29 +164,29 @@ Five problems compound when there's no abstract provider layer:
 
 ### File location
 
-Providers live in a single folder:
+Drivers live in a single folder:
 
 ```
-.providers/
+.drivers/
   openai-images-http/
-    PROVIDER.md            ← this AIP (kind: http)
-    provider.ts            ← optional entry (custom transport / response parser)
+    DRIVER.md            ← this AIP (kind: http)
+    driver.ts            ← optional entry (custom transport / response parser)
     SECRETS.md             ← AIP-19 inventory
     README.md              ← optional long-form
   replicate-flux-http/
-    PROVIDER.md
-    provider.ts
+    DRIVER.md
+    driver.ts
 .cli/
   gh/
-    CLI.md                 ← AIP-29 specialisation; ALSO a PROVIDER (kind: cli)
+    CLI.md                 ← AIP-29 specialisation; ALSO a DRIVER (kind: cli)
     cli.ts
     tools/
       pr-create/TOOL.md
 ```
 
-A PROVIDER MAY live colocated with its concrete bundle (e.g.
-`.cli/gh/CLI.md` IS a `kind: cli` PROVIDER) or alone under
-`.providers/`. The folder name SHOULD match the manifest's `id`.
+A DRIVER MAY live colocated with its concrete bundle (e.g.
+`.cli/gh/CLI.md` IS a `kind: cli` DRIVER) or alone under
+`.drivers/`. The folder name SHOULD match the manifest's `id`.
 
 ### Frontmatter
 
@@ -200,7 +200,7 @@ case-sensitive.
 | `name` | string | Human-readable display name (1–80 chars). |
 | `id` | string | Machine identifier. Lowercase, digits, dashes, dots. 2–80 chars. Unique within the registry. |
 | `description` | string | One-paragraph purpose for an LLM caller. ≤2000 chars. |
-| `version` | semver string | Spec version of THIS provider. Bump on `implements[]` shape change, sandbox change, auth change. |
+| `version` | semver string | Spec version of THIS driver. Bump on `implements[]` shape change, sandbox change, auth change. |
 | `kind` | enum | `"cli"` \| `"http"` \| `"mcp"` \| `"sdk"` \| `"builtin"`. Drives the subtype-specific frontmatter validation. |
 | `implements` | object[] | ≥1 entry. Per-tool dispatch bindings. See [The implements block](#the-implements-block). |
 
@@ -220,7 +220,7 @@ case-sensitive.
 | `retry_override` | object | none | `{ max_attempts, backoff, initial_ms }` overriding contract baseline. |
 | `health_check` | object | none | Cheap probe the resolver runs to confirm reachability. `{ method: "ping" \| "exec" \| "noop", cmd?, http?, expect_exit?, every?: ISO-8601 }`. |
 | `requires` | object | `{}` | Capability requirements ([AIP-7](/docs/aip-7)). Subfields: `os: string[]`, `arch: string[]`, `min_disk_mb: int`, `min_memory_mb: int`. |
-| `examples` | object[] | `[]` | Provider-specific examples augmenting the routed tools' contract examples. |
+| `examples` | object[] | `[]` | Driver-specific examples augmenting the routed tools' contract examples. |
 | `tags` | string[] | `[]` | Free-form discovery tags. |
 | `metadata` | object | `{}` | Free-form, namespaced. `metadata.<host>.…` keys tolerated by other hosts. |
 
@@ -236,11 +236,11 @@ shape.
 | `http` | `endpoint`, `method`, `headers`, `body_template`, `response_extract`, `streaming` | AIP-31 (forthcoming) |
 | `mcp` | `server_ref`, `transport` (`stdio` / `sse` / `http`), `mcp_tool_name`, `prompts_ref` | AIP-32 (forthcoming) |
 | `sdk` | `package`, `package_manager` (`npm` / `pip` / `cargo` / …), `function_ref`, `args_template` | AIP-33 (forthcoming) |
-| `builtin` | `host_id` (the host runtime that provides this tool natively) | This AIP, § Builtin providers |
+| `builtin` | `host_id` (the host runtime that provides this tool natively) | This AIP, § Builtin drivers |
 
 #### Discouraged
 
-`provider`, `concrete`, `transport` at the universal level — these
+`driver`, `concrete`, `transport` at the universal level — these
 are subtype concerns. Authors who feel the urge to add one of these
 to the universal block are signalling a missing subtype field that
 should land via AIP revision.
@@ -249,7 +249,7 @@ should land via AIP revision.
 
 Markdown body following the frontmatter. Recommended sections:
 
-- **`## When to reach for this provider`** — what problems it
+- **`## When to reach for this driver`** — what problems it
   solves, what it doesn't, vs siblings implementing the same TOOL.
 - **`## Trade-offs`** — cost, region, latency, reliability vs other
   candidates for the same TOOL.
@@ -258,12 +258,12 @@ Markdown body following the frontmatter. Recommended sections:
 - **`## Reference`** — links to upstream docs, status pages, support
   channels.
 
-The body is informational. Providers MUST function with adapters
+The body is informational. Drivers MUST function with adapters
 that read only the frontmatter.
 
 ### The `implements` block
 
-The most important block. Declares which TOOLs this PROVIDER
+The most important block. Declares which TOOLs this DRIVER
 implements and how the call binds:
 
 ```yaml
@@ -278,7 +278,7 @@ implements:
       aspect:                             # transform (named transformer in the entry file)
         from: aspect_ratio
         transform: aspect_to_size
-    cost_override:                        # per-tool override; falls through to provider-level
+    cost_override:                        # per-tool override; falls through to driver-level
       cost_units_per_call: 4              # millicents
     metadata:                             # per-tool, kind-specific hints
       http:
@@ -287,16 +287,16 @@ implements:
     version: "^1.0.0"
 ```
 
-Each entry binds the PROVIDER to one TOOL contract. Multiple entries
-in the same PROVIDER bind multiple TOOLs (e.g. one HTTP API serving
+Each entry binds the DRIVER to one TOOL contract. Multiple entries
+in the same DRIVER bind multiple TOOLs (e.g. one HTTP API serving
 three different operations). Every entry in `implements[]` MUST have
-a corresponding `execute` body if the provider has a `defineProvider`
-entry (see [The defineProvider standard signature](#the-defineprovider-standard-signature)).
+a corresponding `execute` body if the driver has a `defineDriver`
+entry (see [The defineDriver standard signature](#the-defineprovider-standard-signature)).
 
 `schema_narrowing.drop_inputs` is the contract-narrowing safety
 valve. The runtime resolver MUST refuse to route a call that uses a
 dropped input — caller error, not silent ignore. Drift between
-contract version (`tool.version`) and what the provider actually
+contract version (`tool.version`) and what the driver actually
 supports lives here, in the open.
 
 ### The `auth` block
@@ -311,8 +311,8 @@ auth:
     paths: ["~/.config/<dir>"]       # CLI / SDK persistent state
     env:   ["FOO_TOKEN"]
   login:                             # interactive flow (when present)
-    cmd: "..."                       # CLI providers
-    url: "https://provider.com/oauth"  # HTTP / SDK providers (browser flow)
+    cmd: "..."                       # CLI drivers
+    url: "https://driver.com/oauth"  # HTTP / SDK drivers (browser flow)
     interactive: true
     requires_callback_url: false
     completes_when:
@@ -346,16 +346,16 @@ unknown ──(version_check / health_check ok)──▶ unauthed ──(login c
                                   ▲ ─────(expiry detected)───────────────────────  ┘
 ```
 
-State persistence is per `(provider.id, workspace.id, user.id)`
+State persistence is per `(driver.id, workspace.id, user.id)`
 tuple, not per-call. Hosts MUST persist state across runs.
 
-### Builtin providers
+### Builtin drivers
 
-A `kind: builtin` provider expresses "this tool is implemented
+A `kind: builtin` driver expresses "this tool is implemented
 natively by the host runtime, no external integration needed":
 
 ```yaml
-spec: agentprovider/v1
+spec: agentdriver/v1
 name: Host fs.read
 id: host-builtin-fs-read
 description: Workspace file read, host-native (no external binary or service).
@@ -369,7 +369,7 @@ metadata:
     host_id: agentik-runtime    # which host runtime provides this
 ```
 
-Builtin providers are how the runtime exposes its first-party
+Builtin drivers are how the runtime exposes its first-party
 capabilities without forcing them through CLI/HTTP/MCP wrappers.
 They have no `install` (already present), no `auth` (host-native),
 no `network` (no egress). They MAY declare `policy_tags` and
@@ -377,29 +377,29 @@ no `network` (no egress). They MAY declare `policy_tags` and
 
 ### Stable identity
 
-`id` + `version` together form the provider's stable identity. Two
-providers with the same `id` but different major `version` values
+`id` + `version` together form the driver's stable identity. Two
+drivers with the same `id` but different major `version` values
 MUST be treated as distinct. Caches, audit logs, and tool
 registrations key on `id@major`.
 
-`version` here is the **manifest** version (provider config). For
-CLI/SDK providers, the **binary** version is covered separately by
+`version` here is the **manifest** version (driver config). For
+CLI/SDK drivers, the **binary** version is covered separately by
 `version_check.range`. Bumping `version_check.range` to support a
-new gh major SHOULD bump the provider major, since tools written
+new gh major SHOULD bump the driver major, since tools written
 for the old binary range may break.
 
-When a provider's `implements[].schema_narrowing` changes (a tool
-gains or loses a supported optional input), the provider MUST bump
+When a driver's `implements[].schema_narrowing` changes (a tool
+gains or loses a supported optional input), the driver MUST bump
 its major version. The schema validator enforces this via diff
 against the previously-registered version.
 
-## The `defineProvider` standard signature
+## The `defineDriver` standard signature
 
-Every implementation that consumes `PROVIDER.md` and ships
-behavioural adapters MUST expose a function named **`defineProvider`**
+Every implementation that consumes `DRIVER.md` and ships
+behavioural adapters MUST expose a function named **`defineDriver`**
 whose signature matches the contract below.
 
-Most PROVIDER.md files are frontmatter-only and don't need an
+Most DRIVER.md files are frontmatter-only and don't need an
 entry — the host's reference adapter handles standard CLI/HTTP/MCP/
 SDK flows generically. An entry is needed when:
 
@@ -413,9 +413,9 @@ SDK flows generically. An entry is needed when:
 ### Signature (TypeScript notation, normative)
 
 ```ts
-defineProvider(definition: ProviderDefinition): ProviderHandle
+defineDriver(definition: DriverDefinition): DriverHandle
 
-interface ProviderDefinition {
+interface DriverDefinition {
   // Identity — mirrors the manifest fields with the same names.
   id:           string
   name:         string
@@ -423,7 +423,7 @@ interface ProviderDefinition {
   version?:     string
   kind:         "cli" | "http" | "mcp" | "sdk" | "builtin"
 
-  // What contracts this provider satisfies (≥1 entry).
+  // What contracts this driver satisfies (≥1 entry).
   implements:   ImplementsEntry[]
 
   // Universal blocks (subset of frontmatter).
@@ -460,14 +460,14 @@ interface ExecuteArgs {
   input:       unknown
   /** Per-call context — when the TOOL declares contextSchema, host validates against it before dispatch. */
   context:     Record<string, unknown>
-  /** Resolved provider state — auth, secrets, sandbox handle, region, signal. */
-  providerCtx: ProviderContext
+  /** Resolved driver state — auth, secrets, sandbox handle, region, signal. */
+  driverCtx: DriverContext
   /** Caller-set abort signal. MUST be honoured. */
   signal:      AbortSignal
 }
 
 interface LoginArgs {
-  context: ProviderContext
+  context: DriverContext
   signal:  AbortSignal
 }
 
@@ -476,7 +476,7 @@ type LoginResult =
   | { ok: false; reason: "user_cancelled" | "callback_failed" | "upstream_error"; message?: string }
 
 interface RefreshArgs {
-  context: ProviderContext
+  context: DriverContext
   signal:  AbortSignal
 }
 
@@ -500,10 +500,10 @@ interface ParseOutputResult {
 
 ### Conformance rules
 
-1. **One canonical name.** The exported name MUST be `defineProvider`.
+1. **One canonical name.** The exported name MUST be `defineDriver`.
    Implementations MAY also re-export under host-idiomatic aliases
-   (`createProvider`, `provider`, `defineCli`, `defineHttp`) — the
-   canonical name is what `PROVIDER.md` adapters reference.
+   (`createProvider`, `driver`, `defineCli`, `defineHttp`) — the
+   canonical name is what `DRIVER.md` adapters reference.
 
 2. **Frontmatter is the source of truth.** When the entry exports
    conflicting values for a field declared in frontmatter, the
@@ -512,22 +512,22 @@ interface ParseOutputResult {
 
 3. **`execute` is keyed by tool id.** Every entry in
    `implements[]` MUST have a corresponding key in the `execute`
-   record. Hosts MUST refuse to register providers whose `execute`
+   record. Hosts MUST refuse to register drivers whose `execute`
    keys don't match the `implements[]` set.
 
 4. **Input validation happens at the contract layer.** The host
    validates `args.input` against the TOOL's `inputSchema` (and
    `contextSchema`, when declared) BEFORE calling
-   `execute[<toolId>]`. Provider bodies MUST NOT re-validate;
+   `execute[<toolId>]`. Driver bodies MUST NOT re-validate;
    they MUST trust the host narrowed the inputs.
 
 5. **`execute` honours `signal`.** Long-running calls
    (LLM streaming, slow CLI invocations) MUST observe the abort
    signal and stop promptly when the caller cancels.
 
-6. **Sandbox is enforced by the host, declared by the provider.**
-   The provider's `network`/`sandbox` block is policy; the host
-   enforces. A `defineProvider` body MUST NOT subvert host
+6. **Sandbox is enforced by the host, declared by the driver.**
+   The driver's `network`/`sandbox` block is policy; the host
+   enforces. A `defineDriver` body MUST NOT subvert host
    enforcement (e.g. by spawning child processes when the CLI
    subtype declares `exec.allow: false`).
 
@@ -541,77 +541,77 @@ interface ParseOutputResult {
    the network or filesystem; that's the runner's job.
 
 9. **No I/O at module load.** The module containing
-   `defineProvider` MUST be safely importable as a side-effect-free
+   `defineDriver` MUST be safely importable as a side-effect-free
    unit. All I/O happens inside `execute` / `login` / `refresh` /
    `parseOutput`.
 
 10. **Schema narrowing is non-extensive.** `schema_narrowing` MAY
     drop optional contract inputs; MUST NOT add inputs the contract
-    doesn't know about. To add provider-specific knobs, use
+    doesn't know about. To add driver-specific knobs, use
     `metadata.<kind>.…` in the implements entry.
 
 ### Implementer's guide
 
-For step-by-step guidance on building a `defineProvider`-conformant
+For step-by-step guidance on building a `defineDriver`-conformant
 implementation, see
 [`./resources/aip-30/draft/ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md).
 The AIP only defines the contract; the resource doc walks an
 implementer through the projection.
 
-## Multi-provider routing
+## Multi-driver routing
 
-When a TOOL has N providers, the resolver picks one per call. The
-algorithm runs in 6 phases — see [AIP-14 § Provider resolution](/docs/aip-14)
+When a TOOL has N drivers, the resolver picks one per call. The
+algorithm runs in 6 phases — see [AIP-14 § Driver resolution](/docs/aip-14)
 for the canonical description (TOOL is the layer that owns the
-resolver contract; PROVIDER is what the resolver picks between).
+resolver contract; DRIVER is what the resolver picks between).
 
 Briefly:
 
 ```
 Phase 1 — Candidate set
-  candidates = providers implementing(tool.id, tool.version)
-  filter by tool.provider_constraints.forbid / require_kind
+  candidates = drivers implementing(tool.id, tool.version)
+  filter by tool.driver_constraints.forbid / require_kind
   filter by schema_narrowing compat with call inputs
 
 Phase 2 — Capability gate
-  drop providers with failed install / version_check
-  drop providers in unauthed state (unless login-only invocation)
-  drop providers with stale failed health_check
+  drop drivers with failed install / version_check
+  drop drivers in unauthed state (unless login-only invocation)
+  drop drivers with stale failed health_check
 
 Phase 3 — Policy filter
-  drop providers violating workspace policy_tags allowlist
-  drop providers without matching region (data residency)
+  drop drivers violating workspace policy_tags allowlist
+  drop drivers without matching region (data residency)
 
 Phase 4 — Pin override
   if context.pinnedProvider: return matching candidate or pinned_provider_unavailable
 
 Phase 5 — Cost / preference rank
-  prefer tool.default_provider if surviving
+  prefer tool.default_driver if surviving
   else rank by cost_units_per_call → kind preference (builtin > sdk > http > mcp > cli)
        → most-recent health_check pass → lex(id)
 
 Phase 6 — Bind
-  return { provider, mappedInput via implements[].mapping, providerCtx }
+  return { driver, mappedInput via implements[].mapping, driverCtx }
 ```
 
 The `kind` preference order (`builtin > sdk > http > mcp > cli`) is
 heuristic, expressing "cheaper to dispatch and more reliable":
 builtin is always available, SDKs are in-process, HTTP is a network
 hop, MCP is a network hop with extra protocol overhead, CLI is a
-subprocess. Authors override per-tool with `default_provider` or
+subprocess. Authors override per-tool with `default_driver` or
 per-call with `context.pinnedProvider`.
 
 ## Authoring with `SKILL.md`
 
-The canonical way to *generate* a `PROVIDER.md` is via a paired
+The canonical way to *generate* a `DRIVER.md` is via a paired
 [SKILL.md](/docs/aip-3) — distributed at
-[`./resources/aip-30/draft/skills/author-provider/SKILL.md`](./resources/aip-30/draft/skills/author-provider/SKILL.md) —
-that an agent loads when asked to wrap a backend as a provider. The
+[`./resources/aip-30/draft/skills/author-driver/SKILL.md`](./resources/aip-30/draft/skills/author-driver/SKILL.md) —
+that an agent loads when asked to wrap a backend as a driver. The
 skill walks the agent through:
 
 1. Identify the **kind** (`cli` / `http` / `mcp` / `sdk` /
    `builtin`) and the corresponding subtype AIP.
-2. Identify **which TOOLs the provider implements**. For each: pick
+2. Identify **which TOOLs the driver implements**. For each: pick
    from existing TOOL.md, scaffold a new TOOL.md via the
    [AIP-14 author-tool skill](/docs/aip-14#authoring-with-skill-md),
    or declare schema-narrowing for partial support.
@@ -624,10 +624,10 @@ skill walks the agent through:
 6. Declare **`implements[]`** with mappings + per-tool overrides.
 7. Add **`region`** + **`policy_tags`** if relevant.
 8. Validate against
-   [`./resources/aip-30/draft/PROVIDER.schema.json`](./resources/aip-30/draft).
+   [`./resources/aip-30/draft/DRIVER.schema.json`](./resources/aip-30/draft).
 
 The agent MAY install the skill, follow the steps, and emit the
-final `PROVIDER.md` (and optional `provider.ts`) without further
+final `DRIVER.md` (and optional `driver.ts`) without further
 instruction.
 
 ## Example
@@ -692,12 +692,12 @@ examples:
   - { goal: "edit existing image with mask", note: "image.edit tool" }
 ---
 
-## When to reach for this provider
+## When to reach for this driver
 
 Use OpenAI for general image generation when DALL-E quality
 suffices and `policy_tags` allow third-party LLMs. Prefer the
-`replicate-flux-http` provider for photorealistic style (better on
-that benchmark) or the `gemini-imagen-http` provider for stylised
+`replicate-flux-http` driver for photorealistic style (better on
+that benchmark) or the `gemini-imagen-http` driver for stylised
 art (cheaper, comparable quality).
 
 ## Trade-offs
@@ -706,7 +706,7 @@ art (cheaper, comparable quality).
   Flux is $0.025; Stable Diffusion XL self-hosted is $0.005 +
   hardware amortisation.
 - **Region**: US data residency only. Workspaces tagged
-  `eu-data-residency` MUST exclude this provider.
+  `eu-data-residency` MUST exclude this driver.
 - **Latency**: ~3–8s for 1024×1024. SDXL local is faster on warm
   GPU; Flux is comparable.
 - **Reliability**: very high (OpenAI's status is the floor).
@@ -716,58 +716,58 @@ art (cheaper, comparable quality).
 - `seed` and `negative_prompt` not supported — declared in
   `schema_narrowing.drop_inputs`. Calls using these inputs will be
   refused by the resolver, not silently ignored.
-- Rate limit: 50 RPM on the standard tier. Provider configures
+- Rate limit: 50 RPM on the standard tier. Driver configures
   retry with exponential backoff; callers should NOT add their own.
 - Expiry detection on `http_status:401`. After detected expiry,
   state transitions to `unauthed`; the host surfaces the login
-  flow (re-bind the API key, this provider doesn't OAuth).
+  flow (re-bind the API key, this driver doesn't OAuth).
 ```
 
 ## Compatibility
 
 ### With AIP-14 TOOL.md (revised)
 
-PROVIDER.md slots in below the abstract TOOL.md. The TOOL no longer
+DRIVER.md slots in below the abstract TOOL.md. The TOOL no longer
 carries `code`/`run`/`runner`/`secrets`/`network` (those moved
-here). A TOOL referencing this PROVIDER's `implements[]` entry sees
+here). A TOOL referencing this DRIVER's `implements[]` entry sees
 its inputs validated, its mutates respected, its approval enforced —
 same contract as before, just with the implementation hosted here.
 
 ### With AIP-29 CLI.md
 
-CLI.md is a `kind: cli` specialisation of PROVIDER. Its
+CLI.md is a `kind: cli` specialisation of DRIVER. Its
 `bin`/`bin_args`/`sandbox.fs/exec/tty`/`output` blocks live in the
 CLI specialisation; everything else (install, version_check, auth,
-runner, network, implements) lives at the PROVIDER level. The
-existing AIP-29 spec adds a `provider_kind: cli` frontmatter
+runner, network, implements) lives at the DRIVER level. The
+existing AIP-29 spec adds a `driver_kind: cli` frontmatter
 declaration to make the relationship explicit.
 
-`defineCli()` survives as thin sugar over `defineProvider({ kind: "cli", ... })`.
+`defineCli()` survives as thin sugar over `defineDriver({ kind: "cli", ... })`.
 
 ### With AIP-19 SECRETS.md
 
-The provider's `auth.ref` points at a `SECRETS.md` listing the
-provider's required env-var bindings. Tools no longer carry a
-`secrets:` block — they inherit from the resolved provider.
+The driver's `auth.ref` points at a `SECRETS.md` listing the
+driver's required env-var bindings. Tools no longer carry a
+`secrets:` block — they inherit from the resolved driver.
 
 ### With AIP-17 RUNNER.md
 
-Provider's `runner` block (per AIP-17) declares the process boundary
-shared across every tool the provider implements. CLI providers
-typically declare `subprocess`; future containerised providers
+Driver's `runner` block (per AIP-17) declares the process boundary
+shared across every tool the driver implements. CLI drivers
+typically declare `subprocess`; future containerised drivers
 declare `docker`/`firecracker`.
 
 ### With AIP-28 INTENT.md
 
-INTENT routes to TOOL (abstract). The runtime resolves provider per
-call. INTENT.md doesn't reference providers directly — its
-`implements:` block points at TOOLs. Direct provider pinning
+INTENT routes to TOOL (abstract). The runtime resolves driver per
+call. INTENT.md doesn't reference drivers directly — its
+`implements:` block points at TOOLs. Direct driver pinning
 happens at call time via `context.pinnedProvider`, not at intent
 authoring time (escape hatch only).
 
 ## Security considerations
 
-`PROVIDER.md` is **declarative**: a malicious manifest can lie about
+`DRIVER.md` is **declarative**: a malicious manifest can lie about
 its `network`, `sandbox`, `policy_tags`, or `auth`. Hosts MUST
 treat the manifest as untrusted input until verified — minimum:
 
@@ -776,7 +776,7 @@ treat the manifest as untrusted input until verified — minimum:
 - Validate the binary's actual version against `version_check.range`
   AFTER install, BEFORE invocation.
 - Enforce the declared sandbox at the OS / network level. A
-  provider that declares `network.egress: ["api.foo.com"]` and
+  driver that declares `network.egress: ["api.foo.com"]` and
   attempts to dial `api.bar.com` MUST fail closed.
 
 Browser-callback login flows (`auth.login.requires_callback_url:
@@ -786,11 +786,11 @@ origins.
 
 `policy_tags` are declarative. Hosts MUST enforce policy filters
 (workspace allowlists, region constraints) against them; they MUST
-NOT trust the provider's self-tagging without verification at
+NOT trust the driver's self-tagging without verification at
 registration time.
 
 `implements[].schema_narrowing` is a security-relevant contract: a
-provider that drops the `idempotency_key` input from a payments
+driver that drops the `idempotency_key` input from a payments
 TOOL silently turns retry-safe calls into double-charge
 opportunities. Reviewers MUST read narrowing diffs as carefully as
 schema diffs.
@@ -800,24 +800,24 @@ schema diffs.
 These remain open until enough subtype implementations ship.
 
 1. **Streaming and progressive outputs.** v1 contracts are unary
-   in/out. Providers that natively stream (HTTP SSE, gRPC bidi,
+   in/out. Drivers that natively stream (HTTP SSE, gRPC bidi,
    MCP `notifications/progress`) need a v2 mechanism. Candidate:
    `streaming: { in?: false, out?: "events" | "tokens" | "partials" }`
    on `implements[]` entries, plus an `executeStream` body in
-   `defineProvider`. Defer to AIP-30 v2.
+   `defineDriver`. Defer to AIP-30 v2.
 
-2. **Multi-account auth (one provider, two accounts).** Today's
-   auth state is per `(provider.id, workspace.id, user.id)`. When
+2. **Multi-account auth (one driver, two accounts).** Today's
+   auth state is per `(driver.id, workspace.id, user.id)`. When
    a user has two OpenAI accounts (personal + workplace), the
    resolver can't distinguish; workaround is registering two
-   PROVIDER.md files (`openai-personal-http`, `openai-work-http`).
+   DRIVER.md files (`openai-personal-http`, `openai-work-http`).
    v2 candidate: `auth.accounts: object[]` + per-call account
    selection. Document workaround now, formalise later.
 
 3. **Per-call cost variability.** `cost_units_per_call` assumes a
-   fixed cost. Providers whose cost varies with input size (LLM
+   fixed cost. Drivers whose cost varies with input size (LLM
    token counts, ffmpeg duration) need a function. Candidate:
-   `cost_estimate: (input) => units` in `defineProvider`. Defer
+   `cost_estimate: (input) => units` in `defineDriver`. Defer
    to v2.
 
 4. **Health-check sufficiency.** A 200 from `/v1/models` doesn't
@@ -825,34 +825,34 @@ These remain open until enough subtype implementations ship.
    checks? Synthetic-call canaries? Defer to v2 with
    field-experience input.
 
-5. **Cross-kind composition.** A provider that's "CLI on macOS,
-   Docker on Linux" — single PROVIDER.md with conditional kind, or
-   two PROVIDER.md files with `requires.os` filtering? v1 prefers
+5. **Cross-kind composition.** A driver that's "CLI on macOS,
+   Docker on Linux" — single DRIVER.md with conditional kind, or
+   two DRIVER.md files with `requires.os` filtering? v1 prefers
    the latter (simpler); v2 may revisit.
 
 ## See also
 
-- [AIP-3 — SKILL.md](/docs/aip-3) — skills MAY require providers as
+- [AIP-3 — SKILL.md](/docs/aip-3) — skills MAY require drivers as
   capabilities (indirectly via tools)
 - [AIP-7 — governance](/docs/aip-7) — sandbox + approval gating
-  enforced against the resolved provider
+  enforced against the resolved driver
 - [AIP-14 — TOOL.md](/docs/aip-14) — abstract contracts that
-  providers implement; resolver lives in TOOL's runtime
+  drivers implement; resolver lives in TOOL's runtime
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — orchestration; per-step
-  provider resolution
+  driver resolution
 - [AIP-16 — IO.md](/docs/aip-16) — input/output blocks shared
   across the layering
 - [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary block,
-  declared on PROVIDER
+  declared on DRIVER
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
-  referenced from PROVIDER's `auth.ref`
+  referenced from DRIVER's `auth.ref`
 - [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above
-  TOOL; doesn't touch providers directly
+  TOOL; doesn't touch drivers directly
 - [AIP-29 — CLI.md](/docs/aip-29) — `kind: cli` specialisation of
   this AIP
 - AIP-31 — HTTP.md — `kind: http` specialisation (forthcoming)
 - AIP-32 — MCP.md — `kind: mcp` specialisation (forthcoming)
 - AIP-33 — SDK.md — `kind: sdk` specialisation (forthcoming)
-- [`./PROVIDER.schema.json`](./resources/aip-30/draft) — JSON Schema validator
+- [`./DRIVER.schema.json`](./resources/aip-30/draft) — JSON Schema validator
 - [`./ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md) — additional PROVIDER.md examples
+- [`./EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md) — additional DRIVER.md examples

@@ -49,7 +49,7 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@agentproto/provider": "workspace:*",
+    "@agentproto/driver": "workspace:*",
     "@agentproto/tool": "workspace:*"
   },
   "peerDependencies": {
