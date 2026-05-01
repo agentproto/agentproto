@@ -24,11 +24,20 @@ jobs:
           set -e
           fail=0
           for f in specs/aip-*.mdx; do
-            for key in aip title author status type created; do
+            # Required on every spec.
+            for key in aip title status type created; do
               if ! grep -qE "^${key}:" "$f"; then
                 echo "::error file=$f::missing frontmatter key '$key'"
                 fail=1
               fi
             done
+            # Authorship: either a single `author:` (own work), or both
+            # `spec-author:` + `aip-editor:` (external spec adapted into AIP).
+            if ! grep -qE "^author:" "$f"; then
+              if ! { grep -qE "^spec-author:" "$f" && grep -qE "^aip-editor:" "$f"; }; then
+                echo "::error file=$f::missing 'author' (or 'spec-author' + 'aip-editor' pair)"
+                fail=1
+              fi
+            fi
           done
           exit $fail
