@@ -2,7 +2,7 @@
 
 **Open numbered standards for the AI-agent ecosystem. Filesystem-first; markdown is the program.**
 
-AIP (Agent Improvement Proposal) specifications. Like BIPs, EIPs, RFCs — but for agents.
+**AIP** = **A**gentproto **I**mprovement **P**roposal — the project is **agentproto** (slug; human-readable name *Agent Protocol*). Same model as BIPs (Bitcoin), EIPs (Ethereum), PEPs (Python), but for agents.
 
 > **Status: 0.1.0-alpha.** Specs are stabilising; expect minor breaking changes between alpha releases.
 
