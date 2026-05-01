@@ -8,7 +8,8 @@ created: 2026-04-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
 resources: ./resources/aip-25/draft
-discussions-to: https://github.com/agentproto/specs/discussions/25
+discussions-to: https://github.com/agentproto/agentproto/discussions/25
+layer: identity
 ---
 
 | Field | Value |
@@ -421,7 +422,7 @@ persona is rebound to a different identity, the face stays and the
 substance changes.
 
 **The DB mapping.** The existing `personas` table in
-[`packages/core/src/domain/persona/persona.columns.ts`](https://github.com/agentik/agentik-studio/tree/dev/packages/core/src/domain/persona/persona.columns.ts)
+`packages/core/src/domain/persona/persona.columns.ts`
 is **a subset** of AIP-25. Today it carries `name`, `description`,
 `prompt`, `slug`, `avatar`, ownership flags. AIP-25 elevates that
 shape with `backstory`, `voice`, `boundaries`, `relationships`, and
@@ -520,7 +521,7 @@ AIP. The convergence is deliberate.
 ## Reference Implementation
 
 The starting point is the existing persona DB schema:
-[`packages/core/src/domain/persona/persona.columns.ts`](https://github.com/agentik/agentik-studio/tree/dev/packages/core/src/domain/persona/persona.columns.ts)
+`packages/core/src/domain/persona/persona.columns.ts`
 — `name`, `description`, `prompt`, `slug`, `avatar`, ownership
 flags. The schema is intentionally light. AIP-25 elevates that
 shape with the structured fields the live spec requires

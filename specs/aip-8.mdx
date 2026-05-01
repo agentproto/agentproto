@@ -7,8 +7,9 @@ type: Core
 created: 2026-04-26
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 6, 7]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agencies
-discussions-to: https://github.com/agentproto/specs/discussions/8
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/agencies/core
+discussions-to: https://github.com/agentproto/agentproto/discussions/8
+layer: coordination
 ---
 
 | Field | Value |
@@ -19,7 +20,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/8
 | Type | Core |
 | Domain | agencies.sh |
 | Requires | [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7) |
-| Reference Impl | [`packages/agencies`](https://github.com/agentik/agentik-studio/tree/dev/packages/agencies) |
+| Reference Impl | [`packages/agencies/core`](https://github.com/agentproto/ts/tree/main/packages/agencies/core) |
 
 > **⚠ Deprecation notice.** This AIP defines `agentagencies/v1` with
 > 11 hardcoded doctypes. It is being superseded by [AIP-21](/docs/aip-21)
@@ -56,7 +57,7 @@ This is the keystone of the agency-protocol stack: AIP-6 describes
 ## Specification
 
 > Full normative text lives in
-> [`packages/agencies/core/AGENTAGENCIES.md`](https://github.com/agentik/agentik-studio/blob/dev/packages/agencies/core/AGENTAGENCIES.md)
+> [`packages/agencies/core/AGENTAGENCIES.md`](https://github.com/agentproto/ts/blob/main/packages/agencies/core/AGENTAGENCIES.md)
 > with per-doctype Zod schemas at `src/spec/doctypes/`. AIP-8 will
 > absorb that text in full as part of moving Draft → Review.
 
@@ -91,9 +92,9 @@ over orchestrator-first.*
 
 ## Reference Implementation
 
-[`packages/agencies/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/agencies) —
+[`packages/agencies/core`](https://github.com/agentproto/ts/tree/main/packages/agencies/core) —
 spec and Zod schemas. The companion adapter
-[`packages/agencies/adapters/mastra`](https://github.com/agentik/agentik-studio/tree/dev/packages/agencies/adapters/mastra)
+[`packages/agencies/mastra`](https://github.com/agentproto/ts/tree/main/packages/agencies/mastra)
 projects an `agentagencies/v1` package into a Mastra runtime.
 
 ## Backwards Compatibility

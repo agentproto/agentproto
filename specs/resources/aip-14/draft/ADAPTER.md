@@ -19,7 +19,7 @@ AIP-30). The host implementing TOOL.md is responsible for:
 5. Wrapping results into the standard envelope.
 
 Driver-side responsibilities (install, auth state, sandbox enforcement,
-output parsing) belong to [`packages/driver-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/driver-runtime) and the kind-specific subtypes —
+output parsing) belong to [`packages/driver/core`](https://github.com/agentproto/ts/tree/main/packages/driver/core) and the kind-specific subtypes —
 not to tool-runtime.
 
 ## Contract overview
@@ -274,7 +274,7 @@ driver's actual side effects to detect spec violations.
 ## Reference implementation
 
 The canonical TypeScript implementation lives at
-[`packages/tool-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/tool-runtime).
+[`packages/tool`](https://github.com/agentproto/ts/tree/main/packages/tool).
 It exposes:
 
 - `defineTool(definition: ToolDefinition): ToolHandle`

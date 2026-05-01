@@ -7,8 +7,9 @@ type: Schema
 created: 2026-04-27
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/wiki
-discussions-to: https://github.com/agentproto/specs/discussions/10
+ref-impl: TBD
+discussions-to: https://github.com/agentproto/agentproto/discussions/10
+layer: memory
 ---
 
 | Field | Value |
@@ -21,7 +22,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/10
 | Doctypes | `knowledge.entry/v1` (curated), `knowledge.source/v1` (immutable), `knowledge.workspace/v1` (manifest + view) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators) |
-| Reference Impl | [`packages/agent-framework/src/wiki`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/wiki) |
+| Reference Impl | TBD |
 
 ## Abstract
 
@@ -480,7 +481,7 @@ asymmetric merge surface. One doctype with `extends:` collapses the two
 into a single mental model: a workspace IS its own view of itself, and
 every view IS a workspace bound to a different consumer. The same
 schema validates both, the same merge algorithm applies recursively,
-and the same authoring skill ([`./resources/aip-10/draft/skills/author-knowledge/SKILL.md`](https://github.com/agentik/agentik-studio/blob/dev/apps/agentik/sites/content/docs/agentproto/resources/aip-10/draft/skills/author-knowledge/SKILL.md))
+and the same authoring skill (`./resources/aip-10/draft/skills/author-knowledge/SKILL.md`)
 walks an agent through both flows.
 
 **Why composition over inheritance hierarchies.** A wiki could ship a
@@ -523,7 +524,7 @@ for partial-availability over hard-fail.
 
 ## Reference Implementation
 
-[`packages/agent-framework/src/wiki`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/wiki) —
+`packages/agent-framework/src/wiki` —
 parser, ingest pipeline, lint pass, and BM25 retrieval. Used by Guilde
 (per-guild knowledge base, Librarian operator) and Simone (per-user
 personal codex, written by the Council standing pass).

@@ -7,8 +7,9 @@ type: Core
 created: 2026-04-26
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 27]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/governance/core
-discussions-to: https://github.com/agentproto/specs/discussions/7
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/governance/core
+discussions-to: https://github.com/agentproto/agentproto/discussions/7
+layer: coordination
 ---
 
 | Field | Value |
@@ -20,7 +21,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/7
 | Domain | governance.sh |
 | Doctypes | `signature` (approval event), `audit-event` (append-only log line), `policy` (declarative rule), `governance.workspace/v1` (manifest + view) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-13](/docs/aip-13) (work) |
-| Reference Impl | [`packages/governance/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/governance/core) |
+| Reference Impl | [`packages/governance/core`](https://github.com/agentproto/ts/tree/main/packages/governance/core) |
 
 ## Abstract
 
@@ -70,7 +71,7 @@ the governance posture.
 ## Specification
 
 > Full normative text is in
-> [`packages/governance/core/AGENTGOVERNANCE.md`](https://github.com/agentik/agentik-studio/blob/dev/packages/governance/core/AGENTGOVERNANCE.md).
+> [`packages/governance/core/AGENTGOVERNANCE.md`](https://github.com/agentproto/ts/blob/main/packages/governance/core/AGENTGOVERNANCE.md).
 > AIP-7 will absorb that text in full as part of moving Draft → Review.
 
 | Doctype | File path | Purpose |
@@ -384,7 +385,7 @@ property: posture can only ratchet up.
 
 ## Reference Implementation
 
-[`packages/governance/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/governance/core) —
+[`packages/governance/core`](https://github.com/agentproto/ts/tree/main/packages/governance/core) —
 parser, validator, hash-chain implementation, and policy evaluator.
 
 ## Backwards Compatibility

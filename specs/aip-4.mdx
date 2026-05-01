@@ -2,23 +2,26 @@
 title: "AIP-4: DESIGN.md — design token format & registry conventions"
 description: A markdown + frontmatter format for portable design tokens, and the registry conventions used by designkit.sh to share community kits.
 aip: 4
-status: Draft
+status: Final
 type: Schema
 created: 2026-04-26
-author: Jeremy André <jeremy@agentik.net>
+spec-author: Google Stitch (google-labs-code/design.md)
+aip-editor: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/apps/designkit
+ref-impl: /docs/aip-4#specification
+layer: surfaces
 ---
 
 | Field | Value |
 |---|---|
 | AIP | 4 |
 | Title | DESIGN.md — design token format & registry conventions |
-| Status | Draft |
+| Status | Final |
 | Type | Schema |
 | Domain | designkit.sh |
-| Reference Impl | [`apps/designkit`](https://github.com/agentik/agentik-studio/tree/dev/apps/designkit) |
-| Upstream | [Google Stitch — design.md](https://github.com/google-labs-code/design.md) |
+| Spec author | [Google Stitch](https://github.com/google-labs-code/design.md) (`google-labs-code/design.md`) |
+| AIP editor | Jeremy André |
+| Reference Impl | [`DESIGN.md` doctype spec](/docs/aip-4#specification) |
 
 ## Abstract
 
@@ -85,9 +88,9 @@ is gaining traction; we extend rather than diverge), markdown over JSON
 
 ## Reference Implementation
 
-[`apps/designkit`](https://github.com/agentik/agentik-studio/tree/dev/apps/designkit) —
+`apps/designkit` —
 the public registry site, CLI, and API for designkit.sh. The optional
-[`@canvakit/designkit`](https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/designkit)
+`@canvakit/designkit`
 bridge is the canonical interop point with AIP-5 (CANVAKIT.md).
 
 ## Backwards Compatibility

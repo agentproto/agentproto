@@ -273,7 +273,7 @@ Mid-flight expiry is logged separately:
 ## Reference implementation
 
 The canonical TypeScript implementation lives at
-[`packages/cli-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/cli-runtime).
+`packages/cli-runtime`.
 It exposes:
 
 - `defineCli(definition: CliDefinition): CliHandle`

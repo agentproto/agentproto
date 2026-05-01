@@ -107,7 +107,7 @@ created: <ISO date>
 author: <Name> <email>
 requires: [<aip-numbers this depends on>]
 resources: ./resources/aip-NN/draft
-discussions-to: https://github.com/agentproto/specs/discussions/NN
+discussions-to: https://github.com/agentproto/agentproto/discussions/NN
 ---
 ```
 

@@ -7,6 +7,7 @@ type: Meta
 created: 2026-04-26
 author: Jeremy André <jeremy@agentik.net>
 resources: ./resources/aip-1/draft
+layer: process
 ---
 
 | Field | Value |
@@ -125,7 +126,7 @@ forbidden — the dep graph is a DAG.
 ### Roles
 
 - **Authors** propose AIPs by opening a PR against
-  [github.com/agentproto/specs](https://github.com/agentproto/specs).
+  [github.com/agentproto/agentproto](https://github.com/agentproto/agentproto).
 - **Editors** keep the registry consistent: they assign numbers, enforce
   format, move state forward, and merge. Editors do not gate on technical
   merit — that's the community's job during Review.
@@ -143,7 +144,7 @@ opening a PR gets a number.
 To propose a new AIP:
 
 1. Read this document and [AIP-2](/docs/aip-2) (the template).
-2. Fork [github.com/agentproto/specs](https://github.com/agentproto/specs).
+2. Fork [github.com/agentproto/agentproto](https://github.com/agentproto/agentproto).
 3. Copy `AIPS/aip-template.md` to `AIPS/aip-XXXX.md` (use a placeholder
    number — editors will assign the real one).
 4. Fill in frontmatter and all required body sections. Status starts at
@@ -203,7 +204,7 @@ shippable specs aren't bottlenecked by ceremony.
 ## Reference Implementation
 
 This site (`agentproto.sh`) and its companion repo
-[github.com/agentproto/specs](https://github.com/agentproto/specs) are
+[github.com/agentproto/agentproto](https://github.com/agentproto/agentproto) are
 themselves the reference implementation of AIP-1.
 
 ## Backwards Compatibility

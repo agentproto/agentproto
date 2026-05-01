@@ -2,23 +2,26 @@
 title: "AIP-3: SKILL.md — skill manifest format"
 description: A markdown + frontmatter format for distributing reusable agent skills as portable, version-controlled files.
 aip: 3
-status: Draft
+status: Final
 type: Schema
 created: 2026-04-26
-author: Jeremy André <jeremy@agentik.net>
+spec-author: Anthropic (anthropics/skills)
+aip-editor: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/skills
+ref-impl: /docs/aip-3#specification
+layer: capabilities
 ---
 
 | Field | Value |
 |---|---|
 | AIP | 3 |
 | Title | SKILL.md — skill manifest format |
-| Status | Draft |
+| Status | Final |
 | Type | Schema |
 | Domain | skills.sh |
-| Reference Impl | [`packages/skills`](https://github.com/agentik/agentik-studio/tree/dev/packages/skills) |
-| Aligned with | [Anthropic Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) ([`anthropics/skills`](https://github.com/anthropics/skills)) — open standard since Dec 2025; AIP-3 adds registry conventions on top |
+| Spec author | [Anthropic](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) ([`anthropics/skills`](https://github.com/anthropics/skills)) — open-sourced Dec 2025 |
+| AIP editor | Jeremy André |
+| Reference Impl | [`SKILL.md` doctype spec](/docs/aip-3#specification) |
 
 ## Abstract
 
@@ -94,7 +97,7 @@ embedded code (skills declare what they need, runtimes provide it).*
 
 ## Reference Implementation
 
-[`packages/skills`](https://github.com/agentik/agentik-studio/tree/dev/packages/skills) —
+`packages/skills` —
 parser, file-tree source, DB-backed source, and library tooling. The
 implementation is the source of truth for the schema during the Draft
 phase.

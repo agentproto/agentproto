@@ -7,8 +7,9 @@ type: Schema
 created: 2026-04-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 6, 7, 9]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/work
-discussions-to: https://github.com/agentproto/specs/discussions/13
+ref-impl: TBD
+discussions-to: https://github.com/agentproto/agentproto/discussions/13
+layer: coordination
 ---
 
 | Field | Value |
@@ -21,7 +22,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/13
 | Doctypes | `work/v1` (project, initiative, task) + `work.workspace/v1` (manifest + view, written as `WORK.md`) |
 | Requires | [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7), [AIP-9](/docs/aip-9) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-10](/docs/aip-10) (knowledge), [AIP-15](/docs/aip-15) (workflows) |
-| Reference Impl | [`packages/agent-framework/src/work`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/work) |
+| Reference Impl | TBD |
 
 > **⚠ Deprecation notice.** This AIP defines `agentwork/v1` with
 > hardcoded `project`, `initiative`, and `task` doctypes. It is being
@@ -506,7 +507,7 @@ doctype with `extends:` collapses the two into a single mental model: a
 workspace IS its own view of itself, and every view IS a workspace
 bound to a different consumer. The same schema validates both, the same
 merge algorithm applies recursively, and the same authoring skill
-([`./resources/aip-13/draft/skills/author-work-workspace/SKILL.md`](https://github.com/agentik/agentik-studio/blob/dev/apps/agentik/sites/content/docs/agentproto/resources/aip-13/draft/skills/author-work-workspace/SKILL.md))
+(`./resources/aip-13/draft/skills/author-work-workspace/SKILL.md`)
 walks an agent through both flows. This is exactly the choice
 [AIP-10](/docs/aip-10) made for `knowledge.workspace/v1` — the two
 specs deliberately mirror each other so that a host implementing one
@@ -534,7 +535,7 @@ mutating individual items.
 
 ## Reference Implementation
 
-[`packages/agent-framework/src/work`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/work) —
+`packages/agent-framework/src/work` —
 Zod-validated parser/serializer (gray-matter), `FsWorkStore` over a
 `MastraFilesystemHandle`, index regeneration on write. Mirrors the
 shape of [AIP-10](/docs/aip-10) `wiki/` and [AIP-11](/docs/aip-11) `lessons/`.

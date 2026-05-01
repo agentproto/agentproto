@@ -72,7 +72,7 @@ created: <YYYY-MM-DD>
 author: <Name> <email>
 requires: [<aip-numbers>] # empty list if none
 resources: ./resources/aip-NN/draft # omit if no resources folder
-discussions-to: https://github.com/agentproto/specs/discussions/NN
+discussions-to: https://github.com/agentproto/agentproto/discussions/NN
 ---
 ```
 

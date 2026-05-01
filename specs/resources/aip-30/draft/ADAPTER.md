@@ -314,7 +314,7 @@ lets operators audit "why was this driver picked" separately from
 ## Reference implementation
 
 The canonical TypeScript implementation lives at
-[`packages/driver-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/driver-runtime).
+[`packages/driver/core`](https://github.com/agentproto/ts/tree/main/packages/driver/core).
 It exposes:
 
 - `defineDriver(definition: DriverDefinition): DriverHandle`

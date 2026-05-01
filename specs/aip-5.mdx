@@ -7,7 +7,8 @@ type: Schema
 created: 2026-04-26
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/core
+ref-impl: /docs/aip-5#specification
+layer: surfaces
 ---
 
 | Field | Value |
@@ -17,7 +18,7 @@ ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/c
 | Status | Draft |
 | Type | Schema |
 | Domain | canvakit.sh |
-| Reference Impl | [`packages/canvakit/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/core) |
+| Reference Impl | [`CANVAKIT.md` doctype spec](/docs/aip-5#specification) |
 
 ## Abstract
 
@@ -45,7 +46,7 @@ compose through the optional `@canvakit/designkit` bridge.
 ## Specification
 
 > Full normative text is in
-> [`packages/canvakit/core/CANVAKIT.md`](https://github.com/agentik/agentik-studio/blob/dev/packages/canvakit/core/CANVAKIT.md).
+> `packages/canvakit/core/CANVAKIT.md`.
 > AIP-5 will absorb that text in full as part of moving Draft → Review.
 
 Three-part structure:
@@ -92,7 +93,7 @@ implementations), output-agnostic stance (don't lock to HTML).*
 
 ## Reference Implementation
 
-[`packages/canvakit/core`](https://github.com/agentik/agentik-studio/tree/dev/packages/canvakit/core)
+`packages/canvakit/core`
 ships the Node/TypeScript reference runtime, parser, Mustache engine
 adapter, and the `@canvakit/designkit` bridge to AIP-4.
 

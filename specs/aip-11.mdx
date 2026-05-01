@@ -7,8 +7,9 @@ type: Schema
 created: 2026-04-27
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/lessons
-discussions-to: https://github.com/agentproto/specs/discussions/11
+ref-impl: TBD
+discussions-to: https://github.com/agentproto/agentproto/discussions/11
+layer: memory
 ---
 
 | Field | Value |
@@ -19,7 +20,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/11
 | Type | Schema |
 | Domain | learning.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
-| Reference Impl | [`packages/agent-framework/src/lessons`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/lessons) |
+| Reference Impl | TBD |
 
 ## Abstract
 
@@ -205,7 +206,7 @@ construction discipline.
 
 ## Reference Implementation
 
-[`packages/agent-framework/src/lessons`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/lessons) —
+`packages/agent-framework/src/lessons` —
 distill pipeline (LLM-as-judge over completed runs), file store with
 slug-based supersession, retrieval processor that injects top-K
 lessons before agent generation. Used by Guilde for per-operator

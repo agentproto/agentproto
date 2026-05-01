@@ -256,7 +256,7 @@ invocation downstream.
 ## Reference implementation
 
 The canonical TypeScript implementation lives at
-[`packages/intent-runtime`](https://github.com/agentik/agentik-studio/tree/dev/packages/intent-runtime).
+`packages/intent-runtime`.
 It exposes:
 
 - `defineIntent(definition: IntentDefinition): IntentHandle`

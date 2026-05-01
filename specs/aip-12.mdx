@@ -7,8 +7,9 @@ type: Schema
 created: 2026-04-27
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 9]
-ref-impl: https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/playbooks
-discussions-to: https://github.com/agentproto/specs/discussions/12
+ref-impl: TBD
+discussions-to: https://github.com/agentproto/agentproto/discussions/12
+layer: memory
 ---
 
 | Field | Value |
@@ -19,7 +20,7 @@ discussions-to: https://github.com/agentproto/specs/discussions/12
 | Type | Schema |
 | Domain | playbooks.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-9](/docs/aip-9) |
-| Reference Impl | [`packages/agent-framework/src/playbooks`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/playbooks) |
+| Reference Impl | TBD |
 
 ## Abstract
 
@@ -201,11 +202,11 @@ playbooks have nothing concrete to weave against.
 
 ## Reference Implementation
 
-[`packages/agent-framework/src/playbooks`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/playbooks) —
+`packages/agent-framework/src/playbooks` —
 weave function (built on the Council-of-Mentors persona overlay code),
 ACE-style evolve loop, lock-check enforcement, shadow → active
 promotion gate. The Council framework in
-[`packages/agent-framework/src/council`](https://github.com/agentik/agentik-studio/tree/dev/packages/agent-framework/src/council)
+`packages/agent-framework/src/council`
 is the first conformant consumer — Council mentors emit
 `PLAYBOOK.md` files instead of in-memory fragments, and the persona
 lock is shared with the Simone base persona definition.
