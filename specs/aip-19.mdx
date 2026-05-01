@@ -21,7 +21,7 @@ layer: primitives
 | Type | Schema |
 | Domain | secrets.sh |
 | Requires | [AIP-7](/docs/aip-7), [AIP-17](/docs/aip-17) |
-| Resources | [`./resources/aip-19`](./resources/aip-19/draft) — [`SKILL.md`](./resources/aip-19/draft/skills/author-secrets/SKILL.md), [`ADAPTER.md`](./resources/aip-19/draft/ADAPTER.md), [`SECRETS.schema.json`](./resources/aip-19/draft/SECRETS.schema.json), [`EXAMPLES.md`](./resources/aip-19/draft/EXAMPLES.md) |
+| Resources | [`./resources/aip-19`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-19/draft) — [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-19/draft/skills/author-secrets/SKILL.md), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-19/draft/ADAPTER.md), [`SECRETS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-19/draft/SECRETS.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-19/draft/EXAMPLES.md) |
 
 ## Abstract
 
@@ -490,7 +490,7 @@ interface SecretHandle {
 For step-by-step guidance on building a `defineSecret` host
 implementation — vault drivers, access matchers, audit emitters —
 see
-[`./resources/aip-19/draft/ADAPTER.md`](./resources/aip-19/draft).
+[`./resources/aip-19/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-19/draft).
 The AIP defines the contract; the resource doc walks an
 implementer through the projection.
 
@@ -570,6 +570,6 @@ intentionally out of scope for v1 and tracked as future AIPs.)
 - [AIP-17 — RUNTIME.md](/docs/aip-17) — primary consumer (`runtime.env` resolves to SECRETS slugs)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-18 — CAPABILITY.md (proposed)](/docs/aip-18) — `cap://secret/reveal/<slug>` is the underlying capability URN
-- [`./SECRETS.schema.json`](./resources/aip-19/draft) — schema validator
-- [`./ADAPTER.md`](./resources/aip-19/draft) — implementer's guide
-- [`./skills/author-secrets/SKILL.md`](./resources/aip-19/draft/skills/author-secrets/SKILL.md) — agent-side authoring skill
+- [`./SECRETS.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-19/draft) — schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-19/draft) — implementer's guide
+- [`./skills/author-secrets/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-19/draft/skills/author-secrets/SKILL.md) — agent-side authoring skill

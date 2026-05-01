@@ -22,7 +22,7 @@ layer: drivers
 | Domain | drivers.sh |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS) |
 | Specialised by | [AIP-29](/docs/aip-29) (CLI), AIP-31 (HTTP), AIP-32 (MCP), AIP-33 (SDK) |
-| Resources | [`./resources/aip-30`](./resources/aip-30/draft) — `DRIVER.schema.json`, [`ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-30/draft/skills/author-driver/SKILL.md) |
+| Resources | [`./resources/aip-30`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-30/draft) — `DRIVER.schema.json`, [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/skills/author-driver/SKILL.md) |
 
 ## Abstract
 
@@ -555,7 +555,7 @@ interface ParseOutputResult {
 
 For step-by-step guidance on building a `defineDriver`-conformant
 implementation, see
-[`./resources/aip-30/draft/ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md).
+[`./resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md).
 The AIP only defines the contract; the resource doc walks an
 implementer through the projection.
 
@@ -606,7 +606,7 @@ per-call with `context.pinnedProvider`.
 
 The canonical way to *generate* a `DRIVER.md` is via a paired
 [SKILL.md](/docs/aip-3) — distributed at
-[`./resources/aip-30/draft/skills/author-driver/SKILL.md`](./resources/aip-30/draft/skills/author-driver/SKILL.md) —
+[`./resources/aip-30/draft/skills/author-driver/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/skills/author-driver/SKILL.md) —
 that an agent loads when asked to wrap a backend as a driver. The
 skill walks the agent through:
 
@@ -625,7 +625,7 @@ skill walks the agent through:
 6. Declare **`implements[]`** with mappings + per-tool overrides.
 7. Add **`region`** + **`policy_tags`** if relevant.
 8. Validate against
-   [`./resources/aip-30/draft/DRIVER.schema.json`](./resources/aip-30/draft).
+   [`./resources/aip-30/draft/DRIVER.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-30/draft).
 
 The agent MAY install the skill, follow the steps, and emit the
 final `DRIVER.md` (and optional `driver.ts`) without further
@@ -854,6 +854,6 @@ These remain open until enough subtype implementations ship.
 - AIP-31 — HTTP.md — `kind: http` specialisation (forthcoming)
 - AIP-32 — MCP.md — `kind: mcp` specialisation (forthcoming)
 - AIP-33 — SDK.md — `kind: sdk` specialisation (forthcoming)
-- [`./DRIVER.schema.json`](./resources/aip-30/draft) — JSON Schema validator
-- [`./ADAPTER.md`](./resources/aip-30/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-30/draft/EXAMPLES.md) — additional DRIVER.md examples
+- [`./DRIVER.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-30/draft) — JSON Schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/EXAMPLES.md) — additional DRIVER.md examples

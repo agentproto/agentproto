@@ -27,7 +27,7 @@ layer: capabilities
 | Type | Schema |
 | Domain | workflows.sh |
 | Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER) |
-| Resources | [`./resources/aip-15`](./resources/aip-15/draft) — [`SKILL.md`](./resources/aip-15/draft/skills/author-workflow/SKILL.md), `ADAPTER.md`, `WORKFLOW.schema.json`, `EXAMPLES.md` |
+| Resources | [`./resources/aip-15`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-15/draft) — [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-15/draft/skills/author-workflow/SKILL.md), `ADAPTER.md`, `WORKFLOW.schema.json`, `EXAMPLES.md` |
 
 ## Abstract
 
@@ -64,7 +64,7 @@ loads the same way under any host.
 The manifest is also the source of truth for governance
 ([AIP-7](/docs/aip-7)) audit, work-item tracking
 ([AIP-13](/docs/aip-13)), and skill-based agent authoring (the
-companion [`SKILL.md`](./resources/aip-15/draft) generates both `TOOL.md`
+companion [`SKILL.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-15/draft) generates both `TOOL.md`
 and `WORKFLOW.md` files when an agent is asked to build automation).
 
 ## Design principles
@@ -592,7 +592,7 @@ interface WorkflowHandle {
 
 For step-by-step guidance on building a `defineWorkflow` /
 `defineStep` conformant implementation in a specific language or
-framework, see [`./resources/aip-15/draft/ADAPTER.md`](./resources/aip-15/draft).
+framework, see [`./resources/aip-15/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-15/draft).
 The AIP only defines the contract; the resource doc walks an
 implementer through the projection.
 
@@ -632,7 +632,7 @@ records, audit rows, and capability grants key on `id@major`.
 
 The canonical way to *generate* a `WORKFLOW.md` is via a paired
 [SKILL.md](/docs/aip-3) — distributed at
-[`./resources/aip-15/draft/skills/author-workflow/SKILL.md`](./resources/aip-15/draft/skills/author-workflow/SKILL.md) — that an agent
+[`./resources/aip-15/draft/skills/author-workflow/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-15/draft/skills/author-workflow/SKILL.md) — that an agent
 loads when asked to build a workflow. The skill walks the agent
 through:
 
@@ -642,7 +642,7 @@ through:
 4. Decide which steps need approval and which run `auto`.
 5. Add compensation for every mutating step.
 6. Validate the manifest against
-   [`./resources/aip-15/draft/WORKFLOW.schema.json`](./resources/aip-15/draft)
+   [`./resources/aip-15/draft/WORKFLOW.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-15/draft)
    and emit the final pair.
 
 ## Compatibility

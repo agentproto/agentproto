@@ -22,7 +22,7 @@ layer: identity
 | Doctype | `persona/v1` (single-doc, written as `PERSONA.md`) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-9](/docs/aip-9) (operators), [AIP-23](/docs/aip-23) (identities), [AIP-24](/docs/aip-24) (assemblies) |
-| Resources | [`./resources/aip-25`](./resources/aip-25/draft) — [`PERSONA.schema.json`](./resources/aip-25/draft/PERSONA.schema.json), [`ADAPTER.md`](./resources/aip-25/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-25/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-25/draft/skills/author-persona/SKILL.md) |
+| Resources | [`./resources/aip-25`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-25/draft) — [`PERSONA.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/PERSONA.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/skills/author-persona/SKILL.md) |
 
 ## Abstract
 
@@ -365,7 +365,7 @@ unresolvable refs surface as warnings (`persona_identity_unresolvable`,
 MUST NOT block load: a persona is usable without its declared
 relationships, and graceful degradation is preferable to refusal
 when the registry is partial. The implementer's
-[ADAPTER.md](./resources/aip-25/draft/ADAPTER.md) documents the full
+[ADAPTER.md](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/ADAPTER.md) documents the full
 error envelope.
 
 ### Vendor extensions
@@ -494,7 +494,7 @@ pack. Personas are inherently bespoke — every meaningful persona
 is its own creative artifact, and a "starter Marcus" template
 would be either too generic to be useful or too specific to be a
 starter. The patterns authors need are demonstrated in
-[EXAMPLES.md](./resources/aip-25/draft/EXAMPLES.md): a minimal
+[EXAMPLES.md](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/EXAMPLES.md): a minimal
 persona, a brand voice, a fictional character, a composed-via-extends
 variant, a persona bound to identity, an assembly mentor. Authors
 copy the closest pattern and edit. This is the same posture
@@ -650,7 +650,7 @@ AIP-25 inherits that posture without restating it.
 - [AIP-14 — TOOL.md](/docs/aip-14) — sibling single-doc AIP
 - [AIP-23 — agentidentity/v1](/docs/aip-23) — heavy substance sibling; persona MAY ref
 - [AIP-24 — agentassemblies/v1](/docs/aip-24) — composes personas as members in roles
-- [`./resources/aip-25/draft/PERSONA.schema.json`](./resources/aip-25/draft/PERSONA.schema.json) — frontmatter validator
-- [`./resources/aip-25/draft/ADAPTER.md`](./resources/aip-25/draft/ADAPTER.md) — implementer's guide
-- [`./resources/aip-25/draft/EXAMPLES.md`](./resources/aip-25/draft/EXAMPLES.md) — reference manifests
-- [`./resources/aip-25/draft/skills/author-persona/SKILL.md`](./resources/aip-25/draft/skills/author-persona/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-25/draft/PERSONA.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/PERSONA.schema.json) — frontmatter validator
+- [`./resources/aip-25/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-25/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-25/draft/skills/author-persona/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-25/draft/skills/author-persona/SKILL.md) — agent-side authoring skill

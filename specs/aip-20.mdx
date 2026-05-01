@@ -24,7 +24,7 @@ layer: coordination
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-18](/docs/aip-18) |
 | Replaces | [AIP-13](/docs/aip-13) (`agentwork/v1`) — once Final |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-8](/docs/aip-8) (agencies), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections) |
-| Resources | [`./resources/aip-20`](./resources/aip-20/draft) — [`WORK.schema.json`](./resources/aip-20/draft/WORK.schema.json), [`ADAPTER.md`](./resources/aip-20/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-20/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-20/draft/skills/author-work-workspace/SKILL.md), [`starters/`](./resources/aip-20/draft/starters/agentwork-v1-compat) |
+| Resources | [`./resources/aip-20`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft) — [`WORK.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/WORK.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/skills/author-work-workspace/SKILL.md), [`starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat) |
 
 ## Abstract
 
@@ -100,7 +100,7 @@ the same lens from disk.
 [AIP-13](/docs/aip-13) is deliberately preserved as Draft for the
 duration of this transition. The migration path is conservative:
 AIP-20 ships a starter library
-([`starters/agentwork-v1-compat/`](./resources/aip-20/draft/starters/agentwork-v1-compat))
+([`starters/agentwork-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat))
 containing three [AIP-18](/docs/aip-18) collections — `project`,
 `initiative`, `task` — whose fields, statuses, ownership rules, and
 deadline semantics mirror AIP-13's hardcoded doctypes. An existing
@@ -594,7 +594,7 @@ the same `work.workspace/v2` doctype used in two modes:
 The same schema validates both modes; the host distinguishes by
 checking whether `extends:` is set. The same merge algorithm applies
 recursively. The same authoring skill
-([`./resources/aip-20/draft/skills/author-work-workspace/SKILL.md`](./resources/aip-20/draft/skills/author-work-workspace/SKILL.md))
+([`./resources/aip-20/draft/skills/author-work-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/skills/author-work-workspace/SKILL.md))
 walks an agent through both flows.
 
 | Aspect | Workspace-root mode | View mode |
@@ -720,7 +720,7 @@ moves to Superseded once AIP-20 reaches Final. Until then, both
 AIPs are loadable.
 
 **Migration path.** AIP-20 ships a starter library at
-[`./resources/aip-20/draft/starters/agentwork-v1-compat/`](./resources/aip-20/draft/starters/agentwork-v1-compat)
+[`./resources/aip-20/draft/starters/agentwork-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat)
 containing three [AIP-18](/docs/aip-18) collections — `project`,
 `initiative`, `task` — whose fields, statuses, ownership, and
 deadline semantics mirror AIP-13's hardcoded doctypes. An existing
@@ -845,8 +845,8 @@ in [AIP-18](/docs/aip-18) and not duplicated here.
 - [AIP-13 — agentwork/v1](/docs/aip-13) — the predecessor; deprecated by this AIP
 - [AIP-15 — WORKFLOW.md](/docs/aip-15)
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate this AIP composes on
-- [`./resources/aip-20/draft/WORK.schema.json`](./resources/aip-20/draft/WORK.schema.json) — frontmatter validator
-- [`./resources/aip-20/draft/ADAPTER.md`](./resources/aip-20/draft/ADAPTER.md) — implementer's guide
-- [`./resources/aip-20/draft/EXAMPLES.md`](./resources/aip-20/draft/EXAMPLES.md) — reference manifests
-- [`./resources/aip-20/draft/skills/author-work-workspace/SKILL.md`](./resources/aip-20/draft/skills/author-work-workspace/SKILL.md) — agent-side authoring skill
-- [`./resources/aip-20/draft/starters/agentwork-v1-compat/`](./resources/aip-20/draft/starters/agentwork-v1-compat) — starter collection library mirroring AIP-13 doctypes
+- [`./resources/aip-20/draft/WORK.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/WORK.schema.json) — frontmatter validator
+- [`./resources/aip-20/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-20/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-20/draft/skills/author-work-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/skills/author-work-workspace/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-20/draft/starters/agentwork-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat) — starter collection library mirroring AIP-13 doctypes

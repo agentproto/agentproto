@@ -23,7 +23,7 @@ layer: capabilities
 | Domain | tools.sh |
 | Requires | [AIP-7](/docs/aip-7) (governance), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER) |
 | Implemented by | Any [AIP-30 DRIVER](/docs/aip-30) declaring the tool in its `implements[]` |
-| Resources | [`./resources/aip-14`](./resources/aip-14/draft) — [`SKILL.md`](./resources/aip-14/draft/skills/author-tool/SKILL.md), `ADAPTER.md`, `TOOL.schema.json`, `EXAMPLES.md` |
+| Resources | [`./resources/aip-14`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-14/draft) — [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-14/draft/skills/author-tool/SKILL.md), `ADAPTER.md`, `TOOL.schema.json`, `EXAMPLES.md` |
 
 ## Abstract
 
@@ -435,7 +435,7 @@ type DriverKind = "cli" | "http" | "mcp" | "sdk" | "builtin"
 
 For step-by-step guidance on building a `defineTool`-conformant
 implementation in a specific language or framework, see
-[`./resources/aip-14/draft/ADAPTER.md`](./resources/aip-14/draft/ADAPTER.md).
+[`./resources/aip-14/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-14/draft/ADAPTER.md).
 The AIP only defines the contract; the resource doc walks an
 implementer through the projection.
 
@@ -443,7 +443,7 @@ implementer through the projection.
 
 The canonical way to *generate* a `TOOL.md` is via a paired
 [SKILL.md](/docs/aip-3) — distributed at
-[`./resources/aip-14/draft/skills/author-tool/SKILL.md`](./resources/aip-14/draft/skills/author-tool/SKILL.md) —
+[`./resources/aip-14/draft/skills/author-tool/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-14/draft/skills/author-tool/SKILL.md) —
 that an agent loads when asked to define a tool contract. The skill
 walks the agent through:
 
@@ -455,7 +455,7 @@ walks the agent through:
    each, run the [AIP-30 author-driver skill](/docs/aip-30) to
    produce a sibling DRIVER.md.
 6. Validate the manifest against
-   [`./resources/aip-14/draft/TOOL.schema.json`](./resources/aip-14/draft).
+   [`./resources/aip-14/draft/TOOL.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-14/draft).
 
 The agent MAY install the skill, follow the steps, and emit the
 final `TOOL.md` (and one or more `DRIVER.md` siblings) without
@@ -679,5 +679,5 @@ settle the answers empirically.
 - [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above TOOL
 - [AIP-30 — DRIVER.md](/docs/aip-30) — implementation layer
   binding contracts to backends
-- [`./TOOL.schema.json`](./resources/aip-14/draft) — schema validator
-- [`./ADAPTER.md`](./resources/aip-14/draft) — implementer's guide
+- [`./TOOL.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-14/draft) — schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-14/draft) — implementer's guide

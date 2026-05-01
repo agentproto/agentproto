@@ -21,7 +21,7 @@ layer: capabilities
 | Type | Schema |
 | Domain | intents.sh |
 | Requires | [AIP-3](/docs/aip-3) (SKILL), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS) |
-| Resources | [`./resources/aip-28`](./resources/aip-28/draft) — `INTENT.schema.json`, [`ADAPTER.md`](./resources/aip-28/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-28/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-28/draft/skills/author-intent/SKILL.md) |
+| Resources | [`./resources/aip-28`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-28/draft) — `INTENT.schema.json`, [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/skills/author-intent/SKILL.md) |
 
 ## Abstract
 
@@ -535,7 +535,7 @@ type RouteResult =
 
 For step-by-step guidance on building a `defineIntent`-conformant
 implementation in a specific language or framework, see
-[`./resources/aip-28/draft/ADAPTER.md`](./resources/aip-28/draft/ADAPTER.md).
+[`./resources/aip-28/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/ADAPTER.md).
 The AIP only defines the contract; the resource doc walks an
 implementer through the projection.
 
@@ -543,7 +543,7 @@ implementer through the projection.
 
 The canonical way to *generate* an `INTENT.md` is via a paired
 [SKILL.md](/docs/aip-3) — distributed at
-[`./resources/aip-28/draft/skills/author-intent/SKILL.md`](./resources/aip-28/draft/skills/author-intent/SKILL.md) —
+[`./resources/aip-28/draft/skills/author-intent/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/skills/author-intent/SKILL.md) —
 that an agent loads when asked to build an intent. The skill walks
 the agent through:
 
@@ -555,7 +555,7 @@ the agent through:
 5. Write **intent** seeds for LLM matching.
 6. Add 2–5 **examples** (paired user phrasing + outcome).
 7. Validate the manifest against
-   [`./resources/aip-28/draft/INTENT.schema.json`](./resources/aip-28/draft).
+   [`./resources/aip-28/draft/INTENT.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-28/draft).
 
 The agent MAY install the skill, follow the steps, and emit the
 final `INTENT.md` (and optional `intent.ts` for custom routing)
@@ -745,6 +745,6 @@ empirically.
   by routed tools
 - [AIP-29 — CLI.md](/docs/aip-29) — CLI bundles ship optional
   pre-wired INTENTs
-- [`./INTENT.schema.json`](./resources/aip-28/draft) — JSON Schema validator
-- [`./ADAPTER.md`](./resources/aip-28/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-28/draft/EXAMPLES.md) — additional INTENT.md examples
+- [`./INTENT.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-28/draft) — JSON Schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-28/draft/EXAMPLES.md) — additional INTENT.md examples

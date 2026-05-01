@@ -22,7 +22,7 @@ layer: drivers
 | Type | Schema |
 | Domain | cli.sh |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-28](/docs/aip-28) (INTENT) |
-| Resources | [`./resources/aip-29`](./resources/aip-29/draft) — `CLI.schema.json`, [`ADAPTER.md`](./resources/aip-29/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-29/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-29/draft/skills/author-cli/SKILL.md) |
+| Resources | [`./resources/aip-29`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-29/draft) — `CLI.schema.json`, [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/skills/author-cli/SKILL.md) |
 
 ## Abstract
 
@@ -601,7 +601,7 @@ interface ParseOutputResult {
 
 For step-by-step guidance on building a `defineCli`-conformant
 implementation in a specific language or framework, see
-[`./resources/aip-29/draft/ADAPTER.md`](./resources/aip-29/draft/ADAPTER.md).
+[`./resources/aip-29/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/ADAPTER.md).
 The AIP only defines the contract; the resource doc walks an
 implementer through the projection.
 
@@ -609,7 +609,7 @@ implementer through the projection.
 
 The canonical way to *generate* a `CLI.md` is via a paired
 [SKILL.md](/docs/aip-3) — distributed at
-[`./resources/aip-29/draft/skills/author-cli/SKILL.md`](./resources/aip-29/draft/skills/author-cli/SKILL.md) —
+[`./resources/aip-29/draft/skills/author-cli/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/skills/author-cli/SKILL.md) —
 that an agent loads when asked to package a CLI. The skill walks
 the agent through:
 
@@ -626,7 +626,7 @@ the agent through:
 6. Optionally pre-wire 3–5 INTENT.md catalog shortcuts for common
    intents.
 7. Validate the manifest against
-   [`./resources/aip-29/draft/CLI.schema.json`](./resources/aip-29/draft).
+   [`./resources/aip-29/draft/CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-29/draft).
 
 The agent MAY install the skill, follow the steps, and emit a
 complete CLI bundle without further instruction. The skill is the
@@ -860,6 +860,6 @@ empirically.
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth-surface inventory
 - [AIP-28 — INTENT.md](/docs/aip-28) — pre-wired user-facing
   intents on the bundle
-- [`./CLI.schema.json`](./resources/aip-29/draft) — JSON Schema validator
-- [`./ADAPTER.md`](./resources/aip-29/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-29/draft/EXAMPLES.md) — additional CLI.md examples
+- [`./CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-29/draft) — JSON Schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/EXAMPLES.md) — additional CLI.md examples

@@ -22,7 +22,7 @@ layer: coordination
 | Doctypes | `office.workspace/v1` (workspace manifest + view, written as `OFFICE.md`) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-18](/docs/aip-18) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work), [AIP-21](/docs/aip-21) (agencies) |
-| Resources | [`./resources/aip-22`](./resources/aip-22/draft) — [`OFFICE.schema.json`](./resources/aip-22/draft/OFFICE.schema.json), [`ADAPTER.md`](./resources/aip-22/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-22/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-22/draft/skills/author-office-workspace/SKILL.md), [`starters/`](./resources/aip-22/draft/starters/office-starters) |
+| Resources | [`./resources/aip-22`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft) — [`OFFICE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/OFFICE.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/skills/author-office-workspace/SKILL.md), [`starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft/starters/office-starters) |
 
 ## Abstract
 
@@ -143,7 +143,7 @@ organisation typically has BOTH: a `COMPANY.md` (AIP-6) for the
 identity card, and an `OFFICE.md` (AIP-22) that references the
 company profile via the `company:` field and carries the operating
 state on top. AIP-22 ships a starter library
-([`starters/office-starters/`](./resources/aip-22/draft/starters/office-starters))
+([`starters/office-starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft/starters/office-starters))
 containing five [AIP-18](/docs/aip-18) collections — `role`,
 `objective`, `department`, `team`, and `policy` — as opinionated
 defaults; teams are free to extend, replace, or omit them.
@@ -728,7 +728,7 @@ formal company profile, e.g. an internal team or a research
 collective).
 
 **Starter library.** AIP-22 ships
-[`./resources/aip-22/draft/starters/office-starters/`](./resources/aip-22/draft/starters/office-starters)
+[`./resources/aip-22/draft/starters/office-starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft/starters/office-starters)
 with five [AIP-18](/docs/aip-18) collections (`role`, `objective`,
 `department`, `team`, `policy`) as opinionated defaults. They are
 *examples*, not normative — teams MAY extend them
@@ -844,8 +844,8 @@ in [AIP-18](/docs/aip-18) and not duplicated here.
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate this AIP composes on
 - [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP for work tracking
 - [AIP-21 — agentagencies/v2](/docs/aip-21) — sibling Workspace AIP for commercial agencies
-- [`./resources/aip-22/draft/OFFICE.schema.json`](./resources/aip-22/draft/OFFICE.schema.json) — frontmatter validator
-- [`./resources/aip-22/draft/ADAPTER.md`](./resources/aip-22/draft/ADAPTER.md) — implementer's guide
-- [`./resources/aip-22/draft/EXAMPLES.md`](./resources/aip-22/draft/EXAMPLES.md) — reference manifests
-- [`./resources/aip-22/draft/skills/author-office-workspace/SKILL.md`](./resources/aip-22/draft/skills/author-office-workspace/SKILL.md) — agent-side authoring skill
-- [`./resources/aip-22/draft/starters/office-starters/`](./resources/aip-22/draft/starters/office-starters) — starter collection library mirroring AIP-6 doctypes
+- [`./resources/aip-22/draft/OFFICE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/OFFICE.schema.json) — frontmatter validator
+- [`./resources/aip-22/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-22/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-22/draft/skills/author-office-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/skills/author-office-workspace/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-22/draft/starters/office-starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft/starters/office-starters) — starter collection library mirroring AIP-6 doctypes

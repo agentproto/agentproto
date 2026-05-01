@@ -22,7 +22,7 @@ layer: primitives
 | Doctypes | `collection.schema/v1` (collection definition, written as `COLLECTION.md`) + `collection.item/v1` (record instance, written as `ITEM.md` or `<slug>.md`) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-13](/docs/aip-13) (work v1 — cautionary tale), AIP-20 (work v2 — planned successor) |
-| Resources | [`./resources/aip-18`](./resources/aip-18/draft) — [`COLLECTION.schema.json`](./resources/aip-18/draft/COLLECTION.schema.json), [`ADAPTER.md`](./resources/aip-18/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-18/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-18/draft/skills/author-collection/SKILL.md) |
+| Resources | [`./resources/aip-18`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-18/draft) — [`COLLECTION.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/COLLECTION.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/skills/author-collection/SKILL.md) |
 
 ## Abstract
 
@@ -298,7 +298,7 @@ know how to read them; the *requirement* is per-collection.
 The collection's `fields` are flat at the item's top level. There is no
 `fields:` wrapper inside the item — every collection field is a
 top-level item key. Per-field type validation is the host's
-responsibility (cf. [`./resources/aip-18/draft/ADAPTER.md`](./resources/aip-18/draft/ADAPTER.md)).
+responsibility (cf. [`./resources/aip-18/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/ADAPTER.md)).
 
 ### Composition (the `extends:` chain semantics)
 
@@ -757,7 +757,7 @@ that posture without restating it.
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — the registry-of-views pattern AIP-18 mirrors
 - [AIP-13 — agentwork/v1](/docs/aip-13) — the cautionary hardcoded-types tale; AIP-20 will compose with AIP-18 instead
-- [`./resources/aip-18/draft/COLLECTION.schema.json`](./resources/aip-18/draft/COLLECTION.schema.json) — frontmatter validator
-- [`./resources/aip-18/draft/ADAPTER.md`](./resources/aip-18/draft/ADAPTER.md) — implementer's guide
-- [`./resources/aip-18/draft/EXAMPLES.md`](./resources/aip-18/draft/EXAMPLES.md) — reference collections and items
-- [`./resources/aip-18/draft/skills/author-collection/SKILL.md`](./resources/aip-18/draft/skills/author-collection/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-18/draft/COLLECTION.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/COLLECTION.schema.json) — frontmatter validator
+- [`./resources/aip-18/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-18/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/EXAMPLES.md) — reference collections and items
+- [`./resources/aip-18/draft/skills/author-collection/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-18/draft/skills/author-collection/SKILL.md) — agent-side authoring skill

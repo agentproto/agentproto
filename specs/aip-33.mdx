@@ -29,7 +29,7 @@ layer: drivers
 | Driver kind | `sdk` |
 | Specialises | [AIP-30 DRIVER.md](/docs/aip-30) |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER) |
-| Resources | [`./resources/aip-33`](./resources/aip-33/draft) — `SDK.schema.json`, [`ADAPTER.md`](./resources/aip-33/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-33/draft/skills/author-sdk/SKILL.md) |
+| Resources | [`./resources/aip-33`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-33/draft) — `SDK.schema.json`, [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/skills/author-sdk/SKILL.md) |
 
 ## Abstract
 
@@ -300,7 +300,7 @@ and streaming-via-callback patterns.
 ## Authoring with `SKILL.md`
 
 The canonical way to *generate* an SDK `DRIVER.md` is via the
-paired [author-sdk skill](./resources/aip-33/draft/skills/author-sdk/SKILL.md).
+paired [author-sdk skill](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/skills/author-sdk/SKILL.md).
 The skill walks the agent through:
 
 1. Identify the package + package manager.
@@ -310,7 +310,7 @@ The skill walks the agent through:
 5. Author `result_extract` only when the SDK's return shape differs
    from the contract.
 6. Validate against
-   [`./resources/aip-33/draft/SDK.schema.json`](./resources/aip-33/draft).
+   [`./resources/aip-33/draft/SDK.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-33/draft).
 
 ## Example
 
@@ -419,7 +419,7 @@ tags: [sdxl, self-hosted, pii-safe]
 ---
 ```
 
-See [`./resources/aip-33/draft/EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md)
+See [`./resources/aip-33/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/EXAMPLES.md)
 for additional patterns.
 
 ## Compatibility
@@ -503,6 +503,6 @@ sandboxed subprocess (that's CLI's job).
 - [AIP-32 — MCP.md](/docs/aip-32) — sibling specialisation,
   `kind: mcp`
 - [Driver family](/docs/family-driver) — index of related AIPs
-- [`./SDK.schema.json`](./resources/aip-33/draft) — JSON Schema validator
-- [`./ADAPTER.md`](./resources/aip-33/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-33/draft/EXAMPLES.md) — additional patterns
+- [`./SDK.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-33/draft) — JSON Schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-33/draft/EXAMPLES.md) — additional patterns

@@ -24,7 +24,7 @@ layer: coordination
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7), [AIP-18](/docs/aip-18) |
 | Replaces | [AIP-8](/docs/aip-8) (`agentagencies/v1`) — once Final |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work workspaces) |
-| Resources | [`./resources/aip-21`](./resources/aip-21/draft) — [`AGENCY.schema.json`](./resources/aip-21/draft/AGENCY.schema.json), [`ADAPTER.md`](./resources/aip-21/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-21/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md), [`starters/`](./resources/aip-21/draft/starters/agentagencies-v1-compat) |
+| Resources | [`./resources/aip-21`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-21/draft) — [`AGENCY.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/AGENCY.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/skills/author-agency-workspace/SKILL.md), [`starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-21/draft/starters/agentagencies-v1-compat) |
 
 ## Abstract
 
@@ -121,7 +121,7 @@ view adds a lint without touching them, a sub-studio adds a new
 rule and the merge resolves it cleanly.
 
 The migration path is conservative. AIP-21 ships a starter library
-([`starters/agentagencies-v1-compat/`](./resources/aip-21/draft/starters/agentagencies-v1-compat))
+([`starters/agentagencies-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-21/draft/starters/agentagencies-v1-compat))
 containing ten [AIP-18](/docs/aip-18) collections — `service`,
 `engagement`, `agreement`, `deliverable`, `invoice`, `counterparty`,
 `procedure`, `pricing-model`, `routine`, `capacity` — whose fields,
@@ -667,7 +667,7 @@ modes:
 The same schema validates both modes; the host distinguishes by
 checking whether `extends:` is set. The same merge algorithm
 applies recursively. The same authoring skill
-([`./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md`](./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md))
+([`./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/skills/author-agency-workspace/SKILL.md))
 walks an agent through both flows.
 
 | Aspect | Workspace-root mode | View mode |
@@ -794,7 +794,7 @@ AIP-8 moves to Superseded once AIP-21 reaches Final. Until then,
 both AIPs are loadable.
 
 **Migration path.** AIP-21 ships a starter library at
-[`./resources/aip-21/draft/starters/agentagencies-v1-compat/`](./resources/aip-21/draft/starters/agentagencies-v1-compat)
+[`./resources/aip-21/draft/starters/agentagencies-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-21/draft/starters/agentagencies-v1-compat)
 containing ten [AIP-18](/docs/aip-18) collections — `service`,
 `engagement`, `agreement`, `deliverable`, `invoice`, `counterparty`,
 `procedure`, `pricing-model`, `routine`, `capacity` — whose
@@ -933,8 +933,8 @@ documented in [AIP-18](/docs/aip-18) and not duplicated here.
 - [AIP-15 — WORKFLOW.md](/docs/aip-15)
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate this AIP composes on
 - [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP, structural template
-- [`./resources/aip-21/draft/AGENCY.schema.json`](./resources/aip-21/draft/AGENCY.schema.json) — frontmatter validator
-- [`./resources/aip-21/draft/ADAPTER.md`](./resources/aip-21/draft/ADAPTER.md) — implementer's guide
-- [`./resources/aip-21/draft/EXAMPLES.md`](./resources/aip-21/draft/EXAMPLES.md) — reference manifests
-- [`./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md`](./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md) — agent-side authoring skill
-- [`./resources/aip-21/draft/starters/agentagencies-v1-compat/`](./resources/aip-21/draft/starters/agentagencies-v1-compat) — starter collection library mirroring AIP-8 doctypes
+- [`./resources/aip-21/draft/AGENCY.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/AGENCY.schema.json) — frontmatter validator
+- [`./resources/aip-21/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/ADAPTER.md) — implementer's guide
+- [`./resources/aip-21/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/EXAMPLES.md) — reference manifests
+- [`./resources/aip-21/draft/skills/author-agency-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-21/draft/skills/author-agency-workspace/SKILL.md) — agent-side authoring skill
+- [`./resources/aip-21/draft/starters/agentagencies-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-21/draft/starters/agentagencies-v1-compat) — starter collection library mirroring AIP-8 doctypes

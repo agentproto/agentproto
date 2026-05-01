@@ -28,7 +28,7 @@ layer: drivers
 | Driver kind | `http` |
 | Specialises | [AIP-30 DRIVER.md](/docs/aip-30) |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER) |
-| Resources | [`./resources/aip-31`](./resources/aip-31/draft) — `HTTP.schema.json`, [`ADAPTER.md`](./resources/aip-31/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-31/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-31/draft/skills/author-http/SKILL.md) |
+| Resources | [`./resources/aip-31`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-31/draft) — `HTTP.schema.json`, [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/skills/author-http/SKILL.md) |
 
 ## Abstract
 
@@ -427,7 +427,7 @@ when conditional or computed request shapes are needed.
 ## Authoring with `SKILL.md`
 
 The canonical way to *generate* an HTTP `DRIVER.md` is via the paired
-[author-http skill](./resources/aip-31/draft/skills/author-http/SKILL.md).
+[author-http skill](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/skills/author-http/SKILL.md).
 The skill walks the agent through:
 
 1. Pick `id` (kebab + `-http` suffix).
@@ -437,11 +437,11 @@ The skill walks the agent through:
    body shape, response shape; author `metadata.http`.
 5. Declare `network.egress` (the API's host).
 6. Validate against
-   [`./resources/aip-31/draft/HTTP.schema.json`](./resources/aip-31/draft).
+   [`./resources/aip-31/draft/HTTP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-31/draft).
 
 ## Example
 
-See [`./resources/aip-31/draft/EXAMPLES.md`](./resources/aip-31/draft/EXAMPLES.md)
+See [`./resources/aip-31/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/EXAMPLES.md)
 for canonical patterns: API-key auth, OAuth-bearer, query-key auth,
 streaming SSE, multi-tool sharing one auth.
 
@@ -518,6 +518,6 @@ via `${secrets.X}` substitution.
 - [AIP-33 — SDK.md](/docs/aip-33) — sibling specialisation,
   `kind: sdk`
 - [Driver family](/docs/family-driver) — index of related AIPs
-- [`./HTTP.schema.json`](./resources/aip-31/draft) — JSON Schema validator
-- [`./ADAPTER.md`](./resources/aip-31/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-31/draft/EXAMPLES.md) — additional patterns
+- [`./HTTP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-31/draft) — JSON Schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-31/draft/EXAMPLES.md) — additional patterns

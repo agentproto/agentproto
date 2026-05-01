@@ -29,7 +29,7 @@ layer: drivers
 | Driver kind | `mcp` |
 | Specialises | [AIP-30 DRIVER.md](/docs/aip-30) |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER) |
-| Resources | [`./resources/aip-32`](./resources/aip-32/draft) — `MCP.schema.json`, [`ADAPTER.md`](./resources/aip-32/draft/ADAPTER.md), [`EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md), [`SKILL.md`](./resources/aip-32/draft/skills/author-mcp/SKILL.md) |
+| Resources | [`./resources/aip-32`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-32/draft) — `MCP.schema.json`, [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/skills/author-mcp/SKILL.md) |
 
 ## Abstract
 
@@ -331,7 +331,7 @@ fit this pattern.
 ## Authoring with `SKILL.md`
 
 The canonical way to *generate* an MCP `DRIVER.md` is via the paired
-[author-mcp skill](./resources/aip-32/draft/skills/author-mcp/SKILL.md).
+[author-mcp skill](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/skills/author-mcp/SKILL.md).
 The skill walks the agent through:
 
 1. Identify the MCP server (npm package / docker image / remote URL).
@@ -340,7 +340,7 @@ The skill walks the agent through:
 4. Map each MCP tool to a TOOL.md contract (existing or new).
 5. Author `argument_mapping` and `result_extract` per tool.
 6. Validate against
-   [`./resources/aip-32/draft/MCP.schema.json`](./resources/aip-32/draft).
+   [`./resources/aip-32/draft/MCP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-32/draft).
 
 ## Example
 
@@ -407,7 +407,7 @@ tags: [mcp, filesystem, anthropic-reference, pii-safe]
 ---
 ```
 
-See [`./resources/aip-32/draft/EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md)
+See [`./resources/aip-32/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/EXAMPLES.md)
 for additional patterns: postgres MCP, GitHub MCP with OAuth, custom
 remote MCP server.
 
@@ -496,6 +496,6 @@ templates the wrapping.
 - [AIP-33 — SDK.md](/docs/aip-33) — sibling specialisation,
   `kind: sdk`
 - [Driver family](/docs/family-driver) — index of related AIPs
-- [`./MCP.schema.json`](./resources/aip-32/draft) — JSON Schema validator
-- [`./ADAPTER.md`](./resources/aip-32/draft/ADAPTER.md) — implementer's guide
-- [`./EXAMPLES.md`](./resources/aip-32/draft/EXAMPLES.md) — additional patterns
+- [`./MCP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-32/draft) — JSON Schema validator
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/ADAPTER.md) — implementer's guide
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-32/draft/EXAMPLES.md) — additional patterns
