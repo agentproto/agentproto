@@ -934,31 +934,34 @@ in *bearer*.
 
 ## Reference Implementation
 
-The reference implementation lives in this monorepo and was the
-basis for this AIP:
+A public reference implementation is **TBD** — pending extraction into
+`agentproto/ts`. A working private implementation runs in production
+across two products (Simone, Guilde) and was the basis for this AIP;
+the file paths below describe its shape so any conforming
+implementation can mirror it:
 
-- [`packages/core/src/domain/identity/identity.schema.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/identity.schema.ts) —
+- `packages/core/src/domain/identity/identity.schema.ts` —
   the canonical domain schema (layer rows, artifacts, temporal
   entries) translated faithfully into the AIP-23 frontmatter
   shape.
-- [`packages/core/src/domain/identity/adapter.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/adapter.ts) —
+- `packages/core/src/domain/identity/adapter.ts` —
   `composeIdentityPrompt(layerSets, artifacts)`, the
   deterministic merge function that powers prompt assembly.
-- [`packages/core/src/domain/identity/compress.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/compress.ts) —
+- `packages/core/src/domain/identity/compress.ts` —
   `compressLayer(layerId, data, tokenLimit)` and
   `assembleCompressed(layers, artifacts, totalBudget,
   priority)`, the AAAK-inspired three-tier compression pipeline.
-- [`packages/core/src/domain/identity/registry.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/registry.ts) —
+- `packages/core/src/domain/identity/registry.ts` —
   `IdentityLayerRegistry`, the registry primitive.
-- [`packages/core/src/domain/identity/presets/`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/presets) —
+- `packages/core/src/domain/identity/presets/` —
   the eight preset layer definitions (`soul`, `mind`, `body`,
   `voice`, `world`, `shadow`, plus extensions in app packages).
-- [`packages/simone/src/domain/identity/layers.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/simone/src/domain/identity/layers.ts) —
+- `packages/simone/src/domain/identity/layers.ts` —
   Simone's `emotional-bond` layer (the canonical temporal-layered
   example).
-- [`packages/guilde/src/domain/identity/layers.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/guilde/src/domain/identity/layers.ts) —
+- `packages/guilde/src/domain/identity/layers.ts` —
   Guilde's `personality` and `role-context` layers.
-- [`packages/core/src/services/identity/identity-ingestion.service.ts`](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/services/identity/identity-ingestion.service.ts) —
+- `packages/core/src/services/identity/identity-ingestion.service.ts` —
   the ingestion service that extracts confidence-scored signals
   from conversation messages.
 

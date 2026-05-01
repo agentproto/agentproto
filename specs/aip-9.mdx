@@ -165,19 +165,24 @@ operator runs.
 
 ## Reference Implementation
 
-`apps/guilde/api/src/mastra/operator-orchestrator`
-in agentik-studio. Includes:
+A public reference implementation is **TBD** — pending extraction into
+`agentproto/ts`. The shape any conforming runtime must expose:
 
-- `operator-orchestrator.ts` — the runtime that turns an operator
-  configuration into a Mastra agent + executes turns
-- `routing/` — mention-resolution, multi-operator triage, pass logic
-- `generation/` — turn generation strategies (sequential vs
-  think-then-speak, normal vs deep work mode)
-- `types.ts` — the typed contract that AIP-9 will codify
+- An **operator orchestrator** that turns an operator configuration
+  into a runnable agent and executes turns.
+- A **routing** module — mention resolution, multi-operator triage,
+  pass logic.
+- A **generation** module — turn-generation strategies (sequential
+  vs think-then-speak, normal vs deep-work mode).
+- A **typed contract** for operator configuration (the shape AIP-9
+  codifies).
 
 The orchestrator boots from an [AIP-6](/docs/aip-6) `OPERATOR.md`
 package + an [AIP-3](/docs/aip-3) skill set + tool registry, and
-produces a fully-configured operator ready to dispatch to.
+produces a fully-configured operator ready to dispatch to. A working
+implementation runs in production inside the agentik-studio monorepo
+(private); the open reference will land alongside `@agentproto/agencies`
+and `@agentproto/governance` once extracted.
 
 ## Backwards Compatibility
 

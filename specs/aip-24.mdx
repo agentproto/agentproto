@@ -763,9 +763,12 @@ without claiming to be normative defaults.
 
 ## Reference Implementation
 
-The advisory mode is implemented in the agentik-studio monorepo:
+A public reference implementation is **TBD** — pending extraction into
+`agentproto/ts`. A working private implementation of the advisory mode
+runs in production; its shape (described below) is what any conforming
+implementation should mirror:
 
-- [`packages/agent-framework/src/council/`](https://github.com/jeremyandre/agentik-studio/tree/main/packages/agent-framework/src/council) —
+- `packages/agent-framework/src/council/` —
   the framework substrate: `types.ts` (Mentor, MentorOutput,
   PersonaFragment, CouncilGuidance, SynthesisRule, CouncilStore),
   `council.workflow.ts` (the gather → invoke → persist → synthesise
@@ -773,7 +776,7 @@ The advisory mode is implemented in the agentik-studio monorepo:
   application algorithm), `persona-overlay.ts` (the lock-check
   implementation and overlay eviction planner), `triggers.ts` (the
   trigger heuristics).
-- [`packages/simone/src/council/`](https://github.com/jeremyandre/agentik-studio/tree/main/packages/simone/src/council) —
+- `packages/simone/src/council/` —
   Simone's app-specific realisation: five mentors, four synthesis
   rules, the `SIMONE_LOCKED_TRAITS` constant, the
   sentinel-prefilter for early-exit on safety patterns. The
