@@ -1,0 +1,439 @@
+---
+title: "AIP-36: SANDBOX.md — agentsandbox/v1 (compute environment policy block)"
+description: A composable schema block defining the `sandbox` field — provider, config, command env, network egress, resource limits — for any manifest that names a compute environment for agent-issued shell commands. Sibling primitive to STORAGE.md (AIP-35); inline or ref, mirroring AIP-17 RUNNER and AIP-19 SECRETS.
+aip: 36
+status: Draft
+type: Schema
+created: 2026-05-02
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 17, 19, 35]
+discussions-to: https://github.com/agentproto/agentproto/discussions/36
+layer: primitives
+---
+
+| Field | Value |
+|---|---|
+| AIP | 36 |
+| Title | SANDBOX.md — agentsandbox/v1 (compute environment policy block) |
+| Status | Draft |
+| Type | Schema |
+| Domain | sandbox.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-35](/docs/aip-35) (STORAGE) |
+
+## Abstract
+
+This AIP defines the `sandbox` schema block — **provider** (which
+backend), **config** (provider-specific connection fields),
+**limits** (resource caps), **env** (variables injected at command
+invocation, resolved via SECRETS.md), **network** (egress
+allowlist) — and the **`defineSandbox(...)`** standard signature
+that consumes it.
+
+`sandbox` describes a single concern: **the compute environment
+hosting agent-issued shell commands** (`execute_command`,
+`get_process_output`, `kill_process`, etc.). It is the sibling of
+[STORAGE.md (AIP-35)](/docs/aip-35), which describes durable file
+storage. Together they compose a workspace's runtime (per AIP-34).
+
+The block is composable: any manifest that names a compute
+environment MAY embed a sandbox block inline, or MAY reference a
+sibling `SANDBOX.md` file or registry slug.
+
+This is a **schema-block AIP**, not a file format users always
+author standalone. There MAY be `<slug>.SANDBOX.md` files in a
+workspace when the policy is reusable; otherwise the block is
+inline in its parent manifest.
+
+## Motivation
+
+Sandbox abstractions have appeared independently in multiple
+ecosystems:
+
+- **Mastra** ships a `MastraSandbox` interface implemented by
+  `LocalSandbox`, `@mastra/e2b`, `@mastra/modal`, `@mastra/daytona`,
+  `@mastra/blaxel` — composed alongside `MastraFilesystem` in the
+  `Workspace` constructor.
+- **The mcp-core registry pattern** (referenced impl: a
+  `SandboxProviderAdapter` interface with `create / connect /
+  isAlive / kill / getUrl / writeFile / readFile / runCommand`) —
+  used to host third-party MCP servers in cloud sandboxes.
+- **Subprocess sandboxes** with kernel-level isolation (Node
+  `--permission` flags + `bwrap`) — used to run workspace-
+  authored code with declarative grants.
+
+Each of these is a real, working pattern. They diverge on
+**lifecycle** (workspace-lifetime vs per-MCP-connector vs
+per-invocation), but they share the same **provider primitive**:
+a thing you can run a command in, with bounded I/O, network, and
+resource allowances.
+
+`SANDBOX.md` extracts the policy declaration into a portable
+block that any of these consumers can read. It's the contract
+layer; lifecycle stays per-consumer.
+
+Three problems this fixes:
+
+1. **Provider enums get incoherent if conflated with storage.**
+   Lumping `s3`, `azure-blob`, `e2b`, and `modal` into one
+   `provider` enum mixes durable backends with ephemeral compute.
+   Splitting clarifies — STORAGE.md is files, SANDBOX.md is
+   commands.
+
+2. **Lifecycle differs.** A storage backend is durable; a sandbox
+   is ephemeral, often with pause/resume semantics. They need
+   different operational verbs.
+
+3. **Policy axes differ.** Storage policy is about read/write,
+   exclude lists, sync mode. Sandbox policy is about resource
+   caps, allowed network egress, env-var injection. A shared
+   policy block can't model both cleanly.
+
+`SANDBOX.md` extracts the compute-environment policy into a
+portable, reusable block that composes with — but is independent
+of — STORAGE.md.
+
+## Design principles
+
+1. **Inline or ref, mirroring AIP-17 / AIP-19 / AIP-35.** Most
+   consumers inline the block. Reusable policies live in their
+   own `<slug>.SANDBOX.md` and are referenced.
+
+2. **Optional in WORKSPACE.md.** A workspace MAY declare no
+   sandbox at all (storage-only workspace). The host MUST
+   tolerate the absence and refuse `execute_command`-class tools
+   when no sandbox is configured.
+
+3. **Provider names are the primary axis.** The `provider` string
+   is the first thing consumers branch on. The provider namespace
+   is open: hosts MAY register additional provider ids.
+
+4. **Config is a typed object per provider.** Discriminated union
+   keyed on `provider`. No `Record<string, unknown>` opt-out.
+
+5. **Env never inline.** Sandbox env vars MUST resolve through
+   AIP-19 SECRETS.md `auth.ref`, not embedded plaintext. Static
+   passthrough (NODE_ENV, DEBUG) is allowed via a separate
+   `passthrough` list.
+
+6. **Network is allow-list, not deny-list.** `network.egress`
+   declares which hosts the sandbox MAY reach. Empty/missing =
+   no egress. Hosts MUST enforce.
+
+7. **Limits are advisory but enforceable.** Hosts SHOULD enforce
+   `timeout_ms` / `memory_mb` / `cpu_ms` when the underlying
+   sandbox primitive supports it. Hosts that can't enforce a cap
+   SHOULD warn at registration.
+
+## Specification
+
+### The `sandbox` block
+
+```yaml
+sandbox:
+  provider: local | mastra-e2b | mastra-modal | mastra-daytona | mastra-blaxel
+  config:
+    # provider-specific shape — see "Provider config shapes" below
+  limits:
+    timeout_ms: 30000
+    memory_mb: 1024
+    cpu_ms: 30000
+  env:
+    auth:
+      ref: ./SECRETS.md                # AIP-19 — credentials live there
+      state: { env: ["OPENAI_API_KEY", "STRIPE_SECRET"] }
+    passthrough: ["NODE_ENV", "DEBUG"] # static host vars to forward
+  network:
+    egress: ["api.openai.com", "*.anthropic.com"]
+  lifecycle:
+    pause_after_idle_ms: 600000        # provider-supported only (modal, daytona)
+    destroy_on_workspace_close: true
+  read_only: false                     # if true, no command execution permitted
+```
+
+### Standalone SANDBOX.md frontmatter
+
+When the block lives in its own file, the frontmatter adds an
+`id` and `version` for addressability:
+
+```yaml
+---
+schema: sandbox/v1
+id: "@<owner-slug>/<sandbox-slug>"
+version: 1.0.0
+provider: <as above>
+config: { ... }
+limits: { ... }
+env: { ... }
+network: { ... }
+lifecycle: { ... }
+read_only: false
+---
+```
+
+### Embedding in a parent manifest (WORKSPACE.md example)
+
+```yaml
+sandbox:
+  inline:                              # exclusive with ref
+    provider: mastra-e2b
+    config: { template: "code-interpreter-v3" }
+    limits: { timeout_ms: 60000, memory_mb: 2048 }
+    network: { egress: ["api.openai.com"] }
+  # OR
+  # ref: ./sandbox/main.SANDBOX.md
+  # OR
+  # ref: "@acme-corp/shared-modal-policy"
+```
+
+### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `provider` | string | Backend kind. See enumerated set + extension rules below. |
+| `config` | object | Provider-specific connection fields. Shape varies per provider. |
+
+### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `limits` | object | `{ timeout_ms: 30000 }` | Resource caps per command. |
+| `env` | object | `{}` | `{ auth: { ref, state }, passthrough: [...] }`. |
+| `network` | object | `{ egress: [] }` | `{ egress: string[] }` — host allowlist. Empty = no egress. |
+| `lifecycle` | object | `{}` | `{ pause_after_idle_ms?, destroy_on_workspace_close? }`. |
+| `read_only` | boolean | `false` | Reject command execution at the sandbox layer. |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+### Standalone-only fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `sandbox/v1`. |
+| `id` | string | `@<owner-slug>/<sandbox-slug>`. Globally addressable when reused. |
+| `version` | semver string | Spec version of THIS file. |
+
+### Provider enumerated set (Day 1)
+
+| `provider` | Implementation | Lifecycle | Notes |
+|---|---|---|---|
+| `local` | Mastra `LocalSandbox` (from `@mastra/core/workspace`) | workspace-lifetime | Dev / self-host. Default in `createAgentWorkspace({ enableSandbox: true })`. |
+| `mastra-e2b` | `@mastra/e2b` | per-call, fresh | Cloud isolation. |
+| `mastra-modal` | `@mastra/modal` | persistent w/ pause/resume | Long-lived sessions. |
+| `mastra-daytona` | `@mastra/daytona` | persistent | Dev-environments. |
+| `mastra-blaxel` | `@mastra/blaxel` | per-call | Cloud isolation. |
+| `node-permission` | Node `--permission` subprocess + optional bwrap | per-invocation | Per-tool grants for workspace-authored code. |
+
+Hosts MAY register additional providers (e.g. `flyio-machines`,
+`cloudflare-containers`, custom internal). The registry name MUST
+NOT collide with the enumerated set.
+
+**On the relationship to existing implementations.** The
+mcp-core `SandboxProviderAdapter` (with `create / connect /
+isAlive / kill / getUrl / writeFile / readFile / runCommand`) is
+prior art that informed this AIP. Where Mastra's `MastraSandbox`
+is available for a given provider, conformant implementations
+SHOULD wrap it rather than reimplement. The AIP defines the
+**declarative contract** (what a workspace asks for); the
+**runtime execution** is the consumer's choice — Mastra
+sandboxes for the canonical path, custom adapters for cases
+Mastra doesn't yet cover.
+
+### Provider config shapes
+
+```yaml
+# local
+config:
+  cwd: string                    # working directory; defaults to workspace root
+  shell: "/bin/bash" | "/bin/sh" # default: /bin/sh
+
+# mastra-e2b
+config:
+  template: string               # e2b template id
+  api_key_ref: string            # SECRETS.md slug for E2B API key
+  region?: "us-east-1" | "eu-west-1"
+
+# mastra-modal
+config:
+  app_name: string
+  function_name: string
+  api_token_ref: string
+
+# mastra-daytona
+config:
+  workspace_id: string
+  api_key_ref: string
+
+# mastra-blaxel
+config:
+  workspace: string
+  api_key_ref: string
+```
+
+### `defineSandbox` standard signature
+
+```ts
+defineSandbox(definition: SandboxDefinition): SandboxHandle
+
+interface SandboxDefinition {
+  schema?:    "sandbox/v1"             // standalone files only
+  id?:        string                    // standalone files only
+  version?:   string                    // standalone files only
+
+  provider:   string
+  config:     Record<string, unknown>   // typed per provider; spec'd in this AIP
+
+  limits?: {
+    timeoutMs?:  number
+    memoryMb?:   number
+    cpuMs?:      number
+  }
+  env?: {
+    auth?:        { ref?: string; state?: { env?: string[] } }
+    passthrough?: string[]
+  }
+  network?: {
+    egress: string[]
+  }
+  lifecycle?: {
+    pauseAfterIdleMs?:        number
+    destroyOnWorkspaceClose?: boolean
+  }
+  readOnly?:  boolean
+  metadata?:  Record<string, unknown>
+}
+```
+
+### Conformance rules
+
+1. **Inline and ref are mutually exclusive.** A consumer manifest
+   embedding the block uses exactly one form per occurrence.
+
+2. **Env credentials never inline.** Implementations MUST reject
+   sandbox blocks containing plaintext credentials. Use
+   `env.auth.ref` → SECRETS.md per AIP-19.
+
+3. **Network egress is allow-list.** A sandbox with no `network`
+   block MUST be granted no egress. Validators that silently allow
+   all egress on missing config are non-conformant.
+
+4. **`read_only: true` MUST be enforced.** Command execution
+   through a read-only sandbox handle MUST fail with a typed error
+   (`sandbox_read_only`) before reaching the backend.
+
+5. **No I/O at parse time.** Parsing a SANDBOX.md or sandbox
+   block MUST NOT trigger credential resolution, network calls,
+   or backend instantiation. Materialization is lazy.
+
+6. **Lifecycle features are advisory.** A `pause_after_idle_ms`
+   declaration on a provider that doesn't support pause/resume
+   (e.g. `local`, `mastra-e2b`) MUST be ignored — not rejected.
+
+## Composition with STORAGE.md
+
+A workspace's runtime is the **product** of its storage and
+sandbox declarations:
+
+```yaml
+# WORKSPACE.md
+storage:
+  inline:
+    provider: github
+    config: { owner: acme, repo: workspace, branch: main }
+sandbox:
+  inline:
+    provider: mastra-e2b
+    config: { template: "code-interpreter-v3" }
+    network: { egress: ["api.openai.com"] }
+```
+
+The host materializes both; agent-callable file tools route to
+the storage filesystem, agent-callable command tools route to the
+sandbox. Files written by sandbox commands MAY mirror to storage
+through host-defined sync (typically: a `mount` of the storage
+filesystem inside the sandbox's working directory). The sync
+contract is host policy, not part of this AIP.
+
+## Reference resolution
+
+A `ref` field accepts three forms (same as STORAGE.md):
+
+1. **Workspace-relative path**: `./sandbox/main.SANDBOX.md`
+2. **Cross-workspace path**: `../shared/team.SANDBOX.md`
+3. **Registry slug**: `@<owner-slug>/<sandbox-slug>`
+
+Resolution failures MUST surface as a typed error
+(`sandbox_ref_unresolvable`).
+
+## Example — standalone SANDBOX.md
+
+```md
+---
+schema: sandbox/v1
+id: "@acme-corp/shared-modal-policy"
+version: 1.0.0
+provider: mastra-modal
+config:
+  app_name: agentik-sandbox
+  function_name: code_runner
+  api_token_ref: org/acme/modal-token
+limits:
+  timeout_ms: 120000
+  memory_mb: 4096
+env:
+  auth:
+    ref: ./SECRETS.md
+    state: { env: ["OPENAI_API_KEY", "STRIPE_SECRET"] }
+  passthrough: ["NODE_ENV"]
+network:
+  egress: ["api.openai.com", "api.stripe.com"]
+lifecycle:
+  pause_after_idle_ms: 300000
+  destroy_on_workspace_close: false
+read_only: false
+---
+
+## Description
+
+Shared Modal sandbox for Acme's analytics workspaces. Pauses after
+5 minutes idle to control cost; reuses the org's Modal API token.
+```
+
+## Security considerations
+
+`SANDBOX.md` is **declarative**: a malicious manifest can claim
+any `provider` or `config`. Hosts MUST validate:
+
+- `env.auth.ref` resolves to a SECRETS.md the workspace's owner
+  is authorised to reveal.
+- `network.egress` entries are on an allow-list of permitted
+  destinations under workspace policy.
+- `provider` is registered in the host's provider registry;
+  unknown providers MUST be rejected, never silently treated as
+  a default.
+
+Sandbox providers vary widely in their isolation guarantees.
+Hosts SHOULD document which providers are considered "trusted"
+under their policy framework. A `local` provider grants
+host-process access — granting it to an untrusted manifest is a
+sandbox escape by definition.
+
+## Open questions
+
+1. **Multi-sandbox per workspace.** Should a workspace declare
+   multiple sandboxes (e.g. `python` + `node` separately)? Defer
+   until concrete need.
+
+2. **Sandbox-to-storage mount syntax.** When a sandbox needs to
+   read/write workspace storage, the mount config is host-
+   specific today. A future AIP may standardise.
+
+3. **Cost / quota declarations.** Sandbox usage is metered by
+   most cloud providers. Whether limits include a cost cap
+   (`max_cost_units_per_run`) is open.
+
+## See also
+
+- [AIP-17 — RUNNER.md](/docs/aip-17) — same composition pattern
+- [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from `env.auth.ref`
+- [AIP-26 — CODE.md](/docs/aip-26) — same composition pattern (inline / ref)
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — the primary consumer
+- [AIP-35 — STORAGE.md](/docs/aip-35) — sibling primitive (filesystem)

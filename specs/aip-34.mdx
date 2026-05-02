@@ -6,7 +6,7 @@ status: Draft
 type: Schema
 created: 2026-05-02
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 19, 35]
+requires: [1, 2, 19, 35, 36]
 discussions-to: https://github.com/agentproto/agentproto/discussions/34
 layer: surfaces
 ---
@@ -18,7 +18,7 @@ layer: surfaces
 | Status | Draft |
 | Type | Schema |
 | Domain | workspace.sh |
-| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-19](/docs/aip-19) (SECRETS), [AIP-35](/docs/aip-35) (STORAGE) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-19](/docs/aip-19) (SECRETS), [AIP-35](/docs/aip-35) (STORAGE), [AIP-36](/docs/aip-36) (SANDBOX) |
 
 ## Abstract
 
@@ -29,10 +29,14 @@ defaults, and publish posture. It is the root manifest of every
 AIP-organized workspace and the entry point hosts read first when
 materializing a workspace.
 
-The format pairs with [STORAGE.md (AIP-35)](/docs/aip-35) — the
-shared block defining where the bytes live. WORKSPACE.md's
-`storage:` field is either inline or a ref to a STORAGE.md file or
-registry slug.
+The format pairs with two sibling blocks that mirror Mastra's
+`Workspace = filesystem + sandbox` shape:
+- [STORAGE.md (AIP-35)](/docs/aip-35) — where the bytes live
+  (filesystem). Required.
+- [SANDBOX.md (AIP-36)](/docs/aip-36) — where shell commands run
+  (compute). Optional — workspaces MAY be storage-only.
+
+Both fields accept inline or ref form.
 
 The file is human-authored, version-controlled, machine-parseable,
 and grep-able — same posture as
@@ -136,13 +140,14 @@ case-sensitive.
 | `version` | semver string | Spec version of THIS file. Bump on breaking shape change. |
 | `name` | string | Human-readable display name. 1–80 chars. |
 | `owner` | object | `{ type: "guild" \| "user" \| "org", id: string, slug: string }`. The `slug` participates in the addressable `id` above. |
-| `storage` | object | Storage policy: either `{ inline: <STORAGE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }`. See AIP-35. |
+| `storage` | object | Filesystem policy: either `{ inline: <STORAGE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }`. See AIP-35. |
 
 #### Optional fields
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `description` | string | `""` | One-paragraph purpose. ≤2000 chars. |
+| `sandbox` | object | (none) | Sandbox policy: either `{ inline: <SANDBOX.md frontmatter body> }` or `{ ref: "<path or registry slug>" }`. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
 | `defaults` | object | `{}` | `{ read_only: bool }` and other workspace-wide defaults. |
 | `publish` | object | `{ template: false, visibility: "private" }` | Publish posture: `{ template: bool, registry?: string, visibility: "private" \| "unlisted" \| "public" }`. |
 | `tags` | string[] | `[]` | Free-form discovery tags. |
@@ -179,7 +184,10 @@ interface WorkspaceDefinition {
     slug: string
   }
   storage:
-    | { inline: StorageDefinition }       // AIP-35
+    | { inline: StorageDefinition }       // AIP-35 (required)
+    | { ref:    string }                  // path or registry slug
+  sandbox?:
+    | { inline: SandboxDefinition }       // AIP-36 (optional)
     | { ref:    string }                  // path or registry slug
   defaults?: { readOnly?: boolean }
   publish?: {
@@ -333,4 +341,5 @@ whether and when to honour it.
 - [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from STORAGE.md.auth
 - [AIP-26 — CODE.md](/docs/aip-26) — sibling manifest the workspace hosts
 - [AIP-30 — DRIVER.md](/docs/aip-30) — sibling manifest the workspace hosts
-- [AIP-35 — STORAGE.md](/docs/aip-35) — paired storage policy block
+- [AIP-35 — STORAGE.md](/docs/aip-35) — filesystem policy block
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox/compute policy block

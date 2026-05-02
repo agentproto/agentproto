@@ -103,7 +103,7 @@ embedded ad-hoc per manifest:
 ```yaml
 storage:
   provider: cloud-bucket | self-bucket | github | local-fs | dev-local
-                | mastra-s3 | mastra-azure | mastra-e2b | mastra-modal | mastra-daytona
+                | mastra-s3 | mastra-azure
   config:
     # provider-specific shape — see "Provider config shapes" below
   sync:
@@ -190,9 +190,15 @@ storage:
 | `dev-local` | `/tmp/<id>` directory | `canonical` | Development only. |
 | `mastra-s3` | `@mastra/s3` | `canonical` | Delegates to the Mastra package. |
 | `mastra-azure` | `@mastra/azure/blob` | `canonical` | Delegates to the Mastra package. |
-| `mastra-e2b` | `@mastra/e2b` | `canonical` | Ephemeral sandbox; lifetime tied to the sandbox. |
-| `mastra-modal` | `@mastra/modal` | `canonical` | Modal-backed sandbox with pause/resume. |
-| `mastra-daytona` | `@mastra/daytona` | `canonical` | Daytona-backed sandbox. |
+
+**Note on sandbox-shaped backends.** E2B, Modal, Daytona, Blaxel
+are **compute environments**, not durable storage. Their
+filesystems are ephemeral and tied to the sandbox lifetime. They
+belong in [SANDBOX.md (AIP-36)](/docs/aip-36), not here. A
+workspace using a sandbox-mounted scratch filesystem composes
+both blocks: persistent `storage:` for durable bytes, ephemeral
+`sandbox:` for the compute (whose scratch fs is host-managed,
+not declared as a STORAGE.md provider).
 
 Hosts MAY register additional providers; the registry name MUST
 NOT collide with the enumerated set.
