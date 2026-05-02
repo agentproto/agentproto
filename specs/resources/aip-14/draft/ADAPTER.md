@@ -67,7 +67,7 @@ A host that implements `defineTool` MUST:
    surface `error.code = "input_unsupported"` BEFORE dispatch — not at
    the driver body.
 
-6. **Honour `default_driver`** in resolver Phase 5 (cost ranking).
+6. **Honour `default_implementation`** in resolver Phase 5 (cost ranking).
    When no other signal differentiates candidates, prefer the contract's
    pinned default.
 
@@ -301,7 +301,7 @@ A pre-refactor TOOL.md carried `code`, `run`, `runner`, `secrets`,
    - `network` → `driver.network.egress`
    - `entry`'s `execute` body → `driver.execute[<toolId>]`
 2. Set `driver.implements[0].tool` to the (now-amputated) TOOL.md.
-3. Remove the moved fields from TOOL.md; add `default_driver` if
+3. Remove the moved fields from TOOL.md; add `default_implementation` if
    relevant.
 4. Validate both files against their v1 schemas.
 

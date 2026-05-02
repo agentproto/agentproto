@@ -1103,6 +1103,170 @@ status-removal attacks) are documented in
 locking and council-overlay threats are documented in
 [AIP-24](/docs/aip-24).
 
+## Identity reference block (cross-AIP composable primitive)
+
+The full AIP-23 IDENTITY.md described above is a **layered identity
+workspace** — rich, composed of AIP-18 collections, with confidence
+scores and compression artifacts. That's the canonical entity layer.
+
+But many other AIPs need a much smaller surface: just "**who** is
+acting here?" — for git commit author attribution, sandbox process
+ownership, code authoring trail, observability annotations. Forcing
+those consumers to instantiate a full identity workspace is overkill.
+
+This section defines the **identity reference block** — a small
+composable primitive that any AIP MAY embed. It follows the same
+`inline | ref | file` pattern used by [STORAGE.md](/docs/aip-35),
+[SANDBOX.md](/docs/aip-36), [SECRETS.md](/docs/aip-19),
+and other composable blocks in the series.
+
+### The block — three forms
+
+```yaml
+# Form A — inline (the simple case)
+identity:
+  name: "Bob"
+  email: "bob@guilde.work"
+  gpg_key: "..."        # optional
+
+# Form B — ref to a host scheme (the most common case)
+identity:
+  ref: "operator://bob"
+  role: "author"        # optional, default "author"
+
+# Form C — file (full AIP-23 IDENTITY.md workspace)
+identity:
+  file: "./bob.IDENTITY.md"
+
+# Multi-attribution — array of any of the above
+identity:
+  - { ref: "operator://bob", role: "author" }
+  - { ref: "user://current", role: "co-author" }
+```
+
+### Reference schemes
+
+The `ref` form accepts a URI-like string. The host's address
+resolver dispatches by scheme:
+
+| Scheme | Resolves to | Source |
+|---|---|---|
+| `operator://<id>` | A guild operator (agent persona) | host's operators table |
+| `user://<id>` | A real user | host's users table |
+| `user://current` | The user who triggered the current action | host's request context |
+| `org://<id>` | An organisation | host's orgs table |
+| `guild://<id>` | A guild / team | host's guilds table |
+| `bot://<name>` | A system bot | host config (e.g. `bot://agentik` = `Agentik <noreply@agentik.net>`) |
+| `@<owner>/identities/<slug>` | A registry-published identity | address resolver per AIP-34 |
+| `./<path>.IDENTITY.md` | A local AIP-23 IDENTITY.md workspace | filesystem read |
+
+Hosts MAY register additional schemes (e.g. `okta://`, `github://`).
+Configs using non-standard schemes declare an explicit host
+dependency.
+
+### Minimal resolution contract
+
+Regardless of form, an identity reference resolves to this contract:
+
+```ts
+interface ResolvedIdentity {
+  name: string             // human-readable display name
+  email: string            // RFC 5322 address — REQUIRED for git commits
+  avatar?: string          // URL to avatar image
+  gpg_key?: string         // PGP public key for signing
+  role?: string            // "author" | "co-author" | custom — for multi-attribution
+  metadata?: Record<string, unknown>  // host-specific extensions
+}
+```
+
+Hosts MAY enrich the resolved identity with extra fields under
+`metadata.<host>.*` namespaces. Consumers MUST tolerate missing
+optional fields.
+
+### Composition rules
+
+When the identity block is embedded in a parent that itself has
+identity (e.g. STORAGE.md inside WORKSPACE.md):
+
+1. The **child overrides the parent** — STORAGE.md.identity wins
+   over WORKSPACE.md.identity for that storage's commits.
+2. Missing identity at every level → host policy fallback (typically
+   the current acting operator from request context).
+3. Multi-attribution arrays MUST preserve order: first entry is the
+   primary author; subsequent entries are co-authors / signers.
+
+### Per-consumer interpretation
+
+Different consumers extract different fields:
+
+| Consumer | Uses |
+|---|---|
+| Git commit author | `name <email>` (primary) + `Co-authored-by: name <email>` (additional) |
+| Git commit signing | `gpg_key` (primary, if present) |
+| Sandbox process owner | `name` (display label only — actual OS user is host policy) |
+| Code authoring trail | `name`, `email`, `metadata` |
+| Observability span tags | `name`, `metadata` |
+
+### `defineIdentityRef` standard signature
+
+Implementations consuming the block expose:
+
+```ts
+defineIdentityRef(
+  block: IdentityRefBlock,
+  context: { requestContext: RequestContext }
+): Promise<ResolvedIdentity | ResolvedIdentity[]>
+```
+
+The function dispatches by form (inline / ref / file), resolves
+through host services, and returns the contract above (or an array
+for multi-attribution).
+
+### Conformance rules
+
+1. **Inline, ref, and file are mutually exclusive per entry.** A
+   single entry MUST use exactly one form.
+2. **Arrays MAY mix forms.** `[{ ref }, { inline }]` is valid.
+3. **No I/O at parse time.** Parsing the block MUST NOT trigger
+   address resolution. Resolution is lazy, at use-time.
+4. **`email` is REQUIRED in every resolved identity.** Hosts that
+   resolve a scheme to an entity without an email MUST refuse the
+   resolution (or substitute a host-policy email like
+   `<scheme>-<id>@noreply.<host>`).
+5. **Versioning.** The block schema is unversioned (it's primitive
+   shape). Future additions are additive only.
+
+### Example — composed across blocks
+
+```yaml
+# WORKSPACE.md
+identity:
+  ref: "operator://bob"               # default for everything in this workspace
+
+storage:
+  inline:
+    provider: github
+    config: { owner: acme, repo: marketing }
+    identity:
+      - { ref: "operator://bob" }      # primary author
+      - { ref: "user://current", role: "co-author" }  # co-author the human
+
+sandbox:
+  inline:
+    provider: mastra-e2b
+    identity: { ref: "bot://agentik" }  # process owner is the bot
+
+code:
+  ref: "./code/marketing-tools/CODE.md"
+  # identity inherited from WORKSPACE.md.identity
+```
+
+### Backward compatibility
+
+Hosts that already implement AIP-23 layered identity workspaces are
+unaffected. The reference block is purely additive — full IDENTITY.md
+files remain valid identity targets via the `file:` form.
+
 ## See also
 
 - [AIP-1 — agent.json](/docs/aip-1)

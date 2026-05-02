@@ -199,7 +199,7 @@ case-sensitive.
 | `cost_class` | string | `"trivial"` | `"trivial"` (no metered call), `"metered"` (counts against quota), `"expensive"` (warn the user before invoking). Baseline; drivers MAY override via `cost_override.cost_class`. |
 | `timeout_ms` | int | `30000` | Hard wall-clock contract ceiling. Drivers MAY narrow via `timeout_override_ms`; MUST NOT widen. |
 | `retry` | object | none | Baseline retry policy: `{ max_attempts: int, backoff: "fixed"\|"exponential", initial_ms: int }`. Drivers MAY override via `retry_override`. |
-| `default_driver` | string \| null | null | Optional `driver.id` to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. |
+| `default_implementation` | string \| null | null | Optional id of an implementation (a [DRIVER.md](/docs/aip-30) or [CODE.md](/docs/aip-26)) to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. (Renamed from `default_implementation` for terminological consistency with the post-AIP-26 model where CODE.md can also implement TOOL contracts.) |
 | `driver_constraints` | object | `{}` | Author-side allowlist/denylist on which driver kinds the contract permits: `{ forbid?: string[], require_kind?: DriverKind[] }`. Use to declare "this tool MUST NOT be served via untrusted HTTP" (`forbid: ["http"]` for self-hosted-only tools). |
 | `tags` | string[] | `[]` | Free-form discovery tags (`finance`, `read-only`, `media`). |
 | `examples` | object[] | `[]` | Each `{ name, input, output, note? }`. Driver-agnostic examples that EVERY conformant driver MUST satisfy. Driver-specific edge cases live on the DRIVER's own examples. |
@@ -383,7 +383,7 @@ interface ToolDefinition {
   idempotent?:  boolean
 
   // Driver routing
-  defaultDriver?:     string
+  defaultImplementation?:     string
   driverConstraints?: { forbid?: string[]; requireKind?: DriverKind[] }
 
   // Bookkeeping
@@ -508,7 +508,7 @@ outputs:
   required: [tiers, capturedAt]
 driver_constraints:
   require_kind: ["http", "sdk"]    # no shell-spawning CLI for scraping
-default_driver: apollo-pricing-http
+default_implementation: apollo-pricing-http
 tags: [finance, scraping, read-only]
 examples:
   - name: Stripe billing page
@@ -543,7 +543,7 @@ Two anticipated drivers:
 - `diffbot-pricing-http` — fallback. Diffbot's structured-page API; more
   expensive but works on heavily-JS-rendered pages where Apollo fails.
 
-Driver routing: default to Apollo (`default_driver`); fall through
+Driver routing: default to Apollo (`default_implementation`); fall through
 to Diffbot only when Apollo returns `upstream_error: parse_failed`.
 This routing is encoded in the resolver via per-call retry-with-fallback,
 not in the tool — the contract stays driver-agnostic.
@@ -593,7 +593,7 @@ A pre-refactor TOOL.md carried `code`/`run`/`runner`/`secrets`/
    - `network` → `driver.network.egress`
    - `entry`'s `execute` body → `driver.execute[<toolId>]`
 2. Set `driver.implements[0].tool` to the (now-amputated) TOOL.md.
-3. Remove the moved fields from TOOL.md; add `default_driver`
+3. Remove the moved fields from TOOL.md; add `default_implementation`
    pointing at the new DRIVER.md's `id`.
 4. Validate both files against the v1 schemas (no v1/v2 dual-shape
    machinery — we ship a clean v1).

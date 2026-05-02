@@ -414,7 +414,7 @@ approval: auto
 risk_level: 0
 cost_class: metered
 timeout_ms: 30000
-default_driver: anthropic-summarise-http  # cheapest
+default_implementation: anthropic-summarise-http  # cheapest
 inputs:
   type: object
   properties:

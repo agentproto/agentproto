@@ -400,12 +400,98 @@ manifests:
 ```
 .code-workspaces/<slug>/manifest.yaml          # Convention: shared bundles
 .code/<slug>/manifest.yaml                     # Alternate: terser, same semantics
+.code/<slug>/CODE.md                           # NEW (post-AIP-23/34/35/36) — lean composable form
 ```
 
 Authors MAY place code-workspaces anywhere in the workspace —
 `./shared/<slug>/`, `./team/finance/utils/`, etc. The conventions
 are defaults the wizard tool (`createCodeWorkspace`) writes to;
 authors are not bound to them.
+
+## CODE.md — lean composable form
+
+The `kind: code-workspace` manifest above is the **rich** form: it
+inlines every concern (`code`, `run`, `runner`, `secrets`, `network`)
+in one file. That works for self-contained bundles but couples
+concerns that other AIPs already express as composable blocks.
+
+The **lean form** of CODE.md keeps only `source` and `run` directly
+inline; every other concern composes via a sibling block (inline,
+ref, or file). Same composition pattern as RUNNER.md (AIP-17),
+SANDBOX.md (AIP-36), STORAGE.md (AIP-35), SECRETS.md (AIP-19),
+IDENTITY-ref (AIP-23 §"Identity reference block").
+
+```yaml
+# .code/notion-search/CODE.md (lean form)
+schema: code/v2
+id: "@<owner>/code/notion-search"
+version: 1.0.0
+description: Notion search MCP server (Python)
+
+# Lean — only source + run inline
+source: { local: "./search.py" }
+run: "python search.py"
+
+# Everything else composes
+runner: { ref: "./RUNNER.md" }            # or inline { engine, language, limits }
+driver: { ref: "./DRIVER.md" }            # AIP-30 binding (implements + expose)
+sandbox: { ref: "@agentik/python-mcp" }   # AIP-36 — where it runs
+secrets: { ref: "./SECRETS.md" }          # AIP-19 — what creds it can reveal
+identity: { ref: "operator://current" }   # AIP-23 — code-authoring trail
+network: { egress: ["api.notion.com"] }   # inline (small block)
+```
+
+A code module is a **folder** of one CODE.md plus its sibling block
+files. Each sibling MAY be inlined (rare for non-trivial cases) or
+ref'd from a registry (`@agentik/runners/python-3.12`).
+
+### Soft links — `suggests_skills` / `requires_tools` / `references`
+
+CODE.md MAY declare optional links to related entities:
+
+```yaml
+suggests_skills:                          # surfaced when this code is installed
+  - { ref: "../skills/use-notion/SKILL.md" }
+  - { ref: "@agentik/skills/api-debugging" }
+
+requires_tools:                           # TOOL contracts this code expects to be present
+  - { ref: "../tools/auth-token/TOOL.md" }
+
+references:                               # free-form (docs, tickets, prior art)
+  - { url: "https://docs.notion.com/api" }
+  - { url: "https://github.com/notion-mcp/notion-mcp", role: "upstream" }
+```
+
+These are **advisory** — the runtime MAY surface them (e.g. "install
+this code? it suggests these skills") but never blocks on them.
+Removing the source CODE.md does not remove the linked entities.
+
+### Optional fields summary (lean form)
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `runner` | block | (none) | AIP-17 — process boundary (engine/image/needs/limits). Inline / ref / file. |
+| `driver` | block | (none) | AIP-30 — binding (kind, implements, expose). Inline / ref / file. |
+| `sandbox` | block | (none) | AIP-36 — compute environment. Inline / ref / file. |
+| `secrets` | block | (none) | AIP-19 — secret inventory. Ref to SECRETS.md (never inline). |
+| `identity` | block / array | (none) | AIP-23 §identity-ref — author / owner. Inline / ref / file. |
+| `network` | object | `{ egress: [] }` | Network egress allow-list. Always inline (tiny). |
+| `suggests_skills` | array of refs | `[]` | Optional links to related SKILL.md files. |
+| `requires_tools` | array of refs | `[]` | Optional links to TOOL.md contracts this code expects. |
+| `references` | array of `{url, role?}` | `[]` | Free-form external references. |
+
+### Choosing between rich and lean form
+
+| Use case | Form |
+|---|---|
+| Self-contained bundle (one folder, no siblings) | rich (`kind: code-workspace`) |
+| Code that shares runner/driver/sandbox with peers | lean (CODE.md + sibling refs) |
+| Code authored by agent (workspace-tools flow) | lean — sibling files emerge naturally |
+| Published registry workspaces | either — author's choice |
+
+Both forms are valid v1+ shapes. Hosts MUST accept both. Validators
+distinguish by frontmatter shape (`kind: code-workspace` → rich;
+`schema: code/v2` → lean).
 
 ## The `defineCode` standard signature
 
@@ -556,12 +642,18 @@ opaque to AIP-26 — it just sees bytes.
 
 ## See also
 
-- [AIP-14 — TOOL.md](/docs/aip-14) — primary consumer
-- [AIP-15 — WORKFLOW.md](/docs/aip-15) — primary consumer
+- [AIP-14 — TOOL.md](/docs/aip-14) — primary consumer (contract)
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — primary consumer (orchestration)
 - [AIP-16 — IO.md](/docs/aip-16) — sibling block (per-call data)
-- [AIP-17 — RUNTIME](/docs/aip-17) — sibling block (process boundary)
+- [AIP-17 — RUNNER.md](/docs/aip-17) — sibling block (process boundary)
 - [AIP-19 — SECRETS.md](/docs/aip-19) — sibling block (env binding)
 - [AIP-18 — COLLECTION.md](/docs/aip-18) — used by `local:` sources targeting `.collections/`
+- [AIP-23 — IDENTITY.md](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — sibling block (identity-ref)
+- [AIP-30 — DRIVER.md](/docs/aip-30) — sibling block (binding)
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — composes a CODE.md as `workspace.code?`
+- [AIP-35 — STORAGE.md](/docs/aip-35) — sibling primitive (filesystem)
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — sibling primitive (compute)
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary (referenced from `identity.refresh_on` etc.)
 - [`./CODE.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-26/draft) — schema validator
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-26/draft) — implementer's guide
 - [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-26/draft) — worked examples

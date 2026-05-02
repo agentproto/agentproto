@@ -1,0 +1,193 @@
+---
+title: "AIP-37: LIFECYCLE.md — agentlifecycle/v1 (event vocabulary)"
+description: A vocabulary AIP defining the standard lifecycle event names that hosts fire and that policy blocks (storage sync, sandbox lifecycle, etc.) reference. Not a runtime — just a shared language so configs across hosts mean the same thing.
+aip: 37
+status: Draft
+type: Meta
+created: 2026-05-03
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+discussions-to: https://github.com/agentproto/agentproto/discussions/37
+layer: primitives
+---
+
+| Field | Value |
+|---|---|
+| AIP | 37 |
+| Title | LIFECYCLE.md — agentlifecycle/v1 (event vocabulary) |
+| Status | Draft |
+| Type | Meta |
+| Domain | lifecycle.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+
+## Abstract
+
+This AIP defines a **vocabulary** of lifecycle event names that hosts
+fire and that policy blocks across the AIP series reference. It is
+**not a runtime contract** — hosts choose which events they fire and
+how. The AIP just standardizes the event names so configs that
+reference them (e.g. `STORAGE.md.sync.commit.on: turn-end`) mean the
+same thing on any conformant host.
+
+There is no `LIFECYCLE.md` file format. This AIP is purely a lookup
+table for event identifiers.
+
+## Motivation
+
+Several AIPs in the series want to express "do X when Y happens":
+
+- `STORAGE.md.sync.commit.on: per-turn` — commit when an agent turn ends
+- `SANDBOX.md.lifecycle.destroy_on: workspace-close` — destroy when workspace closes
+- `CODE.md.identity.refresh_on: conversation-start` — re-resolve identity when a conversation starts
+
+If each AIP coins its own event names, configs become incompatible.
+The same intent ("after each agent turn") gets spelled three different
+ways. Reviewing a manifest requires knowing the local vocabulary of
+each block.
+
+This AIP gives a shared vocabulary. Any AIP that needs lifecycle
+triggers MAY reference an event from this list, knowing every
+conformant host fires the events under the same names.
+
+## Design principles
+
+1. **Vocabulary, not behaviour.** The AIP defines names + semantic
+   meaning. It does NOT define when events MUST fire — that is host
+   policy.
+
+2. **Open enumeration.** Hosts MAY fire additional events beyond
+   this list (e.g. `agentik:custom-trigger`). Names without a colon
+   prefix are reserved for this spec; namespaced names
+   (`<host>:<event>`) are host-specific.
+
+3. **No event payload spec.** The AIP defines event names only.
+   Payloads (which workspace, which conversation, etc.) are
+   host-specific bindings that consumers extract from the host's
+   request context.
+
+4. **Best-effort firing.** A host that doesn't fire an event listed
+   here is non-conformant for that event but otherwise compliant.
+   Configs MUST tolerate missing events (treat as "never trigger")
+   rather than crash.
+
+## Specification
+
+### Standard event names
+
+Event names are **kebab-case**, lowercase, no colons (colons reserved
+for host namespaces).
+
+#### Workspace lifecycle
+
+| Event | Fires when |
+|---|---|
+| `workspace-open` | Host materializes a Workspace instance (e.g. on first agent turn that touches it). |
+| `workspace-close` | Host releases a Workspace instance (e.g. on idle timeout, host shutdown, explicit user action). |
+
+#### Conversation lifecycle
+
+| Event | Fires when |
+|---|---|
+| `conversation-start` | A new conversation is created or first-touched after a long idle. |
+| `conversation-end` | A conversation is explicitly closed, archived, or marked done. |
+| `conversation-idle-<N>` | A conversation has been idle for `<N>` seconds. Hosts SHOULD support at least one threshold (e.g. `conversation-idle-300` = 5 min). |
+
+#### Agent turn lifecycle
+
+| Event | Fires when |
+|---|---|
+| `turn-start` | An agent turn begins (LLM about to be called). |
+| `turn-end` | An agent turn completes (final response delivered or stream closed). |
+| `turn-error` | An agent turn fails with an unrecoverable error. |
+
+#### Tool / command lifecycle
+
+| Event | Fires when |
+|---|---|
+| `tool-call` | Before a tool is invoked. |
+| `tool-result` | After a tool returns successfully. |
+| `tool-error` | After a tool returns an error. |
+
+#### File / write lifecycle
+
+| Event | Fires when |
+|---|---|
+| `write` | Any successful file write through a tracked filesystem provider. |
+| `delete` | Any successful file delete. |
+
+#### Idle hooks
+
+| Event | Fires when |
+|---|---|
+| `idle-<N>` | Generic idle threshold passed (e.g. `idle-60` = 60 seconds since last event). Distinct from `conversation-idle-<N>` which is conversation-scoped. |
+
+#### Manual
+
+| Event | Fires when |
+|---|---|
+| `manual` | Explicit trigger only (operator action, scheduled job, API call). NEVER fires automatically. |
+
+### Aliases
+
+These shorthand names alias to standard events for ergonomics:
+
+| Alias | Standard event |
+|---|---|
+| `each-write` | `write` |
+| `per-turn` | `turn-end` |
+| `per-conversation` | `conversation-end` |
+
+### Reference syntax
+
+Consumers (other AIPs) reference events as bare strings:
+
+```yaml
+# In STORAGE.md
+sync:
+  commit:
+    on: per-turn          # alias for turn-end
+
+# In SANDBOX.md
+lifecycle:
+  destroy_on: workspace-close
+
+# Custom (namespaced) — host-specific, not in this AIP
+sync:
+  pull:
+    on: agentik:scheduled-pull
+```
+
+### Conformance rules
+
+1. **Hosts SHOULD fire the events listed here when their semantic
+   conditions are met.** A host that supports a subset of events MUST
+   document which.
+
+2. **Configs MUST tolerate missing events.** If a config references
+   `turn-end` but the host doesn't fire it, the trigger MUST be
+   silently skipped (logged, but not erroring).
+
+3. **Aliases MUST resolve transparently.** A host that supports
+   `turn-end` MUST also accept `per-turn` as the same trigger.
+
+4. **Namespaced events (`<host>:<event>`) are non-portable.**
+   Configs using namespaced events declare an explicit host
+   dependency.
+
+## Backward compatibility
+
+This AIP is purely additive. Existing AIPs (STORAGE.md, SANDBOX.md,
+CODE.md, etc.) MAY reference these event names without changing their
+own schemas — the references are bare strings interpreted at runtime.
+
+## Security considerations
+
+Event names are not security-sensitive. Hosts MUST NOT include
+sensitive data (credentials, PII) in event names — those go in
+payloads, which this AIP does not specify.
+
+## See also
+
+- [AIP-35 STORAGE.md](/docs/aip-35) — `sync.{pull,commit,push}.on` consumes events
+- [AIP-36 SANDBOX.md](/docs/aip-36) — `lifecycle.{destroy_on,pause_on}` consumes events
+- [AIP-26 CODE.md](/docs/aip-26) — `identity.refresh_on` consumes events

@@ -358,13 +358,43 @@ stateless across calls by design.
    packages from generic system requirements (e.g. "needs a writable
    /tmp larger than 100 MB"). Probably YAGNI for v1.
 
+## Composition pattern (`inline | ref | file`)
+
+Like every composable block in the AIP series (STORAGE, SANDBOX,
+SECRETS, IDENTITY-ref, CODE), `runner` accepts three forms when
+embedded in a parent manifest:
+
+```yaml
+# Inline — the block defined directly in the parent
+runner:
+  inline:
+    engine: subprocess
+    needs: { language: python }
+
+# Ref — a registry-resolvable identifier
+runner:
+  ref: "@agentik/runners/python-3.12"
+
+# File — a workspace-relative path to a sibling RUNNER.md
+runner:
+  file: "./RUNNER.md"
+```
+
+A consumer (e.g. CODE.md, DRIVER.md) MAY use any of the three.
+Validators MUST accept all three and resolve at use-time. Inline
+and the standalone `RUNNER.md` file form share the same frontmatter
+schema (this AIP).
+
 ## See also
 
 - [AIP-14 — TOOL.md](/docs/aip-14) — primary consumer
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — primary consumer
 - [AIP-16 — IO.md](/docs/aip-16) — sibling block (data flow)
 - [AIP-19 — SECRETS.md](/docs/aip-19) — sibling block (env/secret binding)
+- [AIP-23 — IDENTITY.md](/docs/aip-23) — sibling block (identity-ref)
 - [AIP-26 — CODE.md](/docs/aip-26) — sibling block (bundle composition)
+- [AIP-30 — DRIVER.md](/docs/aip-30) — primary consumer (binding)
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary referenced by lifecycle hooks
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [`./RUNNER.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-17/draft) — schema validator
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-17/draft) — implementer's guide

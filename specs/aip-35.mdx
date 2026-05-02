@@ -108,13 +108,26 @@ storage:
     # provider-specific shape — see "Provider config shapes" below
   sync:
     mode: canonical | pull-push | watch
-    pull_ttl_seconds: 60                  # github only
-    commit_mode: each-write | batched | manual   # github only
-    batch_window_ms: 5000                 # github with commit_mode: batched
-    conflict_policy: last-writer-wins | split-conflicts   # local-fs only
+    # Lifecycle triggers — event names from AIP-37 LIFECYCLE.md
+    pull:
+      on: workspace-open | turn-start | manual | <event>
+      ttl_seconds: 60                     # cache validity (pull-push only)
+    commit:
+      on: each-write | per-turn | per-conversation | manual | <event>
+      batch_window_ms: 5000               # debounce for each-write
+      message_template: "{{operator}}: {{summary}}"  # provider-specific tokens
+    push:
+      on: per-commit | per-turn | per-conversation | manual | <event>
+      branch_policy: main | per-conversation | per-turn  # github only
+      pr_policy: none | auto | manual                    # github only
+    conflict:
+      policy: rebase | merge | abort | manual | last-writer-wins | split-conflicts
   auth:
     ref: ./SECRETS.md                     # AIP-19 — credentials live there
     state: { env: ["GITHUB_INSTALLATION_TOKEN"] }
+  identity:                                # AIP-23 identity-ref — optional
+    - { ref: "operator://current" }        # primary commit author
+    - { ref: "user://current", role: "co-author" }
   exclude:                                # paths NOT mirrored to remote
     - ".runs/"
     - ".artifacts/binary/"
@@ -165,8 +178,9 @@ storage:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `sync` | object | `{ mode: "canonical" }` | Sync semantics. See per-provider rules. |
+| `sync` | object | `{ mode: "canonical" }` | Sync semantics. Lifecycle triggers reference [AIP-37](/docs/aip-37) event names. See per-provider rules. |
 | `auth` | object | `{}` | Reference to AIP-19 SECRETS.md for credentials. |
+| `identity` | object \| array | (none) | AIP-23 identity-ref block — commit author(s) for syncing providers (github). Supports multi-attribution (primary + co-authors). See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
 | `exclude` | string[] | `[]` | Paths NOT mirrored to the backing store. Glob-ish, prefix-matched. |
 | `read_only` | boolean | `false` | Reject writes at the storage layer. |
 | `metadata` | object | `{}` | Free-form, namespaced. |
@@ -246,12 +260,16 @@ config:
 ### Sync semantics by provider
 
 - `canonical` — there's only one copy of the bytes; reads/writes
-  go straight to the backend. No local cache. `commit_mode`,
-  `pull_ttl_seconds`, `conflict_policy` are ignored.
+  go straight to the backend. No local cache. The `pull` /
+  `commit` / `push` triggers are ignored.
 
-- `pull-push` (github) — local clone is a cache; reads pull if
-  older than `pull_ttl_seconds`; writes commit per `commit_mode`
-  (`each-write` / `batched` / `manual`).
+- `pull-push` (github) — local clone is a cache. Reads honour
+  `pull.on` (with `ttl_seconds` as cache validity). Writes commit
+  per `commit.on` (`each-write` debounced via `batch_window_ms`,
+  `per-turn` flushes at `turn-end`, `per-conversation` at
+  `conversation-end`, `manual` only on explicit flush). Pushes
+  honour `push.on` independently. Branch + PR creation honour
+  `push.branch_policy` + `push.pr_policy`.
 
 - `watch` (local-fs) — local disk is canonical; the host
   observes changes via filesystem watch and surfaces events.
@@ -401,5 +419,8 @@ explicit access; hosts SHOULD prompt or audit cross-owner refs.
 
 - [AIP-17 — RUNNER.md](/docs/aip-17) — same composition pattern
 - [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from `auth.ref`
+- [AIP-23 — IDENTITY.md](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — referenced from `identity?`
 - [AIP-26 — CODE.md](/docs/aip-26) — same composition pattern (inline / ref)
 - [AIP-34 — WORKSPACE.md](/docs/aip-34) — the primary consumer
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — sibling primitive (compute)
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary referenced by `sync.{pull,commit,push}.on`

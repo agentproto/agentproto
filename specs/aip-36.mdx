@@ -144,9 +144,18 @@ sandbox:
     passthrough: ["NODE_ENV", "DEBUG"] # static host vars to forward
   network:
     egress: ["api.openai.com", "*.anthropic.com"]
+  mounts:                              # AIP-36 mounts (see below) — optional
+    - source: workspace                 # alias for "the parent workspace storage"
+      at: /workspace
+      mode: read-write
+    - source: { ref: "@agentik/python-libs" }
+      at: /vendor/python-libs
+      mode: read-only
+  identity:                            # AIP-23 identity-ref — optional
+    ref: "bot://agentik"
   lifecycle:
-    pause_after_idle_ms: 600000        # provider-supported only (modal, daytona)
-    destroy_on_workspace_close: true
+    pause_after_idle: idle-600          # AIP-37 event name (or `idle-N` shorthand)
+    destroy_on: workspace-close         # AIP-37 event name
   read_only: false                     # if true, no command execution permitted
 ```
 
@@ -199,6 +208,8 @@ sandbox:
 | `limits` | object | `{ timeout_ms: 30000 }` | Resource caps per command. |
 | `env` | object | `{}` | `{ auth: { ref, state }, passthrough: [...] }`. |
 | `network` | object | `{ egress: [] }` | `{ egress: string[] }` — host allowlist. Empty = no egress. |
+| `mounts` | array | `[]` | Filesystems mounted inside the sandbox. See "Mounts" section below. |
+| `identity` | object \| array | (none) | AIP-23 identity-ref block — owner of the sandbox processes. See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
 | `lifecycle` | object | `{}` | `{ pause_after_idle_ms?, destroy_on_workspace_close? }`. |
 | `read_only` | boolean | `false` | Reject command execution at the sandbox layer. |
 | `metadata` | object | `{}` | Free-form, namespaced. |
@@ -327,6 +338,48 @@ interface SandboxDefinition {
    declaration on a provider that doesn't support pause/resume
    (e.g. `local`, `mastra-e2b`) MUST be ignored — not rejected.
 
+## Mounts (filesystems inside the sandbox)
+
+The `mounts` block declares which filesystems are accessible from
+inside the sandbox at which paths. Maps directly to Mastra's
+`Workspace.mounts` field (since `@mastra/core@1.31`) — a sandbox
+provider that wraps a Mastra workspace passes the resolved mounts
+through.
+
+```yaml
+sandbox:
+  mounts:
+    - source: workspace               # alias = the parent workspace's storage
+      at: /workspace
+      mode: read-write
+    - source: { ref: "@agentik/python-libs" }   # AIP-34 workspace ref
+      at: /vendor/python-libs
+      mode: read-only
+    - source: { inline: { provider: cloud-bucket, config: {...} } }  # ad-hoc
+      at: /cache
+      mode: read-write
+```
+
+Each entry:
+
+| Field | Type | Description |
+|---|---|---|
+| `source` | string \| object | What to mount. `"workspace"` = the parent workspace's primary storage. Otherwise an inline storage block (per AIP-35) or a ref to a workspace / storage. |
+| `at` | string | Absolute path inside the sandbox where the mount appears. Hosts MUST normalise (no `..`, leading `/`). |
+| `mode` | `"read-write" \| "read-only"` | Default `read-write`. A read-only mount blocks writes at the sandbox layer. |
+
+**Sandbox-relative semantics** : the path `at` is **inside the
+sandbox process**, not the host. Sandboxed processes see the mounts
+as regular filesystem paths (e.g. `cat /workspace/README.md`).
+Host-side, the bytes route back through the storage provider that
+backs the mount.
+
+**Why mounts matter** : without a mount, a sandbox like E2B/Modal
+has only its own ephemeral fs. Bytes written there die when the
+sandbox dies. Mounts let the sandbox read AND persist into durable
+workspace storage — closing the loop for github-backed workspaces
+where the agent commits code from inside the sandbox.
+
 ## Composition with STORAGE.md
 
 A workspace's runtime is the **product** of its storage and
@@ -343,14 +396,17 @@ sandbox:
     provider: mastra-e2b
     config: { template: "code-interpreter-v3" }
     network: { egress: ["api.openai.com"] }
+    mounts:
+      - source: workspace            # mount the github-backed storage
+        at: /workspace                # inside the e2b sandbox
+        mode: read-write
 ```
 
-The host materializes both; agent-callable file tools route to
-the storage filesystem, agent-callable command tools route to the
-sandbox. Files written by sandbox commands MAY mirror to storage
-through host-defined sync (typically: a `mount` of the storage
-filesystem inside the sandbox's working directory). The sync
-contract is host policy, not part of this AIP.
+The host materializes both; agent-callable file tools route to the
+storage filesystem, agent-callable command tools route to the
+sandbox. Sandboxed commands write to `/workspace` → the storage
+provider routes those writes through its sync layer (commit + push
+per the storage's STORAGE.md.sync policy).
 
 ## Reference resolution
 
@@ -422,9 +478,8 @@ sandbox escape by definition.
    multiple sandboxes (e.g. `python` + `node` separately)? Defer
    until concrete need.
 
-2. **Sandbox-to-storage mount syntax.** When a sandbox needs to
-   read/write workspace storage, the mount config is host-
-   specific today. A future AIP may standardise.
+2. ~~**Sandbox-to-storage mount syntax.**~~ Resolved by the
+   `mounts` block above (added 2026-05-03 per AIP-36 v1.1).
 
 3. **Cost / quota declarations.** Sandbox usage is metered by
    most cloud providers. Whether limits include a cost cap
@@ -434,6 +489,8 @@ sandbox escape by definition.
 
 - [AIP-17 — RUNNER.md](/docs/aip-17) — same composition pattern
 - [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from `env.auth.ref`
+- [AIP-23 — IDENTITY.md](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — referenced from `identity?`
 - [AIP-26 — CODE.md](/docs/aip-26) — same composition pattern (inline / ref)
 - [AIP-34 — WORKSPACE.md](/docs/aip-34) — the primary consumer
 - [AIP-35 — STORAGE.md](/docs/aip-35) — sibling primitive (filesystem)
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary referenced by `lifecycle.{pause_after_idle, destroy_on}`

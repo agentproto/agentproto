@@ -588,7 +588,7 @@ Phase 4 — Pin override
   if context.pinnedProvider: return matching candidate or pinned_provider_unavailable
 
 Phase 5 — Cost / preference rank
-  prefer tool.default_driver if surviving
+  prefer tool.default_implementation if surviving
   else rank by cost_units_per_call → kind preference (builtin > sdk > http > mcp > cli)
        → most-recent health_check pass → lex(id)
 
@@ -600,7 +600,7 @@ The `kind` preference order (`builtin > sdk > http > mcp > cli`) is
 heuristic, expressing "cheaper to dispatch and more reliable":
 builtin is always available, SDKs are in-process, HTTP is a network
 hop, MCP is a network hop with extra protocol overhead, CLI is a
-subprocess. Authors override per-tool with `default_driver` or
+subprocess. Authors override per-tool with `default_implementation` or
 per-call with `context.pinnedProvider`.
 
 ## Authoring with `SKILL.md`
@@ -831,6 +831,34 @@ These remain open until enough subtype implementations ship.
    Docker on Linux" — single DRIVER.md with conditional kind, or
    two DRIVER.md files with `requires.os` filtering? v1 prefers
    the latter (simpler); v2 may revisit.
+
+## Composition pattern (`inline | ref | file`)
+
+Like every composable block in the AIP series (RUNNER, STORAGE,
+SANDBOX, SECRETS, IDENTITY-ref, CODE), a `driver` reference accepts
+three forms when consumed by other manifests (e.g. inside a
+[CODE.md](/docs/aip-26) that wants to expose its files via a typed
+binding):
+
+```yaml
+# Inline — driver definition embedded in the parent
+driver:
+  inline:
+    kind: mcp
+    implements: [{ tool: "./tools/foo/TOOL.md", version: "^1.0" }]
+
+# Ref — registry-resolvable identifier
+driver:
+  ref: "@agentik/drivers/openai-image-create"
+
+# File — workspace-relative path to a sibling DRIVER.md
+driver:
+  file: "./DRIVER.md"
+```
+
+A consumer MAY use any of the three. Validators MUST accept all
+three and resolve at use-time. Inline and the standalone DRIVER.md
+file form share the same frontmatter schema (this AIP).
 
 ## See also
 

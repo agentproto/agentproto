@@ -27,7 +27,7 @@ inputs:
     required: false
     description:
       Comma-separated list of expected driver kinds (cli, http, mcp, sdk,
-      builtin). Used to set `driver_constraints` and `default_driver`.
+      builtin). Used to set `driver_constraints` and `default_implementation`.
       Optional — defaults to "any kind, no default".
 examples:
   - input:
@@ -130,7 +130,7 @@ form here is JSON Schema.
 
 Two optional fields bias the resolver:
 
-- **`default_driver`**: a driver id the resolver picks when no other
+- **`default_implementation`**: a driver id the resolver picks when no other
   signal differentiates candidates. Use when one specific implementation
   is the canonical one (paid model, enterprise SLA, etc.).
 - **`driver_constraints`**: declare allowed/forbidden driver kinds.
