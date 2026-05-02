@@ -1,0 +1,336 @@
+---
+title: "AIP-34: WORKSPACE.md — agentworkspace/v1 (workspace identity manifest)"
+description: A markdown + frontmatter format for declaring a workspace's identity — globally addressable id, owner, storage choice, defaults, publish posture. The root manifest of every AIP-organized workspace; pairs with STORAGE.md (AIP-35) for the storage policy block.
+aip: 34
+status: Draft
+type: Schema
+created: 2026-05-02
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 19, 35]
+discussions-to: https://github.com/agentproto/agentproto/discussions/34
+layer: surfaces
+---
+
+| Field | Value |
+|---|---|
+| AIP | 34 |
+| Title | WORKSPACE.md — agentworkspace/v1 (workspace identity manifest) |
+| Status | Draft |
+| Type | Schema |
+| Domain | workspace.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-19](/docs/aip-19) (SECRETS), [AIP-35](/docs/aip-35) (STORAGE) |
+
+## Abstract
+
+`WORKSPACE.md` is a markdown-with-frontmatter file format that
+packages a single workspace's **identity** — its globally
+addressable id, owner, name, description, storage choice,
+defaults, and publish posture. It is the root manifest of every
+AIP-organized workspace and the entry point hosts read first when
+materializing a workspace.
+
+The format pairs with [STORAGE.md (AIP-35)](/docs/aip-35) — the
+shared block defining where the bytes live. WORKSPACE.md's
+`storage:` field is either inline or a ref to a STORAGE.md file or
+registry slug.
+
+The file is human-authored, version-controlled, machine-parseable,
+and grep-able — same posture as
+[SKILL.md](/docs/aip-3),
+[TOOL.md](/docs/aip-14),
+[WORKFLOW.md](/docs/aip-15),
+[CODE.md](/docs/aip-26).
+
+## Motivation
+
+Workspaces today exist implicitly: a row in some app's database
+points at a folder somewhere, and conventions emerge — `.tools/`,
+`.workflows/`, `.skills/`, `.runs/`. The folder is real, the
+conventions are real, but the workspace itself has no manifest.
+That implicit shape blocks four real workflows:
+
+1. **No portable identity.** "What is this workspace? Whose is it?
+   Where do its bytes live?" answers require querying the host's
+   database. There's no manifest a reviewer can read.
+
+2. **Storage choice is hidden.** Whether a workspace is on
+   Supabase, S3, GitHub, or local disk is a host config detail.
+   The user can't override it without app-side changes.
+
+3. **No publishability.** Workspaces can't be templates,
+   exports, or registry citizens because they have no addressable
+   id and no manifest to publish.
+
+4. **Hosts can't enumerate workspaces uniformly.** A multi-tenant
+   host with N workspaces per owner has to special-case its app
+   schema to list, switch, or migrate them. With a root manifest,
+   `find . -name "WORKSPACE.md" -maxdepth 2` enumerates the
+   substrate.
+
+`WORKSPACE.md` makes the workspace a first-class declared entity.
+
+## Design principles
+
+1. **One file at the root.** A workspace is a folder containing
+   exactly one `WORKSPACE.md` at its root. No subfolder counts.
+
+2. **Identity is globally addressable.** `id` follows the form
+   `@<owner-slug>/<workspace-slug>`. Same posture as
+   designkit / canvakit / agentproto manifests. The address is
+   resolvable across hosts that share an owner namespace.
+
+3. **Storage policy is its own block.** WORKSPACE.md does NOT
+   redefine storage configuration. It either inlines a STORAGE.md
+   block (AIP-35) for one-off cases, or refs a STORAGE.md file /
+   registry slug for reusable policies.
+
+4. **Optional for backward compatibility.** A workspace without a
+   WORKSPACE.md is still a workspace — hosts fall back to
+   defaults inferred from their database row. WORKSPACE.md is the
+   *upgrade path* to declared identity, not a hard gate.
+
+5. **Manifest wins on conflict.** When both a WORKSPACE.md and a
+   host-side row exist, the manifest body is the source of truth.
+   The row caches hot fields (id, current provider) for routing
+   efficiency only.
+
+6. **Owner is descriptive, not load-bearing for FKs.** The
+   `owner.{type, id, slug}` block describes who owns this
+   workspace for human and registry consumption. The DB shape on
+   any host that persists workspaces uses typed FK tables per
+   owner kind (e.g. `guild_workspaces`, `user_workspaces`,
+   `org_workspaces`) — not polymorphic `owner_type` columns.
+
+7. **Publish posture is opt-in.** A workspace declares
+   `publish.template: true` if it intends to be cloneable. The
+   declaration is the input to a downstream registry; this AIP
+   does not specify the registry itself.
+
+## Specification
+
+### File location
+
+```
+<workspace-root>/
+  WORKSPACE.md          ← this AIP, exactly one
+  .tools/<id>/TOOL.md   ← AIP-14
+  .drivers/<id>/DRIVER.md ← AIP-30
+  .workflows/<id>/WORKFLOW.md ← AIP-15
+  .code/<id>/CODE.md    ← AIP-26
+  .skills/<id>/SKILL.md ← AIP-3
+  storage/<slug>.STORAGE.md  ← AIP-35 (if separated)
+  ... other AIP folders ...
+```
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `workspace/v1`. |
+| `id` | string | Globally addressable id: `@<owner-slug>/<workspace-slug>`. Lowercase, digits, dashes. |
+| `version` | semver string | Spec version of THIS file. Bump on breaking shape change. |
+| `name` | string | Human-readable display name. 1–80 chars. |
+| `owner` | object | `{ type: "guild" \| "user" \| "org", id: string, slug: string }`. The `slug` participates in the addressable `id` above. |
+| `storage` | object | Storage policy: either `{ inline: <STORAGE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }`. See AIP-35. |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `description` | string | `""` | One-paragraph purpose. ≤2000 chars. |
+| `defaults` | object | `{}` | `{ read_only: bool }` and other workspace-wide defaults. |
+| `publish` | object | `{ template: false, visibility: "private" }` | Publish posture: `{ template: bool, registry?: string, visibility: "private" \| "unlisted" \| "public" }`. |
+| `tags` | string[] | `[]` | Free-form discovery tags. |
+| `created_at` | string (ISO 8601) | none | Creation timestamp. |
+| `metadata` | object | `{}` | Free-form. Authors MAY stash adapter-specific hints under namespaced keys. |
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## Description`** — long-form purpose, what's in this
+  workspace, who maintains it.
+- **`## Layout`** — non-default folder conventions (e.g. "this
+  workspace also uses `.briefs/` for content drafts").
+- **`## Maintainers`** — humans + agents responsible.
+
+The body is informational. Hosts MUST function reading only the
+frontmatter.
+
+### The `defineWorkspace` standard signature
+
+```ts
+defineWorkspace(definition: WorkspaceDefinition): WorkspaceHandle
+
+interface WorkspaceDefinition {
+  schema:      "workspace/v1"
+  id:          string                     // "@<owner>/<slug>"
+  version:     string
+  name:        string
+  description?: string
+  owner: {
+    type: "guild" | "user" | "org"
+    id:   string
+    slug: string
+  }
+  storage:
+    | { inline: StorageDefinition }       // AIP-35
+    | { ref:    string }                  // path or registry slug
+  defaults?: { readOnly?: boolean }
+  publish?: {
+    template?:   boolean
+    registry?:   string
+    visibility?: "private" | "unlisted" | "public"
+  }
+  tags?:       string[]
+  createdAt?:  string
+  metadata?:   Record<string, unknown>
+}
+```
+
+### Conformance rules
+
+1. **Exactly one WORKSPACE.md per workspace root.** Multiple
+   files at root is a spec violation; nested ones are ignored.
+
+2. **`id` is immutable.** Once set, never changes. Renaming the
+   workspace mutates `name`, never `id`. Hosts that need to
+   change `id` MUST treat the result as a new workspace.
+
+3. **`owner.slug` and the slug suffix of `id` MUST match.** A
+   workspace at `@acme-corp/marketing-ops` MUST have
+   `owner.slug = "acme-corp"`. Validators MUST reject mismatches.
+
+4. **`storage.inline` and `storage.ref` are mutually exclusive.**
+   Exactly one form per WORKSPACE.md.
+
+5. **No I/O at parse time.** Reading WORKSPACE.md MUST NOT trigger
+   credential resolution, network calls, or storage instantiation.
+   Hosts materialize storage lazily.
+
+### Stable identity
+
+`id` + `version` together form the workspace's stable identity.
+A breaking change to the manifest shape (a `storage` provider
+swap, an owner reassignment, a schema upgrade that drops fields)
+SHOULD bump `version`.
+
+## Address resolution
+
+Hosts that support cross-host addressable workspaces MUST
+implement an address resolver that takes `@<owner-slug>/<slug>`
+and returns either a workspace handle or `not-found`:
+
+```ts
+resolveWorkspaceAddress(addr: string): Promise<WorkspaceHandle | null>
+```
+
+Single-app hosts resolve trivially: look up `<owner-slug>` in
+the appropriate owner table (guilds / users / orgs), then JOIN
+the matching workspace table by `<slug>`. Multi-app hosts iterate
+owner kinds.
+
+The `slug` lives on the workspace row; the `owner_slug` lives on
+the owner row. No denormalization is required.
+
+## Backward compatibility
+
+A workspace without a WORKSPACE.md is still a valid workspace.
+Hosts MUST fall back to defaults derived from their persistence
+layer. Adding a WORKSPACE.md is additive — it never changes the
+workspace's address (which the host derives from its row).
+
+To migrate a host into the AIP-34 model:
+
+1. On workspace creation, write a default WORKSPACE.md derived
+   from the host's row.
+2. On read, prefer the manifest body over the row fields it
+   covers.
+3. On row mutation, re-emit the manifest to keep them in sync.
+
+## Example
+
+```md
+---
+schema: workspace/v1
+id: "@acme-corp/marketing-ops"
+version: 1.0.0
+name: Acme Marketing Ops
+description: |
+  Marketing automation workspace for Acme Corp — content briefs,
+  publishing routines, brand-guidelines kit.
+owner:
+  type: org
+  id: 01HQ8VRZX5WNNGCV6YD2N7B6RX
+  slug: acme-corp
+storage:
+  ref: "@acme-corp/shared-s3-policy"
+defaults:
+  read_only: false
+publish:
+  template: false
+  visibility: private
+tags: [marketing, content, brand]
+created_at: 2026-05-02T10:00:00Z
+---
+
+## Description
+
+The marketing team's primary workspace. Brand kits live under
+`.designs/`, content briefs under `.briefs/`, automation routines
+under `.workflows/`.
+
+## Maintainers
+
+- Operator `bob` (marketing director)
+- Operator `eve` (content strategist)
+- Routine `weekly-report` (every Monday 09:00 UTC)
+```
+
+## Security considerations
+
+`WORKSPACE.md` is **declarative**: a malicious manifest can lie
+about `owner` or `id`. Hosts MUST treat the manifest as untrusted
+input and verify ownership against their persistence layer at
+read time. The manifest's `owner.id` MUST match the host row's
+owner FK; mismatches MUST be flagged.
+
+`storage.ref` to a registry slug crosses a trust boundary. Hosts
+SHOULD validate that the resolving registry policy is acceptable
+under workspace-owner policy before instantiating the backing
+storage.
+
+`publish.visibility: "public"` does NOT auto-publish. The
+declaration is input to a downstream registry; the host decides
+whether and when to honour it.
+
+## Open questions
+
+1. **Mounting workspaces into other workspaces.** A future
+   extension may allow a workspace to declare `mounts: [{ at:
+   "/external/lib", source: "@vendor/lib" }]`. Defer until concrete
+   need.
+
+2. **Workspace versioning across hosts.** When a workspace
+   declared at host A is published and forked at host B, what's
+   the lineage record? Likely a separate `LINEAGE.md` AIP.
+
+3. **Per-workspace policy bundles.** Workspaces may want to
+   declare default approval policies, default agent identity
+   bindings, default compute budgets. Whether these live in
+   WORKSPACE.md or sibling manifests is an open call.
+
+## See also
+
+- [AIP-3 — SKILL.md](/docs/aip-3) — sibling manifest the workspace hosts
+- [AIP-14 — TOOL.md](/docs/aip-14) — sibling manifest the workspace hosts
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — sibling manifest the workspace hosts
+- [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from STORAGE.md.auth
+- [AIP-26 — CODE.md](/docs/aip-26) — sibling manifest the workspace hosts
+- [AIP-30 — DRIVER.md](/docs/aip-30) — sibling manifest the workspace hosts
+- [AIP-35 — STORAGE.md](/docs/aip-35) — paired storage policy block

@@ -1,0 +1,399 @@
+---
+title: "AIP-35: STORAGE.md — agentstorage/v1 (storage policy block)"
+description: A composable schema block defining the `storage` field — provider, config, sync semantics, auth ref, exclude rules — for any manifest that names a backing store. Reused by WORKSPACE.md (AIP-34) and any future manifest that names persistent state. Inline or ref, mirroring AIP-17 RUNNER and AIP-19 SECRETS.
+aip: 35
+status: Draft
+type: Schema
+created: 2026-05-02
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 17, 19]
+discussions-to: https://github.com/agentproto/agentproto/discussions/35
+layer: primitives
+---
+
+| Field | Value |
+|---|---|
+| AIP | 35 |
+| Title | STORAGE.md — agentstorage/v1 (storage policy block) |
+| Status | Draft |
+| Type | Schema |
+| Domain | storage.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS) |
+
+## Abstract
+
+This AIP defines the `storage` schema block — **provider**
+(which backend), **config** (provider-specific connection
+fields), **sync** (mode, commit policy, conflict policy),
+**auth** (reference to AIP-19 SECRETS.md), **exclude** (paths
+not mirrored to the backing store) — and the
+**`defineStorage(...)`** standard signature that consumes it.
+
+The block is composable: any manifest that names a backing
+store (today: WORKSPACE.md per AIP-34; tomorrow: data-set
+manifests, model-cache manifests, archive manifests) MAY embed a
+storage block inline, or MAY reference a sibling `STORAGE.md`
+file or registry slug.
+
+This is a **schema-block AIP**, not a file format users always
+author standalone. There MAY be `<slug>.STORAGE.md` files in a
+workspace when the policy is reusable; otherwise the block is
+inline in its parent manifest.
+
+## Motivation
+
+Three problems compound when storage policy is implicit or
+embedded ad-hoc per manifest:
+
+1. **Reusability across manifests.** An org with one S3 bucket
+   referenced by twelve workspaces shouldn't define the
+   connection twelve times. A standalone `@acme/shared-s3-policy`
+   referenced by all twelve is the right shape.
+
+2. **Auth lives with credentials, not config.** Embedding
+   `accessKeyId` / `secretAccessKey` in a workspace manifest
+   leaks credentials and tangles trust review with shape review.
+   A `auth: { ref: ./SECRETS.md }` separates the two cleanly,
+   reusing AIP-19's reveal contract.
+
+3. **Sync semantics are runtime policy.** Whether writes commit
+   immediately, batch, or wait for manual sync is a policy
+   decision that varies per provider AND per workspace (a hot
+   marketing workspace wants `each-write`; a code-archive
+   workspace wants `manual`). Embedding the policy in
+   provider-specific code makes it inaccessible to reviewers.
+
+`STORAGE.md` extracts these into a portable, reusable block.
+
+## Design principles
+
+1. **Inline or ref, mirroring AIP-17 / AIP-19.** Most consumers
+   inline the block for one-off cases. Reusable policies live in
+   their own `<slug>.STORAGE.md` and are referenced by path or
+   registry slug.
+
+2. **Provider names are the primary axis.** The `provider`
+   string is the first thing consumers branch on. The provider
+   namespace is open: hosts MAY register additional provider ids
+   beyond this AIP's enumerated set.
+
+3. **Config is a typed object per provider.** The block schema
+   uses a discriminated union keyed on `provider`, with each
+   provider's `config` shape declared in its own sub-schema. No
+   `Record<string, unknown>` opt-out.
+
+4. **Sync semantics are first-class but optional.** A provider
+   without sync (canonical bucket) sets `sync.mode: "canonical"`
+   and ignores other sync fields. Providers WITH sync (github,
+   local-fs) MUST honour the declared mode.
+
+5. **Auth never inline.** The block MUST NOT contain plaintext
+   credentials. It refs a SECRETS.md (per AIP-19) that names the
+   slugs the host resolves at instantiation time.
+
+6. **Exclude is a portable allow-list complement.** A workspace
+   on `cloud-bucket` synced to `github` shouldn't push `.runs/`
+   (ephemeral) or `.artifacts/binary/` (large). The exclude list
+   is part of the storage policy, not a separate concern.
+
+## Specification
+
+### The `storage` block
+
+```yaml
+storage:
+  provider: cloud-bucket | self-bucket | github | local-fs | dev-local
+                | mastra-s3 | mastra-azure | mastra-e2b | mastra-modal | mastra-daytona
+  config:
+    # provider-specific shape — see "Provider config shapes" below
+  sync:
+    mode: canonical | pull-push | watch
+    pull_ttl_seconds: 60                  # github only
+    commit_mode: each-write | batched | manual   # github only
+    batch_window_ms: 5000                 # github with commit_mode: batched
+    conflict_policy: last-writer-wins | split-conflicts   # local-fs only
+  auth:
+    ref: ./SECRETS.md                     # AIP-19 — credentials live there
+    state: { env: ["GITHUB_INSTALLATION_TOKEN"] }
+  exclude:                                # paths NOT mirrored to remote
+    - ".runs/"
+    - ".artifacts/binary/"
+    - ".cache/"
+  read_only: false
+```
+
+### Standalone STORAGE.md frontmatter
+
+When the block lives in its own file, the frontmatter adds an
+`id` and `version` for addressability:
+
+```yaml
+---
+schema: storage/v1
+id: "@<owner-slug>/<storage-slug>"
+version: 1.0.0
+provider: <as above>
+config: { ... }
+sync: { ... }
+auth: { ref: ./SECRETS.md, state: {...} }
+exclude: [ ... ]
+read_only: false
+---
+```
+
+### Embedding in a parent manifest (WORKSPACE.md example)
+
+```yaml
+storage:
+  inline:                                 # exclusive with ref
+    provider: cloud-bucket
+    config: { bucket: "guilde-workspace", prefix: "guilds/abc/workspace" }
+  # OR
+  # ref: ./storage/main.STORAGE.md        # workspace-local file
+  # OR
+  # ref: "@acme-corp/shared-s3-policy"    # registry slug
+```
+
+### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `provider` | string | Backend kind. See enumerated set + extension rules below. |
+| `config` | object | Provider-specific connection fields. Shape varies per provider. |
+
+### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `sync` | object | `{ mode: "canonical" }` | Sync semantics. See per-provider rules. |
+| `auth` | object | `{}` | Reference to AIP-19 SECRETS.md for credentials. |
+| `exclude` | string[] | `[]` | Paths NOT mirrored to the backing store. Glob-ish, prefix-matched. |
+| `read_only` | boolean | `false` | Reject writes at the storage layer. |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+### Standalone-only fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `storage/v1`. |
+| `id` | string | `@<owner-slug>/<storage-slug>`. Globally addressable when reused across workspaces. |
+| `version` | semver string | Spec version of THIS file. |
+
+### Provider enumerated set (Day 1)
+
+| `provider` | Implementation | Sync mode | Notes |
+|---|---|---|---|
+| `cloud-bucket` | Host-default cloud bucket (e.g. Supabase) | `canonical` | Hosted prod default. |
+| `self-bucket` | BYO S3-compatible bucket | `canonical` | Enterprise / data residency. |
+| `github` | Git repo, clone + commit + pull | `pull-push` | PR-driven authoring; `commit_mode` controls latency. |
+| `local-fs` | Local disk, optional sync agent | `watch` | Desktop / self-host. |
+| `dev-local` | `/tmp/<id>` directory | `canonical` | Development only. |
+| `mastra-s3` | `@mastra/s3` | `canonical` | Delegates to the Mastra package. |
+| `mastra-azure` | `@mastra/azure/blob` | `canonical` | Delegates to the Mastra package. |
+| `mastra-e2b` | `@mastra/e2b` | `canonical` | Ephemeral sandbox; lifetime tied to the sandbox. |
+| `mastra-modal` | `@mastra/modal` | `canonical` | Modal-backed sandbox with pause/resume. |
+| `mastra-daytona` | `@mastra/daytona` | `canonical` | Daytona-backed sandbox. |
+
+Hosts MAY register additional providers; the registry name MUST
+NOT collide with the enumerated set.
+
+### Provider config shapes
+
+```yaml
+# cloud-bucket
+config:
+  bucket: string
+  prefix: string
+
+# self-bucket
+config:
+  kind: "s3" | "azure" | "gcs"
+  endpoint: string                # https://...
+  region: string
+  bucket: string
+  prefix: string
+  credentials_ref: string         # SECRETS.md slug
+
+# github
+config:
+  owner: string
+  repo: string
+  branch: string                  # default branch the workspace tracks
+  installation_id: string         # GitHub App installation
+  default_commit_email: string    # author identity
+
+# local-fs
+config:
+  agent_id: string                # sync agent client id (cloud-orchestrated mode)
+  mount_path: string              # absolute path on the agent host (self-hosted mode)
+
+# dev-local
+config:
+  root: string                    # absolute path
+
+# mastra-* providers
+config:
+  # delegated to the Mastra package's WorkspaceFilesystem constructor
+  # see @mastra/<provider> docs for fields
+```
+
+### Sync semantics by provider
+
+- `canonical` — there's only one copy of the bytes; reads/writes
+  go straight to the backend. No local cache. `commit_mode`,
+  `pull_ttl_seconds`, `conflict_policy` are ignored.
+
+- `pull-push` (github) — local clone is a cache; reads pull if
+  older than `pull_ttl_seconds`; writes commit per `commit_mode`
+  (`each-write` / `batched` / `manual`).
+
+- `watch` (local-fs) — local disk is canonical; the host
+  observes changes via filesystem watch and surfaces events.
+  `conflict_policy` decides what happens when local and host
+  writes diverge.
+
+### `defineStorage` standard signature
+
+```ts
+defineStorage(definition: StorageDefinition): StorageHandle
+
+interface StorageDefinition {
+  schema?:    "storage/v1"             // standalone files only
+  id?:        string                    // standalone files only
+  version?:   string                    // standalone files only
+
+  provider:   string
+  config:     Record<string, unknown>   // typed per provider; spec'd in this AIP
+
+  sync?: {
+    mode:              "canonical" | "pull-push" | "watch"
+    pullTtlSeconds?:   number
+    commitMode?:       "each-write" | "batched" | "manual"
+    batchWindowMs?:    number
+    conflictPolicy?:   "last-writer-wins" | "split-conflicts"
+  }
+  auth?: {
+    ref?:    string
+    state?:  { env?: string[] }
+  }
+  exclude?:   string[]
+  readOnly?:  boolean
+  metadata?:  Record<string, unknown>
+}
+```
+
+### Conformance rules
+
+1. **Inline and ref are mutually exclusive.** A consumer manifest
+   embedding the block uses exactly one form per occurrence.
+
+2. **Auth credentials never inline.** Implementations MUST reject
+   storage blocks containing plaintext access keys, secret keys,
+   or tokens. Use `auth.ref` → SECRETS.md per AIP-19.
+
+3. **Sync mode MUST match provider capabilities.** A `cloud-bucket`
+   provider with `sync.mode: "watch"` is a spec violation —
+   validators MUST reject.
+
+4. **Exclude is advisory at the storage layer, enforced at the
+   sync layer.** A provider that doesn't sync (canonical) MAY
+   ignore `exclude`. A syncing provider MUST honour it.
+
+5. **`read_only: true` MUST be enforced.** Writes through a
+   read-only storage handle MUST fail with a typed error
+   (`storage_read_only`) before reaching the backend.
+
+6. **No I/O at parse time.** Parsing a STORAGE.md or storage
+   block MUST NOT trigger credential resolution, network calls,
+   or backend instantiation. Materialization is lazy.
+
+## Reference resolution
+
+A `ref` field accepts three forms:
+
+1. **Workspace-relative path**: `./storage/main.STORAGE.md` — the
+   host reads the file from the same workspace.
+
+2. **Cross-workspace path**: `../shared/team.STORAGE.md` — the
+   host reads from a sibling workspace, subject to ACL.
+
+3. **Registry slug**: `@<owner-slug>/<storage-slug>` — the host
+   resolves the slug against an addressable registry (per the
+   workspace's own owner namespace, or the host's global
+   registry).
+
+Resolution failures MUST surface as a typed error
+(`storage_ref_unresolvable`) — never silently fallback to a
+default backend.
+
+## Example — standalone STORAGE.md
+
+```md
+---
+schema: storage/v1
+id: "@acme-corp/shared-s3-policy"
+version: 1.0.0
+provider: self-bucket
+config:
+  kind: s3
+  endpoint: https://s3.eu-west-1.amazonaws.com
+  region: eu-west-1
+  bucket: acme-agentik
+  prefix: workspaces/
+  credentials_ref: org/acme/s3-rw
+sync:
+  mode: canonical
+auth:
+  ref: ./SECRETS.md
+  state: { env: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] }
+exclude:
+  - ".runs/"
+  - ".cache/"
+read_only: false
+---
+
+## Description
+
+Shared S3 policy for all Acme Corp workspaces. Reuses the
+`org/acme/s3-rw` credentials slug; isolates each workspace under
+its own prefix when referenced from WORKSPACE.md.
+```
+
+## Security considerations
+
+`STORAGE.md` is **declarative**: a malicious manifest can claim
+any `provider` or `config`. Hosts MUST validate:
+
+- `auth.ref` resolves to a SECRETS.md the workspace's owner is
+  authorised to reveal.
+- `config.endpoint` (for `self-bucket`) is on an allow-list of
+  permitted destinations under workspace policy.
+- `provider` is registered in the host's provider registry;
+  unknown providers MUST be rejected, never silently treated as
+  a default.
+
+Cross-workspace `ref` resolution crosses an ACL boundary. The
+referenced storage's owner MAY require the consumer to have
+explicit access; hosts SHOULD prompt or audit cross-owner refs.
+
+## Open questions
+
+1. **Pre-signed URLs across providers.** Hosts that hand out
+   pre-signed read URLs to clients (e.g. for image rendering)
+   need a uniform contract. Defer until concrete need.
+
+2. **Multi-region replication.** A workspace declared as
+   primary-replica across regions is a real ask. Likely a
+   separate `REPLICATION.md` AIP — not folded here.
+
+3. **Storage swap migration.** Moving a workspace from
+   `cloud-bucket` to `github` requires copying bytes, transforming
+   layouts, validating the destination. The AIP says nothing
+   about *how* to swap; a sibling AIP may.
+
+## See also
+
+- [AIP-17 — RUNNER.md](/docs/aip-17) — same composition pattern
+- [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from `auth.ref`
+- [AIP-26 — CODE.md](/docs/aip-26) — same composition pattern (inline / ref)
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — the primary consumer
