@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-24/ASSEMBLY.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-24/ASSEMBLY.schema.json",
   "title": "agentassembly/v1 frontmatter (AIP-24)",
   "description": "Validates the YAML frontmatter portion of an AIP-24 ASSEMBLY.md (workspace root or per-context view). The single doctype 'assembly.workspace/v1' is used in both modes; the host distinguishes by checking whether `extends` is set. The discriminating field is `mode` — advisory | voting | peer | hierarchy — each selecting a different synthesis substrate. The `members[]` array references AIP-25 personas; AIP-24 does NOT define a member-as-doctype.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-4/DESIGN.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-4/DESIGN.schema.json",
   "title": "DESIGN.md frontmatter (AIP-4)",
   "description": "Validates the YAML frontmatter portion of an AIP-4 DESIGN.md design-token kit.",
   "type": "object",

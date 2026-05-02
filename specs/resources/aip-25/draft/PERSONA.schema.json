@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-25/PERSONA.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-25/PERSONA.schema.json",
   "title": "PERSONA.md frontmatter (AIP-25)",
   "description": "Validates the YAML frontmatter portion of an AIP-25 PERSONA.md manifest. Single-doc, no oneOf — every persona is the same shape. The body is markdown and not validated by this schema.",
   "type": "object",

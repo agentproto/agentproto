@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-3/SKILL.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-3/SKILL.schema.json",
   "title": "SKILL.md frontmatter (AIP-3)",
   "description": "Validates the YAML frontmatter portion of an AIP-3 SKILL.md manifest. Note: this very schema is also exercised by the AIP-3 authoring SKILL.md in the same folder — the authoring skill is itself a valid AIP-3 skill and validates against this file.",
   "type": "object",

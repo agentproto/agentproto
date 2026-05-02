@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-17/RUNNER.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-17/RUNNER.schema.json",
   "title": "Runner block (AIP-17)",
   "description": "Composable JSON Schema definition for the `runner` block — process boundary, optional container image, declarative dependency needs, and resource limits. Other AIPs reference this by $ref into their own schemas.",
   "type": "object",

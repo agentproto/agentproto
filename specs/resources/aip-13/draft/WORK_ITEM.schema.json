@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-13/WORK_ITEM.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-13/WORK_ITEM.schema.json",
   "title": "agentwork/v1 frontmatter (AIP-13)",
   "description": "Validates the YAML frontmatter portion of an AIP-13 doctype. The `schema` discriminator selects between the work-item branch (project / initiative / task — the original `work/v1` doctype, with the `kind` field discriminating the three variants) and the workspace branch (`work.workspace/v1` — used both as the workspace-root manifest at the company root and as a per-consumer view that extends a parent manifest).",
   "oneOf": [{ "$ref": "#/$defs/workItem" }, { "$ref": "#/$defs/workspace" }],

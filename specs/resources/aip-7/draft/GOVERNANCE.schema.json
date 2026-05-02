@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-7/GOVERNANCE.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-7/GOVERNANCE.schema.json",
   "title": "agentgovernance/v1 (AIP-7)",
   "description": "Validates the four AIP-7 doctypes: signature (approval event), audit-event (append-only log line), policy (declarative autonomy rule), and governance.workspace/v1 (workspace manifest, root or view). Branch on the `doctype` (or for the workspace, the `schema`) field.",
   "oneOf": [

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-9/OPERATOR.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-9/OPERATOR.schema.json",
   "title": "OPERATOR.md frontmatter (AIP-9)",
   "description": "Validates the YAML frontmatter portion of an AIP-9 OPERATOR.md manifest.",
   "type": "object",

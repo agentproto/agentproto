@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-10/KNOWLEDGE.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-10/KNOWLEDGE.schema.json",
   "title": "agentknowledge/v1 frontmatter (AIP-10)",
   "description": "Validates the YAML frontmatter portion of an AIP-10 entry, source, or workspace manifest. The doctype is selected via the `schema` discriminator: 'knowledge.entry/v1' (curated, mutable), 'knowledge.source/v1' (raw, immutable), or 'knowledge.workspace/v1' (workspace manifest or per-context view).",
   "oneOf": [

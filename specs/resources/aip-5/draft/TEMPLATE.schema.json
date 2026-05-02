@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-5/TEMPLATE.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-5/TEMPLATE.schema.json",
   "title": "CANVAKIT.md frontmatter (AIP-5)",
   "description": "Validates the YAML frontmatter portion of an AIP-5 *.canvakit.* template.",
   "type": "object",

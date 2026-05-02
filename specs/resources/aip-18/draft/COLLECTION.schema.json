@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-18/COLLECTION.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-18/COLLECTION.schema.json",
   "title": "collections/v1 frontmatter (AIP-18)",
   "description": "Validates the YAML frontmatter portion of an AIP-18 collection schema or item. The doctype is selected via the `schema` discriminator: 'collection.schema/v1' (a COLLECTION.md, the schema for a class of records) or 'collection.item/v1' (an instance of one record validated against a named collection).",
   "oneOf": [{ "$ref": "#/$defs/schema" }, { "$ref": "#/$defs/item" }],

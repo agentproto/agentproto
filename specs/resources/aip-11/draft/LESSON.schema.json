@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-11/LESSON.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-11/LESSON.schema.json",
   "title": "LESSON.md frontmatter (AIP-11)",
   "description": "Validates the YAML frontmatter portion of an AIP-11 LESSON.md file — one transferable lesson distilled from a completed run.",
   "type": "object",

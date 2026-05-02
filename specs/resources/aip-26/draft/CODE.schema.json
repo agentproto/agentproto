@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-26/CODE.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-26/CODE.schema.json",
   "title": "CODE blocks (AIP-26)",
   "description": "Composable JSON Schema definitions for the `code` and `run` blocks reused across manifest formats. Other AIPs reference these by $ref into their own schemas.",
   "type": "object",

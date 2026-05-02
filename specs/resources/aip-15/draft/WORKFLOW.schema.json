@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-15/WORKFLOW.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-15/WORKFLOW.schema.json",
   "title": "WORKFLOW.md frontmatter (AIP-15)",
   "description": "Validates the YAML frontmatter portion of an AIP-15 WORKFLOW.md manifest.",
   "type": "object",
@@ -30,11 +30,11 @@
     "entry": { "type": "string" },
     "inputs": {
       "description": "Defined by AIP-16 — the IO `inputs` block.",
-      "$ref": "https://agentproto.dev/schemas/aip-16/IO.schema.json#/$defs/inputs"
+      "$ref": "https://agentproto.sh/schemas/aip-16/IO.schema.json#/$defs/inputs"
     },
     "outputs": {
       "description": "Defined by AIP-16 — the IO `outputs` block.",
-      "$ref": "https://agentproto.dev/schemas/aip-16/IO.schema.json#/$defs/outputs"
+      "$ref": "https://agentproto.sh/schemas/aip-16/IO.schema.json#/$defs/outputs"
     },
     "steps": {
       "type": "array",
@@ -81,15 +81,15 @@
     },
     "inputsFiles": {
       "description": "Defined by AIP-16 — the IO `inputsFiles` block.",
-      "$ref": "https://agentproto.dev/schemas/aip-16/IO.schema.json#/$defs/inputsFiles"
+      "$ref": "https://agentproto.sh/schemas/aip-16/IO.schema.json#/$defs/inputsFiles"
     },
     "outputsFiles": {
       "description": "Defined by AIP-16 — the IO `outputsFiles` block.",
-      "$ref": "https://agentproto.dev/schemas/aip-16/IO.schema.json#/$defs/outputsFiles"
+      "$ref": "https://agentproto.sh/schemas/aip-16/IO.schema.json#/$defs/outputsFiles"
     },
     "runtime": {
-      "description": "Defined by AIP-17 — the runtime block.",
-      "$ref": "https://agentproto.dev/schemas/aip-17/RUNTIME.schema.json#/$defs/runtime"
+      "description": "Defined by AIP-17 — the runner block.",
+      "$ref": "https://agentproto.sh/schemas/aip-17/RUNNER.schema.json#/$defs/runner"
     }
   },
   "$defs": {

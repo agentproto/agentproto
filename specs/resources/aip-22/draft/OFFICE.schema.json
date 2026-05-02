@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-22/OFFICE.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-22/OFFICE.schema.json",
   "title": "agentoffice/v1 frontmatter (AIP-22)",
   "description": "Validates the YAML frontmatter portion of an AIP-22 OFFICE.md (workspace root or per-context view). The single doctype 'office.workspace/v1' is used in both modes; the host distinguishes by checking whether `extends` is set. Per-item-kind schemas are delegated to AIP-18 (COLLECTION.md / ITEM.md).",
   "type": "object",
@@ -352,7 +352,7 @@
       "additionalProperties": false,
       "properties": {
         "inline": {
-          "$ref": "https://agentproto.dev/schemas/aip-18/COLLECTION.schema.json#/$defs/schema",
+          "$ref": "https://agentproto.sh/schemas/aip-18/COLLECTION.schema.json#/$defs/schema",
           "description": "Full AIP-18 collection.schema/v1 frontmatter, parsed in-place. The host registers the collection directly via AIP-18's defineCollection without loading a separate file."
         }
       },

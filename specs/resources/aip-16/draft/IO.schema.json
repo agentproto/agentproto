@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-16/IO.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-16/IO.schema.json",
   "title": "IO blocks (AIP-16)",
   "description": "Composable JSON Schema definitions for the four input/output blocks reused across manifest formats: inputs, outputs, inputsFiles, outputsFiles. Other AIPs reference these by $ref into their own schemas.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-12/PLAYBOOK.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-12/PLAYBOOK.schema.json",
   "title": "PLAYBOOK.md frontmatter (AIP-12)",
   "description": "Validates the YAML frontmatter portion of an AIP-12 PLAYBOOK.md overlay manifest.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agentproto.dev/schemas/aip-8/AGENCY.schema.json",
+  "$id": "https://agentproto.sh/schemas/aip-8/AGENCY.schema.json",
   "title": "agentagencies/v1 doctype frontmatter (AIP-8)",
   "description": "Validates the YAML frontmatter portion of every AIP-8 doctype: AGENCY.md, SERVICE.md, PROCEDURE.md, PRICING-MODEL.md, COUNTERPARTY.md, ENGAGEMENT.md, AGREEMENT.md, DELIVERABLE.md, INVOICE.md, ROUTINE.md, CAPACITY.md.",
   "type": "object",
