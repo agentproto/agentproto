@@ -1,0 +1,246 @@
+---
+title: "AIP-40: EXTENSION.md — agentextension/v1 (custom doctype declarations)"
+description: A meta-doctype that lets a workspace declare its own custom doctype as an extension of an existing AIP — adding fields, tightening constraints, overriding defaults, and choosing a path convention — without going through the public AIP process. The runtime (@agentproto/manifest verbs, MCP server, scaffolder) treats local extensions identically to public AIPs.
+aip: 40
+status: Draft
+type: Meta
+created: 2026-05-03
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/extension
+discussions-to: https://github.com/agentproto/agentproto/discussions/40
+layer: process
+package: "@agentproto/extension"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 40 |
+| Title | EXTENSION.md — agentextension/v1 (custom doctype declarations) |
+| Status | Draft |
+| Type | Meta |
+| Domain | extensions.agentproto.sh |
+| Doctype | `extension/v1` (written as `EXTENSION.md`) |
+| Composes with | every public AIP — extensions inherit from any of them |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Reference Impl | [`@agentproto/extension`](https://github.com/agentproto/ts/tree/main/packages/extension) |
+| Resources | [`./resources/aip-40/draft/EXTENSION.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-40/draft/EXTENSION.schema.json) |
+
+## Abstract
+
+`agentextension/v1` is a **meta-doctype** — a single file format,
+`EXTENSION.md`, that declares a custom doctype as an extension of an
+existing AIP. An extension carries its own slug-based identity (e.g.
+`acme:deal`), inherits the parent AIP's frontmatter shape, and may
+add fields, tighten constraints, set defaults, and override the path
+convention. The result, when consumed by a runtime, is a fully-typed
+local doctype with the same authoring surface as a public AIP —
+`define`, `create`, `load`, `list`, `update`, `resolve`, `delete` all
+work identically. A workspace can ship dozens of `EXTENSION.md` files
+under `extensions/` and treat them as first-class doctypes without
+touching the public AIP registry.
+
+## Motivation
+
+The public AIP registry is intentionally narrow: each numbered AIP is
+a doctype the entire ecosystem implements. That's the right policy for
+core primitives (TOOL, DRIVER, OPERATOR, …), but it leaves a real gap.
+Three classes of users currently have nowhere clean to land:
+
+1. **Companies with private extensions.** ACME wants every `TOOL.md`
+   to carry a `cost_center: string` field for accounting. There's no
+   way to do this without (a) shoving everything into `metadata.acme.*`
+   (loose, no validation) or (b) forking the public TOOL.md spec
+   (fragmenting the ecosystem).
+
+2. **Domain-specific doctypes.** A finance workspace needs a `DEAL.md`
+   doctype shaped like AIP-13 WORK.md but with `customer_id`,
+   `amount`, `currency`. Submitting it as a public AIP is overkill —
+   it's never going to be standardized across the ecosystem; it's an
+   ACME concern.
+
+3. **Tightened constraints for one workspace.** A regulated workspace
+   needs `id` to match `^[a-z]{2,3}-[a-z-]+$` (org-prefix), every
+   tool's `approval` to default to `on-mutate`, and the path
+   convention to land tools at `services/<id>/tool.md` instead of
+   `<id>/TOOL.md`. None of those are negotiable in the public AIP.
+
+The temptation is to invent ad-hoc YAML conventions per company, each
+with its own validator. The cost: every workspace re-implements the
+same machinery (schema composition, path resolution, manifest I/O),
+nothing is portable, MCP/CLI/SDK tooling can't introspect anything.
+
+`agentextension/v1` closes the gap with one observation: **the
+machinery is generic if the declaration is uniform.** An `EXTENSION.md`
+is a manifest like any other; it composes into a `DoctypeSpec` (the
+shape `@agentproto/manifest.createVerbs` consumes); the runtime
+treats local doctypes identically to public ones. A workspace adopts
+EXTENSION.md by writing one file per local doctype — no per-org code,
+no fork, no ad-hoc validators.
+
+## Specification
+
+A conforming EXTENSION.md is a markdown file with YAML frontmatter
+matching the schema below and a free-form prose body. The file lives
+at `extensions/<slug>/EXTENSION.md` in the workspace; the slug
+appears twice (filesystem path + frontmatter `slug:`) and MUST agree.
+
+### Frontmatter
+
+```yaml
+schema: agentproto/extension/v1
+slug: acme:deal
+title: ACME deal manifest
+description: A workspace-local extension of AIP-13 WORK.md with billing fields.
+version: 1.0.0
+status: Local
+extends: aip-13                            # OR `extends: none` for a new doctype
+add_fields:
+  customer_id: { type: string, minLength: 1 }
+  amount:      { type: number, minimum: 0 }
+  currency:    { enum: [USD, EUR, GBP] }
+  required:    [customer_id, amount]       # added to parent's required[]
+tighten:
+  id: { pattern: "^acme-[a-z][a-z0-9-]*$" } # narrower than parent's pattern
+defaults:
+  approval: on-mutate
+  cost_class: metered
+path_convention: "deals/<slug>/DEAL.md"     # else inherits parent's
+requires: [13, 27]
+```
+
+### Field-by-field
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `schema` | string | yes | Literal `agentproto/extension/v1`. |
+| `slug` | string | yes | `<namespace>:<name>` — e.g. `acme:deal`, `katchy:campaign`. Lowercase, digits, single colon, dashes. Pattern: `^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*[a-z0-9]$`. |
+| `title` | string | yes | Human-readable display name. 1–80 chars. |
+| `description` | string | yes | One paragraph describing the extension's purpose. 1–2000 chars. |
+| `version` | string | yes | Extension's own semver. Bump on breaking change. |
+| `status` | string | yes | Always `Local`. Extensions never graduate to the public lifecycle (Draft/Review/Final). |
+| `extends` | string | yes | `aip-<N>` (inherits the public AIP's schema) or the literal `none` (brand-new doctype, no inheritance). |
+| `add_fields` | object | no | JSON Schema fragment with `properties`, `required`. Merged into the parent's properties; `required` entries are unioned with parent's. |
+| `tighten` | object | no | Per-field constraint overrides. Each entry MAY narrow `pattern`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`. MUST NOT widen — runtimes reject extensions whose tightening is looser than the parent. |
+| `defaults` | object | no | Default values for fields. Applied at `define()` time when the field is omitted. |
+| `path_convention` | string | no | Template like `"deals/<slug>/DEAL.md"`. Tokens: `<slug>` from the doctype's identity field, `<DOCTYPE>` from the extension's slug name part. Defaults to parent's convention. |
+| `requires` | number[] | no | AIPs the extension depends on (in addition to parent's). |
+| `metadata` | object | no | Free-form vendor extensions under namespaced keys. |
+
+### Composition rules
+
+1. **Schema merge.** Parent's `properties` ∪ extension's `add_fields.properties`; collision is an error (extensions add, never replace via `add_fields`). Replacement requires `tighten`.
+
+2. **Required merge.** Parent's `required[]` ∪ extension's `add_fields.required[]`. Order doesn't matter; duplicates are harmless.
+
+3. **Tightening direction.** For each field in `tighten`:
+   - `pattern`: extension's pattern MUST match a subset of the parent's. Runtime check: a parent-valid string MAY match the extension; an extension-valid string MUST match the parent.
+   - `enum`: extension's enum MUST be a subset of the parent's.
+   - `minLength` / `minimum`: extension's value ≥ parent's.
+   - `maxLength` / `maximum`: extension's value ≤ parent's.
+   Validators MUST reject `EXTENSION.md` whose tightening violates monotonicity.
+
+4. **Defaults application order.** Parent defaults applied first, then extension defaults. The extension's defaults win on the same key.
+
+5. **Path convention.** Extension's takes precedence; parent's is the fallback.
+
+6. **Status monotonicity.** Extensions live forever at `Local`. They never move to `Draft`/`Review`/`Final` — those values are reserved for the public registry.
+
+### Slug namespace
+
+`<namespace>:<name>`:
+- `<namespace>` is the org / workspace identifier (e.g. `acme`).
+- `<name>` is the doctype name within that namespace (e.g. `deal`).
+- Two extensions in different workspaces MAY share a `<name>` because the namespace disambiguates.
+- The public AIP registry owns `aip-N` numeric identifiers. Extensions own the slug space. **No aliasing**: `acme:tool` is NOT `aip-14`; it composes from it but is its own doctype.
+
+## Rationale
+
+**Why slug-based, not numeric.** The public registry's numeric ids
+(`aip-N`) are the canonical handle for cross-AIP references. Letting
+extensions allocate numbers would either (a) require a public numeric
+registrar (pollutes the curated process) or (b) fork the namespace
+(every workspace's `aip-9999` means something different). Slugs
+sidestep this — the namespace is the org's responsibility.
+
+**Why no graduation lifecycle.** An extension is by definition NOT a
+public AIP. If a community wants the doctype to graduate, the path is
+to author a real AIP through AIP-1's Draft → Review → Final process.
+Extensions can serve as the "incubation" workspace where the doctype
+is exercised before submitting; once a public AIP exists, the
+extension's `extends:` field updates to point at it and the slug stays
+for backward-compat aliasing.
+
+**Why `extends:` is mandatory.** The alternative was making it
+optional with sensible defaults — but `none` IS a valid value (for
+brand-new doctypes that don't inherit), so making it explicit
+disambiguates "this extends nothing" from "I forgot to set it." The
+parent reference is the most important fact in the file; explicitness
+reads better.
+
+**Why monotonic tightening.** The whole point of an extension is that
+a parent-valid manifest is *also* extension-valid in the right context
+— that's how extensions stay backward-compatible with the parent's
+ecosystem. Allowing widening (e.g. extension's `enum` admits values
+the parent rejects) would break this property and produce manifests
+that fail when round-tripped through the parent's validator.
+
+**Why no behavioral hooks.** Extensions are pure declarative — schema,
+path, defaults. Runtime hooks (validators that run code, lifecycle
+events, transformers) are a separate concern with different
+distribution and security profiles, and belong in a sibling AIP.
+Conflating them would force every extension into a code package even
+when the author just wants three new fields.
+
+## Reference Implementation
+
+[`@agentproto/extension`](https://github.com/agentproto/ts/tree/main/packages/extension) —
+parser + manifest validator + the `specFromExtension(handle)` function
+that produces a runtime `DoctypeSpec` (the shape consumed by
+`@agentproto/manifest.createVerbs`). A workspace loads its
+`EXTENSION.md` files at startup, calls `specFromExtension` on each,
+and registers the result with the manifest layer — all subsequent
+verbs (create, load, list, …) operate on local doctypes identically
+to public ones.
+
+The package is intentionally small (~100 LoC of merge logic on top of
+the existing schema composition primitives) — the heavy lifting is
+done by the existing `@agentproto/define-doctype`, `@agentproto/manifest`,
+and the parent AIP's reference package.
+
+## Backwards Compatibility
+
+Not applicable — first version of the spec. Future versions of
+`agentextension/v1` MAY add fields under `metadata.<vendor>.*`
+following the standard vendor-extension convention from AIP-2.
+Breaking changes to the EXTENSION.md frontmatter shape get a new
+schema literal (`agentproto/extension/v2`) and a migration path.
+
+## Security Considerations
+
+**Extension-scoped trust.** Loading a third-party `EXTENSION.md`
+grants it the ability to define a doctype in your workspace. That
+doctype's manifests will be validated by the merged schema — but
+nothing prevents a malicious extension from declaring a doctype with
+permissive constraints that the workspace's own tools then rely on.
+Mitigation: extensions are workspace-local by default; pulling in
+extensions from a registry MUST go through an explicit allow-list,
+same way npm dependencies are reviewed.
+
+**Tightening-as-bypass.** A workspace MAY believe it has tightened
+its tools' `id` pattern via `tighten:`, only to find a third-party
+extension that re-declares the doctype loosely. Resolution policy:
+when multiple extensions resolve to the same effective doctype, the
+workspace's own `EXTENSION.md` files win over imported ones; ties
+within a single source are an error.
+
+**No code execution at load.** EXTENSION.md is purely declarative.
+Loading does not execute author-supplied code. Code-shaped extensions
+(lifecycle hooks, transformers) are a separate AIP that includes a
+sandbox-mediated execution model.
+
+## See also
+
+- [AIP-1](/docs/aip-1) — Purpose & process. Public AIPs vs local extensions.
+- [AIP-2](/docs/aip-2) — AIP template. Same shape extensions mirror.
+- [AIP-18](/docs/aip-18) — COLLECTION. Conceptually adjacent: AIP-18 lets a doctype declare typed sub-collections; AIP-40 lets a workspace declare custom doctypes.
