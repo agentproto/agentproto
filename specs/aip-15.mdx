@@ -144,7 +144,8 @@ YAML frontmatter, delimited by `---` lines. Case-sensitive.
 |---|---|---|---|
 | `start` | step id | first step | The step the runtime executes first. |
 | `suspendable` | boolean | derived | `true` iff any step has `kind: "suspend"` or `kind: "approval"`. Adapters MAY use this to pick storage (durable vs in-memory). |
-| `triggers` | object[] | `[]` | Events that start the workflow. See [Triggers](#triggers). |
+| `triggers` | object[] | `[]` | Events that start the workflow. See [Triggers](#triggers). **Legacy form** — for recurring schedules prefer the new `routines:` field (decoupled, see below). |
+| `routines` | (ref \| inline)[] | `[]` | [AIP-41 ROUTINE.md](/docs/aip-41) refs that fire this workflow. Decoupled from the workflow body — one schedule can drive N workflows; one workflow can be driven by N schedules. Each entry follows the `inline \| ref \| file` pattern. Preferred over inline `triggers: [{ kind: schedule }]`. |
 | `requires` | object | `{}` | Capability requirements per [AIP-7](/docs/aip-7). Same shape as [TOOL.md](/docs/aip-14). |
 | `approval` | string | `"per-step"` | Default approval class applied to every step lacking its own `approval`. Same vocabulary as [AIP-14](/docs/aip-14): `"auto"`, `"always"`, `"on-mutate"`, `"policy:<ref>"`. |
 | `risk_level` | 0–3 | max of step risks | Workflow-level autonomy gate. Used when the *whole* workflow is dispatched via a parent agent. |
@@ -239,31 +240,51 @@ Each entry in `steps[]`:
 
 ##### `kind: "tool"`
 
-Run a single tool. The `tool:` field MUST reference an external
-TOOL.md by id (per AIP-14). Inline-entry bodies are forbidden — the
-body lives on the AIP-30 DRIVER that implements the TOOL contract,
-and driver resolution happens at step-execution time per AIP-30's
-resolver.
+Run a single tool. Step references either:
+
+- **`tool:` field** — a specific TOOL.md by id (per AIP-14). Implementor
+  is fixed; driver resolution per AIP-30 picks the concrete backend.
+- **`action:` field** (preferred) — an [AIP-39 ACTION](/docs/aip-39)
+  ref. The resolver picks any TOOL with `implements: <action-ref>`,
+  considering policy + capability + cost. Decouples the workflow
+  from a specific tool implementation.
+
+Inline-entry bodies are forbidden — the body lives on the AIP-30
+DRIVER that implements the TOOL contract, and driver resolution
+happens at step-execution time per AIP-30's resolver.
+
+Exactly one of `tool:` or `action:` MUST be set per step.
 
 ```yaml
+# Form A — pin a specific TOOL (locks implementation)
 - id: fetch-page
   kind: tool
-  tool: pricing-snapshot           # TOOL.md id (REQUIRED — string id, no inline body)
+  tool: pricing-snapshot           # TOOL.md id
   inputs:
     productUrl: $workflow.inputs.productUrl
   outputs: { type: object, properties: { html: { type: string } } }
   next: parse
-  retry:
-    max_attempts: 3
-    backoff: exponential
-    initial_ms: 1000
+  retry: { max_attempts: 3, backoff: exponential, initial_ms: 1000 }
   timeout_ms: 20000
-  approval: auto
-  risk_level: 0
-  compensation: undo-fetch         # optional
-  # Optional per-step driver pin (escape hatch — usually omit):
-  # pinned_provider: apollo-pricing-http
+
+# Form B — reference an ACTION (resolver picks tool by policy)
+- id: commit-draft
+  kind: tool
+  action: "@agentik/actions/standard/storage-commit"   # ACTION ref
+  inputs:
+    message: "${{ ctx.summary }}"
+  next: notify
+  # Inheritance: this step inherits the action's mutates,
+  # risk_level, approval. Step MAY narrow but never widens.
+
+# Per-step pin (escape hatch — overrides resolver, usually omit):
+# pinned_provider: apollo-pricing-http
 ```
+
+**Why prefer `action:`** : when a new TOOL ships implementing the same
+action (e.g. `gh.commit` joining `git.commit` for `storage:commit`),
+the workflow benefits automatically. Pinning `tool:` locks you to one
+implementation forever.
 
 When the workflow runtime executes this step, the runtime:
 
@@ -450,6 +471,38 @@ triggers:
 Adapters MUST honour `kind: "manual"` (a UI trigger). Other kinds are
 optional and capability-gated; adapters that don't support them MUST
 refuse the workflow at registration time with a clear error.
+
+### Routines (preferred form for `kind: schedule` triggers)
+
+`triggers: [{ kind: schedule, cron: ... }]` is **legacy** — kept for
+back-compat. The decoupled, preferred form for any recurring or
+event-driven invocation is the `routines:` field, which references
+[AIP-41 ROUTINE.md](/docs/aip-41) manifests:
+
+```yaml
+# Preferred — ref to a published or local ROUTINE.md
+routines:
+  - { ref: "@agentik/routines-standard/daily-9am-utc" }
+  - { file: "./.routines/quarterly-rotation/ROUTINE.md" }
+
+# Inline form — equivalent to a one-shot ROUTINE.md inside this workflow
+routines:
+  - inline:
+      schedule: { kind: cron, cron: "0 9 * * MON", timezone: "Europe/Paris" }
+      target:   { workflow: { ref: "./" } }
+      identity: "bot://acme-routines"
+```
+
+Decoupling buys you:
+
+- **One schedule, many workflows.** "Daily 09:00 Paris" defined once.
+- **Identity attribution at fire time** — POLICY-checked.
+- **Retry, on_failure, history** — defined on the routine, not duplicated per workflow.
+- **Library reuse** — `@agentik/routines-standard/*` covers most common cadences.
+
+Hosts MAY auto-migrate inline `triggers: [{ kind: schedule }]` into
+anonymous inline routines internally for uniform handling. Authors
+SHOULD migrate to `routines:` for any cadence shared across ≥2 workflows.
 
 ### Body
 

@@ -1,0 +1,557 @@
+---
+title: "AIP-41: ROUTINE.md — agentroutine/v1 (recurring schedule + target)"
+description: A markdown + frontmatter format for declaring a recurring or event-driven invocation of an action, workflow, or tool. Decouples "when" (the schedule) from "what" (the target). Supports cron / interval / calendar / manual / event-driven schedules, with retry, jitter, catchup policy, identity attribution, and failure routing.
+aip: 41
+status: Draft
+type: Schema
+created: 2026-05-03
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 27, 37, 39]
+discussions-to: https://github.com/agentproto/agentproto/discussions/41
+layer: primitives
+package: "@agentproto/routine"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 41 |
+| Title | ROUTINE.md — agentroutine/v1 (recurring schedule + target) |
+| Status | Draft |
+| Type | Schema |
+| Domain | routines.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7), [AIP-27](/docs/aip-27), [AIP-37](/docs/aip-37), [AIP-39](/docs/aip-39) |
+| Targets | [ACTION.md](/docs/aip-39), [WORKFLOW.md](/docs/aip-15), [TOOL.md](/docs/aip-14) |
+| Referenced by | [WORKSPACE.md](/docs/aip-34), [AGENT.md](/docs/aip-42) (`routines:`), [WORKFLOW.md](/docs/aip-15) (`routines:`) |
+
+## Abstract
+
+`ROUTINE.md` is a markdown-with-frontmatter file format that packages
+a single **recurring or event-driven invocation** — a schedule (the
+"when") bound to a target action / workflow / tool (the "what"), plus
+retry, jitter, catchup, identity attribution, and failure routing.
+
+Routines are the agentic equivalent of cron jobs, but composable across
+the AIP stack: they target ACTION ids (not opaque shell commands), run
+under a declared identity (auditable), respect POLICY grants (the
+identity must be authorised for the target), and fire LIFECYCLE events
+(`routine-triggered`, `routine-completed`, `routine-failed`) that other
+manifests can subscribe to.
+
+The relationship to existing primitives is **decoupling**:
+
+- [AIP-15 WORKFLOW.md](/docs/aip-15) currently allows inline
+  `triggers: [{ kind: schedule, cron: ... }]`. This AIP keeps that
+  back-compat path while introducing `routines: [{ ref }]` as the
+  preferred decoupled form — one routine can target N workflows, and
+  one workflow can be triggered by N routines.
+- [AIP-37 LIFECYCLE.md](/docs/aip-37) defines the event vocabulary
+  ROUTINEs subscribe to (`event`-kind schedules) and the events
+  ROUTINEs emit (`routine-triggered`, etc.).
+
+## Motivation
+
+Until this AIP, recurring invocations lived inside individual workflow
+manifests as `triggers:` arrays. Five problems compound:
+
+1. **Same schedule, N workflows.** "Daily at 09:00 Paris" gets duplicated
+   across every workflow that wants it. Drift inevitable — one workflow
+   eventually has the wrong timezone.
+
+2. **Schedule changes require workflow edits.** Switching all daily jobs
+   from 09:00 to 10:00 means N PRs across N workflows.
+
+3. **No way to schedule an action directly.** ACTIONs (AIP-39) are
+   the universal verb primitive. "Snapshot the database every hour"
+   should target `db:snapshot` (an action) — not require wrapping in
+   a workflow first.
+
+4. **No identity / governance attribution.** Workflow `triggers:` say
+   *when* but not *who* — the routine fires "as the system". POLICY
+   grants on the target action become unauditable for routine runs.
+
+5. **Failure routing is per-workflow ad-hoc.** Each workflow's
+   `triggers:` lacks `on_failure` semantics. Notifications, retries,
+   work-item creation are reinvented per workflow.
+
+`ROUTINE.md` extracts the schedule into its own primitive. Authors
+write one `daily-9am-paris/ROUTINE.md` once, point N targets at it,
+attach a single identity, set one retry policy, and route failures
+uniformly.
+
+## Design principles
+
+1. **Decouple "when" from "what".** Schedule and target are separate
+   fields. The same schedule can drive different targets across
+   workspaces; the same target can be driven by different schedules.
+
+2. **Bottom-up target binding.** A ROUTINE points AT its target via
+   `target.action` / `target.workflow` / `target.tool`. The target
+   doesn't know about the routine. Targets remain reusable in
+   non-routine contexts.
+
+3. **Identity-attributed.** Every fire MUST carry an identity (AIP-23
+   ref). Audit, POLICY enforcement, side-effect attribution all flow
+   from this. No anonymous schedules.
+
+4. **POLICY-gated at registration.** The routine's identity MUST have
+   the grants required by the target's action(s). Resolver checks at
+   manifest load time, NOT just at fire time — invalid routines refuse
+   to register rather than silently failing later.
+
+5. **Composable like everything else.** ROUTINE refs accept the
+   `inline | ref | file` pattern. Inline in a WORKFLOW, refed from a
+   library (`@agentik/routines/standard/daily-9am-utc`), or pointed at
+   a sibling file.
+
+6. **Catchup policy is explicit.** Default `catchup: skip` — missed
+   fires (host downtime, restart) are dropped. Authors opt into `one`
+   (run latest missed) or `all` (replay every missed slot). Prevents
+   replay-storm surprises.
+
+7. **Jitter is opt-in but recommended.** `jitter_seconds` spreads
+   load across a cluster. Without jitter, every routine with
+   `cron: "0 9 * * *"` fires at the same instant; with jitter,
+   they spread within the window.
+
+## Specification
+
+### File location
+
+ROUTINEs are typically organized as folders under a workspace:
+
+```
+.routines/
+  daily-pricing-snapshot/
+    ROUTINE.md           ← this AIP
+    README.md            ← optional long-form
+  weekly-monday-brief/
+    ROUTINE.md
+  on-conversation-end-cleanup/
+    ROUTINE.md
+```
+
+Folder name SHOULD match `id` (kebab-cased). Authors MAY nest under
+a category (e.g. `.routines/billing/quarterly-stripe-rotation/`) —
+consumers MUST NOT depend on directory depth.
+
+### Routine libraries
+
+A "library of routines" is a [WORKSPACE.md](/docs/aip-34) with
+`publish.visibility: public` containing many `.routines/<slug>/ROUTINE.md`
+files. Other workspaces ref these via the registry address scheme:
+
+```
+@agentik/routines/standard/      ← published routine library
+├── WORKSPACE.md
+└── .routines/
+    ├── hourly/ROUTINE.md
+    ├── daily-9am-utc/ROUTINE.md
+    ├── weekly-monday/ROUTINE.md
+    ├── weekly-friday-eod/ROUTINE.md
+    ├── monthly-first/ROUTINE.md
+    └── on-conversation-end/ROUTINE.md
+```
+
+Consumers reference: `routines: [{ ref: "@agentik/routines/standard/daily-9am-utc" }]`.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `routine/v1`. |
+| `id` | string | Machine identifier. Lowercase, digits, dashes, dots. 2–80 chars. Format `<owner>?/<slug>` or bare `<slug>`. Unique within the registry that hosts the routine. |
+| `description` | string | One-paragraph purpose. ≤2000 chars. |
+| `schedule` | object | When to fire. See [Schedule kinds](#schedule-kinds). |
+| `target` | object | What to invoke. Exactly one of `action` / `workflow` / `tool`. See [Target](#target). |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `version` | semver | `1.0.0` | Spec version of THIS file. |
+| `identity` | identity-ref | host default | Identity that owns the routine fire (AIP-23 identity-ref: `inline \| ref \| file`). MUST be authorised for the target's action(s). |
+| `retry` | object | `{ max_attempts: 1 }` | Retry behaviour. See [Retry](#retry). |
+| `on_failure` | object | `{}` | Where to route failures. See [On failure](#on-failure). |
+| `history` | object | `{ retain_runs: 100, retain_failed: 30 }` | Run history retention. |
+| `fires_events` | string[] | `["routine-triggered", "routine-completed", "routine-failed"]` | AIP-37 events fired. |
+| `enabled` | boolean | `true` | If `false`, routine is registered but does not fire. Useful for staging. |
+| `tags` | string[] | `[]` | Free-form discovery tags. |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+### Schedule kinds
+
+The `schedule` field selects exactly one `kind`:
+
+```yaml
+# kind: cron — most common
+schedule:
+  kind: cron
+  cron: "0 9 * * MON-FRI"
+  timezone: "Europe/Paris"      # IANA tz; default UTC
+  jitter_seconds: 30             # 0..3600, default 0
+  catchup: skip                  # skip | one | all, default skip
+
+# kind: interval — fixed interval, no calendar awareness
+schedule:
+  kind: interval
+  every: "5m"                    # duration: Ns | Nm | Nh | Nd
+  from: "2026-05-03T00:00:00Z"   # OPTIONAL anchor; default = registration time
+  jitter_seconds: 5
+
+# kind: calendar — RRULE for complex recurrences
+schedule:
+  kind: calendar
+  rrule: "FREQ=MONTHLY;BYDAY=3TU"   # RFC 5545 RRULE
+  timezone: "America/New_York"
+
+# kind: manual — no schedule, fires only on explicit trigger
+schedule:
+  kind: manual
+
+# kind: event — subscribes to AIP-37 LIFECYCLE events
+schedule:
+  kind: event
+  on: turn-end                   # AIP-37 event name
+  filter:                        # OPTIONAL — only fire if filter matches
+    workspace: "@me/marketing"
+```
+
+### Target
+
+The `target` field selects exactly one of `action`, `workflow`, or `tool`:
+
+```yaml
+# Target an ACTION (preferred — resolver picks tool implementation)
+target:
+  action: "@agentik/actions/standard/storage-commit"
+  inputs:                        # passed to the action invocation
+    message: "Routine commit"
+
+# Target a WORKFLOW (multi-step procedure)
+target:
+  workflow:
+    ref: "./workflows/competitor-analysis.WORKFLOW.md"
+  inputs:
+    competitors: ["${{ vault.COMPETITOR_LIST }}"]
+
+# Target a specific TOOL (pin implementation)
+target:
+  tool: pricing-snapshot
+  inputs: { ... }
+```
+
+`inputs` are passed as the invocation payload. They MAY reference
+secrets (`${{ vault.NAME }}`) and runtime context (`${{ now }}`,
+`${{ routine.run_id }}`).
+
+### Retry
+
+```yaml
+retry:
+  max_attempts: 3                # 1..10, default 1 (no retry)
+  backoff: exponential           # exponential | linear | fixed, default exponential
+  initial_ms: 60000              # first retry delay, default 60_000
+  max_ms: 3600000                # cap, default 3_600_000
+  on:                            # OPTIONAL — only retry these failure classes
+    - timeout
+    - "5xx"
+    - "rate-limit"
+```
+
+### On failure
+
+```yaml
+on_failure:
+  notify:                        # identity-ref(s) to notify
+    - "@acme/groups/oncall"
+  create_work_item: true         # AIP-13/20 WORK item on retry-exhausted failure
+  fire_event: "pricing-routine-broken"   # OPTIONAL custom AIP-37 event
+```
+
+### The `defineRoutine` standard signature
+
+```ts
+defineRoutine(definition: RoutineDefinition): RoutineHandle
+
+interface RoutineDefinition {
+  schema?:      "routine/v1"
+  id:           string
+  description:  string
+  version?:     string
+
+  schedule:     ScheduleCron | ScheduleInterval | ScheduleCalendar | ScheduleManual | ScheduleEvent
+  target:       TargetAction | TargetWorkflow | TargetTool
+
+  identity?:    IdentityRef                              // AIP-23
+  retry?: {
+    maxAttempts?: number
+    backoff?:     "exponential" | "linear" | "fixed"
+    initialMs?:   number
+    maxMs?:       number
+    on?:          string[]
+  }
+  onFailure?: {
+    notify?:          IdentityRef[]
+    createWorkItem?:  boolean
+    fireEvent?:       string
+  }
+  history?: {
+    retainRuns?:   number
+    retainFailed?: number
+  }
+  firesEvents?: string[]
+  enabled?:     boolean
+  tags?:        string[]
+  metadata?:    Record<string, unknown>
+}
+```
+
+### Conformance rules
+
+1. **`id` format** — `^[a-z0-9][a-z0-9.-]*(/[a-z0-9][a-z0-9.-]*)?$`.
+   Optional single `/` for `<owner>/<slug>` form.
+
+2. **Exactly one schedule kind.** The `schedule` object MUST have
+   exactly one `kind`; the discriminated union enforces required
+   sub-fields. Validators MUST reject ambiguous shapes.
+
+3. **Exactly one target.** `target` MUST contain exactly one of
+   `action`, `workflow`, `tool`. Validators MUST reject
+   multi-target routines (split into multiple ROUTINEs instead).
+
+4. **Identity authorisation at load time.** Resolvers MUST verify the
+   `identity` (or host default) has POLICY grants for the resolved
+   target's action(s) at registration. A routine that would fail at
+   fire time MUST refuse to register.
+
+5. **Catchup default `skip`.** Hosts MUST default to `skip` if
+   `schedule.catchup` absent. Authors that need replay MUST opt in
+   explicitly to avoid surprise on host restart.
+
+6. **Jitter range.** `schedule.jitter_seconds` MUST be in `[0, 3600]`.
+   Hosts MAY further cap.
+
+7. **Cron timezone.** If `schedule.cron` is set without `timezone`,
+   default is UTC. Host MUST use IANA tz database names; legacy
+   abbreviations (`EST`, `PST`) are rejected.
+
+8. **Event-kind require AIP-37 event.** `schedule.kind: event`
+   MUST reference a known AIP-37 event name (or namespace-prefixed
+   custom event registered by a host).
+
+9. **No I/O at parse time.** Parsing a ROUTINE.md MUST NOT trigger
+   network calls, registry lookups, or schedule registration.
+
+### Stable identity
+
+`id` + `version` together form the routine's stable identity. A
+breaking change to schedule semantics (e.g. adding a required
+`filter` to event-kind) MUST bump major version.
+
+## Composition pattern (`inline | ref | file`)
+
+Like every composable block in the AIP series, ROUTINE refs accept
+three forms when consumed by other manifests:
+
+```yaml
+# Inline — routine defined directly in the consumer
+routines:
+  - inline:
+      schedule: { kind: cron, cron: "0 9 * * MON" }
+      target:   { action: "@agentik/actions/standard/storage-commit" }
+
+# Ref — registry-resolvable identifier
+routines:
+  - { ref: "@agentik/routines/standard/daily-9am-utc" }
+# OR shorthand:
+routines: ["@agentik/routines/standard/daily-9am-utc"]
+
+# File — workspace-relative path
+routines:
+  - { file: "./routines/daily-pricing-snapshot/ROUTINE.md" }
+# OR shorthand:
+routines: ["./routines/daily-pricing-snapshot"]
+```
+
+Resolution failures MUST surface as a typed error
+(`routine_ref_unresolvable`).
+
+## Example
+
+```md
+---
+schema: routine/v1
+id: "@acme/routines/daily-pricing-snapshot"
+version: 1.0.0
+description: "Snapshot competitor pricing every weekday at 09:00 Europe/Paris. Notifies #pricing on failure; creates a WORK item if retries exhaust."
+schedule:
+  kind: cron
+  cron: "0 9 * * MON-FRI"
+  timezone: "Europe/Paris"
+  jitter_seconds: 30
+  catchup: skip
+target:
+  action: "@agentik/actions/standard/pricing-snapshot"
+  inputs:
+    competitors: "${{ vault.COMPETITOR_LIST }}"
+identity:
+  ref: "bot://acme-routines"
+retry:
+  max_attempts: 3
+  backoff: exponential
+  initial_ms: 60000
+on_failure:
+  notify:
+    - "@acme/groups/pricing-oncall"
+  create_work_item: true
+history:
+  retain_runs: 100
+  retain_failed: 30
+fires_events:
+  - routine-triggered
+  - routine-completed
+  - routine-failed
+tags: [pricing, daily, automation]
+---
+
+## Description
+
+Runs the pricing snapshot every weekday morning. Targets the
+`pricing-snapshot` action; the resolver picks whichever TOOL
+implementation is bound (`@acme/tools/internal-pricing` in
+production, `@agentik/tools/pricing-mock` in test environments).
+
+## Failure handling
+
+If three retries fail (typically: upstream pricing API down), an
+oncall page is sent and a WORK item is opened so the routine
+doesn't silently rot.
+```
+
+## Connecting to other AIPs
+
+### WORKFLOW references ROUTINEs (decoupled from inline triggers)
+
+```yaml
+# WORKFLOW.md (new, preferred form)
+routines:
+  - { ref: "@agentik/routines/standard/daily-9am-utc" }
+  - { ref: "./routines/quarterly-rotation/ROUTINE.md" }
+
+# WORKFLOW.md (legacy inline triggers — still supported, deprecated)
+triggers:
+  - kind: schedule
+    cron: "0 9 * * MON"
+```
+
+### AGENT references ROUTINEs (auto-firing tasks)
+
+```yaml
+# AGENT.md (AIP-42)
+routines:
+  - { ref: "./routines/morning-brief/ROUTINE.md" }
+  - { ref: "@agentik/routines/standard/weekly-monday" }
+```
+
+The agent fires when its routines do — agent identity becomes the
+routine fire identity unless overridden.
+
+### WORKSPACE references ROUTINEs (workspace-level automation)
+
+```yaml
+# WORKSPACE.md (AIP-34)
+routines:
+  - { ref: "@agentik/routines/standard/daily-9am-utc" }   # nightly sweep
+  - { file: "./.routines/sync-from-upstream/ROUTINE.md" }
+```
+
+### POLICY grants the action the ROUTINE invokes
+
+```yaml
+# POLICY.md (AIP-38)
+grants:
+  - principal: "bot://acme-routines"
+    actions:
+      - { action: "@agentik/actions/standard/pricing-snapshot" }
+```
+
+The routine's identity (`bot://acme-routines`) MUST appear in a
+POLICY grant for the target action. Resolver fails the routine
+registration otherwise.
+
+### LIFECYCLE event subscribed by event-kind ROUTINE
+
+```yaml
+# ROUTINE.md
+schedule:
+  kind: event
+  on: conversation-end          # AIP-37 event
+target:
+  action: "@agentik/actions/standard/log-summary"
+```
+
+## Backward compatibility
+
+This AIP is purely additive:
+
+- WORKFLOW.md `triggers: [{ kind: schedule, cron: ... }]` (AIP-15)
+  remains supported. The `routines:` field is the new preferred form
+  but does not deprecate inline triggers.
+- Hosts MAY auto-migrate inline workflow triggers into anonymous
+  inline ROUTINEs at load time for uniform handling internally.
+
+Migration path:
+1. Author ROUTINE.md files for any inline schedule used by ≥2 workflows.
+2. Replace `triggers: [{ kind: schedule, ... }]` with
+   `routines: [{ ref: ... }]`.
+3. Centralise identity attribution and retry policy on the routine.
+
+## Security considerations
+
+`ROUTINE.md` is **declarative and load-time governed**:
+
+- Identity claims in routines are NOT trusted by themselves. Resolvers
+  MUST verify the host has authority to bind the claimed identity
+  (e.g., `bot://acme-routines` is a registered service account, not
+  arbitrary user impersonation).
+- `event`-kind routines that subscribe to high-volume events
+  (`turn-end`) MAY exhaust quota. Hosts SHOULD apply per-routine rate
+  limits.
+- `catchup: all` after long downtime MAY cause replay storms.
+  Hosts SHOULD bound replay window (typically ≤24h) and warn
+  authors at parse time.
+- Routines targeting irreversible actions (risk_level 3) SHOULD
+  require `approval: always` on the target — hosts SHOULD warn
+  if the routine identity has unattended approval mode.
+
+## Open questions
+
+1. **Distributed leader election.** When N hosts share a routine
+   registry, only one fires per slot. Spec the election protocol
+   (typically: external lock manager, deferred to host).
+
+2. **Backfill on enable.** When `enabled: true` after a period of
+   `false`, do we run missed slots? Currently follows
+   `schedule.catchup`. May need explicit `backfill_on_enable` flag.
+
+3. **Routine-of-routines.** Can a routine target another routine
+   (manual-kind)? Currently no — would require introducing
+   `target.routine`. Defer until concrete demand.
+
+## See also
+
+- [AIP-7 — governance](/docs/aip-7) — POLICY enforcement on routine fires
+- [AIP-13 — WORK.md](/docs/aip-13) — `on_failure.create_work_item` consumer
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — `routines:` field replacement for inline `triggers:`
+- [AIP-23 — IDENTITY.md](/docs/aip-23) — `identity` ref form
+- [AIP-27 — REF.md](/docs/aip-27) — ref primitive used in `target.*`
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — workspace-scoped `routines:`
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — `fires_events` + event-kind `schedule.on` vocabulary
+- [AIP-38 — POLICY.md](/docs/aip-38) — grants required by routine identity
+- [AIP-39 — ACTION.md](/docs/aip-39) — `target.action` consumer
+- [AIP-42 — AGENT.md](/docs/aip-42) — `routines:` field on agent
+- [`./resources/aip-41/draft/ROUTINE.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-41/draft) — schema validator
