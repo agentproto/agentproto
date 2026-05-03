@@ -1,0 +1,518 @@
+---
+title: "AIP-39: ACTION.md — agentaction/v1 (verb primitive)"
+description: A markdown + frontmatter format for declaring an abstract verb / operation that can be performed on a resource — its identity, semantics, side-effect profile, approval class, and lifecycle events. The pivot primitive that TOOL implements (with LLM schema), POLICY references (for grants), INTENT routes to (from user verbs), and WORKFLOW steps invoke. Bottom-up — implementations declare which actions they implement.
+aip: 39
+status: Draft
+type: Schema
+created: 2026-05-03
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 27]
+discussions-to: https://github.com/agentproto/agentproto/discussions/39
+layer: primitives
+package: "@agentproto/action"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 39 |
+| Title | ACTION.md — agentaction/v1 (verb primitive) |
+| Status | Draft |
+| Type | Schema |
+| Domain | actions.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7) (governance), [AIP-27](/docs/aip-27) (REF) |
+| Implemented by | Any [TOOL.md](/docs/aip-14) declaring `implements: <action-ref>` |
+| Referenced by | [TOOL.md](/docs/aip-14) `implements`, [POLICY.md](/docs/aip-38) `grants[].actions`, [INTENT.md](/docs/aip-28) `maps_to[].action`, [WORKFLOW.md](/docs/aip-15) `steps[].action` |
+
+## Abstract
+
+`ACTION.md` is a markdown-with-frontmatter file format that packages
+a single **abstract verb / operation** that can be performed on a
+resource — its identity, semantic description, side-effect profile
+(`mutates`), approval class, risk level, lifecycle events fired,
+and category for catalog UI.
+
+ACTION is the **pivot primitive** of the agentic stack: it is the
+verb that other AIPs reference. TOOL implements an action with an
+LLM-callable IO schema. INTENT routes a user-facing verb to one or
+more actions. WORKFLOW steps invoke actions. POLICY grants
+permissions on actions. LIFECYCLE events fire from actions.
+
+The relationship is **bottom-up**: TOOL declares which ACTION it
+implements (via `implements: <action-ref>`), inheriting the action's
+side-effect profile and never widening it. ACTION optionally lists
+known implementations as a hint for catalog UIs but the source of
+truth lives on the implementations.
+
+## Motivation
+
+Until this AIP, the AIP series fragmented "things an agent or user
+can do" across multiple unrelated primitives:
+
+- [AIP-14 TOOL.md](/docs/aip-14) had abstract LLM-callable contracts
+  with `mutates` / `requires` / `approval` declared per-tool.
+- [AIP-28 INTENT.md](/docs/aip-28) routed user-facing verbs to TOOL ids.
+- [POLICY.md (AIP-38)](/docs/aip-38) needed a vocabulary of "what can
+  be granted" — initially proposed as bare strings (`storage:commit`).
+- [WORKFLOW.md (AIP-15)](/docs/aip-15) referenced TOOL ids in steps.
+- Audit logs annotated tool calls with arbitrary id strings.
+
+Five problems compound when "the verb" is not a first-class primitive:
+
+1. **N implementations of the same verb each redeclare side-effects.**
+   `git.commit`, `gh.commit`, `github.api-commit` all need to declare
+   `mutates: ["storage:*"]` and `risk_level: 1`. Drift is inevitable —
+   one of them eventually downgrades risk to 0 and breaks audit.
+
+2. **POLICY grants are couplée to specific tool ids.** Granting
+   `git.commit` doesn't grant `gh.commit` even though they do the
+   same thing. Every new TOOL impl requires re-grant.
+
+3. **INTENT can only route to TOOLs.** "Save changes" intent has to
+   list every TOOL that commits — not the abstract verb "commit".
+
+4. **WORKFLOW steps lock in implementation.** A step calling
+   `tool: git.commit` can't be retargeted to `gh.commit` without
+   editing the workflow.
+
+5. **No vocabulary for non-LLM operations.** Config-change verbs
+   (`storage:swap-provider`, `workspace:publish`) aren't really TOOLs
+   (no LLM schema needed) but POLICY needs to grant on them.
+
+`ACTION.md` extracts the verb into its own primitive. Implementations
+implement actions; consumers reference actions; everyone composes
+through one shared namespace.
+
+## Design principles
+
+1. **Pure semantic primitive.** ACTION declares **what** the operation
+   is (semantics, side effects, risk) — not **how** (no code, no
+   schema, no calling convention). Implementation lives on TOOL
+   (AIP-14) / DRIVER (AIP-30) / UI / lifecycle handlers.
+
+2. **Bottom-up implementation linking.** TOOLs (and other implementers)
+   declare `implements: <action-ref>`. ACTIONs do not enumerate their
+   implementations — that's the implementor's job. Optional
+   `implementations:` field on ACTION is a discovery hint only,
+   typically populated by the host scanner.
+
+3. **Inheritance with narrowing.** When TOOL `implements: action`,
+   it INHERITS action's `mutates`, `risk_level`, `approval`,
+   `requires`. TOOL MAY narrow (more restrictive) but MUST NOT widen.
+   Validators reject widening at parse time.
+
+4. **One namespace across the stack.** `storage:commit` means the
+   same thing in POLICY grants, INTENT routes, WORKFLOW steps, and
+   audit logs. The action id is the universal verb identifier.
+
+5. **Composable like everything else.** ACTION refs accept the
+   `inline | ref | file` pattern. An ACTION can be inline in a
+   consumer (one-shot), refed from a registry (`@agentik/actions/standard/storage-commit`),
+   or pointed at a sibling file.
+
+6. **Open extension via category + custom verbs.** The
+   `category` field lets catalogs group actions ("filesystem",
+   "compute", "messaging"). Custom verbs registered by hosts use
+   the `<host>:<verb>` convention; standard verbs are bare.
+
+## Specification
+
+### File location
+
+ACTIONs are typically organized as folders under a workspace:
+
+```
+.actions/
+  storage-commit/
+    ACTION.md          ← this AIP
+    README.md          ← optional long-form
+  storage-push/
+    ACTION.md
+  sandbox-execute/
+    ACTION.md
+```
+
+Folder name SHOULD match `id` (kebab-cased). Authors MAY nest under
+a category (e.g. `.actions/filesystem/storage-commit/`) — consumers
+MUST NOT depend on directory depth.
+
+### Action libraries
+
+A "library of actions" is a [WORKSPACE.md](/docs/aip-34) with
+`publish.visibility: public` containing many `.actions/<slug>/ACTION.md`
+files. Other workspaces ref these via the registry address scheme
+(`@<owner>/<workspace-slug>/<action-slug>`):
+
+```
+@agentik/actions/standard/        ← published action library
+├── WORKSPACE.md
+└── .actions/
+    ├── storage-commit/ACTION.md
+    ├── storage-push/ACTION.md
+    └── sandbox-execute/ACTION.md
+```
+
+Consumers reference: `implements: "@agentik/actions/standard/storage-commit"`.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `action/v1`. |
+| `id` | string | Machine identifier. Lowercase, digits, dashes, dots, single colon (`:`). 2–80 chars. Standard format `<category>:<verb>` (e.g. `storage:commit`). Dots denote sub-namespace. Unique within the registry that hosts the action. |
+| `description` | string | One-paragraph purpose. ≤2000 chars. Written for the LLM caller. |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `version` | semver string | `1.0.0` | Spec version of THIS file. Bump on breaking change to `mutates` / `risk_level` (any tightening that requires implementor revalidation). |
+| `category` | string | `""` | Discovery category for catalog UIs. Common: `filesystem`, `compute`, `messaging`, `vcs`, `payment`, `auth`, `lifecycle`. |
+| `verb` | string | derived from `id` | The bare verb (e.g. `commit`, `execute`, `reveal`). Derived from `id` after the `:` if absent. |
+| `target_kind` | string | derived from `id` | The resource kind this action operates on (e.g. `storage`, `sandbox`, `secrets`). Derived from `id` before the `:` if absent. |
+| `mutates` | string[] | `[]` | Resources the action may modify. Same vocabulary as [AIP-14 mutates](/docs/aip-14): `<class>:<scope>`. Implementors MUST honour the declared set; widening is rejected. |
+| `requires` | object | `{}` | Capability requirements (gated by [AIP-7 governance](/docs/aip-7)). Subfields: `network: string[]`, `secrets: string[]`, `tools: string[]`. Implementors MAY add to this set; MUST NOT remove from it. |
+| `approval` | string | `"auto"` | Approval class. `"auto"` / `"always"` / `"on-mutate"` / `"policy:<ref>"`. Implementors MAY narrow (`auto` → `always`); MUST NOT widen. |
+| `risk_level` | 0–3 | `0` | 0 = read-only, 1 = scoped writes, 2 = external side effects, 3 = irreversible. Implementors MAY raise but never lower. |
+| `fires_events` | string[] | `[]` | [AIP-37 LIFECYCLE](/docs/aip-37) event names this action fires when invoked. Subscribers (sync layers, audit) attach to these. |
+| `implementations` | array | `[]` | OPTIONAL discovery hint — known implementations of this action. Format: `[{ kind: "tool" \| "driver" \| "ui" \| "lifecycle", ref: "<ref>" }, ...]`. NOT authoritative — source of truth lives on the implementors via `implements: <action-id>`. Populated by host scanner. |
+| `tags` | string[] | `[]` | Free-form discovery tags. |
+| `examples` | object[] | `[]` | Each `{ name, scenario, note? }` — semantic examples (NOT input/output, since action has no schema). |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+### Body
+
+Markdown body following the frontmatter. Recommended sections:
+
+- **`## Description`** — long-form purpose, when callers should use this action.
+- **`## Side effects`** — prose explaining `mutates` in human terms.
+- **`## Approval rationale`** — why this `approval` class is correct.
+- **`## Implementation notes`** — guidance for implementors (TOOL/DRIVER authors).
+
+The body is informational. Hosts MUST function reading only the frontmatter.
+
+### The `defineAction` standard signature
+
+```ts
+defineAction(definition: ActionDefinition): ActionHandle
+
+interface ActionDefinition {
+  schema?:       "action/v1"
+  id:            string
+  description:   string
+  version?:      string
+  category?:     string
+  verb?:         string
+  targetKind?:   string
+
+  mutates?:      string[]
+  requires?:     {
+    network?: string[]
+    secrets?: string[]
+    tools?:   string[]
+  }
+  approval?:     "auto" | "always" | "on-mutate" | string  // "policy:<ref>"
+  riskLevel?:    0 | 1 | 2 | 3
+  firesEvents?:  string[]              // AIP-37 event names
+  implementations?: Array<{
+    kind: "tool" | "driver" | "ui" | "lifecycle"
+    ref:  string
+  }>
+  tags?:         string[]
+  examples?:     Array<{ name: string; scenario: string; note?: string }>
+  metadata?:     Record<string, unknown>
+}
+```
+
+### Conformance rules
+
+1. **`id` format** — `^[a-z0-9][a-z0-9.-]*(:[a-z0-9][a-z0-9.-]*)?$`. Standard
+   shape `<target-kind>:<verb>` (e.g. `storage:commit`). Single colon
+   only; multiple colons are reserved for future namespacing.
+
+2. **`mutates` are inherited downward.** Every implementor of an
+   action MUST honour every entry in the action's `mutates` array.
+   Implementors MAY add more (be more honest about side effects).
+   Resolvers MUST refuse implementors that drop entries.
+
+3. **`approval` and `risk_level` are floors.** Implementors MAY narrow
+   (`approval: auto` → `always` ok ; `risk_level: 1` → `2` ok). Widening
+   is rejected at parse time.
+
+4. **`requires` is a floor.** Implementors MAY require additional
+   capabilities; MUST NOT remove any required by the action.
+
+5. **`implementations:` is non-authoritative.** Hosts MUST treat it as
+   a hint. The runtime resolver scans implementors via their
+   `implements:` field, NOT via this list.
+
+6. **`fires_events` are advisory at the action layer.** Implementors
+   MAY fire MORE events than the action declares; MUST NOT drop any
+   event the action declares as fired (or the audit trail breaks).
+
+7. **No I/O at parse time.** Parsing an ACTION.md MUST NOT trigger
+   network calls, registry lookups, or implementation resolution.
+
+### Stable identity
+
+`id` + `version` together form the action's stable identity. A
+breaking change to `mutates` (adding an entry implementors couldn't
+have known) or to `risk_level` (raising the floor) MUST bump major
+version. Implementors pinned to `^1.0.0` of an action MAY refuse to
+bind against `2.0.0` until they update.
+
+## Composition pattern (`inline | ref | file`)
+
+Like every composable block in the AIP series, ACTION refs accept
+three forms when consumed by other manifests:
+
+```yaml
+# Inline — action defined directly in the consumer (one-shot)
+implements:
+  inline:
+    id: my.local-action
+    description: "Workspace-specific action, not published."
+    mutates: ["storage:scratch"]
+
+# Ref — registry-resolvable identifier
+implements: { ref: "@agentik/actions/standard/storage-commit" }
+# OR shorthand string (when no ambiguity):
+implements: "@agentik/actions/standard/storage-commit"
+
+# File — workspace-relative path
+implements: { file: "./actions/storage-commit/ACTION.md" }
+# OR shorthand:
+implements: "./actions/storage-commit"
+```
+
+Resolution failures MUST surface as a typed error
+(`action_ref_unresolvable`).
+
+## Inheritance + narrowing (formal)
+
+When TOOL.md (or any implementor) declares `implements: <action-ref>`,
+the host loads the resolved action and merges its fields into the
+implementor's view at parse time. The merged view is what the agent /
+governance layer sees at runtime.
+
+| Field | Action declares | Implementor MAY |
+|---|---|---|
+| `description` | floor | Override (typically more specific). |
+| `mutates` | floor (must include) | Add more entries; never drop. |
+| `risk_level` | floor (minimum) | Raise (more risky); never lower. |
+| `approval` | floor | Narrow (`auto` → `always` → `on-mutate`); never relax. |
+| `requires.network` | floor | Add more hosts; never remove. |
+| `requires.secrets` | floor | Add more slugs; never remove. |
+| `requires.tools` | floor | Add more tools; never remove. |
+| `category` | inherited verbatim | Cannot override (catalog consistency). |
+| `fires_events` | floor (must fire all) | Fire more events; never drop. |
+| `target_kind` | inherited verbatim | Cannot override. |
+
+**Validator pseudocode**:
+
+```ts
+function validateImplementor(impl: ToolDef | DriverDef): Result {
+  if (!impl.implements) return { ok: true, orphan: true }
+  const action = resolveAction(impl.implements)
+  if (!action) return { error: `unknown action: ${impl.implements}` }
+
+  if (impl.riskLevel !== undefined && impl.riskLevel < action.riskLevel)
+    return { error: `widens risk_level: action=${action.riskLevel}, impl=${impl.riskLevel}` }
+
+  if (impl.mutates && !isSuperset(impl.mutates, action.mutates))
+    return { error: `drops mutates: ${diff(action.mutates, impl.mutates)}` }
+
+  if (impl.approval && approvalRank(impl.approval) < approvalRank(action.approval))
+    return { error: `relaxes approval: action=${action.approval}, impl=${impl.approval}` }
+
+  // ... etc
+
+  return { ok: true, mergedView: { ...action, ...impl } }
+}
+```
+
+## Example
+
+```md
+---
+schema: action/v1
+id: storage:commit
+version: 1.0.0
+description: "Commit changes to a storage backend's tracked filesystem. Atomic with respect to the underlying provider's commit semantics (git commit-tree for github, S3 put for cloud-bucket, no-op for canonical providers)."
+category: filesystem
+verb: commit
+target_kind: storage
+mutates: ["storage:*"]
+risk_level: 1
+approval: auto
+requires:
+  secrets: []
+fires_events:
+  - write
+  - commit-completed
+implementations:
+  - { kind: tool, ref: "@agentik/git/tools/commit" }
+  - { kind: tool, ref: "@agentik/github/tools/api-commit" }
+tags: [filesystem, vcs, sync]
+examples:
+  - name: Standard commit after agent edit
+    scenario: "Agent finishes a turn that wrote 3 files. Sync layer triggers commit at turn-end with auto-generated message."
+  - name: Manual commit
+    scenario: "User clicks 'Save' button in workspace UI; UI calls a TOOL implementing this action with a custom message."
+---
+
+## Description
+
+Use when the agent (or sync layer, or UI) needs to atomically record a
+set of pending writes to durable storage. Bare `commit` semantics —
+this action does NOT push to a remote (use `storage:push` for that).
+
+## Side effects
+
+Modifies the storage backend's tracked tree. Specifically:
+- For github-backed storage: creates a git commit object on the
+  current working branch.
+- For cloud-bucket: writes a snapshot manifest under the storage
+  prefix.
+- For canonical providers (no concept of commit): no-op (resolver
+  MAY refuse the call entirely).
+
+## Approval rationale
+
+`approval: auto` because commits are intermediate — the user-visible
+moment is `storage:push`. A typing agent making 50 commits per
+session shouldn't prompt 50 times. Implementors MAY narrow to
+`always` for high-risk repositories.
+
+## Implementation notes
+
+Implementors should:
+- Honour `mutates: ["storage:*"]` strictly.
+- Fire `write` event for the commit's tree-write phase.
+- Fire `commit-completed` event with the resolved SHA after success.
+- Fall back gracefully if the storage's commit semantics differ from
+  git (e.g., S3 put as snapshot manifest).
+```
+
+## Connecting to other AIPs
+
+### TOOL implements ACTION
+
+```yaml
+# TOOL.md
+id: git.commit
+implements: "@agentik/actions/standard/storage-commit"   # ← bottom-up link
+inputs:  { type: object, ... }                            # tool-specific
+outputs: { type: object, ... }                            # tool-specific
+# inherits: mutates, risk_level, approval from action
+```
+
+### POLICY grants ACTION
+
+```yaml
+# POLICY.md
+grants:
+  - principal: "operator://bob"
+    actions:
+      - { action: "@agentik/actions/standard/storage-commit" }
+      - { action: "@agentik/actions/standard/storage-push" }
+```
+
+### INTENT routes to ACTION
+
+```yaml
+# INTENT.md
+id: save-my-work
+maps_to:
+  - { action: "@agentik/actions/standard/storage-commit" }
+  - { action: "@agentik/actions/standard/storage-push" }
+```
+
+### WORKFLOW step invokes ACTION
+
+```yaml
+# WORKFLOW.md
+steps:
+  - id: commit-changes
+    action: "@agentik/actions/standard/storage-commit"   # resolver picks tool
+    inputs: { message: "${{ ctx.summary }}" }
+```
+
+### LIFECYCLE event fired by ACTION
+
+```yaml
+# ACTION.md
+fires_events: ["write", "commit-completed"]
+
+# STORAGE.md.sync.commit.on (subscribes)
+sync:
+  commit:
+    on: write       # fires when ANY storage:* action fires "write"
+```
+
+## Backward compatibility
+
+This AIP is purely additive:
+
+- TOOL.md `implements: <action-ref>` is OPTIONAL. TOOLs without
+  `implements` are "orphan" — usable but not policy-grantable as a
+  group.
+- POLICY.md MAY accept bare action ids (`"storage:commit"`) for
+  back-compat with pre-AIP-39 manifests; the canonical form is
+  `{ action: "<ref>" }`.
+- WORKFLOW.md steps MAY use `tool: <id>` (legacy) or `action: <ref>`
+  (preferred); resolvers SHOULD warn on legacy form.
+
+Migration path:
+1. Author ACTION.md files for existing verbs (one per logical operation).
+2. Update TOOL.md files with `implements: <action-ref>`.
+3. Update POLICY.md grants to use `{ action: "<ref>" }` form.
+4. Update INTENT/WORKFLOW similarly.
+
+## Security considerations
+
+`ACTION.md` is **declarative**: a malicious manifest can lie about
+`mutates`, `risk_level`, `approval`. Hosts MUST treat the action
+manifest as untrusted input until verified. Specifically:
+
+- Action ids in trusted libraries (e.g. `@agentik/actions/standard/*`)
+  SHOULD be cached by SHA. Re-fetching with a different SHA flags a
+  trust-tier downgrade.
+- Implementors that bind to an action SHOULD pin the action's
+  major version. Resolution to a newer major MUST refuse the bind
+  until the implementor explicitly upgrades.
+- `implementations:` hint field MUST NOT be trusted as a security
+  signal. The fact that an action lists a tool as an implementor
+  does NOT grant that tool any privileges — POLICY.grants is the
+  authoritative source.
+
+## Open questions
+
+1. **Multi-namespace ids.** Standard form is `<target-kind>:<verb>`.
+   Future `<domain>:<target-kind>:<verb>` (e.g. `vcs:storage:commit`)
+   may be needed once we have many domains. Defer until concrete
+   collision.
+
+2. **Action versioning + implementation pinning.** When `@agentik/actions/standard/storage-commit@2.0.0`
+   ships with breaking changes, do existing implementors auto-fail
+   or auto-upgrade? Likely require explicit pin per implementor.
+   Spec'd in [AIP-?? lockfile spec] (TBD).
+
+3. **Stream / partial-completion semantics.** Some actions emit
+   progress (long-running). Currently `fires_events` covers it;
+   may need more structure if implementors get heterogeneous.
+
+## See also
+
+- [AIP-7 — governance](/docs/aip-7) — `requires`, `approval`, `mutates` enforcement
+- [AIP-14 — TOOL.md](/docs/aip-14) — primary implementor (`implements: <action-ref>`)
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — `steps[i].action` consumer
+- [AIP-27 — REF.md](/docs/aip-27) — ref primitive used in `implementations[]`
+- [AIP-28 — INTENT.md](/docs/aip-28) — `maps_to[].action` consumer
+- [AIP-30 — DRIVER.md](/docs/aip-30) — implementor pattern parallel
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — `fires_events` vocabulary
+- [AIP-38 — POLICY.md](/docs/aip-38) — `grants[].actions` consumer
+- [`./resources/aip-39/draft/ACTION.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-39/draft) — schema validator

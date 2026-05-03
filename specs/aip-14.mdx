@@ -199,7 +199,8 @@ case-sensitive.
 | `cost_class` | string | `"trivial"` | `"trivial"` (no metered call), `"metered"` (counts against quota), `"expensive"` (warn the user before invoking). Baseline; drivers MAY override via `cost_override.cost_class`. |
 | `timeout_ms` | int | `30000` | Hard wall-clock contract ceiling. Drivers MAY narrow via `timeout_override_ms`; MUST NOT widen. |
 | `retry` | object | none | Baseline retry policy: `{ max_attempts: int, backoff: "fixed"\|"exponential", initial_ms: int }`. Drivers MAY override via `retry_override`. |
-| `default_implementation` | string \| null | null | Optional id of an implementation (a [DRIVER.md](/docs/aip-30) or [CODE.md](/docs/aip-26)) to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. (Renamed from `default_implementation` for terminological consistency with the post-AIP-26 model where CODE.md can also implement TOOL contracts.) |
+| `default_implementation` | string \| null | null | Optional id of an implementation (a [DRIVER.md](/docs/aip-30) or [CODE.md](/docs/aip-26)) to use when the resolver has no other signal. Lets authors pin the canonical implementation while still permitting overrides via `context.pinnedProvider`. Null = pick by resolver policy. (Renamed from `default_driver` for terminological consistency with the post-AIP-26 model where CODE.md can also implement TOOL contracts.) |
+| `implements` | string \| object \| null | null | Optional [AIP-39 ACTION](/docs/aip-39) reference declaring which abstract verb this tool implements. When set, the tool INHERITS the action's `mutates`, `risk_level`, `approval`, `requires` (with narrowing rules — see "Action implementation" below). [POLICY.md (AIP-38)](/docs/aip-38) grants on actions, not tools, so multiple TOOLs implementing the same action share one grant. Format: bare action id (`"storage:commit"`), registry ref (`"@agentik/actions/standard/storage-commit"`), workspace path (`"./actions/storage-commit/ACTION.md"`), or inline action definition (`{ inline: { id: "...", ... } }`). |
 | `driver_constraints` | object | `{}` | Author-side allowlist/denylist on which driver kinds the contract permits: `{ forbid?: string[], require_kind?: DriverKind[] }`. Use to declare "this tool MUST NOT be served via untrusted HTTP" (`forbid: ["http"]` for self-hosted-only tools). |
 | `tags` | string[] | `[]` | Free-form discovery tags (`finance`, `read-only`, `media`). |
 | `examples` | object[] | `[]` | Each `{ name, input, output, note? }`. Driver-agnostic examples that EVERY conformant driver MUST satisfy. Driver-specific edge cases live on the DRIVER's own examples. |
@@ -335,6 +336,67 @@ might perform. A driver whose body observably writes resources
 not declared in the contract MUST be refused at runtime — not
 silently allowed. (The contract is the safety floor, not a starting
 suggestion.)
+
+### Action implementation (`implements: <action-ref>`)
+
+When a TOOL declares `implements: <action-ref>` pointing at an
+[AIP-39 ACTION.md](/docs/aip-39), the tool joins the action's
+implementor pool. The relationship is bottom-up — the TOOL declares
+which ACTION it implements; the ACTION knows nothing about its
+implementors (an optional `implementations:` hint on the action is
+non-authoritative).
+
+**Inheritance.** At parse time, the host loads the resolved action
+and merges its fields into the TOOL view:
+
+| Action field | TOOL behavior |
+|---|---|
+| `description` | TOOL MAY override (typically more specific). |
+| `mutates` | TOOL MUST include all action mutates; MAY add more. |
+| `risk_level` | TOOL MAY raise (more risky); MUST NOT lower. |
+| `approval` | TOOL MAY narrow (`auto` → `always` → `on-mutate`); MUST NOT relax. |
+| `requires.network` | TOOL MAY require more hosts; MUST NOT remove. |
+| `requires.secrets` | TOOL MAY require more slugs; MUST NOT remove. |
+| `requires.tools` | TOOL MAY require more tools; MUST NOT remove. |
+| `category` | TOOL inherits verbatim; cannot override. |
+| `target_kind` | TOOL inherits verbatim; cannot override. |
+| `fires_events` | TOOL MAY fire more events; MUST NOT drop any action-declared event. |
+
+**Narrowing rule, formally**: a TOOL widens an action when its
+declaration would relax any constraint the action set as the floor.
+Widening is rejected at parse time:
+
+```ts
+function validateImplementor(tool: ToolDef): Result {
+  if (!tool.implements) return { ok: true, orphan: true }
+  const action = resolveAction(tool.implements)
+  if (!action) return { error: `unknown action: ${tool.implements}` }
+
+  // risk_level: floor is action.risk_level, tool MAY raise
+  if (tool.risk_level !== undefined && tool.risk_level < action.risk_level)
+    return { error: `widens risk_level: action=${action.risk_level}, tool=${tool.risk_level}` }
+
+  // mutates: tool MUST be a superset
+  if (tool.mutates && !isSuperset(tool.mutates, action.mutates))
+    return { error: `drops mutates: ${diff(action.mutates, tool.mutates)}` }
+
+  // approval: tool MAY narrow
+  if (tool.approval && approvalRank(tool.approval) < approvalRank(action.approval))
+    return { error: `relaxes approval: action=${action.approval}, tool=${tool.approval}` }
+
+  return { ok: true, mergedView: { ...action, ...tool } }
+}
+```
+
+**Why bottom-up.** Adding a new TOOL implementing an existing ACTION
+requires no edit to the action — same shape as TypeScript `implements`
+and npm package dependencies. Forks are clean: anyone can write a
+TOOL implementing your ACTION without touching your repo. POLICY
+grants on the ACTION cover all implementing TOOLs automatically.
+
+**Orphan tools** (tools without `implements`) are valid — they're
+usable but cannot be policy-granted as a group. Recommended only for
+internal utilities and one-shot tools.
 
 ## The `defineTool` standard signature
 
@@ -680,5 +742,7 @@ settle the answers empirically.
 - [AIP-28 — INTENT.md](/docs/aip-28) — user-facing layer above TOOL
 - [AIP-30 — DRIVER.md](/docs/aip-30) — implementation layer
   binding contracts to backends
+- [AIP-38 — POLICY.md](/docs/aip-38) — grants on the actions tools implement
+- [AIP-39 — ACTION.md](/docs/aip-39) — abstract verb tools implement (`implements: <action-ref>`)
 - [`./TOOL.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-14/draft) — schema validator
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-14/draft) — implementer's guide

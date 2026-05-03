@@ -305,15 +305,34 @@ implements:
 
 Each entry is one of:
 
+- **Action ref + condition** (preferred) — `{ action: <ref>, when: <predicate> }`.
+  The runtime evaluates `when`, picks any TOOL with `implements: <action-ref>`
+  per resolver policy. Decouples the intent from a specific tool — when
+  a new TOOL ships implementing the action, the intent benefits
+  automatically. See [AIP-39 ACTION.md](/docs/aip-39).
 - **Tool ref + condition** — `{ tool: <ref>, when: <predicate> }`.
-  The runtime evaluates `when` against the intent's input values.
-  First matching entry wins.
-- **Default** — `{ tool: <ref>, default: true }`. Falls through when
-  no condition matches. Exactly one entry MUST be marked default.
-- **Workflow ref** — `{ workflow: <ref> }` instead of `tool:`. The
-  runtime invokes a [WORKFLOW.md (AIP-15)](/docs/aip-15) instead of
-  a single tool. Use for multi-step intents where atomicity at the
-  tool level isn't enough.
+  Pins a specific TOOL by id. Use only when implementation must be
+  fixed (e.g. legacy compatibility, exact-driver requirement).
+- **Default** — `{ action: <ref>, default: true }` or
+  `{ tool: <ref>, default: true }`. Falls through when no condition
+  matches. Exactly one entry MUST be marked default.
+- **Workflow ref** — `{ workflow: <ref> }` instead of `tool:` or
+  `action:`. The runtime invokes a [WORKFLOW.md (AIP-15)](/docs/aip-15)
+  instead of a single tool/action. Use for multi-step intents where
+  atomicity at the tool level isn't enough.
+
+Mixed entries are allowed:
+
+```yaml
+implements:
+  - action: "@agentik/actions/standard/image-create"
+    when: { style: photorealistic }
+  - action: "@agentik/actions/standard/image-create"
+    default: true
+  # OR pin a specific tool:
+  # - tool: ./tools/replicate-flux-schnell/TOOL.md
+  #   when: { style: photorealistic }
+```
 
 #### Predicates
 
