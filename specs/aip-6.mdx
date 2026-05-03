@@ -67,7 +67,8 @@ Doctype shape (sketch):
 | `company` | `COMPANY.md` | Root file: identity, mission, structure |
 | `role` | `roles/<slug>/ROLE.md` | A role within the company |
 | `objective` | `objectives/<slug>/OBJECTIVE.md` | An objective the company pursues |
-| `operator` | `operators/<slug>/OPERATOR.md` | A specific AI operator (instance of a role) |
+| `operator` | `operators/<slug>/OPERATOR.md` | A specific AI operator (instance of a role). [AIP-9](/docs/aip-9) runtime; extends [AIP-42 AGENT.md](/docs/aip-42) with role + reports_to + company binding. |
+| `agent` | `agents/<slug>/AGENT.md` | A standalone agent (utility, helper, sub-agent) — [AIP-42](/docs/aip-42). NOT bound to a company role; useful for utilities (researcher, code-reviewer, formatter) the company employs without giving them an org-chart slot. |
 
 Common conventions adopted by all `agentcompanies/v1` files:
 

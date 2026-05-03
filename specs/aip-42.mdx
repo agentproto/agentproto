@@ -1,0 +1,655 @@
+---
+title: "AIP-42: AGENT.md — agentagent/v1 (base runnable agent primitive)"
+description: A markdown + frontmatter format for declaring a runnable agent — composes identity, persona, model, tools, actions, skills, workflows, runner, memory, governance, policy, and routines into a single manifest. Standalone runnable in any AIP-9 OPERATOR-conforming runtime. Body is the system prompt. Operators (AIP-9) extend AGENT with organizational context (role, company binding, dynamic per-request resolution).
+aip: 42
+status: Draft
+type: Schema
+created: 2026-05-03
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 3, 7, 9, 14, 15, 17, 23, 25, 27, 37, 38, 39, 41]
+discussions-to: https://github.com/agentproto/agentproto/discussions/42
+layer: primitives
+package: "@agentproto/agent"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 42 |
+| Title | AGENT.md — agentagent/v1 (base runnable agent primitive) |
+| Status | Draft |
+| Type | Schema |
+| Domain | agents.sh |
+| Requires | [AIP-9](/docs/aip-9) (runtime), [AIP-14](/docs/aip-14), [AIP-15](/docs/aip-15), [AIP-17](/docs/aip-17), [AIP-23](/docs/aip-23), [AIP-25](/docs/aip-25), [AIP-37](/docs/aip-37), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-41](/docs/aip-41) |
+| Extended by | [AIP-9 OPERATOR](/docs/aip-9) (operator = agent + organizational context, dynamically resolved per request) |
+| Referenced by | [AIP-6 COMPANY.md](/docs/aip-6) (`agents/<slug>/AGENT.md` doctype), [AIP-24 ASSEMBLY.md](/docs/aip-24) (collective of agents) |
+
+## Abstract
+
+`AGENT.md` is a markdown-with-frontmatter file format that packages a
+**single runnable agent definition** — its identity, persona, model,
+tools, actions, skills, workflows, runner, memory, governance, policy,
+and routines — composed via the universal `inline | ref | file`
+pattern. The body is the system prompt the runtime feeds to the model.
+
+AGENT is the **base primitive** of the agent stack: minimum viable
+declaration is `model + body`. Anyone can author an AGENT.md, drop it
+into a workspace, and have it loaded + registered + runnable by any
+runtime conforming to [AIP-9 OPERATOR](/docs/aip-9). No company, no
+role, no assembly required.
+
+The relationship to existing primitives is **extension**:
+
+- [AIP-9 OPERATOR.md](/docs/aip-9) is a **dynamic agent** — one
+  shared shell with persona/role/tools resolved per-request from
+  `requestContext`. An OPERATOR is an AGENT plus organizational
+  binding (role, reports_to, company, structured persona,
+  governance attached). `OPERATOR extends AGENT` — the operator
+  inherits all AGENT fields and adds organizational ones.
+- [AIP-25 PERSONA.md](/docs/aip-25) is the face/voice carrier;
+  AGENT references it via `persona: { ref }`.
+- [AIP-23 IDENTITY.md](/docs/aip-23) is the layered identity;
+  AGENT references it via `identity: { ref }`.
+- [AIP-14 TOOL.md](/docs/aip-14) / [AIP-39 ACTION.md](/docs/aip-39) /
+  [AIP-3 SKILL.md](/docs/aip-3) / [AIP-15 WORKFLOW.md](/docs/aip-15)
+  are referenced as composable arrays.
+- [AIP-41 ROUTINE.md](/docs/aip-41) auto-fires the agent.
+
+## Motivation
+
+Until this AIP, agents in the agentik stack were defined two ways with
+neither one canonical:
+
+1. **In code** as Mastra `Agent` class instantiations (`new Agent({
+   id, name, instructions, model, tools, ... })`). Portable across
+   files but not across runtimes; not git-diff-friendly for non-devs;
+   no scan-and-register from a workspace.
+
+2. **As `agents/<role>/AGENT.md`** under
+   [AIP-6 `agentcompanies/v1`](/docs/aip-6) `kind: agent` doctype.
+   Limited to company contexts; field set ad-hoc; no formal spec.
+
+Five problems compound:
+
+1. **Agents can't be authored without a company.** A solo utility
+   agent (researcher, code-reviewer, formatter) needed a fake
+   COMPANY.md wrapper to fit the existing AIP-6 `kind: agent` slot.
+
+2. **Composition is not uniform.** Tool / persona / identity refs
+   scattered as ad-hoc fields without the `inline | ref | file`
+   pattern the rest of the stack uses.
+
+3. **No portability.** A Mastra TS-defined agent only runs in Mastra.
+   No declarative form means no migration to other AIP-9-conforming
+   runtimes.
+
+4. **No registry.** Agents can't be published as
+   `@<owner>/operators/<slug>` and reused across workspaces.
+
+5. **OPERATOR vs AGENT confusion.** AIP-9 calls itself an "operator
+   runtime protocol" but [AIP-6](/docs/aip-6) introduces a separate
+   `kind: agent` and a separate `kind: operator` doctype, with
+   neither clearly the file form. AIP-42 resolves this: AGENT is the
+   base file form; OPERATOR extends it for the company/org context.
+
+`AGENT.md` extracts the base agent into its own primitive — composable
+like every other AIP block, runnable standalone, extensible into
+OPERATOR (organizational binding) or ASSEMBLY (multi-agent collective).
+
+## Design principles
+
+1. **Standalone runnable.** Minimum AGENT.md is `model + body`. No
+   required org/role/company refs. A runner conforming to AIP-9 MUST
+   be able to instantiate the agent from this minimum.
+
+2. **Composition uniformity.** All sub-blocks (`identity`, `persona`,
+   `model`, `tools`, `actions`, `skills`, `workflows`, `runner`,
+   `memory`, `governance`, `policy`, `routines`, `extends`) follow
+   the `inline | ref | file` pattern. Authors learn one pattern,
+   apply it everywhere.
+
+3. **Body = system prompt.** Markdown body becomes the runtime's
+   `instructions` field. Frontmatter is structured config the runner
+   consumes. This matches the de-facto AGENTS.md convention from
+   the broader OSS ecosystem (Linux Foundation `agents.md`, OAF).
+
+4. **Bottom-up implementation linking.** AGENT references TOOLs;
+   TOOLs declare `implements: <action>` via [AIP-39](/docs/aip-39).
+   AGENT does NOT re-declare actions the tools bring — POLICY grants
+   propagate through tool's `implements` link.
+
+5. **Extension via `extends`.** An AGENT MAY extend another AGENT
+   (clone + override). The result inherits all parent fields with
+   child overrides applied. Chains MUST be ≤5 levels deep
+   (anti-recursion).
+
+6. **Runner-agnostic.** The `runner: { ref }` field selects the
+   runtime engine. Mastra is the default reference implementation
+   (AIP-9-conforming). Other runtimes (OpenAI Agents SDK, LangGraph,
+   custom) MAY implement AIP-9 and be selected via runner ref. Body
+   + frontmatter are runtime-portable; runner-specific options live
+   in `runner.config`.
+
+7. **AGENTS.md compat.** A sibling `AGENTS.md` (Linux Foundation
+   `agents.md`) at the agent's parent collection level provides
+   instructions inherited by every AGENT.md in that collection.
+   Loaders MUST concat parent `AGENTS.md` body as a prefix to the
+   AGENT.md body. This makes any agent collection legible to
+   AGENTS.md-reading tools (Cursor, Codex, Amp, etc.).
+
+## Specification
+
+### File location
+
+A standalone AGENT.md lives under `.agents/<slug>/AGENT.md` in any
+workspace:
+
+```
+.agents/
+  AGENTS.md                         ← optional collection-level instructions
+  researcher/
+    AGENT.md                        ← this AIP
+    skills/web-search/SKILL.md      ← optional sibling skill
+  code-reviewer/
+    AGENT.md
+  pricing-analyst/
+    AGENT.md
+    routines/daily-snapshot/ROUTINE.md
+```
+
+Authors MAY nest under a category (e.g.
+`.agents/research/competitive-pricing/AGENT.md`) — consumers MUST
+NOT depend on directory depth.
+
+When the agent is also bound to an organizational role
+([AIP-6](/docs/aip-6) company + [AIP-9](/docs/aip-9) operator runtime),
+prefer the `operators/<slug>/OPERATOR.md` location instead.
+
+### Agent libraries
+
+A "library of agents" is a [WORKSPACE.md](/docs/aip-34) with
+`publish.visibility: public` containing many `.agents/<slug>/AGENT.md`
+files. Other workspaces ref these via the registry address scheme:
+
+```
+@agentik/agents-standard/        ← published agent library
+├── WORKSPACE.md
+├── .agents/
+│   ├── AGENTS.md                 ← inherited instructions
+│   ├── researcher/AGENT.md
+│   ├── writer/AGENT.md
+│   ├── code-reviewer/AGENT.md
+│   └── support-agent/AGENT.md
+```
+
+Consumers reference: `extends: { ref: "@agentik/agents-standard/researcher" }`.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `agent/v1`. |
+| `id` | string | Machine identifier. Lowercase, digits, dashes, dots, optional `@<owner>/` prefix. 2–80 chars. Unique within the registry that hosts the agent. |
+| `description` | string | One-paragraph purpose. ≤2000 chars. |
+| `model` | model-ref | The brain. Either a string id (`anthropic/claude-opus-4-7`) or a structured ref. See [Model](#model). |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `version` | semver | `1.0.0` | Spec version of THIS file. |
+| `extends` | agent-ref | — | Parent AGENT this one extends. Inherits all fields; child overrides win. |
+| `identity` | identity-ref | host default | [AIP-23](/docs/aip-23) identity ref. |
+| `persona` | persona-ref | — | [AIP-25](/docs/aip-25) persona ref (face/voice/character). |
+| `runner` | runner-ref | host default | [AIP-17](/docs/aip-17) runtime engine ref. Default = host's reference runner (Mastra in agentik). |
+| `tools` | tool-ref[] | `[]` | [AIP-14](/docs/aip-14) tool refs. |
+| `actions` | object | `{ granted: [] }` | Explicit action allow-list. `granted: <action-ref>[]`. POLICY checks union of this + tools' `implements`. |
+| `skills` | skill-ref[] | `[]` | [AIP-3](/docs/aip-3) skill refs (expertise prose). |
+| `workflows` | workflow-ref[] | `[]` | [AIP-15](/docs/aip-15) workflow refs available to this agent. |
+| `routines` | routine-ref[] | `[]` | [AIP-41](/docs/aip-41) routines that auto-fire this agent. |
+| `delegates_to` | agent-ref[] | `[]` | Sub-agents this agent may dispatch to (council pattern, AIP-24). |
+| `memory` | object | host default | Memory configuration. See [Memory](#memory). |
+| `governance` | governance-ref | — | [AIP-7](/docs/aip-7) governance binding (approval gates, audit). |
+| `policy` | policy-ref | — | [AIP-38](/docs/aip-38) POLICY binding (grants/limits). |
+| `traits` | object | `{}` | Free-form numeric trait scores (1-10): `empathy`, `diligence`, `curiosity`, `assertiveness`, etc. Persona MAY override. |
+| `autonomy` | int 0–10 | `5` | How much the agent acts vs asks. 0 = always asks, 10 = full autonomy. Used by governance. |
+| `boundaries` | string[] | `[]` | Hard rules the agent MUST decline / escalate. Surfaced into system prompt as a high-priority block. |
+| `on` | object | `{}` | Lifecycle hooks. Map of [AIP-37](/docs/aip-37) event name → action-ref to invoke. |
+| `publish` | object | `{ visibility: private }` | Registry publish config. |
+| `tags` | string[] | `[]` | Free-form discovery tags. |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+### Model
+
+```yaml
+# Shorthand string — provider/model id
+model: "anthropic/claude-opus-4-7"
+
+# Or structured ref to model catalog
+model:
+  ref: "@agstudio/model-catalog/claude-opus-4-7"
+  temperature: 0.7
+  max_tokens: 4096
+
+# Or fully inline
+model:
+  inline:
+    provider: anthropic
+    name: claude-opus-4-7
+    api_base: "..."     # optional override
+    temperature: 0.7
+```
+
+### Memory
+
+```yaml
+memory:
+  scope: per-conversation             # per-conversation | per-thread | per-workspace | none
+  retention_turns: 50                  # rolling window
+  semantic:
+    enabled: true
+    embedder:
+      ref: "openai/text-embedding-3-small"
+    top_k: 5
+```
+
+### Lifecycle hooks
+
+```yaml
+on:
+  conversation-start:
+    - "@agentik/actions-standard/load-context"
+  conversation-end:
+    - "@agentik/actions-standard/log-summary"
+  turn-end:
+    - "@me/actions/save-draft"
+```
+
+Hook values are action-ref(s) — single ref or array. Hooks fire
+per [AIP-37 LIFECYCLE](/docs/aip-37) event. Errors in hooks are
+logged but do NOT abort the conversation.
+
+### The `defineAgent` standard signature
+
+```ts
+defineAgent(definition: AgentDefinition): AgentHandle
+
+interface AgentDefinition {
+  schema?:        "agent/v1"
+  id:             string
+  description:    string
+  version?:       string
+
+  extends?:       AgentRef
+  model:          ModelRef | string
+
+  identity?:      IdentityRef
+  persona?:       PersonaRef
+  runner?:        RunnerRef
+
+  tools?:         ToolRef[]
+  actions?:       { granted?: ActionRef[] }
+  skills?:        SkillRef[]
+  workflows?:     WorkflowRef[]
+  routines?:      RoutineRef[]
+  delegatesTo?:   AgentRef[]
+
+  memory?: {
+    scope?:           "per-conversation" | "per-thread" | "per-workspace" | "none"
+    retentionTurns?:  number
+    semantic?: {
+      enabled?:   boolean
+      embedder?:  ModelRef | string
+      topK?:      number
+    }
+  }
+
+  governance?:    GovernanceRef
+  policy?:        PolicyRef
+
+  traits?:        Record<string, number>
+  autonomy?:      number
+  boundaries?:    string[]
+
+  on?:            Record<string, ActionRef | ActionRef[]>
+
+  publish?: {
+    visibility?:  "private" | "unlisted" | "public"
+    registry?:    string
+  }
+
+  tags?:          string[]
+  metadata?:      Record<string, unknown>
+}
+```
+
+### Conformance rules
+
+1. **`id` format** — `^[a-z0-9@][a-z0-9.@/_-]*$`. Optional single
+   `@<owner>/` prefix.
+
+2. **`extends` chain ≤5 deep.** Loader MUST refuse cycles or chains
+   longer than 5 levels. Diamond inheritance (A→B, A→C, B+C in
+   same agent) is allowed; conflict resolution: deeper-in-chain wins,
+   ties broken by source order.
+
+3. **Body is the instructions.** The markdown body following the
+   frontmatter is concatenated with parent `AGENTS.md` body (if
+   present) and used as the runtime's `instructions`. Hosts MAY
+   inject standard sections (boundaries block, lifecycle hints) but
+   MUST preserve user-authored body verbatim.
+
+4. **POLICY grant union.** The agent's effective action grants are
+   the union of `actions.granted` + every tool's `implements`. Hosts
+   MUST refuse to register an agent if its identity lacks POLICY
+   grants for ALL of these. (Stricter rule than checking only
+   `actions.granted`.)
+
+5. **Runner conformance.** `runner: { ref }` MUST resolve to a
+   runtime that conforms to [AIP-9](/docs/aip-9). Loader fails the
+   agent registration with a clear error otherwise.
+
+6. **No I/O at parse time.** Parsing an AGENT.md MUST NOT trigger
+   network calls, registry lookups, model probes, or runner
+   instantiation.
+
+7. **AGENTS.md inheritance.** When a sibling `AGENTS.md` exists in
+   the same `.agents/` collection (same directory level as the
+   AGENT subfolder), its body MUST be prepended to this AGENT's
+   body before passing to the runner.
+
+### Stable identity
+
+`id` + `version` together form the agent's stable identity. A
+breaking change to behavior (model swap, tool removal, persona
+change) MUST bump major version. Consumers pinning to `^1.0.0`
+MAY refuse to load `2.0.0` until they explicitly upgrade.
+
+## Composition pattern (`inline | ref | file`)
+
+Like every composable block in the AIP series, AGENT refs accept
+three forms when consumed by other manifests (e.g., COMPANY.md,
+ASSEMBLY.md, OPERATOR.md `extends`):
+
+```yaml
+# Inline — agent defined directly in the consumer
+agents:
+  - inline:
+      id: my-quick-agent
+      model: "anthropic/claude-opus-4-7"
+      description: "One-shot inline."
+
+# Ref — registry-resolvable
+extends: { ref: "@agentik/agents-standard/researcher" }
+# Or shorthand:
+extends: "@agentik/agents-standard/researcher"
+
+# File — workspace-relative
+extends: { file: "./agents/base/AGENT.md" }
+```
+
+## Example — minimal standalone
+
+```md
+---
+schema: agent/v1
+id: "@me/web-research"
+version: 1.0.0
+description: "Researches topics by browsing the web and returns structured findings."
+model: "anthropic/claude-opus-4-7"
+tools:
+  - "@agentik/tools-standard/web-fetch"
+  - "@agentik/tools-standard/web-search"
+---
+
+# Web Research Agent
+
+You research topics from the public web. For each query:
+
+1. Plan 3-5 search queries.
+2. Fetch the top results.
+3. Distill into a structured findings block:
+   - Key claims with source URLs
+   - Confidence rating (high/medium/low)
+   - Open questions
+
+Decline requests for behind-paywall or personal-data sources.
+```
+
+## Example — full composition
+
+```md
+---
+schema: agent/v1
+id: "@acme/agents/pricing-analyst"
+version: 1.0.0
+description: "Tracks competitor pricing weekly. Surfaces deltas + recommendations to the pricing channel."
+
+extends: "@agentik/agents-standard/researcher"
+
+identity: { ref: "operator://pricing-analyst" }
+persona:  { ref: "@acme/personas/analyst-direct" }
+runner:   { ref: "@agentik/runners-standard/mastra-default" }
+
+model:
+  ref: "@agstudio/model-catalog/claude-opus-4-7"
+  temperature: 0.3      # tighter — analyst should be precise
+
+tools:
+  - "@agentik/tools-standard/web-fetch"
+  - "@acme/tools/pricing-snapshot"
+  - "@acme/tools/post-to-slack"
+
+actions:
+  granted:
+    - "@agentik/actions-standard/storage-write"
+    - "@acme/actions/post-channel"
+
+skills:
+  - "@acme/skills/pricing-101"
+  - "@acme/skills/competitor-list"
+
+workflows:
+  - "@acme/workflows/weekly-pricing-review"
+
+routines:
+  - { ref: "@agentik/routines-standard/weekly-monday" }   # fires the workflow
+
+memory:
+  scope: per-workspace
+  retention_turns: 100
+  semantic:
+    enabled: true
+    embedder: "openai/text-embedding-3-small"
+    top_k: 8
+
+governance: { ref: "./GOVERNANCE.md" }
+policy:     { ref: "./POLICY.md" }
+
+traits:
+  empathy: 4
+  diligence: 9
+  curiosity: 9
+  assertiveness: 7
+autonomy: 6
+boundaries:
+  - "Never publish pricing recommendations without ANALYST sign-off (this agent is analyst — sign-off means the user reviewed)"
+  - "Never include unverified vendor data — always cite source"
+
+on:
+  routine-triggered:
+    - "@acme/actions/load-competitor-list"
+
+publish:
+  visibility: unlisted
+  registry: acme
+
+tags: [pricing, analyst, weekly]
+---
+
+# Pricing Analyst
+
+You track competitor pricing for Acme. Each Monday you:
+
+1. Pull the latest snapshot from the competitor list.
+2. Compute week-over-week deltas (>5% flagged).
+3. Draft a recommendation block (price hold / adjust up / adjust down).
+4. Post to #pricing for review (DO NOT auto-publish).
+
+Cite every datapoint. When in doubt, mark `confidence: low`.
+```
+
+## Connecting to other AIPs
+
+### COMPANY.md doctype slot
+
+```yaml
+# AIP-6 COMPANY.md — registers AGENT.md as a known doctype path
+# (in addition to the existing operators/<slug>/OPERATOR.md slot)
+agents/<slug>/AGENT.md             # standalone agents (utilities, sub-agents, helpers)
+operators/<slug>/OPERATOR.md       # operators (agent + role + company binding)
+```
+
+### OPERATOR.md extends AGENT.md
+
+OPERATOR is the dynamic-agent extension. Same shape; adds organizational
+fields:
+
+```yaml
+# operators/<slug>/OPERATOR.md
+---
+schema: operator/v1
+extends: { ref: "@agentik/agents-standard/director-base" }   # which is an AGENT.md
+
+# Operator-specific extensions
+role: creative-director
+reports_to: principal
+company: { ref: "../../COMPANY.md" }
+persona: { ref: "@agentik/personas-standard/direct-confident" }
+governance: { ref: "./GOVERNANCE.md" }
+
+# Inherits model, tools, runner, instructions body from the extended AGENT
+---
+```
+
+The runtime ([AIP-9](/docs/aip-9)) instantiates ONE shared agent
+shell and resolves operator's persona/role/tools per-request from
+`requestContext.operatorId`. AGENT.md is one-instance-per-file;
+OPERATOR is one-instance-per-runtime-shell-with-N-personas.
+
+### ASSEMBLY.md collection of AGENTs
+
+```yaml
+# AIP-24 ASSEMBLY.md
+members:
+  - { ref: "@me/agents/researcher" }
+  - { ref: "@me/agents/code-reviewer" }
+  - { ref: "@me/agents/writer" }
+mode: council                       # voting | council | hierarchy
+```
+
+### ROUTINE.md fires AGENT
+
+```yaml
+# AIP-41 ROUTINE.md
+target:
+  workflow: { ref: "./workflows/weekly-pricing-review" }
+identity: { ref: "operator://pricing-analyst" }    # the agent's identity
+```
+
+The agent's identity becomes the routine's fire identity unless
+overridden. The agent's POLICY grants apply to the target.
+
+## Backward compatibility
+
+This AIP is purely additive:
+
+- [AIP-6](/docs/aip-6) `agentcompanies/v1` `kind: agent` (under
+  `agents/<role>/AGENT.md`) remains supported. Loaders recognise both
+  `schema: agentcompanies/v1, kind: agent` (legacy) and
+  `schema: agent/v1` (new). Migration is mechanical.
+- [AIP-9 OPERATOR](/docs/aip-9) is **re-pointed** to extend AGENT
+  (per AIP-9 patch), but its file form (`operators/<slug>/OPERATOR.md`)
+  and runtime contract are unchanged.
+- Mastra TS-defined agents continue to work — they just don't gain
+  the file-form benefits (scan, fork, publish) until migrated.
+
+Migration path:
+1. Move `agents/<role>/AGENT.md` → `.agents/<slug>/AGENT.md`.
+2. Update frontmatter `schema: agentcompanies/v1, kind: agent` →
+   `schema: agent/v1`.
+3. Map `traits.*` / `capabilities[]` / `communicationStyle` from the
+   old shape directly (same field names).
+4. Add `runner: { ref: "@agentik/runners-standard/mastra-default" }`
+   if not already implicit.
+5. If the agent is bound to a company role, also create an
+   `operators/<slug>/OPERATOR.md` that `extends` this AGENT.md.
+
+## Security considerations
+
+`AGENT.md` is **declarative and load-time governed**:
+
+- An AGENT manifest can claim any `identity` — the runtime MUST
+  verify the host has authority to bind the claimed identity. For
+  user-authored AGENT.md in a workspace, the default identity is the
+  workspace owner; impersonation is rejected.
+- Tool refs, action grants, and routine targets are subject to the
+  agent identity's POLICY (AIP-38). Hosts MUST refuse to register
+  agents that would have effective grants exceeding the identity's
+  granted set.
+- `extends` resolution can leak across workspaces — extending a
+  third-party AGENT.md inherits its tool/action surface. Hosts
+  SHOULD pin extended AGENT versions by SHA in a lockfile and warn
+  on changed parent SHAs at refresh.
+- `boundaries[]` are advisory — they're injected into the system
+  prompt as high-priority text but the model MAY violate them.
+  Critical safety constraints belong in `governance` / `policy`,
+  enforced outside the model.
+- AGENTS.md (parent collection inheritance) MUST be from a trusted
+  parent. Hosts SHOULD warn if a child agent's collection AGENTS.md
+  changes between loads (an attacker editing AGENTS.md affects every
+  child agent's behavior).
+
+## Open questions
+
+1. **Multi-runner agents.** Can a single AGENT.md declare runners
+   for multiple targets (Mastra for chat, OpenAI Agents SDK for
+   tool-heavy autonomous runs)? Currently no — one runner per agent.
+   Likely defer until clear demand.
+
+2. **Agent versioning + extends pinning.** When parent AGENT.md
+   bumps major version, do extending agents auto-fail or
+   auto-upgrade? Likely require explicit pin per extending agent
+   (lockfile spec — AIP-?? TBD).
+
+3. **Streaming vs blocking instantiation.** Some heavy AGENTs
+   (custom embedder load, large tool set) may take seconds to
+   instantiate. Spec the eager-vs-lazy contract for hosts.
+
+4. **Persona conflicts.** When `persona` is set AND `traits` is
+   set, which wins? Currently traits are the agent's; persona
+   carries voice/tone. Document precedence (likely: traits +
+   persona compose; persona name/voice wins for output rendering,
+   traits drive behavior).
+
+## See also
+
+- [AIP-3 — SKILL.md](/docs/aip-3) — `skills:` consumer
+- [AIP-6 — COMPANY.md](/docs/aip-6) — `agents/<slug>/AGENT.md` doctype slot
+- [AIP-7 — GOVERNANCE.md](/docs/aip-7) — `governance:` ref consumer
+- [AIP-9 — OPERATOR](/docs/aip-9) — runtime contract; OPERATOR extends AGENT
+- [AIP-14 — TOOL.md](/docs/aip-14) — `tools:` consumer
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — `workflows:` consumer
+- [AIP-17 — RUNNER.md](/docs/aip-17) — `runner:` consumer
+- [AIP-23 — IDENTITY.md](/docs/aip-23) — `identity:` ref form
+- [AIP-24 — ASSEMBLY.md](/docs/aip-24) — collective of agents
+- [AIP-25 — PERSONA.md](/docs/aip-25) — `persona:` ref consumer
+- [AIP-27 — REF.md](/docs/aip-27) — ref primitive
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — `on:` event vocabulary
+- [AIP-38 — POLICY.md](/docs/aip-38) — `policy:` ref consumer
+- [AIP-39 — ACTION.md](/docs/aip-39) — `actions.granted:` consumer
+- [AIP-41 — ROUTINE.md](/docs/aip-41) — `routines:` consumer
+- [`./resources/aip-42/draft/AGENT.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-42/draft) — schema validator

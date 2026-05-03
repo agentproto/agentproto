@@ -6,7 +6,7 @@ status: Draft
 type: Core
 created: 2026-04-27
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 3, 6, 7]
+requires: [1, 2, 3, 6, 7, 42]
 ref-impl: TBD
 discussions-to: https://github.com/agentproto/agentproto/discussions/9
 layer: identity
@@ -20,21 +20,35 @@ package: "@agentproto/operator"
 | Status | Draft |
 | Type | Core |
 | Domain | operators.sh |
-| Requires | [AIP-3](/docs/aip-3), [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7) |
+| Requires | [AIP-3](/docs/aip-3), [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7), [AIP-42](/docs/aip-42) |
+| Extends | [AIP-42 AGENT.md](/docs/aip-42) (operator = agent + organizational context, dynamically resolved per request) |
 | Reference Impl | TBD |
 
 ## Abstract
 
 `agentoperators/v1` specifies the **runtime contract** for an operator —
-the canonical agent type that powers AI-company products. An operator is
-a single agent shell with pluggable attachments: a profile (identity +
-role), a skill set ([AIP-3](/docs/aip-3)), a tool set, a memory/context
-slot, and a governance binding ([AIP-7](/docs/aip-7)). One agent class,
-configured many ways, dispatchable by any conforming workflow.
+a **dynamic agent**: a single shared shell whose profile, skills,
+tools, memory, and governance bindings are resolved per-request from
+`requestContext` (typically `operatorId` + `conversationId`). One
+runtime class, N operator personas dispatchable per turn.
 
-This AIP complements [AIP-6](/docs/aip-6) (`agentcompanies/v1`), which
-defines the *file representation* of an operator (`OPERATOR.md`); AIP-9
-defines the *running behavior* the file describes.
+OPERATOR **extends** [AIP-42 AGENT.md](/docs/aip-42). An AGENT.md is
+the static, file-form base primitive — `1 file → 1 agent instance`.
+An OPERATOR is the dynamic-agent extension — `1 shell → N operator
+personas resolved per request`. The two compose:
+
+- **Static agents** (utility researcher, code-reviewer, support-bot)
+  ship as standalone `AGENT.md` files, each instantiated once per
+  workspace at boot.
+- **Dynamic operators** (creative-director, account-strategist,
+  pricing-analyst — anyone bound to a company/role/persona) ship as
+  `OPERATOR.md` files that extend a base AGENT.md and add
+  organizational context, then run through a single shared shell
+  with per-request persona resolution.
+
+The contract this AIP defines is what the shared shell MUST implement
+to be considered AIP-9-conforming. The file form OPERATORs author
+against is described in [AIP-42 § OPERATOR.md extends AGENT.md](/docs/aip-42).
 
 ## Motivation
 
@@ -71,6 +85,27 @@ differentiation.
 > Full normative text is being authored from the Guilde reference
 > implementation. AIP-9 will absorb the formal contract as part of
 > moving Draft → Review.
+
+### Relation to AGENT.md (AIP-42) — fields OPERATOR adds
+
+OPERATOR.md inherits every AGENT.md field. The fields below are what
+OPERATOR adds on top, formalizing the organizational binding:
+
+| Field | Inherited / added | Description |
+|---|---|---|
+| All AGENT fields (`model`, `tools`, `actions`, `skills`, `workflows`, `routines`, `memory`, `governance`, `policy`, `traits`, `autonomy`, `boundaries`, `on`) | inherited | Same semantics as [AIP-42](/docs/aip-42). Operator MAY override any. |
+| `role` | added | Required. Slug identifying the operator's role in the company (e.g. `creative-director`). Used for triage, routing, mention resolution. |
+| `reports_to` | added | Optional. Slug of the operator this one reports to (org chart). |
+| `company` | added | Optional. Ref to [AIP-6](/docs/aip-6) `COMPANY.md` — the operator's home company. |
+| `participation` | added | Required. See [Conversation participation](#conversation-participation). Static agents don't have this — they don't join shared threads. |
+| `capabilities` | added | Optional. Per-action capability flags (autonomous / supervised / gated). |
+
+The runtime instantiates ONE shared shell (Mastra `Agent` instance in
+the reference impl) and resolves all OPERATOR-specific fields
+(`role`, `participation`, `capabilities`, persona overlays) per-request
+from `requestContext.operatorId`. This is the **dynamic-agent**
+property — N OPERATOR.md definitions sharing one runtime shell, vs N
+AGENT.md files each getting their own instance.
 
 ### Operator shape
 
