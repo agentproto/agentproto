@@ -1,0 +1,496 @@
+---
+title: "AIP-38: POLICY.md — agentpolicy/v1 (composable policy block)"
+description: A markdown + frontmatter format for declaring policy on a resource — access grants (who can perform which actions), defaults (per-block behavioural defaults), limits (rate / quota caps), and requirements (cross-cutting must-haves like MFA / approval). Composable inline | ref | file. Granted on AIP-39 ACTION ids — implementations / TOOLs are decoupled from policy.
+aip: 38
+status: Draft
+type: Schema
+created: 2026-05-03
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 23, 27, 39]
+discussions-to: https://github.com/agentproto/agentproto/discussions/38
+layer: primitives
+package: "@agentproto/policy"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 38 |
+| Title | POLICY.md — agentpolicy/v1 (composable policy block) |
+| Status | Draft |
+| Type | Schema |
+| Domain | policy.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7) (governance), [AIP-23](/docs/aip-23) (IDENTITY-ref), [AIP-27](/docs/aip-27) (REF), [AIP-39](/docs/aip-39) (ACTION) |
+| Consumers | [WORKSPACE.md](/docs/aip-34), [STORAGE.md](/docs/aip-35), [SANDBOX.md](/docs/aip-36), [CODE.md](/docs/aip-26), [SECRETS.md](/docs/aip-19), [TOOL.md](/docs/aip-14) |
+
+## Abstract
+
+`POLICY.md` is a markdown-with-frontmatter file format that packages
+the policy applied to a resource — **access grants** (who can perform
+which actions), **defaults** (per-block behavioural defaults),
+**limits** (rate / quota caps), and **requirements** (cross-cutting
+must-haves like MFA, signatures, approvals).
+
+Policy is composable: any AIP that owns a resource (WORKSPACE,
+STORAGE, SANDBOX, CODE, SECRETS, TOOL) MAY embed a `policy:` block
+inline, ref to a sibling POLICY.md file, or reference a published
+policy (e.g. `@acme/policies/team-baseline`).
+
+Grants are made on [AIP-39 ACTION](/docs/aip-39) ids — never on
+TOOL ids directly. This decouples policy from implementation: granting
+`storage:commit` covers every TOOL implementing that action,
+including future ones.
+
+The format pairs with the standard entry-point function,
+**`definePolicy(...)`**, whose signature any implementation in any
+language exposes.
+
+## Motivation
+
+The AIP series accumulated several ad-hoc access mechanisms before
+this AIP was drafted:
+
+- [AIP-19 SECRETS.md](/docs/aip-19) had a per-slug `access:` block.
+- [AIP-18 COLLECTION.md](/docs/aip-18) had per-item lints.
+- [AIP-7 governance](/docs/aip-7) defined approval at the runtime layer.
+- WORKSPACE.md, STORAGE.md, etc. had no explicit access model — implicit
+  "the workspace's owner can do anything."
+
+Five problems compound when there's no unified policy primitive:
+
+1. **Each resource-owning AIP reinvents grants.** SECRETS.md has
+   `access: { operators: [...], ttl_seconds: ... }`. Future
+   primitives would each invent their own. No shared shape.
+
+2. **Cross-resource policies are impossible.** "Bob can commit AND
+   execute" needs to be expressed in two separate `access:` blocks,
+   one per AIP. No single declarative policy.
+
+3. **Org-wide baselines can't be shared.** Each workspace duplicates
+   "all org members can read." No composition.
+
+4. **Defaults aren't policy-able.** "All sandboxes in this workspace
+   default to no-egress" has no home — only individual sandbox configs
+   can specify it.
+
+5. **Limits are nowhere.** "Max 5 concurrent sandboxes per user" is
+   a real ops requirement with no spec.
+
+`POLICY.md` extracts the policy declaration into a portable, reusable
+block that covers all four axes (grants, defaults, limits,
+requirements) and composes across the AIP series via consistent
+embedding.
+
+## Design principles
+
+1. **Policy is declarative; enforcement is runtime.** This AIP
+   specifies the SHAPE of policy. Enforcement (deciding "is this
+   action allowed right now?") happens via [AIP-7 governance](/docs/aip-7)
+   at runtime, consuming the resolved policy view.
+
+2. **Grants on ACTIONs, not implementors.** `actions: [{ action: "storage:commit" }]`
+   covers every implementor (every TOOL with `implements: storage:commit`).
+   Granting on TOOL ids would re-couple policy to implementation.
+
+3. **Default deny, opt-in allow.** When `default: deny` (recommended),
+   only explicitly granted (principal, action) pairs are allowed.
+   `default: allow` is supported but flagged as risky.
+
+4. **Composable like everything else.** Policy refs accept
+   `inline | ref | file`. An array of refs composes (multiple
+   policies merge with explicit conflict resolution).
+
+5. **Most-restrictive wins on conflicts.** When composed policies
+   disagree, the more restrictive answer wins. `default: deny`
+   beats `default: allow`. A grant cannot be silently overridden
+   by a later policy unless that policy explicitly revokes.
+
+6. **Conditions are pluggable.** A grant MAY carry conditions
+   (`during-business-hours`, `mfa-recent`, `ip-range`). Hosts
+   support a subset; unknown conditions cause grants to be skipped
+   (logged), not crashed.
+
+## Specification
+
+### File location
+
+POLICY files live wherever the consumer expects:
+
+```
+.policy/
+  team-baseline/POLICY.md          ← a workspace-local policy
+  marketing-overrides/POLICY.md
+```
+
+Or as a sibling to the resource:
+
+```
+.tools/git-commit/
+  TOOL.md
+  POLICY.md                         ← policy for this specific tool
+```
+
+A "policy library" is a [WORKSPACE.md](/docs/aip-34) with
+`publish.visibility: public` containing many `.policy/<slug>/POLICY.md`
+files. Other workspaces ref via the registry address scheme.
+
+### Frontmatter
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `policy/v1`. |
+
+#### Optional fields (standalone POLICY.md only — when embedded inline, schema/id/version are absent)
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Globally addressable id `@<owner-slug>/<policy-slug>`. Required for standalone files. |
+| `version` | semver string | Spec version of THIS file. |
+
+#### Policy content fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `default` | enum | `"deny"` | Default decision when no grant matches: `"allow"` \| `"deny"`. `"deny"` strongly recommended. |
+| `grants` | array | `[]` | Access grants. See `grant` schema below. |
+| `defaults` | object | `{}` | Per-block behavioural defaults (e.g. `defaults.sandbox.network_egress: []`). Keys are AIP block names (`storage`, `sandbox`, `secrets`, `code`). Values are partial block configs. |
+| `limits` | array | `[]` | Resource limits. Each `{ kind, value, scope?, applies_to? }`. |
+| `requirements` | array | `[]` | Cross-cutting must-haves. Each `{ kind, applies_to: [<action-ref>...] , ... condition fields }`. |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+#### Grant schema
+
+```yaml
+grants:
+  - principal: <identity-ref>          # AIP-23 identity-ref scheme
+    actions:                            # array of action refs
+      - { action: <action-ref> }
+      - { action: <action-ref>, scope?: <string> }    # narrow grant
+    conditions: [<condition>]           # optional
+    ttl_seconds: <number>               # optional, time-bound
+    granted_at: <ISO 8601>              # optional, audit metadata
+    granted_by: <identity-ref>          # optional, audit metadata
+    revoked: <boolean>                  # optional, soft-revoke marker
+```
+
+Each `principal` is an [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive)
+in any of its forms (inline / ref / file).
+Standard schemes: `operator://<id>`, `user://<id>`, `user://current`,
+`org://<id>`, `guild://<id>`, `bot://<name>`, `group://<name>`,
+`role://owner|editor|viewer` (relative to the resource), `*` (wildcard).
+
+Each `action` in `actions` is an [AIP-39 ACTION ref](/docs/aip-39)
+in any of its forms. `*` is a wildcard for "any action in this
+target_kind" when used as a suffix (`storage:*`).
+
+#### Condition schema
+
+```yaml
+conditions:
+  - { kind: "during-business-hours", timezone: "America/Los_Angeles" }
+  - { kind: "ip-range", cidr: "10.0.0.0/8" }
+  - { kind: "mfa-recent", within_seconds: 600 }
+  - { kind: "approval-from", role: "manager", count: 1 }
+  - { kind: "signed-by", role: "admin" }
+```
+
+Hosts MAY support a subset. Unknown conditions cause the grant to be
+**skipped** (logged at `warn` level), NOT to crash the policy
+evaluation.
+
+#### Limit schema
+
+```yaml
+limits:
+  - kind: "max-concurrent-sandboxes"
+    value: 5
+    scope: "user"                       # per user, per workspace, etc.
+
+  - kind: "rate-tool-calls"
+    value: 100
+    per: "minute"
+    applies_to: ["storage:commit"]      # action refs (optional — default: all)
+
+  - kind: "max-egress-bytes-per-day"
+    value: 10000000
+```
+
+#### Requirement schema
+
+```yaml
+requirements:
+  - kind: "mfa-recent"
+    within_seconds: 600
+    applies_to: ["storage:swap-provider", "secrets:rotate:*"]
+
+  - kind: "signed-by"
+    role: "admin"
+    applies_to: ["sandbox:network-egress"]
+
+  - kind: "approval-from"
+    count: 2
+    role: "engineer"
+    applies_to: ["storage:delete-files"]
+```
+
+### Composition pattern (`inline | ref | file`)
+
+When embedded in a consumer (WORKSPACE.md, STORAGE.md, etc.), the
+`policy:` field accepts:
+
+```yaml
+# Inline
+policy:
+  inline:
+    default: deny
+    grants:
+      - principal: "operator://bob"
+        actions: [{ action: "storage:commit" }]
+
+# Ref to a registry-published policy
+policy: { ref: "@acme/policies/team-baseline" }
+# Shorthand:
+policy: "@acme/policies/team-baseline"
+
+# File (workspace-local POLICY.md)
+policy: { file: "./policy/main.POLICY.md" }
+# Shorthand:
+policy: "./policy/main"
+
+# Array (multiple policies compose, last-wins on conflicts but most-restrictive on default)
+policy:
+  - { ref: "@acme/policies/org-baseline" }
+  - { ref: "@acme/policies/marketing-team" }
+  - inline:
+      grants:
+        - { principal: "operator://eve", actions: [{ action: "storage:swap-provider" }] }
+```
+
+### `definePolicy` standard signature
+
+```ts
+definePolicy(definition: PolicyDefinition): PolicyHandle
+
+interface PolicyDefinition {
+  schema?:        "policy/v1"
+  id?:            string
+  version?:       string
+
+  default?:       "allow" | "deny"
+  grants?:        Grant[]
+  defaults?:      Record<string, Record<string, unknown>>
+  limits?:        Limit[]
+  requirements?:  Requirement[]
+  metadata?:      Record<string, unknown>
+}
+
+interface Grant {
+  principal:    IdentityRef
+  actions:      Array<{ action: ActionRef; scope?: string }>
+  conditions?:  Condition[]
+  ttlSeconds?:  number
+  grantedAt?:   string
+  grantedBy?:   IdentityRef
+  revoked?:     boolean
+}
+
+interface Limit {
+  kind:         string                  // host-extensible
+  value:        number
+  scope?:       string                  // "user" | "workspace" | "org" | host-specific
+  per?:         string                  // "second" | "minute" | "hour" | "day"
+  appliesTo?:   ActionRef[]
+}
+
+interface Requirement {
+  kind:         string                  // host-extensible (mfa-recent, signed-by, approval-from, …)
+  appliesTo?:   ActionRef[]
+  [k: string]:  unknown                 // kind-specific fields
+}
+```
+
+### Conformance rules
+
+1. **Default is `deny`.** A POLICY without `default` set MUST be
+   evaluated as `default: deny`. Hosts SHOULD warn when `default: allow`
+   is declared (audit-significant choice).
+
+2. **Compose by union of grants + most-restrictive on default and
+   requirements.** When N policies compose, the agent's effective
+   permissions are the union of all grants. The default decision is
+   `deny` if ANY composed policy declares `default: deny`. All
+   requirements from all policies apply (ANDed).
+
+3. **Wildcards in actions resolve at evaluation time.**
+   `actions: [{ action: "storage:*" }]` at grant time is checked
+   against the action being attempted at evaluation time. Hosts MUST
+   resolve wildcards by querying registered actions sharing the prefix.
+
+4. **TTLs are wall-clock from `granted_at`.** A grant with
+   `ttl_seconds: 86400` and `granted_at: 2026-05-03T00:00:00Z`
+   expires at `2026-05-04T00:00:00Z`. Hosts MUST refuse expired
+   grants even if `granted_at` is missing (treat as expired).
+
+5. **Conditions are AND, never OR.** A grant with multiple conditions
+   requires ALL to be satisfied. To express OR, declare two grants.
+
+6. **Unknown conditions / limit kinds / requirement kinds skip.**
+   The grant is treated as if the unknown condition is unsatisfied
+   (deny). Hosts MUST log this at `warn` level so authors know.
+
+7. **No I/O at parse time.** Parsing a POLICY.md MUST NOT trigger
+   identity resolution, action resolution, or registry lookup.
+   Resolution is lazy at evaluation time.
+
+### Audit + governance integration
+
+Every policy decision (grant matched / denied / condition failed /
+requirement unsatisfied) MUST be loggable via [AIP-7 governance](/docs/aip-7)
+audit hooks. The decision record carries:
+
+```ts
+interface PolicyDecisionRecord {
+  decision:    "allow" | "deny"
+  reason:      "no-grant" | "condition-failed" | "requirement-failed" | "limit-exceeded" | "explicit-revoke" | "ttl-expired" | "matched-grant"
+  principal:   IdentityRef
+  action:      ActionRef
+  grantId?:    string
+  policyChain: Array<{ source: "inline" | { ref: string } | { file: string }; layer: number }>
+  evaluatedAt: string                   // ISO 8601
+}
+```
+
+This record is what audit consumers ingest, not raw POLICY.md.
+
+## Example — standalone POLICY.md
+
+```md
+---
+schema: policy/v1
+id: "@acme/policies/marketing-team"
+version: 1.2.0
+
+default: deny
+
+grants:
+  # All marketing operators can read + write storage
+  - principal: { ref: "@acme/groups/marketing-operators" }
+    actions:
+      - { action: "@agentik/actions/standard/storage-read" }
+      - { action: "@agentik/actions/standard/storage-write" }
+      - { action: "@agentik/actions/standard/storage-commit" }
+
+  # Bob can also push and swap branches
+  - principal: "operator://bob"
+    actions:
+      - { action: "@agentik/actions/standard/storage-push" }
+      - { action: "@agentik/actions/standard/storage-swap-branch" }
+
+  # Acting user can read everything
+  - principal: "user://current"
+    actions:
+      - { action: "storage:read" }
+
+  # Eve has time-bound elevated access
+  - principal: "operator://eve"
+    actions:
+      - { action: "storage:swap-provider" }
+    ttl_seconds: 604800
+    granted_at: "2026-05-03T00:00:00Z"
+    granted_by: "user://contractor-admin"
+
+defaults:
+  sandbox:
+    network_egress: []                  # default: no egress for new sandboxes
+    read_only: false
+  storage:
+    read_only: false
+
+limits:
+  - { kind: "rate-tool-calls", value: 100, per: "minute" }
+  - { kind: "max-concurrent-sandboxes", value: 5, scope: "user" }
+  - { kind: "max-egress-bytes-per-day", value: 10000000 }
+
+requirements:
+  - kind: "mfa-recent"
+    within_seconds: 600
+    applies_to:
+      - "storage:swap-provider"
+      - "@agentik/actions/standard/secrets-rotate"
+---
+
+## Description
+
+Baseline policy for Acme's marketing workspace. Wraps org-baseline
+with team-specific overrides — Bob has push access, Eve has time-bound
+provider-swap access, all marketing operators can read/write storage.
+
+Composed by every Acme marketing guild via:
+
+```yaml
+# WORKSPACE.md
+policy:
+  - { ref: "@acme/policies/org-baseline" }
+  - { ref: "@acme/policies/marketing-team" }
+```
+```
+
+## Backward compatibility
+
+- AIP-19 SECRETS.md `access:` block continues to work (back-compat
+  alias). Hosts SHOULD migrate `access: { operators: [...] }` to the
+  POLICY block at parse time, transparent to authors.
+- TOOL.md `requires: { tools: [...] }` (existing field) remains
+  per-tool. POLICY.md is for cross-resource grants.
+- Workspaces without an explicit `policy:` block evaluate as
+  `default: deny` PLUS host policy fallback (typically: workspace owner
+  has all permissions, others have none).
+
+## Security considerations
+
+POLICY.md is **declarative**: a malicious manifest can grant itself
+arbitrary permissions. Hosts MUST:
+
+- Treat workspace-authored POLICY.md as **untrusted** for grants on
+  resources outside that workspace's owner scope. A workspace-resident
+  agent cannot grant itself permissions on the org's other workspaces.
+- Require admin signing (`requirements: signed-by: role: admin`) for
+  privilege-escalating grants (granting `storage:swap-provider`,
+  `secrets:rotate:*`, `policy:edit`).
+- Audit all policy compositions — when N policies merge, log the
+  resolution chain so reviewers can see "this grant came from
+  `@acme/policies/org-baseline`."
+
+The composition rule "most-restrictive wins" is a security floor.
+Hosts MUST NOT silently allow policies to relax stricter parents
+unless the parent explicitly opts into delegation.
+
+## Open questions
+
+1. **Policy versioning + delegation.** When `@acme/policies/org-baseline@2.0.0`
+   ships breaking changes, do dependent workspaces auto-fail or
+   auto-upgrade? Likely: pin via `.workspace-lock.json`.
+
+2. **Negative grants (explicit deny).** Currently grants are positive
+   only. A "deny Bob commits even though group says yes" pattern would
+   need explicit deny grants. Defer until concrete need.
+
+3. **Policy mutation audit.** When POLICY.md is edited, who's allowed
+   and who reviews? Recursive — POLICY governs POLICY edits.
+
+## See also
+
+- [AIP-7 — governance](/docs/aip-7) — runtime enforcement of policy decisions
+- [AIP-19 — SECRETS.md](/docs/aip-19) — `access:` block migrating to this AIP
+- [AIP-23 — IDENTITY-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — `principal` schemes
+- [AIP-26 — CODE.md](/docs/aip-26) — consumer (`policy?:` field)
+- [AIP-27 — REF.md](/docs/aip-27) — ref primitive
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — primary consumer
+- [AIP-35 — STORAGE.md](/docs/aip-35) — consumer
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — consumer
+- [AIP-39 — ACTION.md](/docs/aip-39) — `actions:` references
+- [`./resources/aip-38/draft/POLICY.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-38/draft) — schema validator

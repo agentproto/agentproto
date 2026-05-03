@@ -182,6 +182,7 @@ storage:
 | `sync` | object | `{ mode: "canonical" }` | Sync semantics. Lifecycle triggers reference [AIP-37](/docs/aip-37) event names. See per-provider rules. |
 | `auth` | object | `{}` | Reference to AIP-19 SECRETS.md for credentials. |
 | `identity` | object \| array | (none) | AIP-23 identity-ref block — commit author(s) for syncing providers (github). Supports multi-attribution (primary + co-authors). See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
+| `policy` | object \| array | (none) | AIP-38 POLICY block — access grants on storage actions (`storage:commit`, `storage:swap-provider`, etc.). Inline / ref / file. See [AIP-38 POLICY.md](/docs/aip-38). |
 | `exclude` | string[] | `[]` | Paths NOT mirrored to the backing store. Glob-ish, prefix-matched. |
 | `read_only` | boolean | `false` | Reject writes at the storage layer. |
 | `metadata` | object | `{}` | Free-form, namespaced. |

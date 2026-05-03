@@ -151,6 +151,7 @@ case-sensitive.
 | `sandbox` | object | (none) | Sandbox policy: either `{ inline: <SANDBOX.md frontmatter body> }` or `{ ref: "<path or registry slug>" }` or `{ file: "<path>" }`. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
 | `code` | object | (none) | Code policy: either `{ inline: <CODE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }` or `{ file: "<path>" }`. See AIP-26. Optional — when present, the workspace IS a code-workspace / repo (see "Workspace as repo" below). |
 | `identity` | object \| array | (none) | AIP-23 identity-ref block — default identity for all sub-blocks of this workspace. Sub-blocks (storage, sandbox, code) override. See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
+| `policy` | object \| array | (none) | AIP-38 POLICY block — access grants, defaults, limits, requirements scoped to this workspace. Composable: inline / ref / file, OR an array that composes (most-restrictive wins). Grants on AIP-39 ACTION ids. See [AIP-38 POLICY.md](/docs/aip-38). |
 | `defaults` | object | `{}` | `{ read_only: bool }` and other workspace-wide defaults. |
 | `publish` | object | `{ template: false, visibility: "private" }` | Publish posture: `{ template: bool, registry?: string, visibility: "private" \| "unlisted" \| "public" }`. |
 | `tags` | string[] | `[]` | Free-form discovery tags. |
