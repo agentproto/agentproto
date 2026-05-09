@@ -145,6 +145,30 @@
         "reactions": { "type": "boolean", "default": false }
       }
     },
+    "runtime": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "description": "Runtime binding. When kind=in-process (default), the operator runs in the host's in-process agent runtime. When kind=agent-cli, turns are dispatched to a spawned AIP-45 agent CLI subprocess (Hermes, Claude Code, OpenCode, ...).",
+      "properties": {
+        "kind": {
+          "enum": ["in-process", "agent-cli"],
+          "default": "in-process"
+        },
+        "ref": {
+          "type": "string",
+          "description": "AIP-45 AGENT-CLI reference. Required when kind=agent-cli. Conventional shape: '<package>#<export>' (e.g. '@agentproto/adapter-hermes#hermes') or a workspace-relative path to an AGENT-CLI.md."
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["ephemeral", "persistent", "resumable"] },
+            "idle_timeout_ms": { "type": "integer", "minimum": 1000 }
+          }
+        }
+      }
+    },
     "tags": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
@@ -171,6 +195,28 @@
         "properties": {
           "participation": {
             "properties": { "mode": { "enum": ["mention-only", "silent"] } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "object",
+            "properties": { "kind": { "const": "agent-cli" } },
+            "required": ["kind"]
+          }
+        },
+        "required": ["runtime"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "object",
+            "required": ["ref"]
           }
         }
       }
