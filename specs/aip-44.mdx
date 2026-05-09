@@ -1,0 +1,350 @@
+---
+title: "AIP-44: ACP.md — agentacp/v1 (Agent Client Protocol profile)"
+description: An agentproto profile of the upstream Agent Client Protocol (agentclientprotocol.com) that defines how agentproto operators (AIP-9) participate in ACP — both as clients driving subprocess agents and as servers exposed to ACP-speaking IDEs (Zed, VSCode, JetBrains, Cursor). Pins the upstream protocol revision, layers governance/audit hooks, and standardises operator-binding extensions under metadata.aip44.*.
+aip: 44
+status: Draft
+type: Core
+created: 2026-05-08
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 9, 17]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/acp
+resources: ./resources/aip-44/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions/44
+layer: protocols
+package: "@agentproto/acp"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 44 |
+| Title | ACP.md — agentacp/v1 (Agent Client Protocol profile) |
+| Status | Draft |
+| Type | Core |
+| Domain | acp.sh |
+| Upstream | [agentclientprotocol.com](https://agentclientprotocol.com/) |
+| Requires | [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-9](/docs/aip-9) (OPERATOR), [AIP-17](/docs/aip-17) (RUNNER) |
+| Reference Impl | [`@agentproto/acp`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/acp) |
+
+## Abstract
+
+`agentacp/v1` specifies how agentproto runtimes participate in the
+**Agent Client Protocol (ACP)** — the JSON-RPC framing released by Zed
+Industries that standardises agent ↔ editor communication. AIP-44 is a
+**profile**, not a fork: every conformant agentproto ACP client/server
+is also a conformant upstream ACP client/server. The AIP adds:
+
+1. A canonical `ACP.md` manifest declaring an agent or client's
+   conformance level (capabilities, transports, version range).
+2. Mappings from ACP's `session/update` notifications to AIP-9
+   operator lifecycle events and AIP-7 audit events.
+3. An extension namespace `metadata.aip44.*` for agentproto-specific
+   bindings (operator ref, governance ref, sandbox ref) that upstream
+   ACP runtimes preserve verbatim.
+
+The wire protocol — methods, payload shapes, capability negotiation —
+defers to the upstream specification at
+[agentclientprotocol.com](https://agentclientprotocol.com/). AIP-44
+pins the upstream revision its profile validates against.
+
+## Motivation
+
+Agent runtimes ship as subprocesses with bidirectional streams. Hermes
+Agent, Claude Code, OpenCode, and Cursor's background agents already
+implement ACP server-side; Zed, VSCode, JetBrains, and Cursor implement
+ACP client-side. The protocol is becoming the LSP-of-agents — the
+narrow waist that decouples agents from editors.
+
+Agentproto needs ACP for two payoffs that pull in opposite directions:
+
+- **Inbound (client side)** — an AIP-9 operator should be drivable via
+  any ACP-speaking subprocess agent. AIP-45
+  [`AGENT-CLI.md`](/docs/aip-45) declares which subprocess to spawn;
+  AIP-44 specifies how that subprocess is talked to.
+- **Outbound (server side)** — an AIP-9 operator should be exposable as
+  an ACP server so any ACP-speaking IDE can connect into it. This
+  ships agentproto operators into Zed/VSCode/JetBrains/Cursor for
+  free, without an extension per IDE.
+
+A single AIP for *the protocol primitive* — sitting beside AIP-45
+(agent-CLI manifest) and AIP-9 (operator runtime) — keeps both flows
+in one place.
+
+This AIP intentionally **does not redefine ACP**. The wire-protocol
+spec is upstream and stable enough to track; the agentproto
+contribution is the binding layer that makes ACP first-class inside
+the AIP registry.
+
+## Specification
+
+This section uses RFC 2119 keywords (MUST / SHOULD / MAY).
+
+### Conformance
+
+A runtime is **AIP-44-conformant** as a client or server (or both) iff
+all of the following hold:
+
+1. It satisfies the upstream ACP specification at the revision pinned
+   in `metadata.aip44.acp_rev` (commit SHA of the
+   `agentclientprotocol/agent-client-protocol` repository).
+2. Its `ACP.md` manifest validates against
+   [`./resources/aip-44/draft/ACP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-44/draft).
+3. For each capability declared in `metadata.aip44.capabilities`, the
+   runtime supports the corresponding upstream ACP capability per
+   §[Capability negotiation](#capability-negotiation).
+
+A runtime that satisfies (1) but not (2) or (3) is a **plain ACP
+runtime** and SHOULD still interop with AIP-44 runtimes — AIP-44
+extensions live in fields upstream preserves verbatim.
+
+### Roles
+
+A runtime declares one of three `kind` values:
+
+- `client` — drives a subprocess agent; sends `session/prompt`,
+  receives `session/update` notifications. The agentik side of an
+  IDE-style integration.
+- `server` — exposes an operator to clients; receives
+  `session/prompt`, sends `session/update` notifications. What
+  Hermes does today; what Guilde does in M5 of the integration plan.
+- `bridge` — both. A runtime that wraps an inbound client and
+  re-exposes it as a server (for proxy chains; tracks upstream
+  RFD-002).
+
+### Transports
+
+Two transports are defined upstream and inherited:
+
+- `stdio` — newline-delimited JSON-RPC over the subprocess stdin/stdout.
+  Default for local agents.
+- `websocket` — JSON-RPC over a WebSocket connection. Required for
+  remote/cloud-hosted agents and for browser-based clients.
+
+Implementations MUST support `stdio`. WebSocket support is OPTIONAL but
+strongly RECOMMENDED for any server intended for remote use (e.g. the
+Guilde ACP-server endpoint).
+
+### Capability negotiation
+
+Capabilities are declared upstream during `initialize`:
+
+- **Client capabilities**: `fs.readTextFile`, `fs.writeTextFile`,
+  `terminal`.
+- **Agent capabilities**: `loadSession`, `promptCapabilities.{image,
+  audio, embeddedContext}`, `mcpCapabilities.{http, sse}`.
+
+AIP-44 defines a `tier` shorthand under `metadata.aip44.tier` that
+groups capabilities for declaration ergonomics:
+
+- `basic` — the minimum: `session/new` + `session/prompt` +
+  `session/update` only. No persistent sessions, no MCP, no fs.
+- `governance-aware` — `basic` + `loadSession` + agent-side tool-call
+  streaming; required to bind to an AIP-7-governed operator.
+- `sandboxed` — `governance-aware` + `mcpCapabilities` enabled +
+  declared sandbox profile (AIP-36); required when the operator runs
+  inside a sandbox provider that mediates network/fs.
+
+Per upstream: capabilities omitted from `initialize` MUST be treated
+as unsupported.
+
+### Operator binding (`metadata.aip44.operator`)
+
+When an `ACP.md` declares `kind: server`, it MAY include
+`metadata.aip44.operator` referencing an AIP-9 OPERATOR.md that this
+server exposes. Runtimes MUST honor the referenced operator's
+governance + memory + skill set. The operator's lifecycle states
+(`invoked → running → suspended | completed | interrupted` per AIP-9)
+map to ACP session updates as follows:
+
+| Operator state | ACP signal |
+|---|---|
+| `invoked` | `session/new` response returned to client |
+| `running` (text) | `session/update` with `agent_message_chunk` |
+| `running` (tool call) | `session/update` with `tool_call` (upstream extension) |
+| `suspended` (governance) | `session/update` with `tool_call` requiring approval, awaiting client `tool_call_result` |
+| `completed` | final `session/update` + idle |
+| `interrupted` | error response to in-flight `session/prompt` |
+
+Every state transition MUST produce an AIP-7 `audit-event` keyed by
+the operator's governance binding.
+
+### Tool-call audit (`metadata.aip44.audit`)
+
+`tool_call` events streamed via `session/update` MUST be mirrored to
+the operator's audit log per AIP-7. The mapping is:
+
+```
+{
+  audit-event-kind: "tool-call",
+  operator: <operatorId>,
+  session: <sessionId>,
+  tool: <toolName>,
+  arguments: <jsonArgs>,
+  result: <jsonResult> | <error>,
+  approval: <approvedBy?> | <auto>
+}
+```
+
+AIP-44 servers MUST refuse to emit `tool_call` events for tools the
+governance binding has not authorized for the current
+session/operator pair.
+
+### MCP-over-ACP
+
+Upstream ACP defines an OPTIONAL MCP-over-ACP transport (RFD-001) that
+multiplexes MCP tool-call traffic over the ACP channel. AIP-44
+runtimes that declare `mcpCapabilities` MUST support MCP-over-ACP for
+any tools they expose; this lets agentproto skills (AIP-3) ride
+through ACP without a separate MCP transport.
+
+### `ACP.md` frontmatter
+
+The full schema lives in
+[`./resources/aip-44/draft/ACP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-44/draft).
+Top-level fields (informative summary):
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Kebab id matching parent dir |
+| `id` | Yes | Stable runtime id |
+| `description` | Yes | One-paragraph purpose |
+| `version` | Yes | Semver of this manifest |
+| `kind` | Yes | `client` \| `server` \| `bridge` |
+| `transport` | Yes | `stdio` \| `websocket` \| array of both |
+| `metadata.aip44.acp_rev` | Yes | Upstream ACP commit SHA this manifest tracks |
+| `metadata.aip44.tier` | Yes | `basic` \| `governance-aware` \| `sandboxed` |
+| `metadata.aip44.capabilities` | No | Explicit capability map (overrides tier defaults) |
+| `metadata.aip44.operator` | When `kind=server` | Ref to AIP-9 OPERATOR.md |
+| `metadata.aip44.governance` | No | Ref to AIP-7 GOVERNANCE.md |
+| `metadata.aip44.sandbox` | When tier `≥ sandboxed` | Ref to AIP-36 SANDBOX.md |
+| `metadata.aip44.audit` | No | Audit log target (defaults to operator's governance binding) |
+
+### Lifecycle (server-side)
+
+```
+Boot      → initialize handshake (capabilities + version)
+↓
+session/new → operator runtime spins up an AIP-9 turn loop
+↓
+session/prompt → operator turn dispatches; tool calls + text chunks
+                 stream as session/update
+↓
+(optional) session/cancel → AbortSignal propagated to operator
+↓
+session/close → operator memory persisted (if memory.kind != ephemeral),
+                governance audit closed
+```
+
+### Lifecycle (client-side)
+
+```
+Spawn agent subprocess → initialize handshake → session/new
+↓
+For each user input: session/prompt → consume session/update stream
+                                     → emit AIP-7 audit-events for
+                                        tool-call mirror
+↓
+On disconnect: SIGTERM (5s) → SIGKILL escalation; release resources
+```
+
+## Rationale
+
+**Why a profile, not a fork.** ACP has 14k weekly TS-SDK downloads, an
+official Python SDK, and adoption by Zed/Cursor/JetBrains/VSCode plus
+multiple major agent vendors. Forking would forfeit the network. AIP-44
+takes the same posture as AIP-3 (agentskills.io profile): track
+upstream verbatim, add agentproto bindings under a namespaced
+extension key.
+
+**Why Core, not Schema.** AIP-44 specifies a runtime contract (how
+operators participate in a wire protocol), not a file format. Per
+AIP-1 lifecycle: Core for protocols/runtimes, Schema for file formats.
+The companion AIP-45 (`AGENT-CLI.md`) is Schema.
+
+**Why a `tier` shorthand.** Capability negotiation in raw ACP is a
+flat map of booleans. Most runtimes fall into three buckets;
+declaring `tier: governance-aware` is shorter and version-stable
+than enumerating every flag. Tier defaults are documented; explicit
+`capabilities` overrides win when set.
+
+**Why pin `acp_rev`.** ACP has open RFDs (elicitation, proxy chains,
+MCP-over-ACP) that will shift the wire surface. Pinning to a commit
+SHA gives implementers a known target and lets AIP-44 ship erratum
+revisions when upstream changes ergonomics.
+
+**Why MCP-over-ACP is REQUIRED when MCP capabilities declared.**
+Without it, agents have to multiplex two transports for tools and
+prompts, and skill activation latency doubles. The upstream RFD-001
+exists precisely to fix this; we adopt it as the only sane shape.
+
+## Reference Implementation
+
+[`@agentproto/acp`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/acp)
+— TypeScript wrapper around `@agentclientprotocol/sdk`. Provides:
+
+- `defineAcp({...})` — validates an `ACP.md` manifest against the
+  schema (via `createDoctype`).
+- `createAcpClient({ adapter })` — wraps `ClientSideConnection`,
+  bridges ACP `session/update` notifications to a typed
+  `AsyncIterable<StreamEvent>`.
+- `createAcpServer({ operator })` — wraps `AgentSideConnection`,
+  binds an AIP-9 OperatorHandle, emits AIP-7 audit events on every
+  tool call.
+- Stdio + WebSocket transports out of the box.
+
+The reference impl is the source of truth for the schema during the
+Draft phase; spec changes propagate through `scaffold-aip` regen.
+
+## Backward compatibility
+
+Not applicable — first agentproto AIP for ACP. Upstream ACP versioning
+is handled via `metadata.aip44.acp_rev`; AIP-44 is independently
+versioned (Draft → Review → Final), and Final eventually freezes the
+binding-layer extensions.
+
+## Security considerations
+
+Inherits the upstream ACP threat surface plus AIP-44 extensions.
+
+- **Untrusted agent subprocess.** A subprocess running under
+  `kind: client` can issue `tool_call` requests for any tool the
+  client offers. Clients MUST gate tool calls through AIP-7
+  governance — never auto-approve based solely on the subprocess's
+  request.
+- **Untrusted client connecting to a server.** A `kind: server`
+  runtime exposed over WebSocket is reachable by any peer that
+  authenticates. Servers MUST authenticate clients (per upstream
+  `authMethods`) and scope the bound operator's capabilities to the
+  authenticated identity.
+- **Capability-confused servers.** A server declaring `tier:
+  governance-aware` but failing to actually mirror tool-call events to
+  the operator's audit log silently breaks AIP-7. Conformance tests
+  MUST exercise the audit emit path.
+- **MCP-over-ACP tunnel.** When MCP is multiplexed over ACP, the MCP
+  transport's authn/authz becomes irrelevant — only the ACP channel's
+  authentication gates access. Servers MUST NOT expose MCP tools they
+  would not have exposed over a bare MCP transport.
+- **Subprocess lifecycle.** Zombies, stuck stdio, deadlocked
+  `initialize` handshakes — clients MUST enforce timeouts at every
+  await point and MUST escalate SIGTERM → SIGKILL on `session/close`
+  hangs.
+- **Path traversal in `cwd`.** `session/new` accepts an absolute
+  `cwd`. Servers MUST reject paths outside the operator's authorized
+  workspace root (AIP-36 sandbox `mounts`).
+- **`session/load` history replay.** The agent streams history via
+  `session/update` before the response. Clients MUST treat replayed
+  history as untrusted prompt content (prompt-injection vector).
+
+The protocol itself has no execution semantics; all execution risk
+flows through tool-call invocation, which AIP-7 governs.
+
+## See also
+
+- [Agent Client Protocol — official site](https://agentclientprotocol.com/)
+- [`agentclientprotocol/typescript-sdk`](https://github.com/agentclientprotocol/typescript-sdk) — `AgentSideConnection`, `ClientSideConnection`
+- [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime contract; `metadata.aip44.operator` references this
+- [AIP-7 — GOVERNANCE.md](/docs/aip-7) — audit + approval gating
+- [AIP-45 — AGENT-CLI.md](/docs/aip-45) — interactive agent CLI manifest; uses AIP-44 when `protocol: acp`
+- [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary inherited by `kind: client` adapters
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox profile for `tier: sandboxed`
+- [`./ACP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-44/draft) — JSON Schema validator
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-44/draft/EXAMPLES.md) — reference manifests (Hermes server, Guilde server)

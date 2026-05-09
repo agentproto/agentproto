@@ -1,0 +1,267 @@
+---
+title: "AIP-43: REGISTRY — agentregistry/v1 (handle catalog primitive)"
+description: A primitive that catalogs N defineX'd doctype handles for runtime lookup. Operations (register / get / list / lookup), identity rules, capability metadata namespace, discovery hooks. Hosts use it to assemble per-host provider/backend/tool catalogs without re-implementing the registry shape; the same primitive works for any doctype family.
+aip: 43
+status: Draft
+type: Standards Track
+created: 2026-05-07
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/registry
+discussions-to: https://github.com/agentproto/agentproto/discussions/43
+layer: primitives
+package: "@agentproto/registry"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 43 |
+| Title | REGISTRY — agentregistry/v1 (handle catalog primitive) |
+| Status | Draft |
+| Type | Standards Track |
+| Domain | registry.agentproto.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Reference Impl | [`@agentproto/registry`](https://github.com/agentproto/ts/tree/main/packages/registry) |
+
+## Abstract
+
+`agentregistry/v1` is a **runtime primitive** — a generic catalog that
+collects N `defineX`-produced doctype handles and exposes a uniform
+lookup surface so hosts can assemble per-host provider/backend/tool
+catalogs without re-implementing registry plumbing per doctype family.
+
+The primitive is type-parametric over a doctype handle (`StorageHandle`,
+`SandboxHandle`, `OperatorHandle`, `ToolHandle`, …) and exposes four
+operations: `register`, `get`, `list`, `lookup`. It also names a
+**capability metadata namespace** (`handle.capabilities`) that hosts
+populate so cross-handle queries — "every storage backend that supports
+FUSE-bridging", "every sandbox that pairs with `local-daemon` storage" —
+are declarative rather than hard-coded in switch statements.
+
+This AIP defines the **rules**. The reference implementation lives in
+`@agentproto/registry` and is the canonical answer for hosts that don't
+need bespoke storage semantics.
+
+## Motivation
+
+`defineStorage` (AIP-35), `defineSandbox` (AIP-36), `defineCli`
+(AIP-29), `defineOperator` (AIP-42), `defineExtension` (AIP-40) all
+produce **handles** — frozen, validated objects describing one
+instance of a doctype. The per-author API is solved.
+
+What's missing is the **catalog side**: every host that consumes more
+than one handle of a given family ends up writing a registry for it,
+each with its own:
+
+1. Storage shape (Map keyed by `id`? Array iterated linearly?
+   Trie keyed by slug? hand-rolled per host).
+2. Lookup verbs (`get` / `find` / `findByType` / `findByOwner`
+   diverge across hosts; consumers can't switch hosts without rewiring).
+3. Capability indexing (every host hard-codes its own `if (provider ===
+   "s3" || provider === "gcs") { fuse-bridgeable }` decision tree).
+4. Discovery hooks (workspace-local doctypes via `EXTENSION.md`,
+   provider files in a directory, MCP-published catalogs — none
+   standardized).
+
+The cost compounds: a doctype family ships with `defineX`, multiple
+hosts each rewrite the registry plumbing, the registry shape drifts
+between hosts, capability metadata becomes load-bearing in some hosts
+and absent in others, and discovery (the most valuable cross-host
+property — "give me every storage backend the host knows about") is
+ad-hoc.
+
+`agentregistry/v1` factors the registry side out the same way `AIP-1`
+factored doctype identity: one shape, one set of verbs, one capability
+namespace, valid across every doctype family.
+
+The companion observation: `defineX` already returns a
+**`createDoctype`-built handle** (AIP-1 / AIP-2). The registry doesn't
+need to know which doctype it's storing — it operates on the universal
+handle shape (id, frozen body, optional capabilities) and yields the
+handle back unchanged. One impl, every doctype family.
+
+## Specification
+
+A conforming registry is an in-memory catalog with the operations,
+identity rules, capability metadata namespace, and discovery hooks
+defined below. The `@agentproto/registry` reference implementation
+satisfies all of them; alternative implementations (a host that
+persists handles to disk or fetches them from an HTTP catalog) MUST
+satisfy the same observable contract.
+
+### Identity
+
+A registry is parameterised by a doctype handle type `H`. Every entry
+has a string id derived from one of (in priority order):
+
+1. `handle.id` — present on standalone doctype manifests (per AIP-2).
+2. `handle.provider` — present on STORAGE / SANDBOX handles (the
+   provider value, e.g. `"local-daemon"`, `"s3"`).
+3. `handle.slug` — present on EXTENSION handles (`"acme:deal"`).
+4. A registry-level `keyBy: (handle: H) => string` selector when
+   none of the above apply.
+
+Registries MUST refuse `register(...)` calls whose handle's id is
+already present — the second registration is an error, not a
+silent overwrite. Hosts that need replacement MUST call `unregister(id)`
+first.
+
+### Operations
+
+The minimum surface is four verbs. A reference signature in TypeScript:
+
+```ts
+interface Registry<H> {
+  /** Add a handle. Throws if `keyBy(handle)` is already present. */
+  register(handle: H): void
+
+  /** Get the handle by id. Returns undefined if absent. */
+  get(id: string): H | undefined
+
+  /** Every handle currently registered, insertion-ordered. */
+  list(): readonly H[]
+
+  /** Every handle matching `predicate`. */
+  lookup(predicate: (handle: H) => boolean): readonly H[]
+}
+```
+
+Hosts MAY extend the surface with sugar (`has`, `count`, `unregister`,
+`replace`, `entries`) but MUST NOT remove or rename the four core verbs.
+
+### Capability metadata namespace
+
+A handle MAY carry a `capabilities` field — a free-form
+`Record<string, unknown>`. The registry treats it as opaque (no
+validation, no normalisation) but indexes it lazily for `lookup`.
+
+Capabilities are **declarative metadata**, not behaviour. A storage
+handle whose `capabilities.bridgeable === true` is asserting that the
+backing store can be FUSE-mounted into a sandbox; the registry doesn't
+verify the claim. Hosts use capabilities for cross-handle queries
+("every storage backend whose `capabilities.transport` is
+`'fuse'`") that would otherwise become hard-coded switch statements.
+
+Suggested namespacing convention (NOT mandated):
+
+| Family | Capability key | Meaning |
+|---|---|---|
+| STORAGE | `bridgeable: boolean` | Can the bytes be mounted into a sandbox? |
+| STORAGE | `transport: "symlink" \| "fuse" \| "mcp" \| "tunnel"` | How a sandbox sees the bytes (when `bridgeable`). |
+| STORAGE / SANDBOX | `pairsWith: string[]` | Backend ids of the other family that compose cleanly. |
+| STORAGE / SANDBOX | `serverReachable: boolean` | Can a remote host reach this backend (false for `local-ide`/`local-daemon` on loopback)? |
+
+Hosts SHOULD agree on convention names within a family but the registry
+itself only relies on the field being a JSON value.
+
+### Discovery hooks
+
+A registry is hand-populated by default — hosts call `register(handle)`
+for each handle they want to expose. Two optional discovery hooks:
+
+1. **Directory scan.** A registry MAY accept a directory path on
+   construction. Every `<file>.<doctype>.ts` file in the directory is
+   imported, its default export validated as a handle of type `H`, and
+   registered. The host sets the file naming convention; the registry
+   doesn't impose one.
+
+2. **MCP listing.** A registry MAY publish a `list_<doctype>` tool to an
+   MCP server (per AIP-5 conventions); the tool returns
+   `{ id, label?, description?, capabilities? }` per entry. This lets
+   agents and external tooling enumerate the catalog without import access.
+
+Discovery is OPTIONAL. A registry that only supports `register()` is
+fully conforming.
+
+### Equality and lifetime
+
+Handles registered into a registry are immutable. The registry MUST NOT
+mutate the handle body; consumers MUST NOT mutate it after registration
+(the `createDoctype` `Object.freeze` invariant from AIP-1 makes this
+runtime-enforced for compliant handles).
+
+The registry's lifetime is the host process. Persistence across
+restarts (e.g. registries hydrated from a config file at boot) is the
+host's concern — the registry primitive itself is in-memory.
+
+### Reference signature
+
+```ts
+import { createRegistry } from "@agentproto/registry"
+
+const storageRegistry = createRegistry<StorageHandle>({
+  family: "storage",
+  keyBy: (handle) => handle.provider,
+})
+
+storageRegistry.register(localDaemonStorage)   // defineStorage(...) result
+storageRegistry.register(s3Storage)
+storageRegistry.list()                          // readonly StorageHandle[]
+storageRegistry.get("local-daemon")             // StorageHandle | undefined
+storageRegistry.lookup(h => h.capabilities?.bridgeable === true)
+```
+
+The `family` field is informational (used in error messages, MCP tool
+names if discovery is enabled). `keyBy` is required when the handle
+type doesn't expose a recognisable id field; `createDoctype`-built
+handles default to the rules in [Identity](#identity).
+
+## Why not just use a Map?
+
+Three reasons:
+
+1. **Identity selection is doctype-aware.** STORAGE keys on
+   `provider`; EXTENSION keys on `slug`; a handle that's a standalone
+   doctype keys on `id`. The registry's `keyBy` defaults pick the
+   right one without the host wiring it case-by-case.
+
+2. **Duplicate registration is an error, not silent overwrite.** A
+   bare `Map.set` lets a second `defineStorage({ provider: "s3" })`
+   silently replace the first; the registry refuses, surfacing the
+   collision at boot.
+
+3. **Capability lookup is the most useful operation.** `Map` exposes
+   `get(key)` cheaply; `lookup(predicate)` is what hosts actually need
+   ("every storage that pairs with sandbox X"). Standardising the verb
+   keeps capability metadata normative across hosts.
+
+## Backward compatibility
+
+This AIP introduces no breaking changes. Existing hand-rolled host
+registries remain functional — adopting `@agentproto/registry` is a
+voluntary refactor. Handles produced by `defineStorage` / `defineSandbox`
+/ `defineExtension` / `defineOperator` are already in the shape the
+registry expects (the universal `createDoctype` handle), so adoption
+is one `register(handle)` call per existing handle.
+
+## Reference implementation
+
+The canonical implementation is
+[`@agentproto/registry`](https://github.com/agentproto/ts/tree/main/packages/registry).
+It implements:
+
+- `createRegistry<H>(options)` returning the four-verb surface plus
+  `has`, `count`, `unregister`, `replace`, `entries` sugar.
+- Default `keyBy` resolution per [Identity](#identity).
+- Optional directory-scan discovery hook (Node-only; uses dynamic
+  `import()` so it's tree-shakable).
+- Optional MCP-tool discovery hook (depends on `@modelcontextprotocol/sdk`;
+  feature-gated so non-MCP hosts don't pull the SDK).
+
+Tests cover: identity selection priority, duplicate-registration
+refusal, capability-lookup correctness, discovery-hook idempotency.
+
+## See also
+
+- [AIP-1 — `agentproto/v1` core invariants](/docs/aip-1) — handle
+  identity rules.
+- [AIP-2 — `define-doctype` factory](/docs/aip-2) — what produces the
+  handles the registry stores.
+- [AIP-29 — CLI.md](/docs/aip-29) — `defineCli` whose handles a CLI
+  registry catalogs.
+- [AIP-35 — STORAGE.md](/docs/aip-35) — `defineStorage` whose handles
+  a storage registry catalogs.
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — `defineSandbox` whose handles
+  a sandbox registry catalogs.
+- [AIP-40 — EXTENSION.md](/docs/aip-40) — `defineExtension` whose
+  handles a workspace-extension registry catalogs.

@@ -1,0 +1,341 @@
+---
+title: "AIP-45: AGENT-CLI.md — agentcli-interactive/v1 (interactive agent CLI manifest)"
+description: A markdown + frontmatter format for declaring an interactive agent CLI — a long-running, bidirectional, agent-as-process binary like Hermes Agent, Claude Code, OpenCode, Goose, or Gemini CLI — and how to install, spawn, and converse with it. Layers over AIP-29 (CLI.md) for install/version/auth blocks and AIP-44 (ACP.md) for the session/wire model when protocol=acp; falls back to MCP or proprietary protocols via a discriminator.
+aip: 45
+status: Draft
+type: Schema
+created: 2026-05-08
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 17, 19, 29, 36, 44]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/driver/agent-cli
+resources: ./resources/aip-45/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions/45
+layer: drivers
+package: "@agentproto/driver-agent-cli"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 45 |
+| Title | AGENT-CLI.md — agentcli-interactive/v1 (interactive agent CLI manifest) |
+| Status | Draft |
+| Type | Schema |
+| Domain | cli.sh |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-29](/docs/aip-29) (CLI), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP) |
+| Reference Impl | [`@agentproto/driver-agent-cli`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/driver/agent-cli) |
+
+## Abstract
+
+`AGENT-CLI.md` packages an **interactive agent CLI** — a binary that
+hosts an agent loop (Hermes, Claude Code, OpenCode, Goose, Gemini CLI)
+and converses bidirectionally with a client over stdio or a similar
+duplex channel. Each manifest declares how to install, version-check,
+sandbox, authenticate, and **talk to** the binary, with a `protocol`
+discriminator (`acp` | `mcp` | `proprietary`) selecting the wire shape.
+
+AIP-45 is a sibling, not a rival, of [AIP-29](/docs/aip-29). AIP-29
+remains the home for **tool CLIs** — `gh`, `stripe`, `kubectl`,
+`ffmpeg` — whose semantics are one-shot `cmd → output`. AIP-45 covers
+**agent CLIs** whose semantics are persistent sessions with streamed
+turn events. The two share the install / version / auth / sandbox
+substrate via JSON Schema `$ref`, so a future "tool CLI that has both
+modes" can carry both manifests without duplication.
+
+## Motivation
+
+Agent runtimes shipped as CLIs are a fast-growing category:
+
+- **Hermes Agent** (Nous Research, ACP server)
+- **Claude Code** (Anthropic, ACP via `@agentclientprotocol/claude-agent-acp`)
+- **OpenCode** (sst, native ACP support)
+- **Goose** (Block, MCP-over-stdio)
+- **Gemini CLI** (Google, proprietary REPL)
+- **Cursor** background agents (ACP)
+
+Today every product wires each one bespoke: invoke it as a subprocess,
+parse its prompt / output / streaming events, manage its lifecycle,
+hand it secrets, route tool calls. The cost compounds across products —
+Guilde, Katchy, Simone, dev tooling — and across platforms (macOS,
+Linux, headless servers, Modal/Daytona sandboxes).
+
+AIP-45 factors the integration shape into a single declarative file
+plus a single TypeScript runner (`@agentproto/driver-agent-cli`), the
+same way AIP-29 factors tool-CLI integration. The discriminator means
+new agent CLIs join the catalog by writing a manifest, not by writing
+runner code.
+
+The companion observation: agent CLIs converge on **ACP**. Hermes,
+Claude Code, OpenCode, Cursor all speak it. Treating ACP as the
+default while leaving room for MCP (Goose) and proprietary REPLs
+(Gemini CLI today) yields one runner with one wire-stable arm and two
+fallback adapters.
+
+## Specification
+
+This section uses RFC 2119 keywords (MUST / SHOULD / MAY).
+
+### Conformance
+
+A manifest is **AIP-45-conformant** iff:
+
+1. Its frontmatter validates against
+   [`./resources/aip-45/draft/AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft).
+2. Its `install`, `version_check`, `auth` blocks satisfy AIP-29's
+   schemas (referenced via `$ref`).
+3. When `protocol: "acp"`, the binary's ACP server satisfies the
+   upstream ACP specification at the AIP-44 `acp_rev` declared by the
+   bound `ACP.md`.
+4. When `protocol: "mcp"`, the binary speaks MCP-over-stdio per
+   `modelcontextprotocol.io`.
+5. When `protocol: "proprietary"`, the manifest's adapter package
+   (`adapter` field) implements the `AgentCliClient` interface from
+   `@agentproto/driver-agent-cli`.
+
+### Frontmatter
+
+The full schema lives in
+[`./resources/aip-45/draft/AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft).
+Top-level fields (informative summary):
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Kebab id matching parent dir |
+| `id` | Yes | Stable runtime id |
+| `description` | Yes | One-paragraph purpose |
+| `version` | Yes | Semver of this manifest |
+| `bin` | Yes | Path to the binary |
+| `bin_args` | No | Default argv (e.g. `["acp"]` for `hermes acp`) |
+| `install` | Yes | Array of install methods (AIP-29 `$ref`) |
+| `version_check` | Yes | Version detection (AIP-29 `$ref`) |
+| `auth` | No | Auth surface (AIP-29 `$ref`) |
+| `sandbox` | Yes | Sandbox profile (AIP-36 `$ref`) |
+| `protocol` | Yes | `acp` \| `mcp` \| `proprietary` |
+| `acp` | When `protocol=acp` | Ref to AIP-44 ACP.md describing the wire profile |
+| `mcp` | When `protocol=mcp` | Inline MCP server config |
+| `adapter` | When `protocol=proprietary` | NPM package implementing `AgentCliClient` |
+| `session` | No | Session policy: mode, idle_timeout_ms, max_turns |
+| `models` | No | Model routing: default, allowed, env-mapped |
+| `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |
+| `runner` | No | AIP-17 RUNNER.md ref or inline runner block |
+
+### `protocol` discriminator
+
+Three values, with cross-field requirements:
+
+```yaml
+# protocol: "acp" → MUST declare `acp` referencing an AIP-44 ACP.md
+protocol: acp
+acp: ./hermes-acp.ACP.md
+
+# protocol: "mcp" → MUST declare `mcp` with server config
+protocol: mcp
+mcp:
+  command: goose
+  args: [serve]
+  transport: stdio
+
+# protocol: "proprietary" → MUST declare `adapter` (NPM package)
+protocol: proprietary
+adapter: "@agentproto/adapter-gemini-cli"
+```
+
+Runtimes that don't recognise the declared `protocol` MUST refuse to
+load the manifest; this is a hard error, not a warning.
+
+### Session model
+
+```yaml
+session:
+  mode: ephemeral | persistent | resumable    # default: ephemeral
+  idle_timeout_ms: integer                    # default: 600000 (10 min)
+  max_turns: integer                          # default: unlimited
+  context_carryover: boolean                  # default: true within a session
+```
+
+`ephemeral` sessions are torn down on disconnect. `persistent` sessions
+survive client reconnect within `idle_timeout_ms`. `resumable` sessions
+are durable across runs (requires the binary to support `session/load`
+or equivalent — clients MUST refuse to declare `resumable` against a
+binary lacking the capability).
+
+### Stream event taxonomy
+
+When the runtime relays the binary's output to a host, events conform
+to a closed taxonomy regardless of underlying protocol:
+
+| Event | Description |
+|---|---|
+| `text-delta` | Streaming agent message text chunk |
+| `tool-call` | Agent invoking a tool — args + tool id |
+| `tool-result` | Tool's response delivered back to the agent |
+| `thought` | Agent's internal reasoning (when capability declared) |
+| `agent-prompt` | Agent asking the user / client for input mid-turn |
+| `turn-end` | Agent has finished the current turn |
+| `error` | Out-of-band error during the turn |
+
+The runner translates protocol-specific events to this taxonomy
+exactly once at the protocol arm boundary; downstream consumers never
+see protocol-specific shapes.
+
+### Lifecycle
+
+```
+Discover (manifest in registry)
+↓
+Install (run install method matching host OS/arch)
+↓
+Version-check (regex against `bin_args + version_check.cmd`)
+↓
+Spawn subprocess (apply sandbox + auth env)
+↓
+Handshake (per protocol arm)
+↓
+Open session (session/new or equivalent)
+↓
+LOOP: send turn → consume stream events → emit AIP-7 audit
+↓
+Close session (session/close or equivalent)
+↓
+Tear down subprocess (SIGTERM 5s → SIGKILL escalation)
+```
+
+### Capabilities
+
+`capabilities` is a manifest-declared mirror of behaviours (separate
+from the runtime-negotiated ACP capabilities). It tells the host what
+to expect *before* boot:
+
+```yaml
+capabilities:
+  streaming: boolean       # streams text-delta events
+  tool_calls: boolean      # emits tool-call events
+  sub_agents: boolean      # may delegate to other agents
+  file_io: boolean         # may read/write workspace files
+  multimodal: boolean      # accepts non-text input
+  resumable: boolean       # supports session/load semantics
+  bidirectional: boolean   # may emit agent-prompt
+```
+
+When `protocol: "acp"`, capabilities MUST be a subset of the ACP
+capabilities the bound AIP-44 manifest declares; the runner enforces
+this at load time.
+
+### Sandbox integration
+
+`sandbox` is REQUIRED. AIP-45 inherits AIP-36 verbatim — the same
+`provider` (local, mastra-modal, mastra-daytona, mastra-e2b,
+node-permission, etc.), `network.egress`, `mounts`, `limits`, `env`
+fields apply. The runner passes the resolved sandbox to the protocol
+arm; the protocol arm decides how to expose it (e.g. ACP's `cwd`
+parameter on `session/new`).
+
+### Auth surface
+
+`auth` is OPTIONAL but RECOMMENDED. When present, follows AIP-29's
+schema verbatim: `ref` to an AIP-19 SECRETS.md, `state.{paths,env}`,
+`login.cmd`, `refresh.cmd`, `expiry`. The runner resolves secrets via
+`@agentproto/secrets` and passes them to the subprocess via
+`sandbox.env.set` (never argv, never logs).
+
+## Rationale
+
+**Why a sibling of AIP-29, not an extension.** AIP-29's central
+abstraction is `commands` — a tree mapping subcommand paths to
+TOOL.md refs. An agent CLI has no commands tree (or a degenerate
+one with one entry, "talk"). Stretching `commands` to model
+session-based interaction would either make AIP-29 schema bloat or
+make `commands` ambiguous. A sibling spec keeps both clean.
+
+**Why a `protocol` discriminator, not separate AIPs per protocol.**
+The install / version / auth / sandbox / capabilities / session
+fields are 90% of an agent-CLI manifest. Splitting per protocol
+would force three near-duplicate schemas and three runners. One
+runner with three protocol arms keeps the integration surface one
+package.
+
+**Why ACP is the default.** Network effects: 14k weekly TS-SDK
+downloads, multi-vendor adoption, a growing IDE ecosystem. New agent
+CLIs increasingly ship ACP support out of the box (Claude Code,
+OpenCode, Cursor announced). Treating ACP as the default and MCP /
+proprietary as fallbacks tracks where the ecosystem is going.
+
+**Why declarative capabilities mirror runtime capabilities.** Hosts
+need to make routing decisions *before* boot — "send this user to
+Hermes (multimodal) or Goose (text-only)?" — without spawning every
+candidate. Manifest-declared capabilities give pre-flight visibility;
+runtime negotiation is the verification step.
+
+**Why stream events are normalised.** A consumer (Guilde Shell view,
+Katchy workflow runner) doesn't care that Hermes uses ACP and Goose
+uses MCP — it cares that both produce `text-delta` and `tool-call`
+events. Normalising at the protocol-arm boundary lets every consumer
+ship one renderer.
+
+## Reference Implementation
+
+[`@agentproto/driver-agent-cli`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/driver/agent-cli)
+— TypeScript runner that loads an `AGENT-CLI.md` manifest, applies
+the sandbox + auth, spawns the binary, dispatches to the protocol
+arm, and emits normalised stream events.
+
+The package exposes:
+
+- `defineAgentCli({...})` — validates manifest, returns an
+  `AgentCliHandle` with a `start(opts) → Session` method.
+- `Session.send(message) → AsyncIterable<StreamEvent>` — write a turn,
+  consume normalised events.
+- `Session.cancel()` — abort the in-flight turn (forwards
+  `session/cancel` for ACP, equivalent for other protocols).
+- `Session.close()` — tear down the session and (if last) the
+  subprocess.
+- Protocol arms under `src/protocol/{acp,mcp,proprietary}.ts`. The
+  ACP arm delegates to `@agentproto/acp` (AIP-44).
+
+The reference impl is the source of truth for the schema during the
+Draft phase; spec changes propagate through `scaffold-aip` regen.
+
+## Backward compatibility
+
+Not applicable — first agentproto AIP for interactive agent CLIs.
+AIP-29 stays correct for tool CLIs; AIP-45 covers the agent-CLI case
+that AIP-29 wasn't designed for.
+
+## Security considerations
+
+Inherits AIP-29's threat surface (install/version/auth/sandbox) and
+adds the bidirectional-protocol surface.
+
+- **Untrusted agent output as prompt.** The agent's `text-delta` and
+  `agent-prompt` events end up in the host's UI. They are
+  attacker-controlled if the agent's model was compromised by
+  upstream prompt injection. Hosts MUST apply the same prompt-
+  injection mitigations as for any user input.
+- **Tool calls from the subprocess.** Events of type `tool-call` ask
+  the host to do something. Hosts MUST gate every tool call through
+  AIP-7 governance — the manifest's `capabilities.tool_calls` flag
+  is permission to *emit*, not permission to *auto-execute*.
+- **Sandbox bypass via auth env.** Secrets passed via `sandbox.env.set`
+  may leak into the agent's tool calls (e.g. `bash` invocations) if
+  the sandbox provider doesn't isolate child env. Sandbox providers
+  that don't isolate child env MUST NOT be used with `auth`.
+- **Resumable sessions and replay.** A `session: { mode: resumable }`
+  manifest persists conversation state. If the persistence store is
+  shared, a malicious actor with read access can inject prior turns
+  into the agent's context. Hosts MUST scope persistent session
+  storage to the authenticated identity.
+- **`adapter` packages from npm.** When `protocol: proprietary`, the
+  manifest names an NPM package the runner imports. Hosts MUST treat
+  these the same as any other dependency — pin versions, audit
+  publishers, prefer first-party packages.
+
+## See also
+
+- [AIP-29 — CLI.md](/docs/aip-29) — tool CLIs (one-shot `cmd → output`); shares install/version/auth blocks via `$ref`
+- [AIP-44 — ACP.md](/docs/aip-44) — wire protocol when `protocol: acp`
+- [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime that consumes an agent CLI via the optional `runtime: { kind: "agent-cli" }` binding
+- [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary
+- [AIP-19 — SECRETS.md](/docs/aip-19) — auth surface
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox profile
+- [`./AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — JSON Schema validator
+- [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) — Hermes (acp), Goose (mcp), Gemini CLI (proprietary)
+- [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md) — implementer's guide
