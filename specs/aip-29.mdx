@@ -864,3 +864,8 @@ empirically.
 - [`./CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-29/draft) — JSON Schema validator
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/ADAPTER.md) — implementer's guide
 - [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/EXAMPLES.md) — additional CLI.md examples
+- [AIP-45 — AGENT-CLI.md](/docs/aip-45) — sibling spec for **interactive
+  agent CLIs** (Hermes, Claude Code, OpenCode, Goose, Gemini CLI). Shares
+  AIP-29's `installMethod` / `versionCheck` / `auth` blocks via JSON
+  Schema `$ref`; covers the bidirectional, persistent-session shape that
+  AIP-29's one-shot `cmd → output` model isn't designed for.
