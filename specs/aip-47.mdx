@@ -1,0 +1,729 @@
+---
+title: "AIP-47: ROLE.md — agentrole/v1 (organizational role manifest)"
+description: A single-doc markdown + frontmatter format for portable organizational roles — mission, responsibilities, capabilities, tools, KPIs, seniority, reporting line, lifecycle hooks. Sibling to AIP-25 PERSONA (face) and AIP-23 IDENTITY (substance); referenced by AIP-9 OPERATOR (`role:` field) and AIP-6 COMPANY (`roles/<slug>/ROLE.md` doctype). Roles describe what a job is — independent of who holds it (persona/identity) and which instance is hired (operator).
+aip: 47
+status: Draft
+type: Schema
+created: 2026-05-11
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+resources: ./resources/aip-47/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions/47
+layer: coordination
+package: "@agentproto/role"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 47 |
+| Title | ROLE.md — agentrole/v1 (organizational role manifest) |
+| Status | Draft |
+| Type | Schema |
+| Domain | roles.sh |
+| Doctype | `role/v1` (single-doc, written as `ROLE.md`) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies, hosts the `role` doctype), [AIP-7](/docs/aip-7) (governance — gates effect), [AIP-9](/docs/aip-9) (operators — consume the role via `role:` field), [AIP-14](/docs/aip-14) (tools), [AIP-23](/docs/aip-23) (identity), [AIP-25](/docs/aip-25) (persona), [AIP-37](/docs/aip-37) (lifecycle), [AIP-38](/docs/aip-38) (policy — defaultPolicy advisory only), [AIP-39](/docs/aip-39) (actions) |
+| Referenced by | [AIP-6](/docs/aip-6) (`roles/<slug>/ROLE.md` doctype), [AIP-9](/docs/aip-9) (operator `role:` field) |
+| Resources | [`./resources/aip-47`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-47/draft) — [`ROLE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ROLE.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/EXAMPLES.md), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ADAPTER.md) |
+
+## Abstract
+
+`agentrole/v1` defines a **single-doc** manifest format — `ROLE.md` —
+for a portable organizational role: the mission, responsibilities,
+capabilities, tools, KPIs, seniority, and reporting line of a position
+in an AI company. A role describes **what the job is** — independent of
+who holds it (the persona / identity) and which instance is hired (the
+operator).
+
+[AIP-6](/docs/aip-6) introduces `role` as a primitive of the company
+package (`roles/<slug>/ROLE.md`) and [AIP-9](/docs/aip-9) declares that
+an operator carries a required `role:` slug, but neither AIP specifies
+the body of a `ROLE.md`. AIP-47 fills that gap by defining `role/v1`:
+the schema, body conventions, composition, and cross-AIP binding rules
+that make roles portable across runtimes.
+
+AIP-47 is the **lighter sibling** of [AIP-23](/docs/aip-23) IDENTITY
+and [AIP-25](/docs/aip-25) PERSONA — all three describe one facet of an
+operator's profile, but where IDENTITY models layered inner substance
+as a workspace and PERSONA models the public face as a single doc,
+ROLE models the job as a single doc. A role MAY ref skills (AIP-3),
+tools (AIP-14), KPIs (scorer slugs), and lifecycle hooks (AIP-37 /
+AIP-39); an operator (AIP-9) MAY ref one role; a persona (AIP-25) and
+identity (AIP-23) are orthogonal to role.
+
+## Motivation
+
+AI-company products today collapse the role concept in one of three
+unsatisfying ways:
+
+1. **A flat enum on the operator** — `role: "ceo" | "cmo" | "cto" | …`.
+   This conflates executive functions with disciplines (a "CMO" and a
+   "Senior SEO Specialist" are not the same kind of thing) and
+   forecloses on user-defined roles. The reference implementation in
+   Guilde currently ships this shape and the limitation surfaces every
+   time a customer asks for a role outside the enum.
+2. **Role fields scattered across the operator object** —
+   `capabilities`, `strengths`, `background`, `responsibilities` live
+   on each operator, so the same job description must be re-authored
+   for each operator that holds the job. Two operators cannot share a
+   role; a promotion mutates the operator instead of re-binding it.
+3. **Free-form prompts** — the role is embedded in the system prompt
+   and cannot be browsed, audited, governed, or composed with
+   [AIP-7](/docs/aip-7) policies. A role declared in prose is not a
+   role; it is a string.
+
+The downstream cost of all three is the same: **no portable artifact**.
+You cannot hand a "Senior SEO Specialist" to a colleague, fork it, attach
+KPIs to it, have two operators apply for it, or render a career-page UI
+on top of it.
+
+[AIP-6](/docs/aip-6) anticipates the gap by listing `role` as a doctype
+of the company package — `roles/<slug>/ROLE.md` — but defers the body
+schema. [AIP-9](/docs/aip-9) anticipates the gap by mandating an
+operator `role:` field but specifies the field only as a slug. AIP-47
+completes the trio.
+
+Beyond the immediate gap, three design pressures point at a standalone
+role spec:
+
+- **Career-page UX.** Browsing roles, "hiring" an operator from a
+  role template, promoting an operator across roles — all need a real
+  data model. Without one, every product reinvents the catalogue.
+- **Inheritance.** Organizations want to take a community-authored
+  `seo-specialist` role and add three brand-specific responsibilities
+  without re-authoring 30 lines. CSS-style `extends` semantics — already
+  used by [AIP-25](/docs/aip-25) and [AIP-23](/docs/aip-23) — fit
+  cleanly.
+- **Governance attachment.** [AIP-7](/docs/aip-7) policies evaluate
+  *what an operator is allowed to do*. The role declares what an
+  operator is *trying* to do (its tools, responsibilities, KPIs).
+  Policy gates the second against the first. Without a role artifact,
+  the comparison is between policy and prompt prose.
+
+## Specification
+
+A conforming `agentrole/v1` deployment is a single doctype: `role/v1`,
+written as `ROLE.md`. The role is a single file, not a workspace —
+every role-level concern fits in one manifest. Role-level concerns are:
+identity (id, title, description, version), org placement (department,
+reports_to, seniority), job content (mission, responsibilities,
+capabilities), bindings (tools, skills, KPIs), composition (`extends`),
+lifecycle hooks (on_promotion, on_demotion), and cross-AIP refs.
+Per-operator behaviour, runtime state, and identity substance are
+deliberately out of scope.
+
+### File location
+
+The filename `ROLE.md` is normative — discovery, install, and toolchains
+key off it. The path is conventional, not normative. The two
+conventional layouts:
+
+```
+# AIP-6 company package layout (canonical when shipped inside a company)
+<company>/
+└── roles/
+    ├── seo-specialist/
+    │   └── ROLE.md
+    ├── senior-seo-specialist/
+    │   └── ROLE.md           # extends ../seo-specialist/ROLE.md
+    └── chief-of-staff/
+        └── ROLE.md
+
+# Standalone role package (one role per repo)
+<repo>/
+├── ROLE.md
+└── README.md
+```
+
+The folder name SHOULD match the role's `name`. Importers MUST NOT
+depend on directory depth — a role at the root of its own repo is
+equivalent to one nested under a company package.
+
+### `ROLE.md` — frontmatter shape
+
+YAML frontmatter, delimited by `---` lines. All fields are
+case-sensitive.
+
+```yaml
+---
+schema: role/v1
+name: <kebab-case-id>                # required, unique within registry
+title: <human-readable>              # required
+description: <one-paragraph>         # required (one-line job description)
+version: <semver>                    # required
+
+# Composition
+extends: ./parent.md                 # OPTIONAL — composable via extends
+
+# Org placement
+department: <kebab-case-string>      # OPTIONAL — see §Departments
+reports_to: ws://roles/<slug>        # OPTIONAL — role-to-role link
+seniority: intern | junior | mid | senior | lead | principal | executive
+
+# Mission & responsibilities
+mission: <markdown-prose>            # required — one paragraph
+responsibilities:                    # required — at least one
+  - <imperative-clause>
+  - <imperative-clause>
+
+# Capabilities — competences this role is expected to have
+capabilities:                        # OPTIONAL — append-and-dedupe
+  - <competence-in-prose>
+
+# Bindings — declarative intent
+tools:                               # OPTIONAL — AIP-14 tool refs
+  - ws://tools/<slug>
+skills:                              # OPTIONAL — AIP-3 skill refs
+  - ws://skills/<slug>
+kpis:                                # OPTIONAL — scorer slugs (forward AIP)
+  - <scorer-slug>
+
+# Job-side prose (small, structured; long-form goes in body)
+strengths:                           # OPTIONAL — append-and-dedupe
+  - <string>
+antiPatterns:                        # OPTIONAL — append-and-dedupe; what the role does NOT do
+  - <string>
+
+# Lifecycle hooks — AIP-37 events bound to AIP-39 actions
+onPromotion: ws://actions/<slug>     # OPTIONAL — fired when an operator is promoted INTO this role
+onDemotion: ws://actions/<slug>      # OPTIONAL — fired when an operator is moved OUT of this role
+onAssign: ws://actions/<slug>        # OPTIONAL — fired when an operator first adopts this role
+
+# Cross-AIP refs
+appliesTo:                           # OPTIONAL — bind to specific consumers
+  - ws://operators/<slug>            #   AIP-9 operator
+defaultPersona: ws://personas/<slug> # OPTIONAL — recommended AIP-25 persona for ops in this role
+defaultIdentity: ws://identities/<slug>  # OPTIONAL — recommended AIP-23 identity workspace
+defaultPolicy: ws://policies/<slug>  # OPTIONAL — recommended AIP-38 policy for ops in this role
+                                     # ADVISORY ONLY — role declares intent, policy decides effect.
+                                     # See §Role vs Policy vs Governance.
+
+# Tags & metadata
+tags: [<tag>]                        # OPTIONAL — append-and-dedupe; lowercase kebab-case
+metadata: {}                         # OPTIONAL — vendor extensions under namespaced keys
+---
+
+# Body — Markdown long-form (background, working principles, escalation)
+```
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | const `role/v1` | Schema dispatch tag. MUST be `role/v1` for this version of AIP-47. |
+| `name` | string | Machine identifier. Lowercase, digits, dashes. 2–64 chars. Unique within the registry that hosts the role. |
+| `title` | string | Human-readable display title. 1–120 chars. |
+| `description` | string | One-paragraph job description. 1–2000 chars. The role's purpose, audience, and shape in prose. |
+| `version` | semver string | Spec version of THIS file. Bump on breaking change to responsibilities, KPIs, tools, or seniority. |
+| `seniority` | enum | One of `intern | junior | mid | senior | lead | principal | executive`. The job's seniority level — operator instances inherit it. |
+| `mission` | markdown | One-paragraph mission. The reason the role exists. |
+| `responsibilities` | string[] | At least one imperative clause. Ordered; semantically meaningful. |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `extends` | string | none | Ref to a parent role. Accepts any form in [Reference syntax](#reference-syntax): bare slug, scoped slug, `ws://roles/<slug>`, or relative path ending in `ROLE.md`. See [Composition](#composition-extends-chain). |
+| `department` | string | none | Free string. See [Departments](#departments-informative) for recommended values. |
+| `reports_to` | ws ref | none | Role-to-role reporting link. Cycles permitted at this level (handled by the company workspace, not by AIP-47). |
+| `capabilities` | string[] | `[]` | Competences in prose. Append-and-dedupe across `extends`. |
+| `tools` | ws ref[] | `[]` | [AIP-14](/docs/aip-14) tool refs. Declarative intent — governance gates effect. Append-and-dedupe. |
+| `skills` | ws ref[] | `[]` | [AIP-3](/docs/aip-3) skill refs. Append-and-dedupe. |
+| `kpis` | string[] | `[]` | Scorer slugs (forward AIP). Append-and-dedupe. |
+| `strengths` | string[] | `[]` | Job-side strengths in prose. Append-and-dedupe. |
+| `antiPatterns` | string[] | `[]` | What the role explicitly does NOT do. Append-and-dedupe. |
+| `onPromotion` | ws ref | none | [AIP-39](/docs/aip-39) action ref. Fired on promotion INTO this role. |
+| `onDemotion` | ws ref | none | [AIP-39](/docs/aip-39) action ref. Fired on demotion OUT of this role. |
+| `onAssign` | ws ref | none | [AIP-39](/docs/aip-39) action ref. Fired on first assignment of this role. |
+| `appliesTo` | ws ref[] | `[]` | Cross-AIP bindings — restrict the role to specific operators. |
+| `defaultPersona` | ws ref | none | [AIP-25](/docs/aip-25) PERSONA recommended for operators adopting this role. Advisory. |
+| `defaultIdentity` | ws ref | none | [AIP-23](/docs/aip-23) IDENTITY recommended for operators adopting this role. Advisory. |
+| `defaultPolicy` | ws ref | none | [AIP-38](/docs/aip-38) POLICY recommended for operators adopting this role. **Advisory only** — role declares intent; policy decides effect. See [Role vs Policy vs Governance](#role-vs-policy-vs-governance). |
+| `tags` | string[] | `[]` | Catalog tags. Lowercase kebab-case. Append-and-dedupe across `extends`. |
+| `metadata` | object | `{}` | Vendor extensions, namespaced under `<vendor>`. |
+
+### Body conventions
+
+The frontmatter ends; the body is markdown. The body is what the host
+typically passes verbatim into the operator's context as job-instruction
+prose. Conventional sections:
+
+- `## Background` — long-form context for the role. What kind of
+  operator typically holds it, what their experience looks like, what
+  assumptions they operate under.
+- `## Working principles` — operating heuristics phrased as imperatives.
+  The "how this role does its job" prose that frontmatter clauses
+  cannot capture.
+- `## When to escalate` — trigger conditions for handing off or
+  requesting human approval. Pairs with [AIP-7](/docs/aip-7) governance
+  policies.
+- `## Anti-patterns` — concrete examples of out-of-scope work, paired
+  with the `antiPatterns` frontmatter field for short labels.
+- `## Notes` — author-facing context. Why this role exists, what NOT to
+  change without breaking the job, links to related roles.
+
+The body is free-form. The contract lives in the frontmatter. A runtime
+that strips the body and renders frontmatter only is non-conforming —
+the body MUST be available to the operator at runtime.
+
+### Composition (`extends:` chain)
+
+A role MAY extend another role. Composition is the mechanism by which
+an organization ships an "our-seo-specialist" variant without forking
+the community `seo-specialist`. When a host loads a `ROLE.md` whose
+`extends:` is set, it MUST:
+
+1. **Walk the parent chain.** Recursively load the parent referenced by
+   `extends:`; that parent's parent if it has one; until a manifest
+   with no `extends:` is reached. Maximum chain depth is eight. Hosts
+   MUST detect cycles by tracking visited absolute paths.
+2. **Treat depth overflow and cycle detection as warnings**, not
+   errors. A role whose chain is malformed MUST still load — the
+   runtime falls back to the local manifest only and surfaces
+   `role_extends_cycle` (or `role_extends_depth_exceeded`) as a warning
+   to the consumer's debug surface.
+3. **Tolerate a missing parent.** If `extends:` points to a path that
+   does not exist, the host emits `role_extends_missing` as a warning
+   and uses the local manifest only.
+4. **Merge bottom-up.** Walk the chain from the workspace root toward
+   the leaf, merging each manifest into the accumulator using the
+   strategy below.
+
+#### Merge strategy
+
+The role merge strategy makes **append-and-dedupe** the default for any
+field that lists declarations the role accumulates over its lineage —
+responsibilities, capabilities, tools, skills, KPIs, strengths, anti-patterns,
+tags. A child role inherits all of the parent's responsibilities AND adds
+its own; it inherits all of the parent's tool refs AND can extend the
+list. Scalar fields override (the child's `seniority` replaces the
+parent's); single bindings override (the child's `defaultPersona`
+replaces the parent's).
+
+| Field | Strategy | Notes |
+|---|---|---|
+| `name`, `title`, `description`, `version` | override | Child's identity wins. |
+| `extends` | local-only | Not inherited. |
+| `department` | override | Child wins. |
+| `reports_to` | override | Child wins. A re-org is a child override, not an append. |
+| `seniority` | override | Child wins. A senior variant of a junior role overrides. |
+| `mission` | override | Child rewrites the mission prose if set. |
+| `responsibilities` | append + dedupe | Lineage accumulates clauses. |
+| `capabilities` | append + dedupe | Lineage accumulates competences. |
+| `tools` | append + dedupe | Lineage accumulates refs. |
+| `skills` | append + dedupe | Lineage accumulates refs. |
+| `kpis` | append + dedupe | Lineage accumulates KPI slugs. |
+| `strengths` | append + dedupe | Lineage accumulates strings. |
+| `antiPatterns` | append + dedupe | Lineage accumulates strings. |
+| `onPromotion`, `onDemotion`, `onAssign` | override | Single action; child wins. |
+| `appliesTo` | local-only | Not inherited. Each role declares its own consumer scope. |
+| `defaultPersona`, `defaultIdentity`, `defaultPolicy` | override | Single binding; child wins. |
+| `tags` | append + dedupe | Lineage accumulates tags. |
+| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+| Body markdown | append-with-separator | Child body is appended to parent body with `\n\n---\n\n`. Child MAY set `bodyMerge: replace` in `metadata.aip-47.bodyMerge` to replace instead. |
+
+The host MUST expose **both** the merged effective config AND the
+resolution chain (ordered list of absolute paths consumed during merge)
+on its debug surface.
+
+#### Explicit remove of inherited entries
+
+When a child role needs to **remove** an inherited entry from a
+list-strategy field rather than add one, it MAY use the long form on
+that field:
+
+```yaml
+responsibilities:
+  add:
+    - "Align every brief with our brand voice"
+  remove:
+    - "Coordinate weekly with EU content team"
+```
+
+The long form is mutually exclusive with the short list form on the
+same field — a runtime that sees both MUST emit
+`role_merge_form_conflict` and fall back to the long form.
+
+The remove operation is exact-string match against the merged
+accumulator at the point this manifest is folded in. Removing an entry
+that does not exist is a no-op and SHOULD emit
+`role_merge_remove_missed` as a warning.
+
+### Cross-AIP refs
+
+A role composes with the rest of the AIP family through several ref
+fields. The table below lists every cross-AIP ref and the AIP that owns
+the binding's semantics.
+
+| Field | Target AIP | Purpose |
+|---|---|---|
+| `extends` | another `role/v1` | Composition. |
+| `reports_to` | another `role/v1` | Org-chart reporting line. Renders an org chart; does not affect runtime dispatch. |
+| `tools[]` | [AIP-14](/docs/aip-14) tool | Declarative intent — what tools an operator in this role expects to invoke. Governance ([AIP-7](/docs/aip-7)) decides effect. |
+| `skills[]` | [AIP-3](/docs/aip-3) skill | Declarative intent — what skills an operator in this role expects to load. |
+| `onPromotion`, `onDemotion`, `onAssign` | [AIP-39](/docs/aip-39) action | Lifecycle hooks. [AIP-37](/docs/aip-37) defines the event vocabulary. |
+| `appliesTo[]` (`ws://operators/<slug>`) | [AIP-9](/docs/aip-9) operator | Restrict the role to specific operators. By default a role applies to any operator that names it. |
+| `defaultPersona` | [AIP-25](/docs/aip-25) persona | Advisory binding — recommended persona for operators adopting this role. The operator's own `persona:` field overrides. |
+| `defaultIdentity` | [AIP-23](/docs/aip-23) identity | Advisory binding — recommended identity workspace for operators adopting this role. The operator's own `identity:` field overrides. |
+| `defaultPolicy` | [AIP-38](/docs/aip-38) policy | **Advisory binding** — recommended policy for operators adopting this role. The operator's own `policy:` field overrides. **Role declares intent; policy decides effect** — runtimes MUST NOT derive access grants from the role alone. See [Role vs Policy vs Governance](#role-vs-policy-vs-governance). |
+
+A host MUST verify that every cross-AIP ref it loads resolves —
+unresolvable refs surface as warnings (`role_tool_unresolvable`,
+`role_skill_unresolvable`, `role_action_unresolvable`,
+`role_appliesto_unresolvable`, `role_default_persona_unresolvable`,
+`role_default_identity_unresolvable`, `role_reports_to_unresolvable`).
+Refs that fail to resolve MUST NOT block load: a role is usable without
+its declared bindings, and graceful degradation is preferable to
+refusal when the registry is partial.
+
+### Departments (informative)
+
+`department` is a free string. The following values are recommended for
+cross-runtime alignment and SHOULD be used when the role fits cleanly:
+
+| Department  | Typical roles |
+|---|---|
+| `engineering` | Software Engineer, DevOps Engineer, QA Engineer, Tech Lead |
+| `product`     | Product Manager, UX Designer, Product Analyst |
+| `marketing`   | Marketing Manager, SEO Specialist, Content Writer, Social Media Manager |
+| `sales`       | Account Executive, SDR, Sales Operations |
+| `customer`    | Customer Success Manager, Support Specialist, Onboarding Specialist |
+| `operations`  | General Manager, Project Manager, Business Analyst |
+| `finance`     | Financial Analyst, Bookkeeper, FP&A Analyst |
+| `people`      | Recruiter, People Ops |
+| `executive`   | CEO, Founder, Managing Director |
+
+Runtimes MAY enforce a closed set per organisation through a vendor
+extension; the spec does not. Roles that do not fit the recommended
+taxonomy (legal, R&D, clinical, …) SHOULD adopt a domain-specific
+string and document it under their `metadata`.
+
+### Vendor extensions
+
+Vendor-specific fields live under `metadata.<vendor>`. Hosts MUST
+tolerate unknown `metadata.<vendor>.…` keys; they MUST NOT honour
+metadata fields that override the meaning of any field defined in this
+AIP. The role spec itself is the source of truth; vendor namespaces are
+advisory. Conventional vendor extensions used by reference
+implementations:
+
+- `metadata.guilde.visibility` — `public | private | org`
+- `metadata.guilde.organizationId` — opaque org handle, scopes
+  `visibility: org`
+- `metadata.guilde.modelTier` — recommended LLM tier for operators in
+  this role
+- `metadata.aip-47.bodyMerge` — `append-with-separator | replace`,
+  controls body merge under `extends` (default `append-with-separator`)
+
+## Role vs Persona vs Identity vs Operator
+
+The role-vs-persona-vs-identity boundary is the most load-bearing
+decision in AIP-47. All four describe one facet of who an operator is;
+the split is deliberate and the seams are sharp.
+
+| Aspect | Role (AIP-47) | Persona (AIP-25) | Identity (AIP-23) | Operator (AIP-9) |
+|---|---|---|---|---|
+| Answers | "What is the job?" | "What is the public face?" | "What is the inner substance?" | "Which instance is hired?" |
+| Shape | Single doc | Single doc | Workspace | Single doc + runtime state |
+| Centre of gravity | Mission, responsibilities, KPIs, tools | Name, voice, backstory, boundaries | Cognitive style, decision posture, value layers | Hired-instance binding (role + persona + identity + memory + governance) |
+| Composition | `extends` chain, depth ≤ 8 | `extends` chain, depth ≤ 8 | Workspace `extends` + per-layer registries | Static frontmatter; dynamic runtime resolution per request |
+| Mutability | Light edits — bump version, ship | Light edits — bump version, ship | Layered — per-layer governance, audit trails | Frequent — every turn updates memory and state |
+| Carries seniority? | YES | NO | NO | Inherited from role |
+| Carries voice? | NO | YES | Optional | Inherited from persona |
+| Carries cognition? | NO | NO | YES | Inherited from identity |
+| Carries memory? | NO | NO | Optional (layered) | YES |
+| Tied to a specific instance? | NO (template) | NO (template) | NO (template) | YES |
+| Validates against | `ROLE.schema.json` | `PERSONA.schema.json` | Workspace schema + per-layer schemas | `OPERATOR.schema.json` |
+
+**When to use which.** Reach for AIP-47 when you want to ship a job
+description — the mission, responsibilities, KPIs, tools, and reporting
+line of a position. Reach for [AIP-25](/docs/aip-25) when you want to
+ship a named character — the face users meet, the voice they hear,
+the backstory. Reach for [AIP-23](/docs/aip-23) when you want to ship
+layered behavioural substance. Reach for [AIP-9](/docs/aip-9) when you
+want to ship a *hired* operator that binds a role, persona, identity,
+and runtime together.
+
+**How they compose.** An [AIP-9](/docs/aip-9) operator binds one role
+via its required `role:` field. The operator MAY ALSO bind a persona
+(`persona:`) and an identity (`identity:`). The role MAY *recommend*
+default persona and identity bindings (`defaultPersona`,
+`defaultIdentity`); the operator's own fields override.
+
+**Why role-as-doc rather than role-fields-on-operator.** Two operators
+holding the "Senior SEO Specialist" job should share that job
+description. Promoting an operator is *re-binding* the operator to a
+different role, not *editing* the operator's responsibilities. Both
+behaviours require role to be a portable artifact, not an inline
+operator field. The AIP-6 company package layout reflects this: roles
+live in `roles/<slug>/ROLE.md`, operators in `operators/<slug>/OPERATOR.md`,
+linked by slug.
+
+**Why AGENT (AIP-42) does NOT bind a role.** [AIP-42](/docs/aip-42)
+AGENT.md is the base runnable primitive — explicitly *"no company, no
+role, no assembly required"*. Adding a role to AGENT would collapse the
+AIP-42 / AIP-9 split: AGENT is portable utility (code-reviewer,
+researcher, formatter), OPERATOR is the upgraded shape that adds
+organizational binding. A standalone agent that needs a role is, by
+definition, an operator — the upgrade path is AGENT → OPERATOR, not
+"AGENT with optional role". AIP-47 is consumed by AIP-9 OPERATOR's
+required `role:` field; AIP-42 AGENT has no role binding.
+
+## Role vs Policy vs Governance
+
+The most consequential seam in AIP-47 is the one between **role** and
+**policy**. They are easy to confuse because both seem to describe
+"what an operator can do" — but they describe **different things** and
+collapsing them is a security mistake.
+
+| Axis | Role (AIP-47) | Policy (AIP-38) | Governance (AIP-7) |
+|---|---|---|---|
+| Answers | "What is the job?" | "What is allowed?" | "What was decided, by whom, with what audit?" |
+| Sense | HR — job description | Security — access control | Process — approval & audit |
+| Surface | `tools[]`, `skills[]`, `kpis[]`, `responsibilities[]` (intent) | `access` grants on [AIP-39](/docs/aip-39) ACTION ids, limits, requirements | Signatures, audit-events, approval policies |
+| Subject | The position | The operator (or workspace, storage, sandbox, code, secrets, tool) | The decision |
+| Mutability | Bumped on org redesign | Tightened on threat / loosened on grant | Append-only |
+| Edited by | Hiring manager / HR | Security / admin | Approver (human or agent) |
+| Grants permission? | **NO** — declarative intent only | **YES** — the access primitive | NO — records decisions about grants |
+| Required on the operator? | YES — `role:` field is mandatory per [AIP-9](/docs/aip-9) | Optional — operators inherit org defaults if absent | Optional — governance binding wraps the operator |
+
+### The contract: role declares intent, policy gates effect
+
+A conforming AIP-47 runtime MUST honour the following invariant:
+
+> **The role's `tools[]`, `skills[]`, and `kpis[]` are declarative
+> intent — a statement of what the role expects to use. They MUST NOT
+> be interpreted as permissions. Effective access for an operator
+> bound to this role is decided by [AIP-38](/docs/aip-38) POLICY
+> evaluation against the operator's governance binding
+> ([AIP-7](/docs/aip-7)), not by the role's declaration.**
+
+In practice:
+
+- If a role declares `tools: [ws://tools/ahrefs]` but the operator's
+  policy does not grant the corresponding [AIP-39](/docs/aip-39) ACTION
+  ids, the operator MUST NOT invoke the tool. The role's declaration
+  surfaces as an `intent_unsatisfied` warning to a human reviewer; it
+  does NOT silently grant the access.
+- Conversely, if a policy grants more than the role declares (e.g. an
+  admin-elevated operator), that is allowed: policy is the floor for
+  what is permitted, role is the floor for what is expected.
+- A custom org-scoped role that adds `tools[]` MUST NOT, by virtue of
+  being saved, elevate any operator's access. Policy authorship is a
+  separate workflow with separate approvers.
+
+### Why `defaultPolicy` is advisory and overridable
+
+The `defaultPolicy` field on a role is a **recommendation** — most
+operators in this job want this policy. It is **not** the operator's
+effective policy. The operator's own `policy:` field overrides; the
+runtime resolves the operator's policy ref through its own source
+chain, not through the role.
+
+Rationale:
+
+- Same role, different orgs may have different policy stances (a "CSM"
+  in a regulated industry has tighter access than a "CSM" in a
+  consumer SaaS).
+- Promoting an operator should NOT auto-elevate its policy. Re-binding
+  the role updates the *recommendation*; the operator's policy
+  binding survives until a separate governance flow (signed by an
+  approver per [AIP-7](/docs/aip-7)) changes it.
+- Roles are HR-managed artifacts; policies are security-managed. A
+  hiring change should not be a security change.
+
+### Why role does not declare permissions directly
+
+Two reasons:
+
+1. **Vendor-neutrality.** [AIP-38](/docs/aip-38) is the access
+   primitive every consumer AIP (WORKSPACE, STORAGE, SANDBOX, CODE,
+   SECRETS, TOOL) already composes with. Roles that declare permissions
+   directly would fragment the access surface.
+2. **Stable seam.** The `role declares intent / policy gates effect`
+   contract is the security invariant that makes user-authored roles
+   safe. If an organization wants to ship custom roles via a UI, the
+   roles never grant; only governance-side workflows grant.
+
+A role MAY hint at expected scopes via its `tools[]` list; a policy
+author MAY consult `role.tools[]` when drafting a matching policy. The
+direction is always role → policy, never the inverse.
+
+## Rationale
+
+**Why a separate AIP rather than extending AIP-6.** [AIP-6](/docs/aip-6)
+names `role` as a doctype of the company family but defers the body
+schema. Two options were considered: (a) add the role schema inline to
+AIP-6, or (b) carve out a sibling AIP. Option (b) wins because the role
+schema is large (a full job description has more fields than the
+company itself), evolves on its own cadence, and is referenced by
+specs outside the company family (notably [AIP-9](/docs/aip-9)
+OPERATOR's `role:` field, which does not require the surrounding
+company package). The pattern matches [AIP-25](/docs/aip-25) PERSONA,
+which is similarly referenced by AIP-6's operator binding but ships as
+its own spec.
+
+**Why a single doc rather than a workspace.** Roles are templates, not
+runtime stateful workspaces. There is no per-layer governance, no
+accumulating memory, no audit trail at the role level. Composition is
+shallow (extends chain ≤ 8) and lifetime is long but quiet (roles
+change every few months at most). A workspace would be overkill;
+[AIP-23](/docs/aip-23) IDENTITY's workspace shape is the right
+heaviness when behaviour layers accumulate, but a job description does
+not need that machinery.
+
+**Why instance inheritance (`extends`) rather than only doctype
+extension via AIP-40.** [AIP-40](/docs/aip-40) lets a workspace
+declare a new doctype (`acme:executive-role`) by extending an existing
+AIP. That is doctype-level extension — it gives you a new shape with
+tightened constraints and added fields, useful when an organization
+wants its own doctype identity. AIP-47 also needs *instance-level*
+inheritance — an `our-seo-specialist.md` that inherits an upstream
+`seo-specialist.md` ROLE.md without becoming a new doctype. The two
+mechanisms compose: an organization MAY declare `acme:role` via
+AIP-40 AND publish instance-level `extends` chains within it.
+
+**Why `mission` is markdown prose rather than a one-liner.** A mission
+captures the *why* of a role and pretrains the operator's value
+priorities. One sentence is rarely enough; three are usually right; a
+paragraph is sometimes required for senior or executive roles. Forcing
+it into a single string truncates the part of the spec that most shapes
+operator behaviour.
+
+**Why `kpis` references scorers by slug, not inline metric
+definitions.** KPIs map naturally to scorers, which deserve their own
+AIP. Inline metric definitions create the same fragmentation we are
+solving for roles — a "branded organic traffic growth" scorer should
+be authored once and referenced many times.
+
+**Why `seniority` is on the role, not on the operator.** Seniority is a
+property of the job: a Senior SEO Specialist and a Junior SEO
+Specialist are distinct roles with distinct responsibilities and KPIs.
+Operator instances inherit seniority from their role. A promotion is
+re-binding the operator to a higher-seniority role; the operator's
+identity and memory survive the transition, while responsibilities,
+KPIs, and tool access change as a unit.
+
+**Why body markdown is normative, not just convention.** Frontmatter
+captures the explicit contract; body captures judgement, principles,
+and escalation rules — the texture a human onboarding doc conveys in
+prose and that LLMs benefit from reading verbatim. Stripping roles to
+fields loses the part that makes them useful as instructions.
+
+**Why `department` is a free string, not an enum.** Vendor-specific
+department taxonomies vary (legal, R&D, clinical, government,
+education, …). Spec-level alignment is more valuable as a recommendation
+than as enforcement; the informative table gives implementers a path to
+convergence without locking out domain-specific structures.
+
+**Why `appliesTo` is local-only under `extends`.** A role's
+`appliesTo[]` scope is a contract with specific operators. A child role
+that extended an `appliesTo` list would inadvertently broaden the
+parent's scope, which is the opposite of what the author intends. Each
+role declares its own consumer scope independently.
+
+## Reference Implementation
+
+Planned location: [`@agentproto/role`](https://github.com/agentproto/ts/tree/main/packages/role)
+in the agentproto TS monorepo. Scope:
+
+- `ROLE.md` parser and validator (frontmatter + body) against
+  `ROLE.schema.json`.
+- `extends` chain resolver with strategic-merge patcher, cycle
+  detection, and depth limit.
+- A reference catalogue of approximately fifty builtin role templates
+  spanning the recommended departments — shipped as a sibling package
+  `@agentproto/role-catalog`.
+- File-system source loader (per-company `roles/` folder).
+- Database source loader — adapter pattern for runtimes that store
+  roles in a table; the Guilde `operator_template` table is the
+  current reference shape and indicates the working schema.
+- HTTP source loader (optional, for community catalogues).
+- Integration adapter for [AIP-9](/docs/aip-9) OPERATOR consumers
+  (Guilde `operator-orchestrator`).
+
+A reference adapter for the Guilde runtime is documented in
+[`./resources/aip-47/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ADAPTER.md).
+Worked examples (builtin role, org-scoped override, executive role)
+are in
+[`./resources/aip-47/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/EXAMPLES.md).
+
+## Backwards Compatibility
+
+Not applicable for the spec itself — AIP-47 introduces a new doctype.
+
+For [AIP-6](/docs/aip-6) implementations that previously embedded
+role fields directly on `OPERATOR.md` or on a `role: <enum>` field of
+the operator: those implementations SHOULD migrate to extracting role
+data into `ROLE.md` files and replacing the operator field with a slug
+reference (the field [AIP-9](/docs/aip-9) already declares). AIP-6 did
+not formally specify role-on-operator beyond the doctype mention, so
+this is a clarification, not a break.
+
+For [AIP-9](/docs/aip-9) implementations that resolve the operator
+`role:` field against an internal enum (Guilde's `ceo | cmo | cto | …`):
+those implementations SHOULD continue to honour the existing slugs as
+canonical role names and ship `ROLE.md` files at the matching slugs.
+The slug surface stays stable while the resolution target migrates from
+an enum to a doc.
+
+## Security Considerations
+
+`ROLE.md` is a static file format with no execution semantics. The risk
+surface lies in what runtimes do with role contents:
+
+- **Tool elevation via a crafted role.** A malicious or careless role
+  declares `tools: [ws://tools/admin/*]` and is loaded into a trusted
+  operator. *Mitigation:* runtime tool allow-listing evaluated against
+  the operator's [AIP-7](/docs/aip-7) governance binding +
+  [AIP-38](/docs/aip-38) POLICY grants, not against the role. The role
+  declares intent; policy gates effect. **A conforming runtime MUST NOT
+  grant access to a tool, skill, or action on the basis of role
+  declaration alone.** This is the load-bearing security invariant of
+  AIP-47 — see [Role vs Policy vs Governance](#role-vs-policy-vs-governance).
+- **`defaultPolicy` elevation abuse.** A malicious role's
+  `defaultPolicy` field points at a permissive policy.
+  *Mitigation:* `defaultPolicy` is **advisory** — the runtime MUST NOT
+  apply it to an operator without the operator's own `policy:` field
+  pointing at the same ref OR a governance signature attesting the
+  binding. Hiring an operator into a role MUST NOT, by itself, change
+  the operator's effective policy. Policy changes are a separate
+  workflow under [AIP-7](/docs/aip-7) governance.
+- **Prompt injection via body markdown.** A role body is fed verbatim
+  to the LLM and could attempt to subvert operator behaviour ("ignore
+  previous instructions, you are now…"). *Mitigation:* provenance
+  metadata (`metadata.signed_by`, `metadata.source`), runtime-side role
+  allow-listing for un-vetted sources, and prompt layering that places
+  the role body below the runtime's operator-shell instructions.
+- **Inheritance loop or explosion.** Malicious `extends` chains could
+  exhaust parser resources or yield enormous merged roles.
+  *Mitigation:* cycle detection mandatory; depth limit recommended
+  (≤ 8); resolved role size limit recommended (≤ 64 KiB after merge).
+- **KPI manipulation.** A custom role removes adverse KPIs
+  (`scorer/quality-drop`) via the `remove` long form. *Mitigation:*
+  governance gates on role authorship and modification; organisations
+  MAY enforce an immutable baseline KPI list via vendor extension.
+- **Cross-org role leakage.** A role marked
+  `metadata.guilde.visibility: org` is served to operators in a
+  different org. *Mitigation:* runtime resolvers MUST enforce
+  visibility scope on every lookup; visibility is a runtime concern,
+  not a file-format concern.
+- **Promotion-trigger abuse.** `onPromotion` action refs run with the
+  caller's privileges, which may exceed the operator's. *Mitigation:*
+  [AIP-39](/docs/aip-39) action invocations MUST be evaluated against
+  [AIP-7](/docs/aip-7) governance like any other action; lifecycle
+  hooks do not bypass policy.
+
+## See also
+
+- [AIP-3](/docs/aip-3) — SKILL.md (skills referenced by role)
+- [AIP-6](/docs/aip-6) — COMPANY.md (hosts the role doctype)
+- [AIP-7](/docs/aip-7) — GOVERNANCE.md (signatures, audit, approval — wraps the policy decisions)
+- [AIP-9](/docs/aip-9) — OPERATOR.md (consumes the role via the required `role:` field)
+- [AIP-14](/docs/aip-14) — TOOL.md (tools referenced by role)
+- [AIP-23](/docs/aip-23) — IDENTITY.md (sibling — inner substance)
+- [AIP-25](/docs/aip-25) — PERSONA.md (sibling — public face)
+- [AIP-37](/docs/aip-37) — LIFECYCLE.md (event vocabulary for hooks)
+- [AIP-38](/docs/aip-38) — POLICY.md (the access primitive — `defaultPolicy` advisory only)
+- [AIP-39](/docs/aip-39) — ACTION.md (action refs for hooks)
+- [AIP-42](/docs/aip-42) — AGENT.md (base runnable; **does NOT bind a role** — AIP-9 OPERATOR is the upgraded shape that adds the role binding)
