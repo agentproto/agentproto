@@ -141,8 +141,51 @@ interface Operator {
   /** Conversation participation — whether/when this operator
    *  reads + responds in shared threads */
   participation: ParticipationConfig
+
+  /** Optional runtime binding — picks the runtime this operator runs
+   *  on. Default `kind: "in-process"` runs in the host's Mastra-style
+   *  in-process loop. `kind: "agent-cli"` dispatches turns to a
+   *  spawned AIP-45 agent CLI subprocess (Hermes, Claude Code, ...). */
+  runtime?: RuntimeBinding
 }
 ```
+
+### Runtime binding
+
+The optional `runtime` block selects the runtime that owns this
+operator's turns. Two kinds today:
+
+```yaml
+# In-process — the host's own agent loop (default).
+runtime:
+  kind: in-process
+
+# Agent CLI — dispatch turns to an AIP-45 manifest's spawned binary.
+runtime:
+  kind: agent-cli
+  ref: claude-code                # AIP-45 AGENT-CLI.md ref
+  config:                         # per-runtime configuration (optional)
+    mode: plan                    # one manifest-declared mode (mutually exclusive)
+    options:                      # manifest-declared option ids → values
+      model: claude-opus-4-7
+      max_turns: 50
+    continuation: pinned-session  # one of the manifest's `continuation.supported` ids
+  session:                        # session policy override (optional)
+    mode: persistent
+    idle_timeout_ms: 1800000
+```
+
+`config` is the contract between the operator and its bound AIP-45
+manifest. Hosts MUST validate every entry before spawn:
+
+- `config.mode` MUST appear in the manifest's `modes[].id` set.
+- Each `config.options.<id>` MUST match a manifest `options[]` entry
+  by `id` AND satisfy that entry's declared `type` / `enum` / bounds.
+- `config.continuation` MUST be a member of the manifest's
+  `continuation.supported` set.
+
+Unknown ids are a hard load-time error; the host MUST refuse to bind
+the operator. Omitted fields fall back to manifest defaults.
 
 ### Lifecycle
 

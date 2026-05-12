@@ -90,6 +90,15 @@ A manifest is **AIP-45-conformant** iff:
 5. When `protocol: "proprietary"`, the manifest's adapter package
    (`adapter` field) implements the `AgentCliClient` interface from
    `@agentproto/driver-agent-cli`.
+6. When `modes` is present, every entry has a unique `id` matching
+   `^[a-z0-9][a-z0-9\-]*$`; mode patches reference no symbols beyond
+   `bin_args_append` and `env`.
+7. When `options` is present, every entry has a unique `id` matching
+   `^[a-z0-9][a-z0-9_]*$`; `type: enum` entries declare an `enum`
+   array; `min`/`max` only appear on `type: integer`.
+8. When `continuation` is present, `default` is in `supported`; if
+   `default == "native-resume"` then `capabilities.resumable: true`
+   MUST also be declared.
 
 ### Frontmatter
 
@@ -107,6 +116,7 @@ Top-level fields (informative summary):
 | `bin_args` | No | Default argv (e.g. `["acp"]` for `hermes acp`) |
 | `install` | Yes | Array of install methods (AIP-29 `$ref`) |
 | `version_check` | Yes | Version detection (AIP-29 `$ref`) |
+| `setup` | No | Post-install configuration steps (AIP-29 `$ref`) — daemons, bind-time prompts, OAuth, external pickers |
 | `auth` | No | Auth surface (AIP-29 `$ref`) |
 | `sandbox` | Yes | Sandbox profile (AIP-36 `$ref`) |
 | `protocol` | Yes | `acp` \| `mcp` \| `proprietary` |
@@ -116,6 +126,9 @@ Top-level fields (informative summary):
 | `session` | No | Session policy: mode, idle_timeout_ms, max_turns |
 | `models` | No | Model routing: default, allowed, env-mapped |
 | `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |
+| `modes` | No | Mutually-exclusive operation modes (e.g. claude-code's `plan` / `accept-edits` / `bypass-permissions`). One active per turn. |
+| `options` | No | Independent typed knobs (model, max-turns, auto, ...). Multiple may be active per turn. |
+| `continuation` | No | How prior turns reach the CLI. Declares default + supported strategies. |
 | `runner` | No | AIP-17 RUNNER.md ref or inline runner block |
 
 ### `protocol` discriminator
@@ -220,6 +233,104 @@ When `protocol: "acp"`, capabilities MUST be a subset of the ACP
 capabilities the bound AIP-44 manifest declares; the runner enforces
 this at load time.
 
+### Modes
+
+`modes` is OPTIONAL. When present, it declares the set of mutually-
+exclusive operation profiles the CLI exposes. The host picks **at
+most one mode per turn** via `OPERATOR.runtime.config.mode` (AIP-9).
+Each mode may patch the spawn `bin_args` and `env`; the runner applies
+mode patches AFTER the manifest's default `bin_args` and BEFORE option
+patches.
+
+```yaml
+modes:
+  - id: default
+    description: Standard interactive session
+  - id: plan
+    description: Plan-only mode — no edits, no commands
+    bin_args_append: ["--permission-mode", "plan"]
+  - id: accept-edits
+    bin_args_append: ["--permission-mode", "acceptEdits"]
+  - id: bypass-permissions
+    bin_args_append: ["--permission-mode", "bypassPermissions"]
+```
+
+Mode ids MUST be unique. The default mode (when the operator omits
+`config.mode`) is "no patch applied" — the manifest's bin_args run
+verbatim. Hosts MUST reject an `OPERATOR.runtime.config.mode` value
+that is not in the manifest's `modes[].id` list.
+
+### Options
+
+`options` is OPTIONAL. When present, it declares typed knobs the CLI
+accepts. Unlike modes, options are **independent** — multiple may be
+active in the same turn. Each option declares a `type` (`boolean` |
+`integer` | `string` | `enum`) and how its value patches `bin_args` /
+`env`.
+
+```yaml
+options:
+  - id: model
+    type: enum
+    enum: [claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5]
+    bin_args_template: ["--model", "{value}"]
+  - id: max_turns
+    type: integer
+    min: 1
+    max: 200
+    bin_args_template: ["--max-turns", "{value}"]
+  - id: auto
+    type: boolean
+    bin_args_append_when_true: ["--auto"]
+```
+
+Patch semantics:
+
+- `bin_args_template` — appended when the value is non-default. The
+  literal token `{value}` is replaced with the option's value
+  (stringified). Use for value-bearing flags.
+- `bin_args_append_when_true` — applies only to `type: boolean`. Value
+  must be `true`. Use for bare flags.
+- `env` — merged into the spawn env. Values may contain `{value}`.
+
+Hosts MUST validate `OPERATOR.runtime.config.options.<id>` against the
+matching option's type / enum / bounds before spawn. Unknown ids are a
+hard load-time error.
+
+### Continuation
+
+`continuation` is OPTIONAL but RECOMMENDED. It declares **how prior
+conversation turns reach the CLI on subsequent invocations**. The
+driver hosts a strategy registry; this block names which strategies
+fit this CLI and which is the default.
+
+```yaml
+continuation:
+  default: pinned-session
+  supported: [pinned-session, transcript, none]
+  pinned_session:
+    idle_timeout_ms: 1800000
+    key_scope: [conversation, operator]
+```
+
+Built-in strategy ids (`continuationStrategyId` enum):
+
+| Id | Behaviour | Best for |
+|---|---|---|
+| `none` | Fresh session per turn, no prior context. Current behaviour. | One-shot tools; debugging |
+| `pinned-session` | Driver keeps the spawned child process alive across turns; subsequent `session.send` calls hit the SAME child, so the CLI's in-memory model context carries over. Idle TTL eviction. | CLIs declaring `session.mode: persistent` AND `context_carryover: true` (Claude Code, OpenCode, ...) |
+| `transcript` | Caller (host) supplies the last N turns as text; the strategy prepends them as a preamble before the current message. Token-costly but stateless and survives process restarts. | CLIs with `resumable: false` AND ephemeral session model; debugging when pinning misbehaves |
+| `native-resume` | Caller passes a prior session id; the strategy passes it to the CLI's own `--resume`/`--continue` flag at start. Requires `capabilities.resumable: true`. | CLIs with first-class durable sessions |
+
+Hosts MUST refuse to dispatch with a strategy outside `supported`. The
+operator MAY override `default` via `OPERATOR.runtime.config.continuation`
+provided the chosen id is in `supported`.
+
+`pinned_session.key_scope` is the composite key the driver uses to
+decide whether two turns share the same pinned child process. Default
+`[conversation, operator]` means: different conversations get different
+children; one operator-per-conversation reuses one child across turns.
+
 ### Sandbox integration
 
 `sandbox` is REQUIRED. AIP-45 inherits AIP-36 verbatim — the same
@@ -236,6 +347,32 @@ schema verbatim: `ref` to an AIP-19 SECRETS.md, `state.{paths,env}`,
 `login.cmd`, `refresh.cmd`, `expiry`. The runner resolves secrets via
 `@agentproto/secrets` and passes them to the subprocess via
 `sandbox.env.set` (never argv, never logs).
+
+### Setup surface
+
+`setup` is OPTIONAL. When present, mirrors
+[AIP-29 § Setup](/docs/aip-29#setup) verbatim — an ordered, idempotent
+pipeline of post-install configuration steps the host runs once per
+`(bundle.id, workspace.id, user.id)` after `install` and before the
+agent is considered ready. Step kinds: `cmd` (e.g. `openclaw onboard
+--install-daemon`), `prompt` (e.g. gateway URL, default channel),
+`oauth` (AIP-19 driver), `external` (browser-based pickers).
+
+Use `setup` for one-time concerns the auth state machine isn't
+designed to model: sidecar daemons, bind-time configuration choices,
+secret pastes from web consoles, Discord-channel / Slack-workspace
+selection. Recurring credential rotation stays in `auth.refresh`.
+
+Lifecycle integration:
+
+```
+install → version_check → setup → auth.login → spawn(bin) → handshake → session
+```
+
+When the manifest declares `setup`, the runner MUST refuse to spawn
+the binary until every step has either succeeded or matched its
+`skip_if`. Headless callers receive `error.code = "setup_required"`
+with the pending step list.
 
 ## Rationale
 

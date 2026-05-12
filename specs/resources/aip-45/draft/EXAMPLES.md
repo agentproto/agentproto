@@ -54,9 +54,49 @@ capabilities:
   multimodal: true
   resumable: false
   bidirectional: true
+modes:
+  - id: default
+    description: Standard interactive session
+options:
+  - id: model
+    type: enum
+    enum:
+      - anthropic/claude-sonnet-4-6
+      - anthropic/claude-opus-4-7
+    bin_args_template: ["--model", "{value}"]
+  - id: max_turns
+    type: integer
+    min: 1
+    max: 200
+    bin_args_template: ["--max-turns", "{value}"]
+continuation:
+  default: pinned-session
+  supported: [pinned-session, transcript, none]
+  pinned_session:
+    idle_timeout_ms: 1800000
+    key_scope: [conversation, operator]
 tags: [hermes, nous, acp, agent-runtime]
 ---
 ```
+
+### Operator binding (AIP-9)
+
+A Hermes-bound operator picks per-turn knobs through `runtime.config`:
+
+```yaml
+# operator definition (AIP-9 OPERATOR.md frontmatter)
+runtime:
+  kind: agent-cli
+  ref: hermes
+  config:
+    options:
+      model: anthropic/claude-opus-4-7
+      max_turns: 50
+    continuation: pinned-session   # default; shown explicitly
+```
+
+The host validates `config.options.*` against the manifest's `options[]`
+declarations before spawn; unknown ids are rejected at load time.
 
 ## MCP arm — Goose
 

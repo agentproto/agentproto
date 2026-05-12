@@ -45,6 +45,11 @@
     "version_check": {
       "$ref": "https://agentproto.sh/docs/aip-29/CLI.schema.json#/$defs/versionCheck"
     },
+    "setup": {
+      "type": "array",
+      "description": "Post-install configuration steps — shared with AIP-29 via $ref. Used for sidecar daemons (openclaw onboard) and one-time bind config (gateway URL, default channel) that don't fit the auth state machine.",
+      "items": { "$ref": "https://agentproto.sh/docs/aip-29/CLI.schema.json#/$defs/setupStep" }
+    },
     "auth": {
       "$ref": "https://agentproto.sh/docs/aip-29/CLI.schema.json#/$defs/auth"
     },
@@ -89,6 +94,17 @@
     "session": { "$ref": "#/$defs/session" },
     "models":  { "$ref": "#/$defs/models" },
     "capabilities": { "$ref": "#/$defs/capabilities" },
+    "modes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mode" },
+      "description": "Mutually-exclusive operation modes the CLI exposes. The host picks at most one per turn via OPERATOR.runtime.config.mode. Each mode patches bin_args / env; the patches are applied AFTER the manifest's default bin_args and BEFORE option patches. Common shape: claude-code's permission modes (default | plan | accept-edits | bypass-permissions)."
+    },
+    "options": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/option" },
+      "description": "Independent typed knobs the CLI accepts. The host picks any subset per turn via OPERATOR.runtime.config.options. Patches apply in declaration order, AFTER mode patches."
+    },
+    "continuation": { "$ref": "#/$defs/continuation" },
     "requires": { "$ref": "https://agentproto.sh/docs/aip-29/CLI.schema.json#/properties/requires" },
     "examples": {
       "type": "array",
@@ -134,6 +150,32 @@
           }
         },
         "required": ["session"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "object",
+            "properties": { "resumable": { "const": true } },
+            "required": ["resumable"]
+          }
+        },
+        "required": ["capabilities"]
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "continuation": {
+            "type": "object",
+            "properties": {
+              "default": { "const": "native-resume" }
+            },
+            "required": ["default"]
+          }
+        },
+        "required": ["continuation"]
       },
       "then": {
         "type": "object",
@@ -204,6 +246,126 @@
         "resumable":     { "type": "boolean" },
         "bidirectional": { "type": "boolean" }
       }
+    },
+    "mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "description": "A single mutually-exclusive operation mode. Exactly one mode is active per turn; modes do not stack. Use options for independent knobs.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9\\-]{0,63}$",
+          "description": "Stable id. The operator config references this id."
+        },
+        "description": { "type": "string" },
+        "bin_args_append": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra argv appended after the manifest's bin_args when this mode is active."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Extra env vars merged into the spawn env when this mode is active."
+        }
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "description": "A single typed knob. Multiple options can be active in the same turn; each option's patch is independent.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_]{0,63}$",
+          "description": "Stable id. The operator config references this id."
+        },
+        "type": {
+          "enum": ["boolean", "integer", "string", "enum"]
+        },
+        "description": { "type": "string" },
+        "enum": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Allowed values when type=enum."
+        },
+        "default": {
+          "description": "Default value used when the operator config omits this option. Type matches the declared `type`."
+        },
+        "min": {
+          "type": "integer",
+          "description": "Lower bound when type=integer."
+        },
+        "max": {
+          "type": "integer",
+          "description": "Upper bound when type=integer."
+        },
+        "bin_args_template": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Argv template appended when the option has a non-default value. The literal token `{value}` is replaced with the option's value (stringified). Use for value-bearing flags like `--model {value}` or `--max-turns {value}`."
+        },
+        "bin_args_append_when_true": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Argv appended when type=boolean AND value=true. Use for bare flags like `--auto`."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Env vars to merge when the option has a non-default value. Values may contain `{value}` for templating."
+        }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "type": { "const": "enum" } }, "required": ["type"] },
+          "then": { "required": ["enum"] }
+        }
+      ]
+    },
+    "continuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "supported"],
+      "description": "How prior turns reach the CLI. The driver hosts a strategy registry; this block declares which strategies fit this CLI and which is the default. The operator config MAY override `default` with any id from `supported`.",
+      "properties": {
+        "default": { "$ref": "#/$defs/continuationStrategyId" },
+        "supported": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/continuationStrategyId" },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Strategies the CLI is known to work with. The host MUST refuse to run with a strategy outside this list."
+        },
+        "pinned_session": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tuning for the pinned-session strategy. Ignored by other strategies.",
+          "properties": {
+            "idle_timeout_ms": {
+              "type": "integer",
+              "minimum": 1000,
+              "default": 1800000,
+              "description": "How long an idle pinned session is kept alive before the driver closes it. Applies in addition to the CLI's own session.idle_timeout_ms."
+            },
+            "key_scope": {
+              "type": "array",
+              "items": { "enum": ["conversation", "operator", "user", "guild", "workspace"] },
+              "minItems": 1,
+              "uniqueItems": true,
+              "default": ["conversation", "operator"],
+              "description": "Composite key that uniquely identifies a pinned session. Default keys by (conversation, operator) — different conversations get different child processes; one operator per conversation reuses one process across turns."
+            }
+          }
+        }
+      }
+    },
+    "continuationStrategyId": {
+      "enum": ["none", "pinned-session", "transcript", "native-resume"],
+      "description": "Built-in strategy ids. Future custom strategies require a follow-up AIP that opens this enum."
     }
   }
 }

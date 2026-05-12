@@ -347,6 +347,124 @@ Tools invoked in `unauthed` state SHOULD short-circuit with
 `refresh` runs eagerly while in `authed` to delay re-entry to
 `unauthed`.
 
+### Setup
+
+`setup` is OPTIONAL. When present, it declares an ordered, idempotent
+pipeline of **post-install configuration steps** the host runs once
+per `(bundle.id, workspace.id, user.id)` tuple after `install` and
+before the bundle is considered ready.
+
+It exists because the `install` → `version_check` → `auth` lifecycle
+doesn't model two real-world cases:
+
+1. **Sidecar daemons** — some CLIs ship a binary that depends on a
+   long-running companion process (`openclaw onboard --install-daemon`,
+   Ollama's model server, n8n's queue worker). The binary is on
+   `$PATH` after `install`, but the bundle is not actually usable
+   until the daemon is up.
+
+2. **Bind-time configuration** — values the user picks once and
+   reuses (Discord channel, Slack workspace, gateway URL, default
+   model). These aren't auth refreshes; they're *configuration*
+   captured at first run and persisted into the bundle's secrets
+   store or an env-var slot the runner injects on every spawn.
+
+```yaml
+setup:
+  - id: install-daemon
+    kind: cmd
+    cmd: "openclaw onboard --install-daemon"
+    skip_if:
+      cmd: "openclaw daemon status"
+      exit_code: 0                    # already running → skip
+    description: "Install + start the OpenClaw background daemon."
+
+  - id: gateway-url
+    kind: prompt
+    prompt: "Gateway URL"
+    default: "wss://gateway.openclaw.ai"
+    persist: { env: OPENCLAW_GATEWAY_URL }
+
+  - id: gateway-token
+    kind: prompt
+    type: secret
+    prompt: "Gateway token (paste from https://openclaw.ai/dashboard)"
+    persist: { secret_slug: openclaw/gateway-token }
+
+  - id: ready-check
+    kind: cmd
+    cmd: "openclaw acp --probe"
+    description: "Confirms the bridge can reach the configured gateway."
+```
+
+#### Step kinds
+
+| `kind`     | Purpose | Required fields |
+|------------|---------|-----------------|
+| `cmd`      | Run a shell command. Daemons, healthchecks, in-CLI config writes. | `cmd` |
+| `prompt`   | Ask the user for a value. `type: text \| select \| boolean \| secret`. | `prompt` |
+| `oauth`    | Drive an [AIP-19](/docs/aip-19) OAuth flow. Tokens land in the named SECRETS slug. | `secret_slug` |
+| `external` | Open a URL and wait for an external action. Discord-channel pickers, manual token paste flows. Optional `callback` reads the result from a host-allocated callback URL. | `url` |
+
+#### Common fields
+
+- `id` (REQUIRED) — stable per-step identifier. Appears in audit logs
+  and the host's setup ledger.
+- `description` (optional) — surface adapter shows this above the
+  prompt or progress line.
+- `skip_if` (optional) — `{ cmd, exit_code? }`. When the cmd exits
+  with the matching code, the step is skipped. Lets `agentproto
+  setup <slug>` re-runs be idempotent without external state.
+- `persist` (optional, applies to `cmd` / `prompt` / `external`) —
+  where the captured value lands. **Exactly one** of:
+  - `env: <NAME>` — env var the runner injects on every spawn
+    (lifted from the workspace secrets store).
+  - `secret_slug: <slug>` — write into an AIP-19 secret slot.
+  - `cmd: "<…> ${value}"` — run a CLI-specific config command with
+    the captured value substituted.
+
+#### Lifecycle integration
+
+```
+install → version_check → setup (this block) → auth.login → ready
+```
+
+Steps run in declared order. A failure aborts the pipeline and
+surfaces `error.code = "setup_failed"` with the failing step's `id`.
+Hosts MUST persist completion state per
+`(bundle.id, workspace.id, user.id)` so successful steps don't
+re-prompt on every invocation; `skip_if` is the in-band re-check
+mechanism for steps that can verify completion themselves.
+
+When `setup` is omitted, hosts skip this phase — backwards
+compatible with bundles authored before this addition.
+
+#### Surface adapters
+
+Surface adapters render `prompt` and `external` steps as their
+native UI affordance:
+
+- **CLI surface** — text/secret/select prompts via inquirer-like
+  TUI. `external` opens the URL via `open`/`xdg-open` and polls the
+  callback URL.
+- **Web surface** — modal with form inputs. `external` redirects
+  in-tab and reads the callback via `postMessage` or a host-managed
+  callback page.
+- **Headless surface** — surfaces `setup_required` to the caller
+  with the pending step list; refuses to spawn the bundle until the
+  caller has driven setup separately.
+
+#### Why not overload `auth.login`
+
+`auth.login.cmd` is a recurring affordance — the host MAY re-invoke
+it on `auth_required`, and the auth state machine keeps the bundle
+in `unauthed` until login completes. A daemon install or a
+configuration prompt is a *one-time* concern that survives logout
+and is orthogonal to credential rotation. Putting them in
+`auth.login.cmd` would either re-run them on every re-login (wrong)
+or make the auth state machine aware of one-shot steps (overloading
+the wrong field).
+
 ### Sandbox
 
 `sandbox` is the policy contract. Hosts MUST enforce it; bundles

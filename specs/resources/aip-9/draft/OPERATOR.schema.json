@@ -166,6 +166,27 @@
             "mode": { "enum": ["ephemeral", "persistent", "resumable"] },
             "idle_timeout_ms": { "type": "integer", "minimum": 1000 }
           }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-runtime configuration that the host applies when spawning / dispatching to the bound AIP-45 manifest. The host MUST validate every entry against the manifest's declared `modes` / `options` / `continuation.supported`; unknown ids are a hard load-time error.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "description": "Id of the manifest-declared mode to activate for this operator. At most one per operator (modes are mutually exclusive). Omitted = manifest's default behaviour (no mode patch applied)."
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Map of manifest-declared option id → value. Each value MUST satisfy the option's declared type / enum / min / max. Unknown ids are rejected at load time."
+            },
+            "continuation": {
+              "type": "string",
+              "enum": ["none", "pinned-session", "transcript", "native-resume"],
+              "description": "Continuation strategy id. MUST be a member of the manifest's `continuation.supported`. Omitted = manifest's `continuation.default`."
+            }
+          }
         }
       }
     },

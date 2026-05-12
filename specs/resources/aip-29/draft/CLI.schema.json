@@ -19,6 +19,11 @@
       "items": { "$ref": "#/$defs/installMethod" }
     },
     "version_check": { "$ref": "#/$defs/versionCheck" },
+    "setup": {
+      "type": "array",
+      "description": "Ordered, idempotent post-install configuration steps. Run once after `install` and before the bundle is considered ready. Each step has a `kind` discriminator. Hosts MUST persist completion state per `(bundle.id, workspace.id, user.id)` so steps don't re-run on every invocation; `skip_if` allows in-band re-checks.",
+      "items": { "$ref": "#/$defs/setupStep" }
+    },
     "auth":          { "$ref": "#/$defs/auth" },
     "runner": {
       "oneOf": [
@@ -146,6 +151,116 @@
           }
         }
       }
+    },
+    "setupStep": {
+      "description": "One step in the post-install setup pipeline. Discriminated by `kind`. Steps run in declared order; failures abort the pipeline.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "cmd"],
+          "properties": {
+            "id":          { "type": "string", "pattern": "^[a-z0-9][a-z0-9\\-]{0,63}$", "description": "Stable per-step identifier; appears in audit logs and the host's setup ledger." },
+            "kind":        { "const": "cmd", "description": "Run a shell command. Useful for installers, daemon bootstraps, health checks." },
+            "cmd":         { "type": "string", "description": "Command to run. Hosts MUST shell-escape any interpolated values from prior steps (`${input.X}`, `${secrets.X}`)." },
+            "description": { "type": "string", "maxLength": 2000 },
+            "skip_if":     { "$ref": "#/$defs/skipIf" },
+            "timeout_ms":  { "type": "integer", "minimum": 100, "default": 60000 },
+            "interactive": { "type": "boolean", "default": false, "description": "When true, the host MUST attach a PTY; useful for `openclaw onboard` style installers that draw a TUI." },
+            "persist":     { "$ref": "#/$defs/setupPersist", "description": "When the cmd's stdout / parsed output should be captured into a secret slot or env var." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "prompt"],
+          "properties": {
+            "id":           { "type": "string", "pattern": "^[a-z0-9][a-z0-9\\-]{0,63}$" },
+            "kind":         { "const": "prompt", "description": "Ask the user for a value. Surface adapter renders the appropriate UI (text input, select, confirm, masked secret)." },
+            "prompt":       { "type": "string", "description": "Question text shown to the user." },
+            "description":  { "type": "string", "maxLength": 2000 },
+            "type":         { "type": "string", "enum": ["text", "select", "boolean", "secret"], "default": "text" },
+            "default":      { "type": "string", "description": "Pre-filled value the user may accept by pressing Enter." },
+            "options":      {
+              "description": "For `type: select`, either a static enum or a command whose stdout produces the choices (one per line, optional `value\\tlabel` tab-separated).",
+              "oneOf": [
+                { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["cmd"],
+                  "properties": {
+                    "cmd":         { "type": "string" },
+                    "timeout_ms":  { "type": "integer", "minimum": 100, "default": 30000 }
+                  }
+                }
+              ]
+            },
+            "skip_if":      { "$ref": "#/$defs/skipIf" },
+            "persist":      { "$ref": "#/$defs/setupPersist" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "secret_slug"],
+          "properties": {
+            "id":            { "type": "string", "pattern": "^[a-z0-9][a-z0-9\\-]{0,63}$" },
+            "kind":          { "const": "oauth", "description": "Drive an AIP-19 OAuth flow. Host opens the consent URL, exchanges the callback, stores tokens in the named SECRETS.md slug." },
+            "secret_slug":   { "type": "string", "minLength": 2, "maxLength": 80, "description": "Slug declared in the bundle's SECRETS.md with `kind: oauth`." },
+            "description":   { "type": "string", "maxLength": 2000 },
+            "skip_if":       { "$ref": "#/$defs/skipIf" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "url"],
+          "properties": {
+            "id":             { "type": "string", "pattern": "^[a-z0-9][a-z0-9\\-]{0,63}$" },
+            "kind":           { "const": "external", "description": "Open a URL and wait for an external action — manual token paste, OAuth-like callback, or a third-party UI choice (Discord channel pick, Slack workspace bind)." },
+            "url":            { "type": "string", "format": "uri", "description": "URL the host opens in the user's browser. May contain `${input.X}` interpolations from earlier steps." },
+            "description":    { "type": "string", "maxLength": 2000 },
+            "callback":       {
+              "type": "object",
+              "description": "When the external flow returns to a host-allocated callback URL, this declares how to read the result.",
+              "additionalProperties": false,
+              "properties": {
+                "param":      { "type": "string", "description": "Query-string parameter holding the result value (e.g. `code` or `channel_id`)." },
+                "timeout_ms": { "type": "integer", "minimum": 1000, "default": 600000 }
+              }
+            },
+            "skip_if":        { "$ref": "#/$defs/skipIf" },
+            "persist":        { "$ref": "#/$defs/setupPersist" }
+          }
+        }
+      ]
+    },
+    "skipIf": {
+      "type": "object",
+      "description": "Health check that, when matching, skips the enclosing step. Lets re-runs of `agentproto setup <slug>` be idempotent without storing extra state.",
+      "additionalProperties": false,
+      "required": ["cmd"],
+      "properties": {
+        "cmd":         { "type": "string" },
+        "exit_code":   { "type": "integer", "default": 0, "description": "Skip the step when the cmd exits with this code. Default 0." },
+        "timeout_ms":  { "type": "integer", "minimum": 100, "default": 5000 }
+      }
+    },
+    "setupPersist": {
+      "type": "object",
+      "description": "How the step's resulting value reaches future invocations of the bundle. Exactly one of `env` / `secret_slug` / `cmd` MUST be present.",
+      "additionalProperties": false,
+      "properties": {
+        "env":         { "type": "string", "description": "Env var the runner injects on every spawn (lifted from the workspace secrets store, never logged)." },
+        "secret_slug": { "type": "string", "minLength": 2, "maxLength": 80, "description": "AIP-19 secret slug to write into. Use when the value is sensitive and the bundle's SECRETS.md declares the slug." },
+        "cmd":         { "type": "string", "description": "Run this command with `${value}` substituted by the captured value. Use for CLIs that expect their own config command (e.g. `openclaw config set gateway.remote.token ${value}`)." }
+      },
+      "oneOf": [
+        { "required": ["env"] },
+        { "required": ["secret_slug"] },
+        { "required": ["cmd"] }
+      ]
     },
     "sandbox": {
       "type": "object",
