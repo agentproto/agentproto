@@ -1,0 +1,322 @@
+---
+title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
+description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings), the over-the-wire surface (HTTP + SSE + MCP tools), and the workspace-resolution pattern that lets a single host serve many bound directories. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn.
+aip: 46
+status: Draft
+type: Schema
+created: 2026-05-10
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 17, 19, 36, 44, 45]
+ref-impl: https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/runtime
+discussions-to: https://github.com/agentproto/agentproto/discussions/46
+layer: drivers
+package: "@agentproto/runtime"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 46 |
+| Title | AGENT-SESSIONS — agent-session-lifecycle/v1 |
+| Status | Draft |
+| Type | Schema |
+| Domain | cli.sh |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Reference Impl | [`@agentproto/runtime`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/runtime) |
+
+## Abstract
+
+`agent-session-lifecycle/v1` standardises how a host **spawns,
+drives, observes, and tears down** long-running agent CLI sessions on
+a machine. It sits above [AIP-45](/docs/aip-45), which defines how
+to install and start a single agent binary, by adding the
+N-sessions-on-one-daemon plumbing every real orchestration scenario
+needs:
+
+- many concurrent agents (claude in `~/code/foo`, hermes in
+  `~/code/bar`, aider in `~/blog`)
+- multi-turn continuity per session (don't respawn for every prompt)
+- live observation (UI tails output, operator polls for the answer)
+- workspace-bound spawns (resolve `cwd` from a stable, named
+  workspace handle instead of hand-typing absolute paths)
+
+A daemon implementing this AIP becomes a **control plane for local
+agents**. Any host (cloud orchestrator, IDE extension, mobile remote)
+can drive it through the standard surface — HTTP routes, an SSE
+stream, and MCP tools — without knowing which adapter is wrapped.
+
+AIP-46 is opinionated about the lifecycle and the data shape; it is
+*not* opinionated about the wire format inside a turn (that's
+AIP-44/ACP via AIP-45's `protocol` discriminator). Hosts that already
+support AIP-45 adapters get AIP-46 by adopting the registry +
+endpoint table below.
+
+## Motivation
+
+Reference implementation history: agentproto shipped AIP-45 with one
+canonical entry point (`agentproto run <slug> --prompt "…"`) — a
+single, fire-and-forget invocation. This worked for ad-hoc piping but
+fell apart for the actual product flows:
+
+1. **A guild operator wants claude alive in 4 different folders** so
+   it can answer follow-ups without re-pulling each repo's context.
+   The `run` verb spawns a fresh agent per call — no continuity.
+2. **A web UI wants to mirror `claude mcp list` over HTTP** so the
+   user sees what's running on their laptop without `ps -aux`. There
+   was no enumeration surface.
+3. **A cloud orchestrator wants to dispatch a claude turn into the
+   user's workspace** through the same MCP connection it already
+   uses for fs/exec. There was no MCP path; the orchestrator had to
+   shell out.
+
+Three different consumers, three workarounds, one missing primitive:
+*persistent, named, observable agent sessions*. AIP-46 fills it.
+
+## Specification
+
+### Session data model
+
+A session is the host's record of one running (or recently exited)
+agent CLI invocation. Required fields:
+
+```ts
+interface Session {
+  /** Stable id for the lifetime of the session. Caller-opaque. */
+  id: string
+  /** Adapter slug from the AIP-45 manifest the session wraps. */
+  adapterSlug: string
+  /** Workspace handle (AIP-46 §workspaces) this session binds to.
+   *  "default" when the host has no workspace registry. */
+  workspaceSlug: string
+  /** Absolute path the agent runs in. Equals
+   *  `workspaces[workspaceSlug].path` when the slug resolved. */
+  cwd: string
+  /** Lifecycle phase. State machine in §status-transitions. */
+  status: "starting" | "running" | "exited" | "killed" | "error"
+  /** ISO-8601. Time the host called the spawn. */
+  startedAt: string
+  /** ISO-8601, present when status ∈ {exited, killed, error}. */
+  endedAt?: string
+  /** ISO-8601, last stdout/stderr or projected event line. */
+  lastOutputAt?: string
+  /** Process exit code when present. -1 / unset for non-process
+   *  sessions or sessions still alive. */
+  exitCode?: number
+  /** Free-text label the spawner attaches (conversation id, operator
+   *  name, …) so consumers can group/filter. */
+  label?: string
+}
+```
+
+The host MAY add fields; consumers MUST ignore unknown fields.
+
+### Status transitions
+
+```
+starting ──→ running ──→ exited
+   │           │     ╲──→ killed
+   │           ╰──────────→ error
+   ╰──→ error  (spawn failed)
+```
+
+- `starting → running` fires when the agent's protocol arm reports
+  the session ready for the first turn.
+- `running → exited` is the normal terminal — the underlying child
+  exited with code 0 (or any code; presence of `exitCode` is what
+  matters, not its value).
+- `running → killed` fires when a consumer called `kill_session`,
+  `DELETE /sessions/:id`, or the host shut down with a live agent.
+- `* → error` fires on any unhandled spawn / protocol / IO error;
+  `lastOutputAt` typically points at the corresponding line in the
+  ring buffer.
+
+### Workspaces
+
+A host implementing AIP-46 SHOULD persist a workspaces config
+(reference implementation: `~/.agentproto/workspaces.json`) so
+spawns can reference a named handle instead of an absolute path:
+
+```json
+{
+  "version": 1,
+  "active": "agentik-studio",
+  "workspaces": [
+    { "slug": "agentik-studio",
+      "path": "/Volumes/.../agentik-studio",
+      "addedAt": "2026-05-10T15:31:56.664Z",
+      "updatedAt": "2026-05-10T15:32:00.123Z",
+      "label": "Main monorepo" }
+  ]
+}
+```
+
+`cwd` resolution priority for any spawn that omits an explicit
+`cwd` field:
+
+1. lookup `workspaces[workspaceSlug]` → use its `path`
+2. fall back to `workspaces[active]` → use its `path`
+3. emit a warning + use the host's `process.cwd()`
+
+Hosts that don't implement workspaces MAY require explicit `cwd`
+on every spawn; consumers MUST then pass it.
+
+### HTTP surface
+
+The host MUST expose these routes under a fixed prefix (default
+`/sessions`):
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/sessions` | — | `{ sessions: Session[] }` |
+| `POST` | `/sessions/agent` | `SpawnAgentRequest` | `Session` (201) |
+| `GET` | `/sessions/:id` | — | `Session` |
+| `POST` | `/sessions/:id/prompt` | `{ prompt: string }` | `{ ok: true, id }` |
+| `POST` | `/sessions/:id/kill` | — | `{ ok: boolean, id }` |
+| `DELETE` | `/sessions/:id` | — | `{ ok: boolean, id }` (forget) |
+| `GET` | `/sessions/:id/stream` | — | SSE — see §sse |
+
+#### SpawnAgentRequest
+
+```ts
+{
+  /** AIP-45 adapter slug. Required. */
+  adapter: string
+  /** Workspace handle. Optional — falls back to active. */
+  workspaceSlug?: string
+  /** Override cwd. Wins over workspaceSlug. */
+  cwd?: string
+  /** Initial prompt — equivalent to start + prompt back-to-back. */
+  prompt?: string
+  /** Free-text label for the descriptor. */
+  label?: string
+}
+```
+
+#### SSE event format
+
+The `/sessions/:id/stream` endpoint emits one JSON-encoded event per
+SSE message:
+
+```
+event: line
+data: { "line": "hello world", "stream": "stdout" }
+```
+
+`stream` is one of `"stdout" | "stderr"`. Hosts MAY emit additional
+event types (e.g. `status` for state transitions); consumers MUST
+ignore unknown event types. Hosts SHOULD send a comment-line
+keep-alive every 25–30 seconds to defeat proxy idle timeouts.
+
+### MCP tools
+
+Hosts that already expose an MCP server (the common case for daemons
+also serving fs/exec tools) MUST register the following five tools
+so MCP clients can drive sessions through the same connection:
+
+| Tool | Inputs | Notes |
+|---|---|---|
+| `start_agent_session` | `{adapter, workspaceSlug?, cwd?, prompt?, label?}` | Returns the `Session` JSON |
+| `prompt_agent_session` | `{sessionId, prompt}` | Fire-and-forget — call `get_agent_session_output` to read the reply |
+| `list_agent_sessions` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
+| `get_agent_session_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
+| `kill_agent_session` | `{sessionId}` | Returns `{ok, sessionId}` |
+
+The MCP tools and the HTTP routes target the same underlying
+registry — calling either family results in the same observable
+state.
+
+### Multi-turn semantics
+
+A session stays alive after each turn. Subsequent
+`prompt_agent_session` (or `POST /sessions/:id/prompt`) calls dispatch
+to the *same* underlying agent process; the agent retains its in-
+memory context (previous tool results, file reads, etc.) until the
+session is killed.
+
+The host MUST reject (HTTP 409 / MCP error) overlapping prompts on
+the same session — agents are single-turn-at-a-time. Consumers can
+poll `get_agent_session_output` or watch the SSE stream to know when
+a turn ended (look for the `turn-end` projected line).
+
+### Output projection
+
+When the underlying adapter speaks AIP-44/ACP (the common case),
+the host SHOULD project structured events into the ring buffer with
+human-readable prefixes:
+
+| ACP event | Projected line |
+|---|---|
+| `text-delta` | the delta text, joined on `\n` boundaries |
+| `thought` | `[thought] {text}` (dim) |
+| `tool-call` | `[tool] {toolName}` (cyan) |
+| `tool-result` (error) | `[tool-error]` (red) |
+| `agent-prompt` | `[awaiting input]` (yellow) |
+| `turn-end` | `── turn-end ({reason}) ──` (dim) |
+| `error` | `[error] {message}` + child stderr tail (red) |
+
+The exact wire format is non-normative; the goal is that a CLI
+observer (`agentproto sessions --attach <id>`) sees a coherent
+transcript without parsing per-event JSON.
+
+## Reference Implementation
+
+The `@agentproto/runtime` package implements AIP-46 alongside AIP-45.
+Daemons started via `agentproto serve` (or built directly through
+`createGateway()`) expose:
+
+- **HTTP routes**: `runtime/src/http-server.ts` — handler under
+  `/sessions/*`
+- **MCP tools**: `runtime/src/session-tools.ts` — registered
+  per-request via `mcpServerFactory`
+- **Registry**: `runtime/src/sessions.ts` — in-memory + persisted
+  to `~/.agentproto/sessions.json` (debounced)
+- **Workspaces config**: `runtime/src/workspaces-config.ts` —
+  read+write helpers for `~/.agentproto/workspaces.json`
+
+The CLI shell `@agentproto/cli` adds:
+- `agentproto workspace add|list|remove|use` for managing the
+  workspaces config
+- `agentproto sessions [--watch] [--attach <id>] [--json]` for
+  browsing + tailing the registry
+
+## Backwards Compatibility
+
+AIP-46 is purely additive. Hosts that ship AIP-45 today can adopt
+AIP-46 by registering the registry + routes; existing
+`agentproto run` invocations continue to work unchanged (they bypass
+the registry, which is fine for one-shot scripting).
+
+Hosts MAY refuse to register the routes when no AIP-45 adapter is
+installed; they then SHOULD return HTTP 501 from
+`POST /sessions/agent` with a clear message pointing at the install
+command.
+
+## Security Considerations
+
+- All sessions execute as the daemon's UID. Hosts SHOULD gate the
+  routes behind their existing auth (bearer / loopback / mTLS),
+  which is the same mechanism protecting the AIP-45 spawn surface.
+- The ring buffer captures stdout/stderr verbatim — secrets the
+  agent printed are visible to anyone with `GET /sessions/:id` or
+  the SSE stream. Hosts MAY redact known secret patterns, but the
+  AIP does not require it; consumers MUST treat the buffer as
+  potentially sensitive.
+- `start_agent_session` accepts `cwd` from the caller. Hosts SHOULD
+  reject paths outside their allowed surface (e.g. require the path
+  to be a registered workspace, or under the workspaces' parent
+  directory) when the auth principal is not the local UID.
+
+## Open Questions
+
+- Should sessions expose a `pid` field even for protocol-arm
+  (ACP-driven) sessions where the host owns the spawn? Consumers
+  asked for `pid` for `kill -9` debugging; the AIP currently leaves
+  it `null` for agent sessions to discourage host-side process tree
+  manipulation.
+- Cancellation mid-turn — the protocol arms support
+  `session.cancel()`, but the AIP doesn't expose it as an HTTP/MCP
+  verb yet. Should be added once we have a real consumer demand
+  (the ACP `cancel_turn` semantics differ across adapters).
+- Resume across daemon restarts — `~/.agentproto/sessions.json`
+  persists descriptors but not the live agent process. A future v2
+  could specify rehydration (re-spawn + replay context) for
+  adapters whose AIP-45 manifest declares `session.mode = "resumable"`.
