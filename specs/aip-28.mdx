@@ -144,10 +144,10 @@ agent do".
 
 ### File location
 
-Intents live in a single folder:
+A single intent folder always has the same shape:
 
 ```
-.intents/
+<root>/intents/
   image-create/
     INTENT.md          ← this AIP
     intent.ts          ← optional entry (when routing logic is non-trivial)
@@ -157,8 +157,90 @@ Intents live in a single folder:
 ```
 
 The folder name SHOULD match the manifest's `id`. Intents MAY be
-nested under a domain (e.g. `.intents/media/image-create/`);
+nested under a domain (e.g. `<root>/intents/media/image-create/`);
 consumers MUST NOT depend on directory depth.
+
+`<root>` depends on the publication tier (`frontmatter.scope`). A
+conforming host loads intents from one root per tier and merges the
+catalogs at resolution time — see [Scope and publication](#scope-and-publication).
+
+### Scope and publication
+
+An intent's `scope` is the dimension on which it is **published**:
+who can author one at that tier, where on the filesystem (or backing
+store) it is loaded from, and which invocation contexts see it.
+Resolution against the merged catalog follows a deterministic
+specificity rule, the same chain Model Access Rules v2 and the
+membership/role layers already use across the platform — adding a new
+parallel dimension here would be a footgun.
+
+The seven tiers, from least to most specific:
+
+| Tier | Recommended root | Authoring permission | Visibility in invocation context |
+|---|---|---|---|
+| `platform` | bundled with the host runtime | system only | every caller, regardless of app |
+| `app` | `<app>/intents/` in the app package | system (per-app) | every caller of that app |
+| `tier` | host-side (per subscription plan) | system | callers whose `context.user.subscriptionPlanTier` matches |
+| `user` | `<user-vault>/intents/` | the user (carries across guilds + workspaces) | only when `context.user.id` matches the publisher |
+| `guild` | `<guild>/intents/` | guild role with `manage_intents` permission | callers within the publishing guild |
+| `workspace` | `<workspace>/intents/` | workspace owner / editor | callers within the publishing workspace |
+| `operator` | `<operator>/intents/` (under the operator's persona folder) | operator with the `intent-author` capability | only the publishing operator |
+
+`platform` rows never exist in storage — the value is reserved for
+catalog defaults shipped with the host runtime, and authors MUST NOT
+declare `scope: platform` in a manifest.
+
+#### Specificity-based resolution
+
+When the same `id` appears at multiple tiers, the **most specific
+tier whose context matches wins** at resolution time. Specificity
+ranks mirror Model Access Rules v2:
+
+```
+operator (7) > user (6) > workspace (5) > guild (4) >
+tier (3) > app (2) > platform (1)
+```
+
+A `user`-scope intent named `summarise` shadows a `guild`-scope
+`summarise` for that user inside any guild; in another user's
+context the same guild row resolves instead. Hosts MUST surface the
+full resolution chain (which tier won, which got shadowed) so authors
+can audit conflicts — duplicate-slug shadowing is intentional, but
+silent shadowing is a bug.
+
+Authors MAY declare `disable: <id>` in frontmatter to explicitly
+hide a less-specific tier's intent without re-implementing it
+(useful when compliance scope removes a user-authored intent on an
+org-managed workspace).
+
+#### Authoring permission
+
+`scope` is **publication**, not just metadata. A conforming host MUST
+gate writes:
+
+- `user` scope: the publisher's `context.user.id` MUST equal the
+  filesystem owner. Other users cannot write to that root.
+- `guild` scope: the publisher MUST hold the guild's
+  `manage_intents` permission. Guild membership alone is not enough.
+- `workspace` scope: the publisher MUST hold a workspace owner /
+  editor role on the publishing workspace.
+- `operator` scope: the publisher MUST be the operator itself, with
+  the `intent-author` capability granted in its ROLE manifest
+  (per [AIP-47](/docs/aip-47)).
+- `app` / `tier` / `platform`: system-only — host policy refuses
+  user-initiated writes.
+
+Authors MUST NOT publish above their tier (a user can't write a
+`guild`-scope intent without `manage_intents`). Conforming hosts
+refuse the write and surface the conflict so the author adjusts the
+slug or scope.
+
+#### Compatibility
+
+`scope` is OPTIONAL. Manifests without the field default to `app`,
+which matches the pre-scope semantics ("loaded from the app's
+bundled intents folder, visible to every caller of that app").
+Existing manifests stay valid; the field is purely additive.
 
 ### Frontmatter
 
@@ -192,6 +274,7 @@ tag.
 | `requires` | object | inherited | Capability requirements (governance gating per [AIP-7](/docs/aip-7)). When omitted, the runtime computes the union of all candidate tools' `requires`. |
 | `auth` | string | none | Reference to [SECRETS.md](/docs/aip-19). Usually omitted — auth is per-tool. Declare here only when the intent layer adds requirements (e.g. an OAuth scope used by routing logic itself). |
 | `experiments` | object[] | `[]` | A/B routing config: `[{ id, weight, when?, implements }]`. The runtime picks one experiment arm per session/user; the picked arm's `implements` overrides the default. |
+| `scope` | string | `app` | Publication tier. One of `platform`, `app`, `tier`, `user`, `guild`, `workspace`, `operator`. Aligns with the scope chain used by Model Access Rules v2 + Memberships + Secrets. Controls where the manifest is *loaded from* and which invocation contexts *resolve it*. See [Scope and publication](#scope-and-publication). |
 | `preview` | string | none | Workspace-relative thumbnail (`./previews/foo.png`) or external URL. Surfaces MAY display in catalog cards. |
 | `tags` | string[] | `[]` | Free-form discovery tags (`media`, `productivity`, `read-only`). |
 | `examples` | object[] | `[]` | Each `{ user: i18n string, note?: i18n string }`. Few-shot examples for LLMs and end-users. |

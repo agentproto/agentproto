@@ -227,6 +227,64 @@ Approval gating ([AIP-7](/docs/aip-7)) runs on the **routed tool's**
 `approval` class, not the intent's. The intent's job is routing; the
 tool's job is declaring its own safety contract.
 
+## Scope-aware loader
+
+A conforming host loads from one root per declared `scope` tier and
+merges into a single catalog at resolution time. Tier semantics are
+defined in [AIP-28 § Scope and publication](/docs/aip-28#scope-and-publication);
+this section is the implementer's recipe.
+
+### Required behaviour
+
+1. **Discover roots per tier.** The host MAY hardcode FS paths (e.g.
+   `<user-vault>/intents/`, `<guild>/intents/`) or back them by a
+   database-backed equivalent — as long as each tier is queryable
+   independently and exposes `(id, scope, manifest, owner)` rows.
+2. **Authoring permission gate.** Writes MUST be refused unless the
+   actor has the corresponding permission:
+   - `user` tier — `context.user.id` matches the row owner.
+   - `guild` tier — actor holds `manage_intents` on the guild.
+   - `workspace` tier — actor holds workspace owner / editor role.
+   - `operator` tier — actor IS the operator AND the operator's
+     role manifest grants `intent-author`.
+   - `app` / `tier` / `platform` — system only; reject user writes.
+3. **Resolve by specificity.** When the same `id` exists at multiple
+   tiers, return the most specific match for the invocation context.
+   Specificity ranks (high → low):
+
+   ```
+   operator (7) > user (6) > workspace (5) > guild (4) >
+   tier (3) > app (2) > platform (1)
+   ```
+
+   These ranks MUST mirror the values used by Model Access Rules v2's
+   `SPECIFICITY_RANK` table — the platform avoids two parallel scope
+   chains.
+4. **Honour `disable`.** A higher-tier manifest with a `disable: <id>`
+   frontmatter hides the matching lower-tier intent from resolution
+   in any context where the higher-tier row is visible.
+5. **Audit the resolution chain.** Every lookup that traverses more
+   than one tier MUST emit (at debug level) the winner + the
+   shadowed entries with their tiers. Silent shadowing is a bug.
+
+### Optional behaviour
+
+A host MAY:
+
+- Watch FS roots for hot-reload (each tier independently).
+- Cache the per-tier catalog keyed by `(tier, root-mtime)`.
+- Render a "Scope" badge in surface UIs so the user knows whether an
+  intent is "mine", "my team's", or "platform-provided".
+- Provide tier-aware UI affordances for authoring — a "Save as user
+  intent" button on the form builder, etc.
+
+### Hosts that don't support scoping
+
+A host MAY treat all intents as `scope: app`. Manifests with a
+non-`app` scope SHOULD still load (the field is ignored) — but the
+host MUST log a warning at registration time so operators know the
+intent's intended publication boundary is being broadened.
+
 ## Audit log shape
 
 Hosts SHOULD emit one audit entry per intent invocation:
