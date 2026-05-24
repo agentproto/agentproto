@@ -1,0 +1,355 @@
+---
+title: "AIP-48: MULTI_AGENT_RUNTIME — agentruntimes/v1 (composable multi-agent execution kernel)"
+description: A declarative manifest format and reference kernel for multi-agent runtimes — seven swappable ports (participants, substrate, dispatcher, lifecycle, state, effectors, provisioning) composed under a single manifest. One declarative kit produces both a private local-journal swarm and a Guilde-bridged conversation participant, with no kernel changes. Sibling to AIP-9 OPERATOR (which describes one participant) — AIP-48 describes how participants execute together.
+aip: 48
+status: Draft
+type: Core
+created: 2026-05-23
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 9, 40, 47]
+resources: ./resources/aip-48/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions/48
+layer: coordination
+package: "@agentproto/agent-runtime"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 48 |
+| Title | MULTI_AGENT_RUNTIME — agentruntimes/v1 (composable multi-agent execution kernel) |
+| Status | Draft |
+| Type | Core |
+| Domain | runtimes.sh |
+| Doctype | `multi-agent-runtime/v1` (single-doc, written as `multi-agent.yaml` or `<name>.mdx`) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-9](/docs/aip-9) (operator — participants are operators), [AIP-40](/docs/aip-40) (extension — runtime manifest is an extension doctype), [AIP-47](/docs/aip-47) (role — participants ref roles) |
+| Composes with | [AIP-6](/docs/aip-6) (company — runtime can host a company's operators), [AIP-8](/docs/aip-8) (agency — agency can host one or more runtimes), [AIP-17](/docs/aip-17) (runner — runner provides effectors), [AIP-36](/docs/aip-36) (sandbox — substrate may be sandbox-resident), [AIP-42](/docs/aip-42) (agent — participants delegate to agent execution), [AIP-45](/docs/aip-45) (agent-cli — `participant-agent-cli` adapter wraps AIP-45 binaries) |
+| Referenced by | (forward refs once profiles, transports, and AgentProto-runtime gain awareness of this AIP) |
+| Resources | [`./resources/aip-48`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-48/draft) — [`MultiAgentRuntime.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-48/draft/MultiAgentRuntime.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-48/draft/EXAMPLES.md), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-48/draft/ADAPTER.md) |
+
+## Abstract
+
+`agentruntimes/v1` defines a **single-doc** manifest format for a multi-agent
+runtime: a composition of seven swappable ports — **participants**,
+**substrate**, **dispatcher**, **lifecycle**, **state**, **effectors**,
+**provisioning** — that together describe how a set of agents executes a
+coordinated conversation.
+
+The seven ports are the AIP's *only* primitive. Every concrete runtime is one
+choice of adapter per port, expressed declaratively in a manifest. The same
+participants run over a private append-only file journal (CLI-first mode) or
+over a live Guilde conversation thread (conversation-first mode) by swapping
+nothing but the `substrate:` adapter — the kernel never branches on
+mode. Dispatchers, lifecycle hooks, and participant executors are written once
+and reused across both compositions.
+
+AIP-48 is the **execution layer** of the AgentProto stack — distinct from but
+composing with the *organization* layer (AIP-6 company, AIP-8 agency), the
+*participant* layer (AIP-9 operator, AIP-47 role), and the *transport* layer
+(AIP-45 agent-cli). Where AIP-9 describes a single participant and AIP-6
+describes the org chart they belong to, AIP-48 describes how a chosen subset
+of those participants takes turns, where their conversation is stored, and
+which effectors they have available at execution time.
+
+## Motivation
+
+Multi-agent systems today fragment along three vectors:
+
+1. **By framework.** Each framework (Mastra, OpenAI Agents SDK, AutoGen,
+   CrewAI) bakes its own substrate, router, and lifecycle conventions into
+   its codebase. Moving a participant from one to another requires reauthoring
+   prompts, tool bindings, and orchestration.
+2. **By transport.** "A reviewer that posts into our Slack" and "a reviewer
+   that journals into a markdown file" are typically two reimplementations of
+   the same agent role — one network-coupled, one offline — with no shared
+   kernel.
+3. **By scope.** A *local swarm* (one developer's sub-agents coordinating in a
+   repo) and a *cloud-hosted team* (humans + Mastra operators + CLI sessions
+   in one Guilde conversation) are usually different products built by
+   different teams, even when the underlying dispatch + turn-taking shape is
+   identical.
+
+AIP-48 collapses these vectors onto one manifest:
+
+- Replace the framework by registering an adapter for whichever port you
+  control — participants stay portable.
+- Replace the transport by swapping the substrate adapter — kernel,
+  participants, and dispatcher don't move.
+- Replace the scope by changing the manifest — local-only and cloud-hosted
+  share the same seven-port shape.
+
+The reference kernel (`@agentproto/agent-runtime`) is a thin orchestration
+loop over the port interfaces; the reference adapters (`substrate-file`,
+`substrate-guilde-mcp`, `dispatcher-mention`, `state-fs`,
+`participant-agent-cli`) implement the most common composition. Future
+adapters (LLM router, capability-match dispatcher, MCP-kv state, real-operator
+participant) plug in without altering the kernel.
+
+## Specification
+
+### Manifest format
+
+The manifest is a YAML document (typically `.runtime/multi-agent.yaml` for a
+local manifest, or any `.mdx` file with frontmatter for an in-repo
+template). Frontmatter is the structured contract; the markdown body (if
+present) is human-readable documentation.
+
+```yaml
+schema: agentruntimes/v1
+kind: MultiAgentRuntime
+id: <slug>                            # unique within scope; lower-kebab
+participants:                         # 1..n
+  - id: <participant-id>
+    executor: <executor-kind>         # keys into the adapter registry
+    displayName: <human name>         # mention parser matches this
+    role: <path-or-ref>               # AIP-47 role manifest path, or inline
+    meta: { ... }                     # adapter-specific extras
+substrate:
+  kind: <substrate-kind>              # e.g. "file" | "guilde-mcp"
+  # ...adapter-specific fields
+dispatcher:
+  kind: <dispatcher-kind>             # e.g. "mention" | "llm-router"
+  # ...adapter-specific fields
+state:                                # optional; defaults to fs
+  kind: <state-kind>
+  # ...
+lifecycle:                            # optional; advisory flags
+  onTurnEnd: <bool>
+  onMention: <bool>
+  onIdle: <bool>
+effectors: [ ... ]                    # optional; per-participant tool/MCP bindings
+provisioning:                         # optional; cut-3+
+  kind: <provisioning-kind>
+```
+
+The full machine-readable schema lives at
+[`./resources/aip-48/draft/MultiAgentRuntime.schema.json`](./resources/aip-48/draft/MultiAgentRuntime.schema.json).
+
+### The seven ports
+
+Each port is a contract — an adapter registers a `kind` plus optional
+declared capabilities, and the kernel dispatches polymorphically off `kind`
+above the adapter registry.
+
+#### Substrate
+
+Where the conversation lives. Append-only by contract. Adapters MAY declare
+capabilities — `mentions`, `reactions`, `visibility`, `identity`,
+`multi-writer`, `ordered` — and consumers MUST consult capabilities before
+calling optional surface area (e.g. a dispatcher MUST NOT assume mentions
+work without the capability flag).
+
+The contract:
+
+```ts
+interface Substrate {
+  readonly kind: string
+  readonly capabilities: ReadonlySet<SubstrateCapability>
+  append(turn: TurnInput): Promise<Turn>
+  read(since?: TurnId): Promise<readonly Turn[]>  // oldest first
+}
+```
+
+Reference adapters:
+- `file` — append-only markdown journal with content-hashed turn ids.
+- `guilde-mcp` — wraps Guilde MCP `post_message` + `get_messages`; declares
+  `mentions`, `reactions`, `visibility`, `identity`, `multi-writer`,
+  `ordered`.
+
+#### Dispatcher
+
+Decides who speaks next given the recent substrate window. Pure function:
+
+```ts
+interface Dispatcher {
+  readonly kind: string
+  selectNext(input: { recentTurns; participants }): Promise<ParticipantId[]>
+}
+```
+
+Returning `[]` puts the runtime idle. Returning multiple ids fans out in one
+cycle. The dispatcher MUST NOT re-select the author of the most recent turn
+(self-skip) unless an explicit re-entry policy is set.
+
+Reference adapter:
+- `mention` — text-based `@<displayName>` parser, byte-for-byte identical
+  to Guilde's server-side parser so behaviour matches across modes.
+
+#### Participant
+
+A descriptor + an executor. The descriptor is declarative (id, displayName,
+executor kind, role ref). The executor is invoked by the kernel with a turn
+input and produces a turn output.
+
+```ts
+interface ParticipantExecutor {
+  readonly kind: string
+  executeTurn(input: ParticipantExecuteInput): Promise<ParticipantExecuteOutput>
+}
+```
+
+Reference adapter:
+- `agent-cli` — spawns an AIP-45 CLI binary (Claude Code, Hermes, Goose,
+  …), pipes the assembled prompt over stdin, captures stdout as the turn
+  content. Loads role files with YAML frontmatter stripped so the same file
+  doubles as a Claude Code sub-agent definition (`.claude/agents/*.md`) and a
+  swarm participant role.
+
+#### State
+
+Per-participant durable scratch. Read returns `{}` on missing.
+
+Reference adapter:
+- `fs` — one JSON file per participant under a state directory. Participant
+  ids are sanitised to prevent path traversal.
+
+#### Lifecycle
+
+Optional callbacks:
+
+- `onTurnEnd(turn)` — fires after a turn is appended.
+- `onMention(target, byTurn)` — fires when the dispatcher selects a
+  participant.
+- `onIdle()` — fires when the dispatcher returns no selection.
+
+Implementations are free to ignore any hook. Hooks are advisory: they MUST
+NOT block the turn loop (they may throw, but the loop swallows errors and
+continues).
+
+#### Effectors
+
+Per-participant tool surface — names of tools, MCP servers, or sandbox
+runtimes available to a participant at execute time. Effectors are *declared*
+in the manifest and *resolved* by the participant executor. The kernel does
+not enforce effector restrictions itself.
+
+#### Provisioning
+
+How a runtime's required artifacts (participants' role files, effector
+configs, hooks, MCP servers) get *here* from where they're authored. The
+provisioning port is the bridge between the manifest's declarative
+references and the local filesystem.
+
+Reference strategy:
+- `agentproto install runtime-profile/<slug>` (AIP-29 install path, layered
+  on `@agentproto/cli`) — fetches a profile package, copies declared files
+  into the user's repo with per-file merge strategy, records to a setup
+  ledger. See `runtime-profile/v1` companion spec for the profile format.
+
+### Composition rules
+
+A runtime is **a manifest** + **a registry of adapter implementations** +
+**a kernel** that walks one or more turn cycles.
+
+1. **Manifest → ports → adapters → instance.** Top-down resolution at runtime
+   start. No sideways resolution; no adapter discovers another adapter's
+   choices except through the explicit port interface.
+2. **`kind`-based dispatch above the registry, polymorphic below.** Outside
+   the adapter constructors, no `if/switch` over `kind` strings is allowed.
+   Adapters expose interface methods; the kernel calls them.
+3. **Capabilities are declared, not assumed.** A file substrate that doesn't
+   support mentions MUST NOT claim the capability. Dispatchers that depend on
+   mentions MUST check before invoking — if a substrate lacks the capability,
+   the dispatcher SHOULD return `[]` rather than throw.
+4. **Substrate is the only durable boundary inside a cycle.** Participants
+   are stateless between turns; everything that crosses turns lives in
+   substrate (the conversation), state (per-participant scratch), or
+   provisioning (file system).
+5. **One manifest, one substrate.** A manifest MUST NOT declare a substrate
+   union. Repositories needing two flows (e.g. local + bridged) ship two
+   manifests and run two processes.
+
+### Turn cycle (pseudocode)
+
+```
+turn():
+  recent  = substrate.read(since=last)
+  picked  = dispatcher.selectNext(recent, participants)
+  if picked is empty: lifecycle.onIdle?; return idle
+  trigger = recent.last
+  for each pid in picked:
+    p   = find_participant(pid)
+    e   = executors[p.executor]
+    lifecycle.onMention?(pid, trigger)
+    st  = state.read(pid)
+    out = e.executeTurn(participant=p, recentTurns=recent, triggerTurn=trigger, state=st)
+    t   = substrate.append({participantId=pid, content=out.content, meta=out.meta})
+    if out.stateUpdate: state.write(pid, out.stateUpdate)
+    lifecycle.onTurnEnd?(t)
+  return executed
+```
+
+The loop above is intentionally minimal — every degree of freedom is in the
+adapters, not the kernel.
+
+## Reference implementation
+
+`@agentproto/agent-runtime` ships the kernel + the five reference adapters
+listed above. `@agentproto/runtime-profile-standard` ships an installable
+profile that drops the .claude/ scaffolding (two example sub-agents, hooks,
+slash commands, an example swarm manifest) into a user's repo via
+`agentproto install runtime-profile/standard`.
+
+The reference compositions:
+
+- **CLI-first** (local swarm): `participant-agent-cli` + `substrate-file` +
+  `dispatcher-mention` + `state-fs`. No network, append-only journal, two
+  example sub-agents.
+- **Conversation-first** (Guilde-bridged): `participant-agent-cli` +
+  `substrate-guilde-mcp` + `dispatcher-mention` + `state-fs`. CLI participates
+  in a real Guilde conversation as a first-class operator with
+  `runtime.kind = "agent-cli"` + `runtime.ref = "claude-code"`.
+
+The dispatcher and participant adapters are byte-identical between the two
+modes — proven by `__smoke__/smoke-cross-substrate.mjs` in the kernel
+package.
+
+## Known limitations
+
+### Autonomous-orchestrator coexistence (guilde-mcp substrate)
+
+When the kernel runs against a `guilde-mcp` substrate and Guilde's own
+autonomous orchestrator is also active in the same conversation, both
+can react to the same human `@mention`:
+
+- The kernel's dispatcher reads the message, selects a participant, and
+  invokes its executor (e.g. `participant-db-operator` calls
+  `run_operator`, which posts the reply).
+- Guilde's autonomous `runConversation` flow reads the same message, runs
+  its own routing, and may post a second reply from the same operator.
+
+This produces a duplicate turn. Two short-term mitigations:
+
+1. **Stay one-sided.** Put all the operators that should respond in the
+   conversation on the kernel side (declared as `participants` in the
+   manifest), and don't let Guilde's autonomous routing select them. The
+   simplest version is to use a dedicated conversation for
+   kernel-dispatched mode and not invite the same operators into
+   conversations where Guilde's auto-routing should run.
+2. **Use `postReply: false` on db-operator participants.** The reply
+   text comes back to the kernel and the substrate writes it; Guilde
+   never sees a kernel-originated trigger that would re-fan-out. The
+   autonomous orchestrator still fires on human messages independently,
+   though, so this only narrows the surface.
+
+The proper fix is a conversation-level `disableAutoOrchestration` flag
+that Guilde's autonomous runner consults. Planned for a follow-up AIP
+amendment; it requires a single column on `conversations` and a check
+in `runConversation`. The kernel's `participant-db-operator` adapter
+can set the flag implicitly when attached to a conversation.
+
+### `run_operator` MCP tool — single-shot semantics
+
+`run_operator` invokes one Mastra operator's `agent.generate()` over the
+conversation context and returns the text. It deliberately doesn't run
+the full orchestrator pipeline (routing, triage, peer-render, deep-work
+continuation). That's correct for kernel-dispatched use — the kernel
+already chose the operator — but it means operators run via
+`run_operator` will skip routing-stage side effects (e.g. triage's
+react-emoji decision). If a swarm needs those, the right primitive is a
+new MCP tool, not extending `run_operator`.
+
+## Resources
+
+- [`MultiAgentRuntime.schema.json`](./resources/aip-48/draft/MultiAgentRuntime.schema.json) — JSON Schema for the manifest.
+- [`EXAMPLES.md`](./resources/aip-48/draft/EXAMPLES.md) — worked manifests for the two reference compositions plus three forward-looking ones.
+- [`ADAPTER.md`](./resources/aip-48/draft/ADAPTER.md) — implementation guide for new adapter authors (one per port).
