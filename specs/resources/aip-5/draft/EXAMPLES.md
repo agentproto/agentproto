@@ -31,7 +31,7 @@ pattern and edit fields rather than draft from scratch.
 ## 1. Minimal static page
 
 A template with no dynamic data — useful for fixed marketing copy that still
-wants to live in the canvakit registry. `dataSources` is empty; the body uses
+wants to live in the canvakit registry. `sources` is empty; the body uses
 caller variables only.
 
 `welcome.canvakit.html`
@@ -88,7 +88,7 @@ renderer: mustache
 refreshEvery: 5m
 variables:
   period: { type: string, default: "current-month" }
-dataSources:
+sources:
   mrr:
     kind: tool
     ref: stripe.mrr
@@ -130,7 +130,7 @@ template: true
 name: open-tasks
 version: 1.0.0
 description: Open tasks rolled up from /tasks/**/*.md, sorted by priority.
-dataSources:
+sources:
   tasks:
     kind: query
     include: /tasks/**/*.md
@@ -183,7 +183,7 @@ template: true
 name: pricing-table
 version: 1.0.0
 description: Current pricing tiers rendered from /data/pricing.csv.
-dataSources:
+sources:
   pricing: { kind: file, path: /data/pricing.csv }
   config: { kind: file, path: /config/site.yaml }
 variables:
@@ -303,7 +303,7 @@ description:
   Weekly brief themed via the active workspace designkit, falling back to
   dk:heritage.
 design: dk:heritage
-dataSources:
+sources:
   brief: { kind: file, path: /briefs/this-week.md }
 tags: [brief, themed]
 ---
@@ -362,7 +362,7 @@ design: dk:heritage
 variables:
   period: { type: string, default: "Q2 2026" }
   user_id: { type: string, required: true }
-dataSources:
+sources:
   brand:
     kind: static
     value: { name: "Acme", motto: "Build fewer, build deeper." }
@@ -522,7 +522,7 @@ Notes:
 - **Double-brace for imported bodies.** `{{imports.header}}` HTML-escapes the
   rendered HTML — use `{{{imports.header}}}`.
 - **Cross-source references in `params`.** Sources resolve in parallel, so
-  `dataSources.b.params.x: "{{a.value}}"` is a race. Substitution happens
+  `sources.b.params.x: "{{a.value}}"` is a race. Substitution happens
   against `variables` only — pass the value through a variable instead.
 - **Body-level `:root { --color-* }` blocks** when the designkit bridge is also
   injecting one. The cascade lets the body win; use inline

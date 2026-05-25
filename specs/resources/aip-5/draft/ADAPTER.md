@@ -17,7 +17,7 @@ a `*.canvakit.*` file:
 1. **Parse the frontmatter** — split on `---` fences, parse YAML, validate
    against [`./TEMPLATE.schema.json`](./TEMPLATE.schema.json), apply legacy-kind
    rewrites.
-2. **Resolve `dataSources` in parallel** — every entry produces a value plus a
+2. **Resolve `sources` in parallel** — every entry produces a value plus a
    per-source `status`. Failures degrade to `null`/`[]` without aborting the
    render.
 3. **Render the body** — assemble a context (variables + sources + well-known
@@ -103,19 +103,19 @@ the human reason. Don't silently drop fields.
 
 ## Variable substitution
 
-Variables are substituted in `dataSources.<x>.params` (and any nested string
+Variables are substituted in `sources.<x>.params` (and any nested string
 values inside) before the source is resolved. The substitution language is the
 same as the body engine — `{{var}}` under Mustache. Substitution rules:
 
 - Required variables without a caller value MUST throw `input_invalid`.
 - Defaults in `variables.<x>.default` apply when the caller omits.
-- A caller-provided variable name that collides with a `dataSources` name
+- A caller-provided variable name that collides with a `sources` name
   silently loses to the source post-resolution. Hosts SHOULD warn so the
   collision is visible.
 
 ## Source resolution
 
-Resolve all `dataSources` entries **in parallel** using the host's async
+Resolve all `sources` entries **in parallel** using the host's async
 primitive (Promise.all in JS, asyncio.gather in Python, errgroup in Go).
 Per-source timeouts MAY be applied; an exceeded timeout becomes
 `status: "error", reason: "timeout"`.
@@ -126,7 +126,7 @@ Every resolution reports a status the host MUST return alongside the resolved
 value:
 
 ```ts
-type DataSourceStatus =
+type SourceStatus =
   | { status: "ok"; sampleKeys?: string[]; count?: number }
   | { status: "missing"; reason: string }
   | { status: "error"; reason: string }
@@ -171,7 +171,7 @@ runtimes:
 | `.json`                   | Parsed JSON (any shape)                                | Standard `JSON.parse` (or equivalent).                                                    |
 | `.yaml` / `.yml`          | Parsed YAML (any shape)                                | Use a real YAML parser (js-yaml, PyYAML); never roll your own.                            |
 | `.csv` / `.tsv`           | `{ columns: string[], rows: Record<string,string>[] }` | First row is the column header. Cell values are strings.                                  |
-| `.md` / `.markdown`       | `{ ...frontmatter, $body: string }`                    | Frontmatter keys flatten on the object; the markdown body lives at `$body` (un-rendered). |
+| `.md` / `.markdown`       | `{ ...frontmatter, $body: string, $html: string }`     | Frontmatter keys flatten on the object. `$body` is the raw markdown source; `$html` is the same body rendered to HTML by the host's markdown engine (GFM-compliant). Templates that want headings/lists/tables to display as real DOM use `{{{x.$html}}}`; `$body` is for displaying the source as text. |
 | `.html` / `.htm` / `.txt` | `{ $text: string }`                                    | The raw text, escape-safe.                                                                |
 | (anything else)           | `{ $text: string }`                                    | Same fallback shape so the body never crashes on a typo'd extension.                      |
 
@@ -198,7 +198,7 @@ highest):
 
 1. Author-declared `variables` defaults
 2. Caller-provided `variables`
-3. Resolved `dataSources` (winning — the dynamic data is the point)
+3. Resolved `sources` (winning — the dynamic data is the point)
 
 Plus these well-known roots:
 
@@ -296,7 +296,7 @@ Inherits AIP-5's consumer convention:
 | ----------------------------------------- | ---------------------------------------------- |
 | Unknown frontmatter key                   | Preserve (round-trip); do not error.           |
 | Missing `template: true` marker           | Warn; render anyway.                           |
-| Unknown `dataSources` kind                | Drop with warning; other sources still render. |
+| Unknown `sources` kind                | Drop with warning; other sources still render. |
 | Malformed source fields                   | Drop with warning; status reports the issue.   |
 | Missing / unreadable file (`file` source) | Status `missing`; value `null`.                |
 | Unregistered tool ref                     | Status `missing`; value `null`.                |

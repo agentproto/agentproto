@@ -4,7 +4,7 @@ name: author-canvas
 title: Author a canvakit template (AIP-5)
 description:
   Walk through authoring a portable canvakit template — frontmatter identity,
-  variables, dataSources (tool/static/file/query), imports, designkit binding,
+  variables, sources (tool/static/file/query), imports, designkit binding,
   validation. Produces a `<name>.canvakit.<ext>` file plus an optional
   `defineCanvas` entry.
 version: 1.0.0
@@ -115,14 +115,14 @@ variables:
 
 Rules:
 
-- Every variable that's referenced in `dataSources.<x>.params` MUST appear in
+- Every variable that's referenced in `sources.<x>.params` MUST appear in
   `variables` (the runtime substitutes `{{user_id}}` -> caller value before
   resolving the source).
 - Mark `required: true` for inputs with no sensible default. The runtime MUST
   refuse the render if a required variable is missing.
 - Authoring defaults (`default: <x>`) are visible to the body too — `{{period}}`
   renders the default when the caller doesn't override.
-- A caller-provided `variables` key that **collides** with a `dataSources` name
+- A caller-provided `variables` key that **collides** with a `sources` name
   silently loses to the source. Don't shadow.
 
 ### 4. Pick the data sources
@@ -133,7 +133,7 @@ filesystem shorthands. Use the **smallest** kind that fits.
 #### `kind: tool` — the primitive
 
 ```yaml
-dataSources:
+sources:
   mrr: { kind: tool, ref: stripe.mrr, params: { since: "2026-01-01" } }
   user: { kind: tool, ref: get-user, params: { id: "{{user_id}}" } }
 ```
@@ -154,7 +154,7 @@ are resolved by the runtime's tool registry, identical across hosts.
 #### `kind: static` — caller-supplied / constant
 
 ```yaml
-dataSources:
+sources:
   header: { kind: static, value: "Welcome back" }
   branding: { kind: static, value: { color: "#7c3aed", name: "Acme" } }
 ```
@@ -165,7 +165,7 @@ the caller supplies via the host (e.g. injected through context extension).
 #### `kind: file` — single-file shorthand
 
 ```yaml
-dataSources:
+sources:
   roadmap: { kind: file, path: /plans/q2.md }
   pricing: { kind: file, path: /data/pricing.csv }
   config: { kind: file, path: /config/site.yaml }
@@ -184,7 +184,7 @@ The parsed shape lands at the source name — see §Format contract below.
 #### `kind: query` — multi-file shorthand
 
 ```yaml
-dataSources:
+sources:
   tasks:
     kind: query
     include: /tasks/**/*.md
@@ -231,7 +231,7 @@ know which shape to expect, because the body addresses it directly:
 | `.json`                   | Parsed JSON (any shape)                                |
 | `.yaml` / `.yml`          | Parsed YAML (any shape)                                |
 | `.csv` / `.tsv`           | `{ columns: string[], rows: Record<string,string>[] }` |
-| `.md` / `.markdown`       | `{ ...frontmatter, $body: string }`                    |
+| `.md` / `.markdown`       | `{ ...frontmatter, $body: string, $html: string }`     |
 | `.html` / `.htm` / `.txt` | `{ $text: string }`                                    |
 | (anything else)           | `{ $text: string }`                                    |
 
@@ -241,11 +241,16 @@ CSV iteration:
 {{#pricing.rows}}{{name}}: ${{price}}{{/pricing.rows}}
 ```
 
-Markdown body insertion (triple-brace to skip HTML escaping):
+Markdown body insertion — `$html` is the body pre-rendered to HTML (use this to
+get real headings/lists/tables in the page), `$body` is the raw markdown text.
+Triple-brace skips HTML escaping; required for `$html`.
 
 ```mustache
-<article>{{{roadmap.$body}}}</article>
+<article>{{{roadmap.$html}}}</article>
 ```
+
+Use `{{{roadmap.$body}}}` instead when you intentionally want to display the
+markdown source as text (e.g. inside a `<pre>` for an editor preview).
 
 ### 6. Decide on imports (composability)
 
@@ -332,7 +337,7 @@ export default defineCanvas({
   name: "q2-dashboard",
   version: "1.0.0",
   variables: { user_id: { type: "string", required: true } },
-  dataSources: {
+  sources: {
     user: { kind: "tool", ref: "get-user", params: { id: "{{user_id}}" } },
   },
   body: /* loaded from the .canvakit.html sibling */ "",
@@ -342,7 +347,7 @@ export default defineCanvas({
 Reply to the user with:
 
 1. The path you wrote to.
-2. The list of `dataSources` with their resolution kind so they can verify the
+2. The list of `sources` with their resolution kind so they can verify the
    binding (e.g. `mrr → tool stripe.mrr`, `tasks → query /tasks/**/*.md`).
 3. **Required variables** they must supply at render time.
 4. **Open assumptions** — defaults you guessed (`renderer: mustache`,
