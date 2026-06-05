@@ -1,0 +1,212 @@
+---
+title: "AIP-49: WALLET — agentwallet/v1 (principal-owned multi-asset wallet)"
+description: A principal-owned multi-asset wallet primitive. Assets are declared ERC-20-style (ref/symbol/decimals/standard/peg/ruleSet) and partitioned into ERC-1410 tranches; value lives in an append-only event journal whose fold is the balance. A restriction lattice makes laundering structurally impossible and conversions no-arbitrage; an authorize policy engine separates passive (cost-of-existing) from active (chosen) spend and bounds delegation by lineage-min. All settlement rails (Stripe/PawaPay/x402/on-chain) are adapters behind a per-asset SettlementPort.
+aip: 49
+status: Draft
+type: Schema
+created: 2026-06-06
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+discussions-to: https://github.com/agentproto/agentproto/discussions/49
+layer: primitives
+package: "@agentproto/wallet"
+resources: ./resources/aip-49/draft
+---
+
+| Field | Value |
+|---|---|
+| AIP | 49 |
+| Title | WALLET — agentwallet/v1 (principal-owned multi-asset wallet) |
+| Status | Draft |
+| Type | Schema |
+| Domain | wallet.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Prior art | ERC-20 (fungible token), ERC-1400 / ERC-1410 (partially-fungible / partitioned token) |
+
+## Abstract
+
+This AIP defines a **principal-owned, multi-asset wallet** primitive and the
+**`defineAsset(...)`** signature that declares the assets it holds.
+
+A wallet belongs to a **principal** (user / org / guild / operator / agent — any
+addressable identity). It holds one or more **assets**, each declared
+**ERC-20-style** (`ref`, `symbol`, `decimals`, `standard`, optional `peg`, and a
+`ruleSet`). Each asset is divided into **partitions** — ERC-1410 tranches that
+share an asset's value but carry their own restriction, expiry, and spendable
+categories. Value lives as **lots** inside partitions; the lots are a projection
+(`fold`) of an append-only **event journal** that is the sole source of truth.
+
+Three laws hold structurally rather than by runtime check:
+
+1. **No laundering.** Restrictions form a join-semilattice under union;
+   conversion accumulates restrictions at the `meet`, never strips them.
+2. **No arbitrage.** The convert graph admits no cycle whose rate product
+   exceeds 1.
+3. **Bounded delegation.** A delegate's effective allowance is the element-wise
+   minimum down its delegation chain (lineage-min) — it can only narrow.
+
+Spend carries an **intent**: `passive` (the metered cost of an agent existing /
+thinking — gated by balance + an operating cap) versus `active` (an economic
+action the agent *chose* — gated by a discretionary envelope). This is the safety
+boundary: an agent may operate freely without being able to move value out.
+
+## Motivation
+
+A single mutable `balance` integer cannot express what agentic products already
+need, and bolting features onto it produces drift:
+
+1. **Multiple assets, one wallet.** Loyalty points, paid credits, currency
+   balances, and (runtime) guild- or chain-issued tokens are different assets
+   with different pegs, networks, and rules — not one number. ERC-20-style
+   declaration gives each a precise identity; `decimals` alone retires the
+   recurring ×100 unit-bug class.
+
+2. **Feature- and cohort-fenced value.** "Image-only trial credits",
+   "promo credits that expire in 21 days" are partitions (tranches), and
+   "image credit can't pay for text" is a *missing capability* on a partition,
+   not an `if`.
+
+3. **Provenance and reconciliation.** A regulator-grade ledger must replay: every
+   spent unit traces to the grant — and ultimately the external payment — that
+   funded it. An append-only journal whose fold equals the balance makes drift
+   detectable and stops it.
+
+4. **Agent safety.** The dangerous capability is not *spending* but *moving value
+   out*. Separating passive operation from active, discretionary, bounded
+   settlement is the load-bearing guardrail against drift and prompt injection.
+
+5. **Pluggable settlement.** Stripe, PawaPay, x402, and on-chain rails are
+   interchangeable adapters behind one port, chosen per asset — not branches in
+   the wallet.
+
+## Design principles
+
+1. **Asset ⊃ partition ⊃ lot — no taxonomy above the asset.** There is no
+   "asset class". The `standard` field (`internal | iso4217 | erc20 | spl`) is
+   the only discriminator, and it routes to a settlement/valuation adapter
+   polymorphically — never `if standard === …`.
+
+2. **The journal is truth; balance is a fold.** No cell is mutated. Lots and
+   balances are replays of the event log. The reconciliation oracle asserts
+   `fold(events) == stored lots == balance` continuously.
+
+3. **Two edges, never conflated.** `coalesce` merges lots WITHIN an asset
+   (value-preserving, free); `convert` crosses BETWEEN assets (peg/forex,
+   no-arbitrage). Only `convert` may cross a peg.
+
+4. **Restrictions only accumulate.** The lattice `meet` is union; conversion is
+   `burn + mint` at the meet, so dust stays restricted and laundering is
+   self-defeating.
+
+5. **Spend intent is first-class.** `passive` vs `active` is the authorization
+   boundary; the allowance budgets the two separately (`operating` vs
+   `discretionary`).
+
+6. **Delegation narrows, never widens.** Effective envelope = lineage-min over
+   the delegation chain.
+
+7. **Purity via ports.** The primitive performs zero I/O. Storage, settlement,
+   rate, and clock are injected (`@agentproto/wallet/ports`); hosts supply
+   concrete adapters.
+
+8. **Settlement is two-phase.** Outbound value rides `reserve → pay →
+   capture | release`, so internal value is never burned before the external leg
+   confirms.
+
+## Specification
+
+### Asset declaration
+
+An `AssetDeclaration` is the registry-keyed (`ref`) unit of value. `ref` is a
+unique UPPER_SNAKE string (convention `<ORIGIN>_<SYMBOL>`, or a bare ISO-4217
+code for fiat). Full field schema in
+[`resources/aip-49/draft/ASSET.schema.json`](./resources/aip-49/draft/ASSET.schema.json).
+
+```
+asset {
+  ref         GUILDE_CREDITS | GUILDE_POINTS | USD | ERC20_USDT | SPL_USDC
+  name · symbol
+  decimals    minor-unit precision (2 = centi, 6 = USDC, 18 = most ERC-20)
+  standard    internal | iso4217 | erc20 | spl     (→ adapter, not a taxonomy)
+  chain?      ethereum | solana                     (on-chain standards)
+  peg?        { vs, source }                         (→ RatePort)
+  ruleSet     { settleOut, spendableOn, convertEdges, transfer, custody? }
+}
+```
+
+`defineAsset(...)` MUST: validate `ref` against `^[A-Z0-9][A-Z0-9_]{1,79}$`,
+validate the declaration against the schema, reject a convert edge whose `to`
+equals the asset's own `ref`, and return a frozen handle.
+
+### Partition
+
+A `partition` is `(asset, restriction, optional narrowed spendableOn, optional
+TTL)`, identified `<asset>:<tranche>`. Lots in one partition coalesce freely. A
+partition's `spendableOn`, when present, NARROWS the asset's.
+
+### Journal + lots
+
+Verbs (`event_kind`): `mint · burn · reserve · capture · release · convert_in ·
+convert_out · transfer`. A `convert` emits a correlated `convert_out` +
+`convert_in` pair atomically; a hold is `reserve` then `capture` (settle) or
+`release` (return). `fold(events, now)` projects lots
+`{ original, remaining, reserved, expiresAt?, status }`; spendable balance for an
+asset = Σ(remaining − reserved) over live (active, unexpired) lots.
+
+### Coalescing (intra-asset spend)
+
+A spend names `asset + category + amount`. Eligible lots are those whose asset
+matches and whose (partition-narrowed) `spendableOn` covers the category.
+Default order: **restricted-first** (spend constrained value before fungible),
+then **expiring-first**, then oldest. An asset with `spendableOn: []` (e.g.
+loyalty points) has NO eligible spend lot — it can only `convert`.
+
+### Convert (inter-asset) + no-arbitrage
+
+`convert` burns the source and mints the destination at the lattice meet:
+`out.restriction → in.restriction = meet(source, edge.addsRestriction)`. Amounts
+scale across `decimals`. A conformant implementation MUST provide a
+`verifyNoArbitrage` check (negative-cycle detection over `-log(rate)`) and gate
+it in CI: no cycle of convert edges may have a rate product > 1.
+
+### Authorize + delegation
+
+`authorize(request)` returns `{ ok }` or `{ ok: false, reason }`. `passive` is
+gated by balance and the `operating` cap; `active` additionally requires
+`settleOut` to be permitted and is bounded by the `discretionary` envelope
+(amount cap, rate/window, counterparty allow-list, asset allow-list). Delegation
+chains resolve by `minEnvelope` (lineage-min): caps take the minimum, allow-lists
+intersect.
+
+### Ports
+
+`StoragePort` (load/commit journal + lots, atomic AND serialized per account;
+`spendableBalance` accessor), `SettlementPort` (`charge` inbound / `pay`
+outbound, per asset), `RatePort` (universal rate oracle), `ClockPort`. All I/O is
+confined to these.
+
+## Reference implementation
+
+[`@agentproto/wallet`](https://github.com/agentproto/ts/tree/main/packages/wallet)
+— pure (zero runtime/filesystem/HTTP), property-tested:
+`restriction-lattice` (semilattice axioms), `fold` (replay invariance + hold
+cycle), `coalescing` (restricted-/expiring-first, ineligibility of points),
+`convert` (decimals scaling, restriction accumulation, no-arbitrage cycle
+detection), `authorize` (intent gating, lineage-min). Exposes `defineAsset` via
+the AIP-1 `createDoctype` scaffold.
+
+## Known limitations
+
+- **Held multi-currency (B) and on-chain-authority custody** are declared in the
+  model but not part of the reference cloud pipeline; convert-on-entry and
+  custodial-mirror are the day-1 defaults.
+- **Runtime/DB-backed asset declarations** (guild-minted tokens, arbitrary
+  deposited ERC-20s) extend the config-first registry with a DB loader; the
+  `ref` is the shared key so call sites are stable.
+- **Agent-to-agent netting** is supported by the event substrate but
+  unspecified here.
+
+## Resources
+
+- [`ASSET.schema.json`](./resources/aip-49/draft/ASSET.schema.json) — asset
+  declaration frontmatter / inline schema.
