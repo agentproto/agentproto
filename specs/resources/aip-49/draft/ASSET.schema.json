@@ -36,7 +36,12 @@
         "source": { "type": "string", "minLength": 1, "description": "Rate source key — `fixed:<ratio>` or an oracle id." }
       }
     },
-    "ruleSet": { "$ref": "#/$defs/ruleSet" }
+    "ruleSet": { "$ref": "#/$defs/ruleSet" },
+    "partitions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/partitionSpec" },
+      "description": "The asset's tranches + lifecycle policies — the partition catalog, co-located on the asset."
+    }
   },
   "$defs": {
     "restriction": {
@@ -83,6 +88,108 @@
             "amount": { "type": "number", "minimum": 0 },
             "windowSec": { "type": "number", "exclusiveMinimum": 0 }
           }
+        }
+      }
+    },
+    "timeSpec": {
+      "description": "A point in time: relative to the lot's grant, or absolute (epoch ms).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ms"],
+          "properties": {
+            "kind": { "const": "afterGrant" },
+            "ms": { "type": "number", "minimum": 0, "description": "Offset from the lot's grant instant." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "at"],
+          "properties": {
+            "kind": { "const": "absolute" },
+            "at": { "type": "number", "minimum": 0, "description": "Absolute epoch-ms instant." }
+          }
+        }
+      ]
+    },
+    "partitionRule": {
+      "description": "One lifecycle rule. `kind` discriminates; rules are serialisable data evaluated by `evaluatePolicy`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "categories"],
+          "properties": {
+            "kind": { "const": "spendOn" },
+            "categories": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Narrows payable categories (∩ with the asset's spendableOn)." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "tags"],
+          "properties": {
+            "kind": { "const": "restrict" },
+            "tags": { "$ref": "#/$defs/restriction" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "at"],
+          "properties": {
+            "kind": { "const": "expire" },
+            "at": { "$ref": "#/$defs/timeSpec", "description": "Hard cliff: spendable drops to 0 once this passes." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "curve", "ratePerDay"],
+          "properties": {
+            "kind": { "const": "decay" },
+            "curve": { "type": "string", "enum": ["linear", "exponential"] },
+            "ratePerDay": { "type": "number", "minimum": 0, "maximum": 1, "description": "Fraction lost per day. Linear hits 0 at 1/rate days; exponential is asymptotic." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "durationMs"],
+          "properties": {
+            "kind": { "const": "vest" },
+            "cliff": { "$ref": "#/$defs/timeSpec", "description": "No value unlocks before this instant." },
+            "durationMs": { "type": "number", "exclusiveMinimum": 0, "description": "Linear unlock completes this many ms after grant (or cliff)." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "scope"],
+          "properties": {
+            "kind": { "const": "transfer" },
+            "scope": { "type": "string", "enum": ["soulbound", "account", "open"] }
+          }
+        }
+      ]
+    },
+    "partitionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "asset", "restriction"],
+      "description": "A tranche within an asset, identified `<asset>:<tranche>`. Carries its lifecycle policy.",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "`<asset>:<tranche>`." },
+        "asset": { "type": "string", "minLength": 1, "description": "Owning asset ref (the prefix of `id`)." },
+        "restriction": { "$ref": "#/$defs/restriction" },
+        "spendableOn": { "type": "array", "items": { "type": "string" }, "description": "Legacy shorthand: narrows the asset's categories for this tranche." },
+        "defaultTtlMs": { "type": "number", "exclusiveMinimum": 0, "description": "Legacy shorthand: default lot lifetime." },
+        "policy": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/partitionRule" },
+          "description": "The unified lifecycle policy (restrict/expire/decay/vest/transfer). Source of truth when present."
         }
       }
     },
