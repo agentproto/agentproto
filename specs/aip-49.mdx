@@ -131,18 +131,49 @@ asset {
   chain?      ethereum | solana                     (on-chain standards)
   peg?        { vs, source }                         (→ RatePort)
   ruleSet     { settleOut, spendableOn, convertEdges, transfer, custody? }
+  partitions? [ PartitionSpec, … ]                    (the partition catalog)
 }
 ```
+
+Partitions are co-located on the asset (a partition always belongs to one
+asset), so the asset registry IS the partition catalog: a shared common set plus
+per-app `extend`.
 
 `defineAsset(...)` MUST: validate `ref` against `^[A-Z0-9][A-Z0-9_]{1,79}$`,
 validate the declaration against the schema, reject a convert edge whose `to`
 equals the asset's own `ref`, and return a frozen handle.
 
-### Partition
+### Partition + policy
 
-A `partition` is `(asset, restriction, optional narrowed spendableOn, optional
-TTL)`, identified `<asset>:<tranche>`. Lots in one partition coalesce freely. A
-partition's `spendableOn`, when present, NARROWS the asset's.
+A `partition` is a tranche within an asset, identified `<asset>:<tranche>`. Lots
+in one partition coalesce freely. A partition carries a **`policy`** — the
+unified lifecycle runtime — instead of special-casing restriction and expiry as
+separate fields:
+
+```
+policy = [ rule, … ]            an ordered, JSON-serialisable list
+rule =
+  | { kind: "spendOn",  categories }                  narrows payable categories
+  | { kind: "restrict", tags }                        stamps lattice tags (lineage)
+  | { kind: "expire",   at: TimeSpec }                hard cliff → spendable 0
+  | { kind: "decay",    curve, ratePerDay }           spendable = remaining × factor(t)
+  | { kind: "vest",     cliff?, durationMs }           unlocks over time
+  | { kind: "transfer", scope }                        soulbound | account | open
+TimeSpec = { kind: "afterGrant", ms } | { kind: "absolute", at }
+```
+
+`evaluatePolicy(policy, ctx)` folds the rules into `{ spendable, eligible,
+restriction, nextTransitionAt }`: quantity factors compose multiplicatively,
+eligibility is AND-ed, restriction tags fold via the lattice union, and
+`nextTransitionAt` is the earliest instant the spendable amount changes on its
+own (the sweep schedules on it). Relative `TimeSpec`s anchor on the lot's grant
+instant, so two grants into the same partition carry independent clocks. The
+legacy shorthand (`restriction`, narrowed `spendableOn`, `defaultTtlMs`) remains
+valid as a fast path for the common rules.
+
+This maps directly on-chain: a `policy` is the off-chain twin of an ERC-1400
+transfer-restriction module plus rebasing math; a relative-expiry partition is
+realised on-chain by stamping the deadline into the `bytes32` partition id.
 
 ### Journal + lots
 
