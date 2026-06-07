@@ -235,10 +235,13 @@ version: <semver>                    # required, the WORKSPACE version
 extends: ../path/to/parent/KNOWLEDGE.md  # OPTIONAL — relative path to
                                          #   parent; recursive merge
 appliesTo:                                # OPTIONAL — bind this view to
-                                          #   specific consumers
+                                          #   specific consumers OR dimensions
   - ws://operators/<slug>                 #   AIP-9 operator
   - ws://companies/<slug>                 #   AIP-6 company
   - ws://skills/<slug>                    #   AIP-3 skill
+  - <dimension>/<value>                   #   dimension ref, e.g.
+                                          #   region/fr, compliance/gdpr,
+                                          #   org/acme, tier/exec
 
 # Cross-AIP refs
 curator: ws://operators/<slug>          # OPTIONAL — AIP-9 operator that
@@ -294,6 +297,8 @@ display:
   defaultGrouping: kind | tag | source
 
 metadata:                               # vendor extensions, namespaced
+  layer:                                # OPTIONAL (view mode) — composition mode
+    mode: lens | constraint             #   default lens. See "Layer mode" below.
   <vendor>:
     <field>: <value>
 ---
@@ -352,6 +357,92 @@ resolution chain (ordered list of absolute paths consumed during
 merge). Consumers use the merged config; tooling uses the chain to
 explain *why* a field has the value it does.
 
+#### Dimension refs
+
+`appliesTo` accepts, alongside the `ws://operators|companies|skills/*`
+consumer refs, **dimension refs** of the form `<dimension>/<value>`:
+`region/fr`, `compliance/gdpr`, `org/acme`, `tier/exec`. A dimension ref
+binds a view to a *facet* of the resolution context rather than a single
+named consumer, so one view can adapt the workspace for "every operator
+running in France" or "any tier-exec recall". The dimension namespace is
+open: hosts register which dimensions they resolve (a host that does not
+know `compliance/*` simply never activates such a view). A view bound to
+a dimension the host cannot resolve is inert, not an error; a view bound
+to a *malformed* ref (no `/`, empty value) emits
+`knowledge_appliesto_unresolvable`.
+
+#### Layer mode — `lens` vs `constraint`
+
+A view declares its composition mode via `metadata.layer.mode` (default
+`lens`):
+
+- **`lens`** — the view adapts the workspace and is freely overridable by
+  higher-precedence layers and by guild-local edits. Org house-style,
+  tier tone, regional preferences are lenses.
+- **`constraint`** — the view is a **floor**. Higher-precedence layers and
+  guild-local edits MAY `extend` a constraint view (add entries, add
+  fields) but MUST NOT shadow, soften, or tombstone its **protected
+  entries** (its own `entries/*` and the `lints` it declares). A
+  compliance or legal view (`compliance/gdpr`, `region/fr` labour law)
+  ships as a constraint so a downstream org pack cannot silently bury it.
+
+A host MUST surface, per merged field and per resolved entry, whether it
+originated from a constraint layer (so a reviewer sees a value is
+protected). Two constraint layers that conflict on the same protected
+entry are a governance escalation, not a silent child-wins merge — the
+host emits `knowledge_constraint_conflict` and keeps both for review.
+
+#### Plane-precedence invariant
+
+Composition happens on **two planes** and they resolve different things;
+the invariant binds them:
+
+1. **Manifest-merge plane** (`extends`/`appliesTo`, child-wins) resolves
+   the effective *shape/lens* — entity types, lints, tone, query hints.
+2. **Path-shadow plane** (the mounted entry tree) resolves entry
+   *content* — a higher layer's `entries/x.md` shadows a lower layer's at
+   the same path.
+
+> **Invariant.** The guild-writable (highest-precedence) layer always
+> shadows pack content on the path-shadow plane — **EXCEPT** a
+> `constraint`-mode layer's protected entries, which neither higher
+> packs nor guild edits may shadow or tombstone. They may only `extend`
+> (author *additional* entries at *different* paths). A constraint thus
+> overrides ordinary precedence: it is the one case where a lower layer
+> wins.
+
+#### Tombstone (whiteout)
+
+The path-shadow plane is union + shadow only: a higher layer can
+*replace* a lower entry by re-authoring the same path, but cannot
+*remove* one (e.g. a US guild dropping an inherited `region/fr` entry).
+A higher layer removes a lower-layer entry with a **tombstone**: a
+zero-byte **marker file** at the sibling path `<entry-path>.whiteout`
+(to drop `entries/foo.md`, author `entries/foo.md.whiteout`). A marker
+file is used rather than a frontmatter flag so the resolution stays a
+pure path operation — hosts need not parse entry bodies to list a
+directory. When resolving the mounted tree a host MUST:
+
+- resolve each path top-down (highest-precedence layer first); the first
+  layer that declares either the entry **or** its `.whiteout` marker
+  decides. A real entry → present with that layer's content; a
+  `.whiteout` first → the path is absent from `readdir`/`walk` and reads
+  return not-found, as if no layer declared it.
+- hide `.whiteout` markers themselves from `readdir`/`walk` output.
+
+Because resolution is top-down, a higher layer re-authoring a real entry
+naturally overrides a lower tombstone, and a tombstone only suppresses
+layers **below** the one declaring it.
+
+- **Constraint entries are non-tombstoneable and non-shadowable.** A
+  `constraint`-mode layer's protected entries are pinned ABOVE all
+  higher layers, so by precedence neither a higher real entry nor a
+  `.whiteout` can shadow or remove them. A host that detects a higher
+  layer attempting to shadow a protected path emits
+  `knowledge_constraint_conflict`; a `.whiteout` targeting one emits
+  `knowledge_tombstone_blocked`. In both cases the constraint content
+  wins.
+
 #### Cross-AIP refs
 
 `KNOWLEDGE.md` is the binding surface where `agentknowledge/v1` meets
@@ -361,7 +452,7 @@ the rest of the AIP family:
 |---|---|---|
 | `curator` | [AIP-9](/docs/aip-9) operator | Names the operator the host should activate when running ingest, curation, or lint passes against this workspace. |
 | `governance` | [AIP-7](/docs/aip-7) policy / audit ref | Binds the workspace (or view) to a governance policy. Schema-poisoning mitigations and source-mutation audits flow through this ref. |
-| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator | A view declares which consumers it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer (`knowledge_appliesto_unresolvable`). |
+| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator, or a dimension ref (`<dimension>/<value>`) | A view declares which consumers OR dimensions it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer or a malformed dimension ref (`knowledge_appliesto_unresolvable`). A view bound to a dimension the host does not resolve is inert, not refused. |
 | `extends` | another `KNOWLEDGE.md` | Composition. |
 
 `appliesTo` is **not inherited**. A view binds to its own consumers; a
@@ -559,7 +650,11 @@ The wiki is *write surface* for an LLM. Threats:
   weaken the curator agent. Mitigation: hosts MUST expose the
   resolution chain alongside the merged config so reviewers can audit
   what came from where; governance policies SHOULD restrict which
-  lints a view is allowed to soften.
+  lints a view is allowed to soften. A legal/compliance baseline SHOULD
+  ship as a `constraint`-mode view so it cannot be shadowed or
+  tombstoned by a higher layer or a guild edit — the floor rule turns an
+  otherwise-silent override into a `knowledge_constraint_conflict` /
+  `knowledge_tombstone_blocked` warning.
 - **Confidence laundering** — an LLM marks low-quality syntheses as
   `confidence: 1.0`. Mitigation: confidence values written by the LLM
   during ingest are advisory; downstream consumers MAY weight them
