@@ -135,7 +135,8 @@ YAML frontmatter, delimited by `---` lines. Case-sensitive.
 | `description` | string | One-paragraph purpose, written for the LLM caller. ≤2000 chars. |
 | `version` | semver | Spec version of THIS file. Bump on incompatible step graph or schema changes. |
 | `inputs` | JSON Schema | Workflow-level inputs. Available to any step via `$workflow.inputs.*`. |
-| `outputs` | JSON Schema | Workflow-level outputs. The `summarize` / final step's output is mapped here. |
+| `outputs` | JSON Schema | Workflow-level output **shape**. Describes what `result` produces (or, when `result` is omitted, the final step's output). |
+| `result` | object \| string | Optional output **value** expression: maps step results to the workflow output using the same reference grammar as a step's `inputs` (`$workflow.inputs.*`, `$steps.<id>.*`, literals). Omitted ⇒ the output is the final step's result. Its shape SHOULD satisfy `outputs`. |
 | `steps` | object[] | Ordered array of step declarations (see [Steps](#steps)). |
 
 #### Optional fields
@@ -192,6 +193,27 @@ Workflow-specific bindings:
   manifest's `id`.
 - Step bodies access the scratch root via
   `inputData._workflowFsRoot` (the standard reserved key).
+
+`outputs` declares the output **shape**; `result` declares the output
+**value**. They split the same way a step's `outputs` (schema) and a
+step's `inputs` (value mapping) do — so the workflow output is authored
+declaratively rather than defaulting to whatever the last step happened
+to return:
+
+```yaml
+outputs:
+  type: object
+  properties:
+    count: { type: integer }
+    delivery: { type: object }
+result:
+  count: $steps.shortlist.count
+  delivery: $steps.sent
+```
+
+`result` uses the step-`inputs` reference grammar (`$workflow.inputs.*`,
+`$steps.<id>.*`, literals; objects resolve recursively). It is OPTIONAL:
+omit it and the output is the final step's result, the prior behaviour.
 
 ### Runner / Secrets / Network
 
