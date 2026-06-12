@@ -134,9 +134,9 @@ YAML frontmatter, delimited by `---` lines. Case-sensitive.
 | `id` | string | Machine identifier. Lowercase, digits, dashes. 2–64 chars. Unique within the registry. |
 | `description` | string | One-paragraph purpose, written for the LLM caller. ≤2000 chars. |
 | `version` | semver | Spec version of THIS file. Bump on incompatible step graph or schema changes. |
-| `inputs` | JSON Schema | Workflow-level inputs. Available to any step via `$workflow.inputs.*`. |
+| `inputs` | JSON Schema | Workflow-level inputs. Available to any step via `$input.*`. |
 | `outputs` | JSON Schema | Workflow-level output **shape**. Describes what `result` produces (or, when `result` is omitted, the final step's output). |
-| `result` | object \| string | Optional output **value** expression: maps step results to the workflow output using the same reference grammar as a step's `inputs` (`$workflow.inputs.*`, `$steps.<id>.*`, literals). Omitted ⇒ the output is the final step's result. Its shape SHOULD satisfy `outputs`. |
+| `result` | object \| string | Optional output **value** expression: maps step results to the workflow output using the same reference grammar as a step's `inputs` (`$input.*`, `$steps.<id>.*`, literals). Omitted ⇒ the output is the final step's result. Its shape SHOULD satisfy `outputs`. |
 | `steps` | object[] | Ordered array of step declarations (see [Steps](#steps)). |
 
 #### Optional fields
@@ -211,7 +211,7 @@ result:
   delivery: $steps.sent
 ```
 
-`result` uses the step-`inputs` reference grammar (`$workflow.inputs.*`,
+`result` uses the step-`inputs` reference grammar (`$input.*`,
 `$steps.<id>.*`, literals; objects resolve recursively). It is OPTIONAL:
 omit it and the output is the final step's result, the prior behaviour.
 
@@ -254,8 +254,8 @@ Each entry in `steps[]`:
 | `name` | string | Display label. |
 | `kind` | enum | `"tool"`, `"branch"`, `"parallel"`, `"suspend"`, `"approval"`, `"map"`, `"loop"`, `"subworkflow"`. |
 | `description` | string | One-line purpose. |
-| `inputs` | object | Mapping from upstream values to this step's input. Keys are the step's input fields; values are JSON-pointer-style references like `$workflow.inputs.productUrl`, `$steps.fetch-page.outputs.html`, or literals (`{ "kind": "literal", "value": 42 }`). |
-| `outputs` | JSON Schema | Schema of this step's output. Other steps reference it via `$steps.<id>.outputs.*`. |
+| `inputs` | object | Mapping from upstream values to this step's input. Keys are the step's input fields; values are JSON-pointer-style references like `$input.productUrl`, `$steps.fetch-page.html`, or literals (`{ "kind": "literal", "value": 42 }`). |
+| `outputs` | JSON Schema | Schema of this step's output. Other steps reference it via `$steps.<id>.*`. |
 | `next` | step id \| `"$end"` | Default successor. Branch steps override this with their `branches`. |
 
 #### Step-kind specific fields
@@ -283,7 +283,7 @@ Exactly one of `tool:` or `action:` MUST be set per step.
   kind: tool
   tool: pricing-snapshot           # TOOL.md id
   inputs:
-    productUrl: $workflow.inputs.productUrl
+    productUrl: $input.productUrl
   outputs: { type: object, properties: { html: { type: string } } }
   next: parse
   retry: { max_attempts: 3, backoff: exponential, initial_ms: 1000 }
@@ -331,9 +331,9 @@ Conditionally route to one of N successors.
 - id: route
   kind: branch
   branches:
-    - when: $steps.parse.outputs.tier == "free"
+    - when: $steps.parse.tier == "free"
       next: handle-free
-    - when: $steps.parse.outputs.tier == "paid"
+    - when: $steps.parse.tier == "paid"
       next: handle-paid
   default: $end                    # taken if no branch matches
 ```
@@ -396,7 +396,7 @@ Pause for a human decision. A specialised suspend.
   kind: approval
   prompt: "Review the contract draft and approve or reject."
   artifacts:
-    - $steps.draft-contract.outputs.fileId
+    - $steps.draft-contract.fileId
   approvers:
     - role: legal
     - role: founder                # any one approver suffices
@@ -420,7 +420,7 @@ results aggregate into an array.
 ```yaml
 - id: process-each-line
   kind: map
-  over: $steps.parse.outputs.lines
+  over: $steps.parse.lines
   parallelism: 5                   # concurrent items; 0 = unbounded
   steps: [...]
   outputs:
@@ -436,7 +436,7 @@ Repeat the nested step graph while a condition holds. Bounded by
 ```yaml
 - id: refine
   kind: loop
-  while: $steps.evaluate.outputs.score < 0.8
+  while: $steps.evaluate.score < 0.8
   max_iterations: 5
   steps: [...]
 ```
@@ -452,7 +452,7 @@ this step's `outputs`.
   workflow: deploy-to-prod         # WORKFLOW.md id
   inputs:
     branch: main
-    artifact: $steps.build.outputs.artifactPath
+    artifact: $steps.build.artifactPath
 ```
 
 ### Expressions
@@ -462,12 +462,19 @@ The minimum expression grammar adapters MUST support:
 ```
 expr     := value | binary | unary | path
 value    := string | number | bool | null
-path     := '$workflow.inputs.' field ( '.' field )*
-          | '$steps.' step-id '.outputs.' field ( '.' field )*
+path     := '$input'  ( '.' field )*
+          | '$steps.' step-id ( '.' field )*
+          | '$item'   ( '.' field )*
+          | '$index'
 binary   := expr op expr
 op       := '==' | '!=' | '<' | '<=' | '>' | '>=' | '&&' | '||'
 unary    := '!' expr
 ```
+
+`$input` is the workflow `inputs` block; `$steps.<id>` is a step's
+resolved output (no `.outputs.` segment — the step's output binds
+directly under its id); `$item` / `$index` are the current element and
+position inside a `map` step. A leading `$$` escapes a literal `$`.
 
 No function calls, no loops in expressions, no string interpolation.
 Workflows that need richer logic encode it as a tool step with a
@@ -686,14 +693,14 @@ steps so partial failures roll back cleanly. Convention:
 - id: charge-card
   kind: tool
   tool: stripe-charge
-  inputs: { amount: $workflow.inputs.amount, customer: $workflow.inputs.customerId }
+  inputs: { amount: $input.amount, customer: $input.customerId }
   outputs: { type: object, properties: { chargeId: { type: string } } }
   compensation: refund-card
 
 - id: refund-card
   kind: tool
   tool: stripe-refund
-  inputs: { chargeId: $steps.charge-card.outputs.chargeId }
+  inputs: { chargeId: $steps.charge-card.chargeId }
   outputs: { type: object }
 ```
 
@@ -747,7 +754,7 @@ Hosts SHOULD accept both shapes during the deprecation window.
 
 Adds an optional top-level `result:` expression that maps step outputs
 into the workflow's output **value**, using the same reference grammar
-as a step's `inputs` (`$workflow.inputs.*`, `$steps.<id>.*`, literals;
+as a step's `inputs` (`$input.*`, `$steps.<id>.*`, literals;
 objects resolve recursively). `outputs` stays the output **shape**;
 `result` is the value that fills it. Fully backward-compatible — omit
 `result` and the output remains the final step's result, the prior
@@ -793,7 +800,7 @@ in-process privilege, egress enforcement), see
 
 ## Open questions
 
-1. **Variable scoping**: should `$steps.<id>.outputs` be visible
+1. **Variable scoping**: should `$steps.<id>` be visible
    inside parallel branches, or only after the join? Current draft:
    only after the join.
 2. **Streaming step outputs**: tools that yield progressive results

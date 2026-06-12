@@ -104,8 +104,8 @@ If the user's description has an ambiguity (could be `branch` or
 Each step's `inputs` field maps upstream values to that step's input schema. Use
 the path grammar:
 
-- `$workflow.inputs.<field>` — workflow-level input.
-- `$steps.<step-id>.outputs.<field>` — output of an earlier step.
+- `$input.<field>` — workflow-level input.
+- `$steps.<step-id>.<field>` — output of an earlier step.
 - Literals: `{ "kind": "literal", "value": <any> }`.
 
 Rules:
@@ -277,7 +277,7 @@ const fetch = defineStep({
   id: "fetch-customer",
   kind: "tool",
   tool: "stripe-customer-lookup",
-  inputs: { email: "$workflow.inputs.customerEmail" },
+  inputs: { email: "$input.customerEmail" },
   outputs: z.object({ customerId: z.string(), pastDue: z.boolean() }),
   next: "route",
 })
@@ -286,7 +286,7 @@ const route = defineStep({
   id: "route",
   kind: "branch",
   branches: [
-    { when: "$steps.fetch-customer.outputs.pastDue == true", next: "dunning" },
+    { when: "$steps.fetch-customer.pastDue == true", next: "dunning" },
     { when: "true", next: "send" },
   ],
 })
@@ -319,7 +319,7 @@ npx ajv validate -s ./WORKFLOW.schema.json -d ./WORKFLOW.md
 Fix every error before declaring success. Specifically check:
 
 - All `next` references point to step ids that exist.
-- All `$steps.<id>.outputs.<field>` references point to upstream steps with that
+- All `$steps.<id>.<field>` references point to upstream steps with that
   field in their `outputs`.
 - Every mutating step has either `compensation: <id>` set OR a body comment
   explaining why compensation is impossible.

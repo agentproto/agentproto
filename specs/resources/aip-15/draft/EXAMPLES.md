@@ -49,13 +49,13 @@ steps:
   - id: fetch
     kind: tool
     tool: pricing-snapshot
-    inputs: { productUrl: $workflow.inputs.productUrl }
+    inputs: { productUrl: $input.productUrl }
     outputs: { type: object, properties: { tiers: { type: array } } }
     next: summarise
   - id: summarise
     kind: tool
     tool: text-summarise
-    inputs: { content: $steps.fetch.outputs.tiers }
+    inputs: { content: $steps.fetch.tiers }
     outputs: { type: object, properties: { markdown: { type: string } } }
     next: write
   - id: write
@@ -63,7 +63,7 @@ steps:
     tool: append-to-notes
     inputs:
       filename: pricing.md
-      line: $steps.summarise.outputs.markdown
+      line: $steps.summarise.markdown
     outputs: { type: object, properties: { path: { type: string } } }
     next: $end
 timeout_ms: 60000
@@ -100,7 +100,7 @@ steps:
   - id: enrich
     kind: tool
     tool: clearbit-enrich
-    inputs: { email: $workflow.inputs.email }
+    inputs: { email: $input.email }
     outputs:
       type: object
       properties:
@@ -110,7 +110,7 @@ steps:
   - id: route
     kind: branch
     branches:
-      - when: $steps.enrich.outputs.companySize >= 500
+      - when: $steps.enrich.companySize >= 500
         next: assign-ae
       - when: true
         next: smb-email
@@ -119,7 +119,7 @@ steps:
   - id: assign-ae
     kind: tool
     tool: salesforce-assign-account-exec
-    inputs: { email: $workflow.inputs.email }
+    inputs: { email: $input.email }
     outputs: { type: object, properties: { ownerId: { type: string } } }
     approval: on-mutate
     next: $end
@@ -128,7 +128,7 @@ steps:
     kind: tool
     tool: send-email-brevo
     inputs:
-      to: $workflow.inputs.email
+      to: $input.email
       subject: "Welcome to <product>"
       body: <…template…>
     approval: always
@@ -170,7 +170,7 @@ steps:
           - id: stripe-lookup
             kind: tool
             tool: stripe-customer-lookup
-            inputs: { email: $workflow.inputs.customerEmail }
+            inputs: { email: $input.customerEmail }
             outputs: { type: object }
             next: $end
         next: merge
@@ -179,7 +179,7 @@ steps:
           - id: hubspot-lookup
             kind: tool
             tool: hubspot-contact-lookup
-            inputs: { email: $workflow.inputs.customerEmail }
+            inputs: { email: $input.customerEmail }
             outputs: { type: object }
             next: $end
         next: merge
@@ -188,7 +188,7 @@ steps:
           - id: linear-search
             kind: tool
             tool: linear-issues-by-customer
-            inputs: { email: $workflow.inputs.customerEmail }
+            inputs: { email: $input.customerEmail }
             outputs: { type: object }
             next: $end
         next: merge
@@ -198,9 +198,9 @@ steps:
     kind: tool
     tool: merge-objects
     inputs:
-      stripe: $steps.enrich.outputs.stripe
-      hubspot: $steps.enrich.outputs.hubspot
-      linear: $steps.enrich.outputs.linear
+      stripe: $steps.enrich.stripe
+      hubspot: $steps.enrich.hubspot
+      linear: $steps.enrich.linear
     outputs: { type: object }
     next: $end
 timeout_ms: 30000
@@ -239,8 +239,8 @@ steps:
     kind: tool
     tool: contract-draft
     inputs:
-      customerId: $workflow.inputs.customerId
-      sku: $workflow.inputs.productSku
+      customerId: $input.customerId
+      sku: $input.productSku
     outputs:
       type: object
       properties: { fileId: { type: string } }
@@ -252,7 +252,7 @@ steps:
       "Legal review required for contract draft. Open the artifact, read the
       body, approve to send to the customer or reject with notes."
     artifacts:
-      - $steps.draft.outputs.fileId
+      - $steps.draft.fileId
     approvers:
       - role: legal
       - role: founder
@@ -265,7 +265,7 @@ steps:
     kind: tool
     tool: contract-revise
     inputs:
-      fileId: $steps.draft.outputs.fileId
+      fileId: $steps.draft.fileId
     outputs: { type: object, properties: { fileId: { type: string } } }
     next: legal-review
 
@@ -280,8 +280,8 @@ steps:
     kind: tool
     tool: send-contract-to-customer
     inputs:
-      customerId: $workflow.inputs.customerId
-      fileId: $steps.draft.outputs.fileId
+      customerId: $input.customerId
+      fileId: $steps.draft.fileId
     outputs: { type: object, properties: { sentAt: { type: string } } }
     approval: always
     next: $end
@@ -321,7 +321,7 @@ steps:
     kind: tool
     tool: send-email-brevo
     inputs:
-      to: $workflow.inputs.email
+      to: $input.email
       subject: "Welcome — set up your workspace"
       body: <…template…>
     approval: always
@@ -343,7 +343,7 @@ steps:
   - id: route-event
     kind: branch
     branches:
-      - when: $steps.wait-payment.outputs.eventName == "stripe.charge.succeeded"
+      - when: $steps.wait-payment.eventName == "stripe.charge.succeeded"
         next: provision
       - when: true
         next: $end
@@ -351,7 +351,7 @@ steps:
   - id: provision
     kind: tool
     tool: provision-workspace
-    inputs: { customerId: $workflow.inputs.customerId }
+    inputs: { customerId: $input.customerId }
     outputs: { type: object, properties: { workspaceId: { type: string } } }
     next: $end
 timeout_ms: 2592000000
@@ -389,7 +389,7 @@ steps:
   - id: reserve
     kind: tool
     tool: inventory-reserve
-    inputs: { orderId: $workflow.inputs.orderId }
+    inputs: { orderId: $input.orderId }
     outputs: { type: object, properties: { reservationId: { type: string } } }
     compensation: release-reservation
     next: charge
@@ -397,7 +397,7 @@ steps:
   - id: release-reservation
     kind: tool
     tool: inventory-release
-    inputs: { reservationId: $steps.reserve.outputs.reservationId }
+    inputs: { reservationId: $steps.reserve.reservationId }
     outputs: { type: object }
     next: $end
 
@@ -405,7 +405,7 @@ steps:
     kind: tool
     tool: stripe-charge
     inputs:
-      orderId: $workflow.inputs.orderId
+      orderId: $input.orderId
       amountUsd: 100 # placeholder — real amount comes from prior step in production
     outputs: { type: object, properties: { chargeId: { type: string } } }
     approval: always
@@ -415,7 +415,7 @@ steps:
   - id: refund
     kind: tool
     tool: stripe-refund
-    inputs: { chargeId: $steps.charge.outputs.chargeId }
+    inputs: { chargeId: $steps.charge.chargeId }
     outputs: { type: object }
     next: $end
 
@@ -423,8 +423,8 @@ steps:
     kind: tool
     tool: ship-package
     inputs:
-      orderId: $workflow.inputs.orderId
-      reservationId: $steps.reserve.outputs.reservationId
+      orderId: $input.orderId
+      reservationId: $steps.reserve.reservationId
     outputs: { type: object, properties: { trackingId: { type: string } } }
     approval: on-mutate
     next: $end
@@ -460,7 +460,7 @@ outputs:
 steps:
   - id: triage-each
     kind: map
-    over: $workflow.inputs.emails
+    over: $input.emails
     parallelism: 5
     steps:
       - id: triage
@@ -506,22 +506,22 @@ outputs:
 steps:
   - id: refine
     kind: loop
-    while: $steps.evaluate.outputs.score < 0.8
+    while: $steps.evaluate.score < 0.8
     max_iterations: 5
     steps:
       - id: generate
         kind: tool
         tool: copy-generate
         inputs:
-          brief: $workflow.inputs.brief
-          previousAttempt: $steps.evaluate.outputs.feedback
+          brief: $input.brief
+          previousAttempt: $steps.evaluate.feedback
         outputs: { type: object, properties: { copy: { type: string } } }
         next: evaluate
 
       - id: evaluate
         kind: tool
         tool: brand-score
-        inputs: { copy: $steps.generate.outputs.copy }
+        inputs: { copy: $steps.generate.copy }
         outputs:
           type: object
           properties:
@@ -562,7 +562,7 @@ steps:
   - id: lookup
     kind: subworkflow
     workflow: customer-360
-    inputs: { customerEmail: $workflow.inputs.customerEmail }
+    inputs: { customerEmail: $input.customerEmail }
     outputs:
       type: object
       properties: { summary: { type: object } }
@@ -572,7 +572,7 @@ steps:
     kind: subworkflow
     workflow: contract-send
     inputs:
-      customerId: $workflow.inputs.customerId
+      customerId: $input.customerId
       productSku: "annual-renewal"
     outputs:
       type: object
@@ -627,9 +627,9 @@ steps:
     kind: tool
     tool: { entry: ./workflow.ts#writeReportStep }
     inputs:
-      title: $workflow.inputs.title
-      content: $workflow.inputs.content
-      _workflowFsRoot: $workflow.inputs._workflowFsRoot
+      title: $input.title
+      content: $input.content
+      _workflowFsRoot: $input._workflowFsRoot
     outputs:
       type: object
       properties:
@@ -738,8 +738,8 @@ steps:
     kind: tool
     tool: { entry: ./workflow.ts#writeCsvStep }
     inputs:
-      rows: $steps.pull.outputs.rows
-      _workflowFsRoot: $workflow.inputs._workflowFsRoot
+      rows: $steps.pull.rows
+      _workflowFsRoot: $input._workflowFsRoot
     outputs:
       type: object
       properties:
@@ -809,13 +809,13 @@ steps:
   - id: search
     kind: tool
     tool: marketplace-search
-    inputs: { query: $workflow.inputs.query }
+    inputs: { query: $input.query }
     outputs: { type: object, properties: { ads: { type: array } } }
     next: shortlist
   - id: shortlist
     kind: tool
     tool: listings-shortlist
-    inputs: { ads: $steps.search.outputs.ads }
+    inputs: { ads: $steps.search.ads }
     outputs:
       type: object
       properties:
@@ -824,7 +824,7 @@ steps:
     next: details
   - id: details
     kind: map
-    over: $steps.shortlist.outputs.items
+    over: $steps.shortlist.items
     parallelism: 2
     steps:
       - id: detail
@@ -836,22 +836,22 @@ steps:
     kind: tool
     tool: listings-enrich
     inputs:
-      items: $steps.shortlist.outputs.items
+      items: $steps.shortlist.items
       details: $steps.details
     outputs: { type: object, properties: { items: { type: array } } }
     next: report
   - id: report
     kind: tool
     tool: report-render
-    inputs: { items: $steps.enrich.outputs.items }
+    inputs: { items: $steps.enrich.items }
     outputs: { type: object, properties: { path: { type: string } } }
     next: notify
   - id: notify
     kind: tool
     tool: messaging-send
     inputs:
-      to: $workflow.inputs.recipient
-      document: $steps.report.outputs.path
+      to: $input.recipient
+      document: $steps.report.path
     outputs: { type: object, properties: { id: { type: string } } }
     next: $end
 result:
@@ -878,7 +878,7 @@ each `$steps.<id>.<field>` reference resolved against the step that produced it.
 - **`approval: auto` on a mutating step** — schema rejects this combination
   upstream (TOOL.md), but workflows can re-introduce it via step-level
   overrides. Don't.
-- **Forward references in `inputs`** — `$steps.<later-id>.outputs` for a step
+- **Forward references in `inputs`** — `$steps.<later-id>` for a step
   that hasn't run yet. Spec violation; validators catch it.
 - **Branches with no `default`** — if no `when` matches, what happens? Always
   set `default` (or use `default: $end` for no-op).

@@ -37,7 +37,7 @@
       "$ref": "https://agentproto.sh/schemas/aip-16/IO.schema.json#/$defs/outputs"
     },
     "result": {
-      "description": "Optional value expression mapping step results to the workflow output, using the same reference grammar as a step's `inputs` ($workflow.inputs.*, $steps.<id>.*, literals). Omitted ⇒ the output is the final step's result. Its shape SHOULD satisfy `outputs`.",
+      "description": "Optional value expression mapping step results to the workflow output, using the same reference grammar as a step's `inputs` ($input.*, $steps.<id>.*, literals). Omitted ⇒ the output is the final step's result. Its shape SHOULD satisfy `outputs`.",
       "type": ["object", "string"]
     },
     "steps": {

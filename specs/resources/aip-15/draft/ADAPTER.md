@@ -67,7 +67,7 @@ A host that implements `defineWorkflow` MUST:
    up-front `steps[]`. Both styles MUST yield the same registered workflow.
 2. **Validate the graph at `commit()`**:
    - All `next` references resolve to declared steps OR `$end`.
-   - All `$steps.<id>.outputs.<field>` references in `inputs` mappings point to
+   - All `$steps.<id>.<field>` references in `inputs` mappings point to
      steps that complete BEFORE the referencing step in topological order.
    - No cycles outside `kind: "loop"` bodies.
    - Every `compensation: <id>` reference resolves.
