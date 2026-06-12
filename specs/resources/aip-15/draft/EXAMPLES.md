@@ -17,6 +17,7 @@ pattern and edit fields rather than draft from scratch.
 9. [Sub-workflow composition](#9-sub-workflow-composition)
 10. [File contract — files-in / files-out](#10-file-contract--files-in--files-out)
 11. [Sandboxed workflow with explicit env + egress](#11-sandboxed-workflow-with-explicit-env--egress)
+12. [Shaped output with `result`](#12-shaped-output-with-result)
 
 ---
 
@@ -770,6 +771,102 @@ What the host does at run time:
 4. Syncs `outputsFiles.invoices` from `<fsRoot>/invoices` back to the workspace
    at `finance/stripe-<isoDate>.csv`.
 5. Tears down the sandbox.
+
+---
+
+## 12. Shaped output with `result`
+
+Compose the workflow output from several steps instead of surfacing whatever the
+last step returned. A search → shortlist → enrich → report → notify pipeline
+whose caller wants `{ count, reportPath, delivery }` — each field pulled from the
+step that produced it. The `details` map enriches every shortlisted listing
+before the report renders.
+
+```md
+---
+name: Listing Search Report
+id: listing-search-report
+description:
+  Search a marketplace, shortlist by commute, enrich each hit with its detail
+  page, render a report, and deliver it. Output is mapped explicitly via
+  `result` so the caller gets a stable contract, not the notify step's envelope.
+version: 1.0.0
+entry: workflow.ts
+inputs:
+  type: object
+  properties:
+    query: { type: string }
+    recipient: { type: string }
+  required: [query, recipient]
+outputs:
+  type: object
+  properties:
+    count: { type: integer }
+    reportPath: { type: string }
+    delivery: { type: object }
+  required: [count, reportPath]
+steps:
+  - id: search
+    kind: tool
+    tool: marketplace-search
+    inputs: { query: $workflow.inputs.query }
+    outputs: { type: object, properties: { ads: { type: array } } }
+    next: shortlist
+  - id: shortlist
+    kind: tool
+    tool: listings-shortlist
+    inputs: { ads: $steps.search.outputs.ads }
+    outputs:
+      type: object
+      properties:
+        items: { type: array }
+        count: { type: integer }
+    next: details
+  - id: details
+    kind: map
+    over: $steps.shortlist.outputs.items
+    parallelism: 2
+    steps:
+      - id: detail
+        kind: tool
+        tool: marketplace-detail
+        inputs: { ref: $item.url }
+    next: enrich
+  - id: enrich
+    kind: tool
+    tool: listings-enrich
+    inputs:
+      items: $steps.shortlist.outputs.items
+      details: $steps.details
+    outputs: { type: object, properties: { items: { type: array } } }
+    next: report
+  - id: report
+    kind: tool
+    tool: report-render
+    inputs: { items: $steps.enrich.outputs.items }
+    outputs: { type: object, properties: { path: { type: string } } }
+    next: notify
+  - id: notify
+    kind: tool
+    tool: messaging-send
+    inputs:
+      to: $workflow.inputs.recipient
+      document: $steps.report.outputs.path
+    outputs: { type: object, properties: { id: { type: string } } }
+    next: $end
+result:
+  count: $steps.shortlist.count
+  reportPath: $steps.report.path
+  delivery: $steps.notify
+timeout_ms: 120000
+tags: [marketplace, report, result-mapping]
+---
+```
+
+Without `result`, the workflow would surface `notify`'s `{ id }` — the final
+step's output. `result` instead returns the declared `outputs` contract: the
+shortlist `count`, the rendered `reportPath`, and the full `delivery` envelope,
+each `$steps.<id>.<field>` reference resolved against the step that produced it.
 
 ---
 

@@ -11,7 +11,7 @@ aip: 15
 status: Draft
 type: Schema
 created: 2026-04-28
-updated: 2026-04-30
+updated: 2026-06-12
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 7, 14, 16, 30]
 resources: ./resources/aip-15/draft
@@ -742,6 +742,16 @@ manifest.runtime.timeout_ms     → manifest.runner.limits.timeout_ms
 ```
 
 Hosts SHOULD accept both shapes during the deprecation window.
+
+### Output `result` mapping (2026-06-12 revision)
+
+Adds an optional top-level `result:` expression that maps step outputs
+into the workflow's output **value**, using the same reference grammar
+as a step's `inputs` (`$workflow.inputs.*`, `$steps.<id>.*`, literals;
+objects resolve recursively). `outputs` stays the output **shape**;
+`result` is the value that fills it. Fully backward-compatible — omit
+`result` and the output remains the final step's result, the prior
+behaviour. See [EXAMPLES § 12](./resources/aip-15/draft/EXAMPLES.md).
 
 ### With pre-AIP runtime-specific workflow definitions
 
