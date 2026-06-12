@@ -70,6 +70,23 @@ Doctype shape (sketch):
 | `operator` | `operators/<slug>/OPERATOR.md` | A specific AI operator (instance of a role). [AIP-9](/docs/aip-9) runtime; extends [AIP-42 AGENT.md](/docs/aip-42) with role + reports_to + company binding. |
 | `agent` | `agents/<slug>/AGENT.md` | A standalone agent (utility, helper, sub-agent) — [AIP-42](/docs/aip-42). NOT bound to a company role; useful for utilities (researcher, code-reviewer, formatter) the company employs without giving them an org-chart slot. |
 
+### `structure.positions` (formerly `structure.roles`)
+
+The company manifest's `structure` block enumerates the org chart:
+
+- **`structure.positions`** — slugs of the company's **seats**, each
+  typically materialized as an operator (`operators/<slug>/OPERATOR.md`).
+  A position is a seat exactly one operator holds; several positions MAY
+  share one [AIP-47](/docs/aip-47) catalog role (e.g. an SDR seat and an
+  AE seat both fulfilling `sales-rep`). See AIP-47 §Role vs Position vs
+  Access role.
+- **`structure.reports_to`** — map of position-slug → position-slug
+  expressing the reporting tree.
+- **`structure.roles`** — DEPRECATED alias of `positions`. Historically
+  documented as role slugs but used in practice for seats. Readers MUST
+  accept both; when both are present, `positions` wins. Writers SHOULD
+  emit `positions`.
+
 Common conventions adopted by all `agentcompanies/v1` files:
 
 - **Markdown canonical** with YAML frontmatter

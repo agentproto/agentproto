@@ -84,7 +84,10 @@ playbooks/
 schema: playbooks/v1
 slug: <kebab-case-playbook-id>
 title: <one-sentence — what this overlay does>
-targets:
+selector:                               # typed binding — see §Selector binding
+  role: <slug>                          # axis → ref | ref[]; AND across keys, OR within a list
+  capability: [<slug>, <slug>]
+targets:                                # DEPRECATED — legacy binding, see §Selector binding
   - kind: operator | role | skill | runtime
     ref: <slug-or-glob>                 # e.g. "role/librarian", "operator/*", "skill/research"
 kind: overlay | block-replacement       # overlay = additive; block-replacement = swap a named block
@@ -109,12 +112,58 @@ metadata:
 persona at the position implied by `kind`>
 ```
 
+### Selector binding
+
+A playbook binds to subjects through a typed **selector** evaluated
+against the subject's **dimensions** — a host-supplied map of axis →
+value(s). One matcher decides `selector ⊨ dimensions`; nothing else
+about the subject is consulted.
+
+Well-known axes (hosts MAY register more — org units, regions,
+compliance regimes — via their own axis registry; this spec defines
+only the AIP-concept axes):
+
+| Axis | Owner | Subject value | Targets |
+|---|---|---|---|
+| `identity` | [AIP-9](/docs/aip-9) | The operator's own slug | One specific operator |
+| `role` | [AIP-47](/docs/aip-47) | The catalog role (job) slug the operator fulfils | Every operator in the role |
+| `position` | [AIP-6](/docs/aip-6) | The host-assigned seat label, slugified | The one operator holding the seat |
+| `capability` | [AIP-9](/docs/aip-9) | Capability slugs the operator carries | Operators with the capability |
+
+Short form: `selector:` maps axis keys to a ref or a ref list — AND
+across keys, OR within a list. The long form (`allOf:` / `anyOf:` lists
+of `{axis, anyOf}` terms) expresses OR across axes. A ref of `"*"`
+matches any present value on the axis. Two hard rules:
+
+- **An empty selector matches NOTHING.** An overlay meant for every
+  subject in scope says so explicitly (`role: "*"` or similar).
+  Reach — org vs guild vs workspace — is NOT a selector concern: it is
+  decided by which corpus workspaces the host aggregates before
+  matching runs.
+- **A term against an absent dimension fails.** Hosts that don't
+  supply a `position` dimension simply never match position-targeted
+  overlays — no error, no fallback.
+
+**Legacy compile (permanent).** Files predating `selector:` bind via
+`targets[]` / `binds_operator`, which are axis-AMBIGUOUS: a
+`kind: operator` ref (and `binds_operator`) historically held either an
+operator slug or a role slug, and runtimes tried both. A conforming
+runtime MUST compile the legacy fields into a selector that preserves
+this: each `kind: operator` ref and `binds_operator` lands in BOTH an
+`identity` and a `role` bucket of an `anyOf` selector; `kind: role`
+refs land in the `role` bucket; `kind: skill | runtime` refs compile to
+their own axes. Ref shapes `<kind>/<slug>`, `ws://<kind>s/<slug>`, and
+globs (`operator/*` → `"*"`) normalize before matching. When both
+`selector:` and the legacy fields are present, `selector:` wins and
+`binds_operator` is provenance only — never matched.
+
 ### Apply contract
 
 Before the agent generates a turn, the runtime MUST:
 
-1. Resolve the active operator's `targets` matches across all
-   `PLAYBOOK.md` files with `status: active`.
+1. Resolve the active operator's selector matches (explicit
+   `selector:` or the legacy compile of `targets` — see §Selector
+   binding) across all `PLAYBOOK.md` files with `status: active`.
 2. Sort matches by `priority` desc, `updated_at` desc.
 3. For each match, run `lock_check` against the operator's locked
    persona traits — if any locked trait would be modified by the

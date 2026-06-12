@@ -30,7 +30,7 @@ package: "@agentproto/role"
 
 `agentrole/v1` defines a **single-doc** manifest format — `ROLE.md` —
 for a portable organizational role: the mission, responsibilities,
-capabilities, tools, KPIs, seniority, and reporting line of a position
+capabilities, tools, KPIs, seniority, and reporting line of a job
 in an AI company. A role describes **what the job is** — independent of
 who holds it (the persona / identity) and which instance is hired (the
 operator).
@@ -177,6 +177,9 @@ skills:                              # OPTIONAL — AIP-3 skill refs
   - ws://skills/<slug>
 kpis:                                # OPTIONAL — scorer slugs (forward AIP)
   - <scorer-slug>
+knowledge:                           # OPTIONAL — generic corpus this role consults
+  packs:                             #   AIP-10 pack refs, mounted read-only beneath the operator's corpus
+    - <pack-ref>
 
 # Job-side prose (small, structured; long-form goes in body)
 strengths:                           # OPTIONAL — append-and-dedupe
@@ -230,6 +233,7 @@ metadata: {}                         # OPTIONAL — vendor extensions under name
 | `tools` | ws ref[] | `[]` | [AIP-14](/docs/aip-14) tool refs. Declarative intent — governance gates effect. Append-and-dedupe. |
 | `skills` | ws ref[] | `[]` | [AIP-3](/docs/aip-3) skill refs. Append-and-dedupe. |
 | `kpis` | string[] | `[]` | Scorer slugs (forward AIP). Append-and-dedupe. |
+| `knowledge.packs` | ref[] | `[]` | [AIP-10](/docs/aip-10) knowledge-pack refs this role mounts as its generic corpus floor — read-only, layered UNDER the operator's own editable corpus. Distinct from `skills` (what the role knows how to DO): knowledge is what it CONSULTS. Append-and-dedupe across `extends`. Absent = host convention (e.g. a pack named after the role slug). |
 | `strengths` | string[] | `[]` | Job-side strengths in prose. Append-and-dedupe. |
 | `antiPatterns` | string[] | `[]` | What the role explicitly does NOT do. Append-and-dedupe. |
 | `onPromotion` | ws ref | none | [AIP-39](/docs/aip-39) action ref. Fired on promotion INTO this role. |
@@ -313,6 +317,7 @@ replaces the parent's).
 | `tools` | append + dedupe | Lineage accumulates refs. |
 | `skills` | append + dedupe | Lineage accumulates refs. |
 | `kpis` | append + dedupe | Lineage accumulates KPI slugs. |
+| `knowledge.packs` | append + dedupe | Lineage accumulates pack refs. |
 | `strengths` | append + dedupe | Lineage accumulates strings. |
 | `antiPatterns` | append + dedupe | Lineage accumulates strings. |
 | `onPromotion`, `onDemotion`, `onAssign` | override | Single action; child wins. |
@@ -437,7 +442,7 @@ the split is deliberate and the seams are sharp.
 
 **When to use which.** Reach for AIP-47 when you want to ship a job
 description — the mission, responsibilities, KPIs, tools, and reporting
-line of a position. Reach for [AIP-25](/docs/aip-25) when you want to
+line of a job. Reach for [AIP-25](/docs/aip-25) when you want to
 ship a named character — the face users meet, the voice they hear,
 the backstory. Reach for [AIP-23](/docs/aip-23) when you want to ship
 layered behavioural substance. Reach for [AIP-9](/docs/aip-9) when you
@@ -469,6 +474,32 @@ definition, an operator — the upgrade path is AGENT → OPERATOR, not
 "AGENT with optional role". AIP-47 is consumed by AIP-9 OPERATOR's
 required `role:` field; AIP-42 AGENT has no role binding.
 
+## Role vs Position vs Access role
+
+Three host-side concepts orbit the word "role" and MUST stay distinct:
+
+| Concept | What it is | Authored by | Attachment-selector axis? |
+|---|---|---|---|
+| **Role** (this AIP) | The catalog job template — `ROLE.md`, bound by slug from the operator's `role:` field. Many operators can hold one role. | Catalog / HR | YES — axis `role` |
+| **Position** | The host-assigned, user-settable seat label on a specific operator instance ("Growth AE — EMEA"). Not a doctype — carried by the host (typically the operator's editable display title) and matched by its slugified form. | End user | YES — axis `position` |
+| **Access role** | Membership RBAC tier of a human or operator inside the host's org structure (`owner`, `admin`, `editor`, `viewer`, …). | Security / admin | **NEVER** |
+
+A role is a template many operators share; a position is a seat exactly
+one operator holds at a time; an access role is a permission tier.
+Renaming a seat ("Growth AE" → "Enterprise AE") MUST NOT change the
+operator's role binding or its access — and granting `admin` MUST NOT
+change which knowledge or playbooks attach.
+
+Hosts that support attachment binding (playbook overlays, knowledge
+packs, skills — see [AIP-12](/docs/aip-12) selectors) expose `role` and
+`position` as targeting dimensions. Position matching is on the
+slugified label; the label itself remains free prose. Access roles are
+evaluated by policy ([AIP-38](/docs/aip-38)) and governance
+([AIP-7](/docs/aip-7)), never by attachment selectors — attaching
+knowledge by permission tier conflates HR with security, the exact
+collapse [Role vs Policy vs Governance](#role-vs-policy-vs-governance)
+forbids.
+
 ## Role vs Policy vs Governance
 
 The most consequential seam in AIP-47 is the one between **role** and
@@ -481,7 +512,7 @@ collapsing them is a security mistake.
 | Answers | "What is the job?" | "What is allowed?" | "What was decided, by whom, with what audit?" |
 | Sense | HR — job description | Security — access control | Process — approval & audit |
 | Surface | `tools[]`, `skills[]`, `kpis[]`, `responsibilities[]` (intent) | `access` grants on [AIP-39](/docs/aip-39) ACTION ids, limits, requirements | Signatures, audit-events, approval policies |
-| Subject | The position | The operator (or workspace, storage, sandbox, code, secrets, tool) | The decision |
+| Subject | The job | The operator (or workspace, storage, sandbox, code, secrets, tool) | The decision |
 | Mutability | Bumped on org redesign | Tightened on threat / loosened on grant | Append-only |
 | Edited by | Hiring manager / HR | Security / admin | Approver (human or agent) |
 | Grants permission? | **NO** — declarative intent only | **YES** — the access primitive | NO — records decisions about grants |
