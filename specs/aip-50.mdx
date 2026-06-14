@@ -1,0 +1,337 @@
+---
+title: "AUTH.md — agentauth/v1 (agentic server authentication manifest)"
+description: Defines the auth-provider doctype that lets CLI tools and agents authenticate to API servers via a standardized discovery chain and pluggable flow engines, aligned to the WorkOS auth.md open standard.
+aip: 50
+status: Draft
+type: Schema
+created: 2026-06-13
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 19, 43]
+ref-impl: "https://github.com/agentproto/ts/tree/main/packages/auth"
+resources: ./resources/aip-50/draft
+layer: capabilities
+package: "@agentproto/auth"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 50 |
+| Title | AUTH.md — agentauth/v1 (agentic server authentication manifest) |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-19](/docs/aip-19), [AIP-43](/docs/aip-43) |
+| Resources | [`./resources/aip-50`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-50/draft) — [`AUTH.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-50/draft/AUTH.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-50/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-50/draft/EXAMPLES.md) |
+
+## Abstract
+
+`AUTH.md` is a markdown-with-frontmatter manifest that declares how a CLI
+tool or agent authenticates to a remote API server. It is the counterpart to
+the provision-recipe doctype ([AIP-19](/docs/aip-19)): together, an `auth:`
+section (this spec) and an `install:` section (AIP-19) form a complete vendor
+connection manifest. Clients discover server endpoints from the standard
+`/.well-known/` chain at runtime; a TS-literal builtin serves as offline
+fallback. Flow engines are registered as plain objects keyed by `flow` id —
+no if/switch branching at dispatch sites.
+
+This spec aligns to the [WorkOS auth.md open standard](https://workos.com/auth-md),
+which composes RFC 8628 (device authorization), RFC 7523 (JWT-bearer grant),
+and RFC 8414 (authorization server metadata).
+
+## Motivation
+
+Provision recipes ([AIP-19](/docs/aip-19)) tell a CLI tool *what credential to
+install* and *where it lives locally*. They say nothing about *how to obtain a
+valid bearer token to make the install call in the first place*. Today this is
+solved ad-hoc: bureaus and CLI tools require users to paste personal API keys
+(`gld_*`, `sk-*`, …) fetched manually from a web UI.
+
+The WorkOS auth.md protocol offers the right abstraction here: a server hosts
+an `auth.md` file describing its supported registration flows, and clients
+follow a discoverable, standard ceremony — the same UX as `gh auth login` or
+`vercel login`. By making agentproto-native CLI tools (`bureau login <vendor>`)
+auth.md-aware, any server that publishes `auth.md` becomes auto-configurable
+with no hardcoded client-side metadata.
+
+The `AUTH.md` doctype (this AIP) extends the standard with:
+- A typed `install:` section that pairs auth with provision (AIP-19 target
+  URLs), so one vendor manifest covers the full connection lifecycle.
+- A TS-literal authoring path (`defineAuthProvider`) for builtins and tests,
+  matching the pattern every other agentproto doctype uses.
+- A pluggable flow-engine registry so new auth protocols register as plain
+  objects, not if/switch branches.
+
+## Specification
+
+### File location
+
+An `AUTH.md` manifest may live in one of two places:
+
+1. **Server-hosted** (primary): `https://<server>/auth.md` — the resource
+   server publishes its own spec, discovered by clients at runtime.
+2. **Client-bundled builtin**: authored as a TS literal via `defineAuthProvider`
+   and registered at module load. Used when the server does not publish
+   `auth.md`, or as an offline fallback.
+
+### Frontmatter
+
+YAML frontmatter delimited by `---`.
+
+```yaml
+---
+id: <string>           # required — vendor id, 2–80 chars, ^[a-z0-9][a-z0-9._-]*$
+description: <string>  # required — ≤2000 chars
+apiBase: <url>         # required — canonical API base URL (no trailing slash)
+auth:                  # required — authentication configuration
+  flow: pat | service-auth
+  # … flow-specific fields (see below)
+install:               # optional — provision target (AIP-19 companion)
+  sealKey: <path>      # path template for the seal-key endpoint
+  secretBacked: <path> # path template, may contain {guildId}
+---
+```
+
+#### `auth` block — `pat` flow
+
+```yaml
+auth:
+  flow: pat
+  tokenStore:
+    keychain: <service-name>          # macOS Keychain service
+    account: <literal | "{server}">   # Keychain account; {server} = resolved server URL
+```
+
+The PAT flow reads an existing token from the local Keychain or prompts the
+user interactively. It does not open a browser. Use this for providers that
+issue long-lived personal API keys.
+
+#### `auth` block — `service-auth` flow
+
+```yaml
+auth:
+  flow: service-auth
+  clientId: <string>    # optional; defaults to "agentproto-cli"
+  loginHint: <email>    # optional; passed as login_hint to /agent/identity
+  tokenStore:
+    keychain: <service-name>
+    account: <literal | "{server}">
+```
+
+The `service-auth` flow implements the [auth.md claim ceremony](https://workos.com/auth-md):
+
+1. Discovery: fetch `{apiBase}/.well-known/oauth-protected-resource` → authorization server URL →
+   `/.well-known/oauth-authorization-server` → `agent_auth.identity_endpoint` + `token_endpoint`.
+2. Registration: `POST {identity_endpoint} { type: "service_auth", login_hint? }` → `{ claim_token, claim: { user_code, verification_uri, expires_in, interval } }`.
+3. Hand-off: open `verification_uri` in the default browser; print `user_code`.
+4. Poll: `POST {token_endpoint} grant_type=urn:workos:agent-auth:grant-type:claim&claim_token=<clm_…>`
+   every `interval` seconds until success, `authorization_pending`, `slow_down` (back off), or `expired_token`.
+5. On success: the response carries `{ access_token, identity_assertion, assertion_expires }`.
+   Store the `identity_assertion` JWT in the Keychain. MUST NOT store the `access_token`.
+6. Refresh: exchange the stored `identity_assertion` at the token endpoint with
+   `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` to obtain a fresh `access_token`.
+   Restart at step 1 when the assertion itself expires or `invalid_grant` is returned.
+
+#### `auth` block — `id-jag` flow (reserved)
+
+```yaml
+auth:
+  flow: id-jag
+  # … (unspecified in v1; requires agentproto-as-IdP)
+```
+
+Reserved. Implementations MUST NOT parse this block in v1. When agentproto
+functions as an identity provider, `id-jag` enables the agent to register
+with a third-party service entirely without user interaction: the agent mints
+a JWT assertion audience-bound to the target, the service validates it against
+a trusted-issuer list, and an access token is issued without any claim ceremony.
+
+#### `install` block (optional)
+
+```yaml
+install:
+  sealKey: /path/to/connectors/seal-key
+  secretBacked: /path/to/guilds/{guildId}/connectors/secret-backed
+```
+
+URL path templates for the AIP-19 provision flow. The variable `{guildId}` is
+substituted by the caller at provision time. These fields mirror the `httpTarget`
+port from `@agentproto/secrets` — having both in one manifest eliminates the need
+to store endpoint URLs separately.
+
+### Discovery algorithm (normative)
+
+When a client resolves an `AUTH.md` handle for a given `server` URL:
+
+1. Attempt: `GET {server}/.well-known/oauth-protected-resource`.
+2. On success (200): parse JSON; extract `authorization_servers[0]` as `authServerBase`.
+3. Fetch: `GET {authServerBase}/.well-known/oauth-authorization-server`.
+4. On success: parse JSON; extract `token_endpoint`, `revocation_endpoint`,
+   `agent_auth.identity_endpoint`, `agent_auth.claim_endpoint`,
+   `agent_auth.identity_types_supported`.
+5. Return `DiscoveredEndpoints`. On any fetch error or missing required field:
+   throw `DiscoveryError` and let the caller fall back to the static manifest config.
+
+Clients MUST NOT fail permanently on discovery errors — static config MUST
+always work as a fallback. Discovery errors SHOULD be surfaced as debug
+output, not user-facing errors.
+
+### Token storage model (normative)
+
+- The PAT flow stores a raw `access_token` in the Keychain.
+- The `service-auth` flow stores the **`identity_assertion` JWT** in the
+  Keychain — NOT the `access_token`. The assertion is re-exchanged at the
+  token endpoint to obtain a fresh, short-lived `access_token` on demand.
+  This model avoids long-lived opaque tokens while remaining compatible with
+  the AIP-19 provision flow (which uses the `access_token` as a Bearer header).
+- `claim_token` values MUST be held in memory only for the duration of the
+  ceremony. They MUST NOT be persisted to disk or Keychain.
+
+### `TokenStoreSpec` (normative)
+
+```typescript
+interface TokenStoreSpec {
+  keychain: string          // macOS Keychain service name
+  account?: string          // literal, or "{server}" → resolved server URL
+}
+```
+
+Hosts on non-macOS platforms MUST fall back to a per-platform secure store
+equivalent (e.g. `libsecret` on Linux, Windows Credential Store on Windows).
+The `keychain` field names the service; the platform adapter is host-resolved.
+
+### `FlowEngine` interface (normative)
+
+```typescript
+interface FlowEngine {
+  readonly id: FlowId
+  run(
+    provider: AuthProviderHandle,
+    discovered: DiscoveredEndpoints | null,
+    opts: FlowRunOptions,
+  ): Promise<FlowResult>
+}
+
+interface FlowRunOptions {
+  server: string       // resolved server URL (may differ from provider.apiBase)
+  force?: boolean      // force re-auth even if a stored credential is found
+  signal?: AbortSignal
+}
+
+interface FlowResult {
+  identityAssertion?: string   // service-signed JWT (service-auth flow)
+  assertionExpires?: string    // ISO 8601 datetime
+  accessToken?: string         // short-lived token (pat flow; or from claim ceremony)
+  tokenKind: "pat" | "assertion" | "oat"
+}
+```
+
+Hosts MUST dispatch by `provider.auth.flow` against `FLOW_ENGINES[id]`. Hosts
+MUST NOT branch on `flow` id with if/switch chains — use the registry.
+
+### `defineAuthProvider` standard signature (normative)
+
+```typescript
+defineAuthProvider(definition: AuthProviderDefinition): AuthProviderHandle
+
+interface AuthProviderDefinition {
+  id: string
+  description: string
+  apiBase: string
+  auth: PATAuthConfig | ServiceAuthConfig
+  install?: InstallConfig
+}
+
+type AuthProviderHandle = Readonly<AuthProviderDefinition>
+```
+
+Conformance rules:
+1. The export MUST be named `defineAuthProvider`.
+2. The returned handle MUST be frozen (`Object.freeze`).
+3. The `id` MUST match `/^[a-z0-9][a-z0-9._-]{1,79}$/`.
+4. The `description` MUST be 1–2000 chars.
+
+### Registry contract (normative)
+
+```typescript
+function registerAuthProvider(handle: AuthProviderHandle): void
+function getAuthProvider(id: string): AuthProviderHandle | undefined
+function listAuthProviderIds(): string[]
+```
+
+The module-level registry is pre-seeded with builtin providers. Last write
+wins so a host can shadow a builtin. The registry MUST be synchronously
+readable (no async init).
+
+### Body
+
+Markdown body following the frontmatter. Hosts MUST function with parsers
+that read only the frontmatter. Recommended sections:
+
+- `## Overview` — human summary of the server and its auth flows.
+- `## Scopes` — what capabilities the issued token grants.
+- `## Procurement` — how to get credentials if the automated flow fails.
+
+## Rationale
+
+**Alignment with WorkOS auth.md**: The `service-auth` claim ceremony maps
+one-to-one to the auth.md `service_auth` flow. Using the same grant URN
+(`urn:workos:agent-auth:grant-type:claim`) at the token endpoint means any
+agentproto client works out-of-the-box against any server that implements
+auth.md — including future third-party servers — without custom integration.
+
+**`identity_assertion` over long-lived token**: The two-step model (store
+assertion → exchange for access_token on demand) produces tokens that are
+short-lived (≤1h), revocable at the registration layer, and stateless on the
+server side. The assertion acts as a capability certificate; the access_token
+is ephemeral. This is strictly better than storing a `gld_*` PAT forever.
+
+**`service-auth` grant URN, not RFC 8628 device_code**: Using a profile-specific
+URN prevents collision when the same token endpoint also handles standard RFC
+8628 device authorization — the server routes by `grant_type`, never confusing
+a `claim_token` with a `device_code`.
+
+**Separate from AIP-19**: AIP-19 provision recipes answer "what credential to
+install, where does it live locally?" This AIP answers "how does the CLI
+authenticate to call the install endpoint?" The concerns are orthogonal:
+one recipe can be installed with multiple auth configs; one auth config can
+provision multiple recipes. Combining them would conflate the credential-lifecycle
+with the authentication-lifecycle.
+
+**TS-literal + `.md` authoring duality**: All agentproto doctypes support both
+paths. TS literals bundle into the tsup output (zero fs reads); `.md` parsing
+is the seam for hosts that ship their own manifests alongside their server.
+
+## Reference Implementation
+
+[`@agentproto/auth`](https://github.com/agentproto/ts/tree/main/packages/auth) —
+implements `defineAuthProvider`, `parseAuthProviderManifest`,
+`discoverEndpoints`, `FLOW_ENGINES` (`pat`, `service-auth`), and the module-level
+registry. See also [`./resources/aip-50/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-50/draft/ADAPTER.md).
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec. Existing `bureau login --token`
+flows continue to work unchanged (the PAT flow is the TS-literal builtin for all
+providers that have not migrated to `service-auth`).
+
+## Security Considerations
+
+- **Assertion in Keychain, not plaintext token**: the `identity_assertion` JWT
+  is short-lived; an attacker who steals it from the Keychain can exchange it
+  for an `access_token` only while the assertion is valid (≤1h). A stolen
+  PAT is valid indefinitely until the user revokes it.
+- **`claim_token` never persisted**: Persisting a `claim_token` to disk would
+  allow an attacker who can read the filesystem to complete a ceremony initiated
+  by the victim. Holding it in memory only (and discarding on process exit)
+  limits the window to the ceremony duration.
+- **No echo, no log**: The `accessToken` returned by `FlowResult` MUST NOT be
+  printed to stdout or logged. Implementations MUST treat it as opaque bytes
+  bound to the in-process use.
+- **Discovery TOCTOU**: An attacker who can intercept the `/.well-known/`
+  responses can redirect the client to a rogue token endpoint. Implementations
+  MUST use HTTPS for all discovery and auth requests; MUST validate TLS
+  certificates; MUST NOT follow redirects for the discovery endpoints.
+- **Plaintext argv risk** (macOS Keychain write): The `security` CLI receives
+  the token as an argument. On multi-user systems, other processes can read
+  `argv`. Implementations SHOULD use the Keychain API directly (via native
+  bindings) when available rather than shelling out to `security -w`.
