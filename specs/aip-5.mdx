@@ -57,7 +57,15 @@ Three-part structure:
 2. **Body** (required) — content, interpreted by the chosen template
    engine. v1 default: [Mustache](https://mustache.github.io/mustache.5.html).
 3. **Output** — whatever the engine produces. HTML is the soft default;
-   non-HTML outputs are spec-legal.
+   non-HTML outputs are spec-legal. A canvas's `medium` (`web` · `document` ·
+   `presentation` · `image`) declares its output form — a design constraint that
+   drives both authoring geometry and the export defaults. The
+   `@canvakit/export` artifact layer turns the render into `html` / `html-zip` /
+   `text` (an LLM-readable `llms.txt` for the canvas) / `png` / `pdf`. For a
+   `document`, the renderer adds a branded cover, a clickable TOC with real page
+   numbers, and a running header/footer — via CDP `Page.printToPDF` header/footer
+   templates plus a two-pass page-number extraction, since CSS alone can't
+   (Chrome has no `@page` margin boxes or `target-counter`).
 
 Canonical filename: `<name>.canvakit.<engine-ext>` (e.g.
 `q2-dashboard.canvakit.html`, `report.canvakit.mdx`). The double-extension
@@ -69,6 +77,7 @@ Frontmatter sketch:
 ---
 schema: canvakit/v1
 template: true
+medium: document # web | document | presentation | image (default web)
 sources:
   user:
     kind: tool
