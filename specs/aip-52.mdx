@@ -1,0 +1,435 @@
+---
+title: "AIP-52: ADAPTER — agentadapter/v1 (outward framework bridge)"
+description: The outward mirror of AIP-30 DRIVER — the contract for projecting an agentproto handle (TOOL, AGENT, PROCESSOR) into a foreign framework runtime (Mastra, AI SDK, LangChain, a CLI) so it runs as a native citizen there. Names the pattern, fixes conformance rules (frontmatter precedence, schema fidelity, degradation reporting, no credentials), and canonizes the existing resources/ADAPTER.md implementer-guide convention.
+aip: 52
+status: Draft
+type: Standards Track
+created: 2026-07-05
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 30, 42, 51]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/mastra
+layer: drivers
+package: "@agentproto/mastra"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 52 |
+| Title | ADAPTER — agentadapter/v1 (outward framework bridge) |
+| Status | Draft |
+| Type | Standards Track |
+| Domain | adapters.sh |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-30](/docs/aip-30) (DRIVER), [AIP-42](/docs/aip-42) (AGENT), [AIP-51](/docs/aip-51) (PROCESSOR) |
+| Mirror of | [AIP-30](/docs/aip-30) (DRIVER — the inward direction of the same binding seam) |
+| Reference Impl | [`@agentproto/mastra`](https://github.com/agentproto/ts/tree/main/packages/mastra) |
+
+## Abstract
+
+`agentadapter/v1` names and fixes the contract for an **adapter**: a
+code-level bridge that projects an agentproto handle — a
+[TOOL (AIP-14)](/docs/aip-14), an [AGENT (AIP-42)](/docs/aip-42), a
+[PROCESSOR (AIP-51)](/docs/aip-51) — **outward** into a foreign framework
+runtime (Mastra today, the AI SDK next, LangChain / a bare CLI later) so
+our definition runs as a **native citizen** of that host.
+
+An adapter is the **outward mirror of [AIP-30 DRIVER](/docs/aip-30)**.
+DRIVER binds an abstract TOOL *inward* to a backend we call; ADAPTER
+exposes our definition *outward* to a host that calls us. The two are the
+opposite directions of one binding seam, which is why this AIP shares
+`layer: drivers` with AIP-30.
+
+This is a **code contract, not a doctype.** An adapter is a function
+`(handle, hostResolvers) → native host artifact`; there is deliberately
+**no `ADAPTER.md` manifest** in v1 (see [Non-goals](#non-goals) — a manifest
+carrying install and auth lifecycle would recreate DRIVER). The AIP names
+the pattern, fixes five conformance rules — frontmatter precedence, schema
+fidelity, **no credentials**, identity preservation, composition-not-mutation
+— and canonizes the existing `resources/aip-NN/draft/ADAPTER.md`
+implementer-guide convention.
+
+## The DRIVER/ADAPTER mirror
+
+The whole design follows from one figure. DRIVER and ADAPTER are the two
+directions across the same binding seam between an agentproto definition
+and the outside world:
+
+| | DRIVER ([AIP-30](/docs/aip-30)) | ADAPTER (AIP-52) |
+|---|---|---|
+| direction | **inward** — bind an abstract TOOL to a backend we call | **outward** — expose our definition to a host that calls us |
+| consumes | a TOOL contract + a concrete backend (cli / http / mcp / sdk) | a `defineX`-produced handle (TOOL / AGENT / PROCESSOR) |
+| produces | a `DRIVER.md` manifest + a `defineDriver` handle | a native host artifact (Mastra `createTool` input / `Agent` / Processor; AI SDK `tool()`; …) |
+| carries creds / install / auth | **yes** — install lifecycle, auth surface, sandbox, secrets ([AIP-19](/docs/aip-19)) | **never** — see the [no-credentials rule](#3-no-credentials) |
+| artifact form | manifest doctype + entry function | **code bridge**, `to<Host><Doctype>` / `build<Host><Doctype>` / `make<Host><Doctype>` |
+| standard entry | `defineDriver(...)` (AIP-30) | a `to…` / `build…` / `make…` function per (host, doctype) pair |
+| who authors it | integration author wrapping a backend | host-runtime author exposing agentproto to a framework |
+
+Read across a row and the symmetry holds: same seam, opposite direction,
+and the credential column is where they are kept **disjoint** — a DRIVER
+holds secrets because it dials out on our behalf; an adapter holds none
+because the host, not us, owns the runtime it hands the artifact to.
+
+## Motivation
+
+The registry already has [DRIVER (AIP-30)](/docs/aip-30) for binding an
+abstract tool *inward* to a runnable backend. The inverse direction —
+taking an agentproto handle and making it run inside *someone else's*
+framework — has shipped as real code three times
+(`@agentproto/mastra` projects `AGENT.md` into `new Agent({...})` from
+`@mastra/core/agent`; `@agentproto/tool` exposes `toMastraTool`; the
+Mastra overlay ships a real Input/Output Processor) but has never had a
+name or a contract. Four problems compound while it stays anonymous:
+
+1. **The pattern is unnamed, so it is reinvented per host.** Each new
+   target (Mastra, AI SDK, LangChain, a CLI) re-derives the same
+   questions — what wins on a field conflict, what happens when the host
+   can't express a schema constraint, whether the bridge may touch
+   credentials — from scratch, and answers them differently.
+
+2. **"Adapter" is overloaded three ways** (see
+   [Terminology reconciliation](#terminology-reconciliation)) and readers
+   conflate them. Without a spec, a credentialed provider registry
+   (`@agentproto/provider-kit`) and a Mastra tool bridge look like the same
+   thing. They are not, and the confusion has already leaked into package
+   names.
+
+3. **Fidelity failures are silent.** When a host framework cannot express
+   a contract constraint an agentproto handle declares (a `format`
+   refinement, a `mutates` flag, an approval gate), a bridge that quietly
+   drops it turns a checked contract into an unchecked one — and nobody
+   is told. There is no rule saying it must surface the loss.
+
+4. **The credential boundary is unstated.** Nothing today says an outward
+   bridge MUST NOT collect or forward credentials. Without that line, a
+   Mastra adapter and a provider registry drift toward each other until
+   one grows an auth flow and the primitives fuse.
+
+Prior art: this is the same move MCP servers, LangChain `Tool`
+subclasses, and framework "integration" packages make ad hoc every day.
+AIP-52 gives the move a contract so it composes with the rest of the AIP
+series instead of living in wrapper code.
+
+## Design principles
+
+1. **Adapter is DRIVER's mirror, not a new axis.** Every rule here is
+   either the mirror image of an AIP-30 rule (frontmatter precedence,
+   input validation at the contract layer) or the one rule the mirror
+   *adds* because the direction reversed (no credentials). When in doubt
+   about an adapter's behaviour, ask what the corresponding DRIVER rule
+   is and flip the direction.
+
+2. **An adapter is code, not a manifest.** DRIVER earns a `.md` doctype
+   because it declares install/auth/sandbox state a host must persist and
+   enforce. An adapter declares none of that — it is a pure projection
+   function. Giving it a manifest would hand it a credential surface and
+   recreate DRIVER. v1 defines the function shape and stops.
+
+3. **The handle is authoritative; the host bends to it.** An adapter
+   reads a `defineX` handle and produces a host artifact. On any conflict
+   between what the handle declares and what host-side configuration says,
+   the handle's frontmatter wins (mirror of
+   [AIP-30 principle 8](/docs/aip-30)). The adapter never edits the
+   handle to fit the host.
+
+4. **Lossy projection is loud.** A host framework whose type system can't
+   express a constraint the handle declares MUST have that gap **named**
+   in a degradation report, never silently dropped
+   (see [rule 2](#2-contract-fidelity)).
+
+5. **No credentials, ever.** The single line that keeps ADAPTER disjoint
+   from provider registries and from DRIVER. An outward bridge exposes a
+   definition; it does not authenticate anyone. Credentials live in
+   DRIVER ([AIP-30](/docs/aip-30) / [AIP-19](/docs/aip-19)) and in
+   provider registries, never in an adapter.
+
+6. **Identity survives the crossing.** The agentproto slug MUST be
+   recoverable from the produced host artifact, stored under a
+   host-namespaced metadata key (mirror of the `metadata.<host>.…`
+   convention DRIVER uses, and of the `mastra.…` / `langchain.…` key
+   convention already in `@agentproto/tool`). A round-trip loses no
+   identity.
+
+## Specification
+
+### Definition
+
+An **adapter** is a function of the shape
+
+```ts
+type Adapter<Handle, HostArtifact> = (
+  handle:        Handle,          // a defineX-produced handle (TOOL / AGENT / PROCESSOR)
+  hostResolvers: HostResolvers,   // host-supplied callbacks: how to run a tool, call a model, resolve a ref
+) => HostArtifact                 // the host framework's native object
+```
+
+It consumes a handle produced by a `defineX` entry point — `defineTool`
+([AIP-14](/docs/aip-14)), the AGENT handle ([AIP-42](/docs/aip-42)),
+`defineProcessor` ([AIP-51](/docs/aip-51)) — and returns the **native
+object of the target host**: a Mastra `createTool` input, a
+`@mastra/core/agent` `Agent`, a Mastra Input/Output Processor; an AI SDK
+`tool()`; a LangChain `StructuredTool`; and so on.
+
+`hostResolvers` is how the host injects *its* runtime seams (how to
+actually invoke a tool, how to reach a model, how to resolve a workspace
+ref) without the adapter reaching for credentials or global state. An
+adapter is otherwise pure and side-effect-free at construction time
+(mirror of [AIP-30 rule 9](/docs/aip-30), "no I/O at module load").
+
+### Naming convention
+
+An adapter is named for the `(host, doctype)` pair it projects, using one
+of three verbs by artifact shape:
+
+| Verb | Use when the host artifact is… | Example |
+|---|---|---|
+| `to<Host><Doctype>` | a value the host consumes directly | `toMastraTool`, `toAISDKTool` |
+| `build<Host><Doctype>` | assembled from several handle parts | `buildMastraAgent` |
+| `make<Host><Doctype>` | a factory closing over `hostResolvers` | `makePlaybookOverlayProcessor`, `makeQueryKnowledgeTool` |
+
+The verb is informative; the `(host, doctype)` naming is the load-bearing
+part, so a reader can find every projection into a given host by grep.
+
+### Conformance rules
+
+A conforming adapter MUST satisfy all five rules. Rules 1, 2, and 5 are
+the mirror images of AIP-30's discipline (cite
+[AIP-30 § Conformance rules](/docs/aip-30#conformance-rules) and
+[`resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md));
+rules 3 and 4 are the two the reversed direction adds.
+
+#### 1. Frontmatter is the source of truth
+
+When the host framework offers a way to override a field the handle
+already declares in its frontmatter (a display name, a description, a
+schema), and the two disagree, the adapter MUST surface a **warning
+naming the field** and prefer the handle's value. This is the verbatim
+mirror of [AIP-30 rule 2](/docs/aip-30#conformance-rules): the definition
+is authoritative; host overrides are for behaviour the definition doesn't
+cover, never for redefining identity.
+
+#### 2. Contract fidelity
+
+Input and output schemas MUST project **losslessly**, or the adapter MUST
+surface a **named degradation** — it MUST NOT silently drop a constraint
+the host can't express. Concretely, when the target host's type system
+cannot represent a refinement the handle declares (a string `format`, a
+numeric bound, a `mutates` / approval flag, an enum the host flattens to
+`string`), the adapter emits a degradation entry of the shape:
+
+```ts
+type Degradation = {
+  field:   string   // the handle field that lost fidelity, e.g. "input.dueDate.format"
+  reason:  string   // why the host can't express it, e.g. "AI SDK JSON-schema has no date-time format check"
+  handle:  string   // the agentproto slug the degradation belongs to
+}
+```
+
+Degradations are collected and returned or logged alongside the artifact;
+they are never swallowed. A host that receives an artifact with an empty
+degradation list may treat the projection as exact.
+
+#### 3. No credentials
+
+**Adapters MUST NOT collect, store, request, or forward credentials of
+any kind** — no API keys, tokens, cookies, OAuth flows, or secret
+material. An adapter projects a definition outward; it never
+authenticates. Credentials belong to DRIVERs
+([AIP-30](/docs/aip-30) / [AIP-19 SECRETS](/docs/aip-19)) — which dial out
+on our behalf and therefore hold secrets — and to credentialed provider
+registries such as
+[`@agentproto/provider-kit`](https://github.com/agentproto/ts/tree/main/packages/provider-kit).
+This is the normative line that keeps ADAPTER **disjoint** from a provider
+registry: the moment a bridge grows an auth surface it has stopped being
+an adapter and become a DRIVER. A host that needs the artifact to reach an
+authenticated backend obtains those credentials through its own DRIVER /
+registry path and injects the *result* via `hostResolvers`; the adapter
+sees a resolver callback, never a secret.
+
+#### 4. Identity preservation
+
+The agentproto slug of the source handle MUST remain recoverable from the
+produced host artifact. The adapter MUST write it under a host-namespaced
+metadata key — `metadata.<host>.agentprotoSlug` or the host's idiomatic
+equivalent — mirroring the `metadata.<host>.…` convention DRIVER uses and
+the `mastra.…` / `langchain.…` namespaced-key convention already present
+in `@agentproto/tool`. A projection that discards the slug is
+non-conforming: identity round-trips.
+
+#### 5. Composition, not mutation
+
+An adapter MAY **compose** sibling primitives into one host artifact — for
+example folding a [PROCESSOR (AIP-51)](/docs/aip-51) transform chain
+together with a hook (veto/tripwire) chain into a single Mastra
+Input/Output Processor — but it MUST NOT **mutate** the handles it
+consumes. The handle is read-only input; composition happens in the
+artifact the adapter builds, not by editing the definition. This mirrors
+the DRIVER discipline that `implements[]` narrows a contract without
+rewriting it.
+
+### Implementer's guide
+
+Per-host projection guidance — the actual `to…` / `build…` / `make…`
+functions for a given runtime — lives in that AIP's
+`resources/aip-NN/draft/ADAPTER.md`, exactly as
+[`resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md)
+is the implementer's guide for loading DRIVER.md in a host runtime. This
+AIP defines the contract; the resource doc walks an implementer through
+one host's projection. See
+[Terminology reconciliation](#terminology-reconciliation) for why that
+filename is the same word.
+
+## Non-goals
+
+This AIP deliberately does **not** define:
+
+1. **No `ADAPTER.md` manifest doctype in v1.** Adapters are code, not
+   installable manifests. A manifest carrying an install/auth lifecycle
+   would hand the adapter a credential surface and a persisted-state
+   contract — i.e. it would **recreate DRIVER**. If a future need for a
+   declarative adapter descriptor emerges it will be argued on its own
+   merits in a later revision; v1 fixes the function contract and stops.
+   (The `resources/aip-NN/draft/ADAPTER.md` files are implementer
+   *guides*, not a manifest schema — see
+   [Terminology reconciliation](#terminology-reconciliation).)
+
+2. **No adapter registry.** This AIP does not define a catalog of
+   adapters. A host that wants to enumerate its projections MAY use the
+   generic [REGISTRY (AIP-43)](/docs/aip-43) primitive over whatever
+   handles it exposes; ADAPTER adds no registry shape of its own.
+
+3. **No runtime for AIP-51/52.** The concrete Mastra / AI SDK bridges are
+   reference implementations, not part of this normative contract.
+
+## Terminology reconciliation
+
+"Adapter" already appears in three places in the agentproto ecosystem.
+This AIP claims all three coherently so future readers stop conflating
+them:
+
+1. **The `resources/aip-NN/draft/ADAPTER.md` implementer-guide
+   convention.** Every AIP that projects a doctype into a host ships an
+   `ADAPTER.md` under its resources — e.g.
+   [`resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md),
+   the guide for loading `DRIVER.md` in a host runtime. This is the
+   **same sense** as AIP-52: a host-side bridge for a doctype. This AIP
+   **canonizes that convention** — those files are the per-host
+   implementer guides for the contract defined here.
+
+2. **AIP-30's "behavioural adapters."** [AIP-30](/docs/aip-30)'s body
+   calls host-side `defineDriver` implementations
+   "[behavioural adapters](/docs/aip-30#the-defineprovider-standard-signature)"
+   (see AIP-30 principle 8 and the `defineDriver` conformance section).
+   This is the **same sense** again — a code bridge between an agentproto
+   definition and a runtime. AIP-52 is the outward-direction generalization
+   of that phrase.
+
+3. **`@agentproto/provider-kit` (formerly named
+   `@agentproto/adapter-kit`) — a DIFFERENT thing.** This package is a
+   **credentialed provider/backend registry**: a creds store, a setup
+   ledger, supported/available/ready status, `list_*` / `setup_*` tooling,
+   and a setup wizard, shared across the agent-CLI, tunnel, connector, and
+   eval-reporter families. It is **not** the framework-bridge adapter this
+   AIP defines — it holds credentials, which an adapter
+   ([rule 3](#3-no-credentials)) never does. It was renamed precisely to
+   stop this conflation; the internal `Adapter*` vocabulary it keeps
+   refers to *its own* catalog members (some of which are credentialed
+   provider bridges), a different sense from AIP-52's outward projection.
+
+Senses 1 and 2 are this AIP. Sense 3 is a provider registry and lives
+elsewhere; the rename is the fix.
+
+## Worked examples (informative)
+
+**`@agentproto/mastra`** — the flagship target and reference impl
+([`packages/mastra/src/index.ts`](https://github.com/agentproto/ts/tree/main/packages/mastra)):
+
+- `buildMastraAgent` projects an [AGENT (AIP-42)](/docs/aip-42) handle
+  into `new Agent({...})` from `@mastra/core/agent` — the package
+  description literally calls itself "a thin adapter."
+- `makeQueryKnowledgeTool` is a `make…` factory: it closes over
+  `hostResolvers` (how the host reaches the knowledge backend) and returns
+  a Mastra tool.
+- `makePlaybookOverlayProcessor` projects a
+  [PROCESSOR (AIP-51)](/docs/aip-51) chain into a Mastra Input/Output
+  Processor, folding a transform chain and a hook chain into one host
+  artifact ([rule 5](#5-composition-not-mutation), composition not
+  mutation).
+
+**`@agentproto/tool`** — `toMastraTool` is the canonical `to…` adapter:
+a [TOOL (AIP-14)](/docs/aip-14) handle → a Mastra `createTool` input, with
+the agentproto slug preserved under a `mastra.…` namespaced metadata key
+([rule 4](#4-identity-preservation)).
+
+**AI SDK (second target, stubbed).** The projection table for the Vercel
+AI SDK — `toAISDKTool` (`tool()` from `ai`), a `buildAISDKAgent`
+equivalent — is named here as the next target. Its per-host guide will
+land as `resources/aip-52/draft/ADAPTER.md`. The AI SDK's JSON-schema tool
+inputs are the canonical example of [rule 2](#2-contract-fidelity)'s
+degradation reporting: constraints agentproto expresses that the AI SDK
+flattens become named degradations, not silent drops.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec. It names a pattern that
+already exists in shipped code (`@agentproto/mastra`,
+`@agentproto/tool`) and fixes a contract around it; the existing adapters
+are the reference implementation and do not change shape. The one prior
+overload it resolves is the `@agentproto/provider-kit` rename (see
+[Terminology reconciliation](#terminology-reconciliation), sense 3), which
+is non-breaking (the old package name resolves via a deprecated
+re-export shim to `@agentproto/provider-kit`).
+
+## Reference Implementation
+
+[`@agentproto/mastra`](https://github.com/agentproto/ts/tree/main/packages/mastra)
+is the reference implementation: `buildMastraAgent`,
+`makeQueryKnowledgeTool`, and `makePlaybookOverlayProcessor` are conforming
+adapters for the AGENT, TOOL, and PROCESSOR doctypes respectively, and
+`@agentproto/tool`'s `toMastraTool` is the canonical TOOL adapter. The AI
+SDK adapter and its `resources/aip-52/draft/ADAPTER.md` implementer guide
+are planned follow-up work.
+
+## Security Considerations
+
+The security posture of an adapter is defined mostly by what it is
+forbidden to do:
+
+- **No credential surface.** [Rule 3](#3-no-credentials) makes it
+  non-conforming for an adapter to collect, store, or forward
+  credentials. This is a security invariant, not just a layering one: an
+  outward bridge that grew an auth flow would become an
+  un-audited credential path outside the DRIVER / SECRETS
+  ([AIP-19](/docs/aip-19)) machinery that exists precisely to govern
+  secrets. Reviewers MUST reject any adapter that touches secret material.
+
+- **Silent fidelity loss is a security bug.** [Rule 2](#2-contract-fidelity)
+  requires that a constraint the host can't express be reported, not
+  dropped. A silently dropped constraint (an approval gate, a `mutates`
+  flag, a `format` refinement on a value that flows to a sensitive sink)
+  turns a checked contract into an unchecked one inside the host runtime.
+  The degradation report is the audit trail that a projection is exact.
+
+- **Untrusted host, read-only handle.** An adapter runs inside a foreign
+  framework it does not control. [Rule 5](#5-composition-not-mutation)
+  keeps the source handle read-only, so a compromised or buggy host
+  cannot use the adapter as a vector to mutate the agentproto definition;
+  the worst a hostile host does is misuse the artifact it was handed,
+  which is bounded by the (credential-free) resolvers the host itself
+  injected.
+
+## See also
+
+- [AIP-30 — DRIVER](/docs/aip-30) — the inward mirror; every conformance
+  rule here is AIP-30's discipline reflected or the one rule the reversed
+  direction adds
+- [AIP-14 — TOOL](/docs/aip-14) — the abstract contract a TOOL adapter
+  projects outward
+- [AIP-42 — AGENT](/docs/aip-42) — the runnable agent an AGENT adapter
+  projects (`buildMastraAgent`)
+- [AIP-51 — PROCESSOR](/docs/aip-51) — the I/O transform primitive a
+  PROCESSOR adapter projects (`makePlaybookOverlayProcessor`)
+- [AIP-19 — SECRETS](/docs/aip-19) — where credentials live; an adapter
+  never touches this surface
+- [AIP-43 — REGISTRY](/docs/aip-43) — the generic catalog a host MAY use
+  to enumerate its adapters (this AIP defines no registry of its own)
+- [`resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md)
+  — the implementer-guide convention this AIP canonizes
