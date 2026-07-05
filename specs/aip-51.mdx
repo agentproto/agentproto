@@ -1,0 +1,405 @@
+---
+title: "AIP-51: PROCESSOR — agentprocessor/v1 (I/O transform primitive)"
+description: A runtime primitive for pure input/output transforms — (value, ctx) → value — mounted at declared seams (codec-import/export, agent-input/output, egress), chainable, tagged with a capability in the AIP-43 namespace. Redaction is one built-in capability, not a privileged one; a separate redaction profile layers the boundary-seam safety invariant on top.
+aip: 51
+status: Draft
+type: Standards Track
+created: 2026-07-05
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 19, 43]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/redaction
+discussions-to: https://github.com/agentproto/agentproto/discussions/51
+layer: primitives
+package: "@agentproto/redaction"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 51 |
+| Title | PROCESSOR — agentprocessor/v1 (I/O transform primitive) |
+| Status | Draft |
+| Type | Standards Track |
+| Domain | processor.agentproto.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-19](/docs/aip-19), [AIP-43](/docs/aip-43) |
+| Reference Impl | [`@agentproto/redaction`](https://github.com/agentproto/ts/tree/main/packages/redaction) |
+
+## Abstract
+
+`agentprocessor/v1` is a **runtime primitive** for pure input/output
+transforms: a `Processor` takes a JSON value and a context describing
+where in the pipeline it's running, and returns a transformed value.
+Processors mount at declared **seams** — the points where a value
+crosses a codec boundary (import, export), an agent boundary (input,
+output), or leaves the process (egress) — and chain: several
+processors compose into one, each one's output feeding the next.
+
+Redaction is the AIP's motivating instance, not its ceiling. The
+shipped `@agentproto/redaction` package already implements this shape
+under the names `Redactor` / `RedactionContext` / `chainRedactors`;
+this AIP generalizes that contract to `Processor` / `ProcessorContext`
+/ `chain` so hash, sample, truncate, PII-detection, schema-coercion,
+and future transforms are catalog entries of the same primitive
+instead of one-off mechanisms bolted onto the redaction package.
+A separate, clearly-layered **redaction profile** (below) states the
+one safety invariant that's specific to redaction: every trust-crossing
+seam must resolve a redaction-capable chain, or explicitly opt out.
+
+## Motivation
+
+`@agentproto/redaction` shipped as a leaf package so egress boundaries
+(loggers, telemetry sinks, session tracers) could depend on a single
+transform interface without pulling in a kernel. It solved redaction.
+It did not solve the broader problem sitting one layer up: **every
+seam that moves a value between a trusted and an untrusted context
+needs the same shape** — a pure function of `(value, ctx) → value`,
+composable, and mountable at a declared point in the pipeline — and
+redaction is only one instance of it.
+
+Concretely, hosts already want processors that are not redaction:
+
+- **Truncation** for payload-size limits at codec export.
+- **Sampling** (drop N% of low-value telemetry rows) at egress.
+- **Schema coercion** (normalize field casing, strip null fields) at
+  codec import.
+- **PII detection** backed by an external service (e.g. Presidio) —
+  a connect-class processor that needs credentials, distinct from the
+  local, dependency-free transforms redaction ships today.
+
+Without a shared primitive, each of these gets reinvented per host,
+under a bespoke interface, with no shared chaining semantics and no
+shared capability-tagging scheme. `agentprocessor/v1` factors the
+shape out — the same way [AIP-43](/docs/aip-43) factored the registry
+shape out of per-host catalogs — so that TOOL, AGENT, and PROCESSOR
+sit as sibling primitives: TOOL does work, AGENT orchestrates, and
+PROCESSOR transforms the values that flow between them.
+
+This AIP defines the generic contract and the built-in catalog. It
+does **not** define a new runtime package: `@agentproto/redaction`
+is both the reference implementation and, per the
+[Backward Compatibility](#backward-compatibility) section, the
+generalization target — `Redactor` becomes an alias for
+`Processor & { capability: "redaction" }`, not a competing type.
+
+## Specification
+
+### Core type shape (normative)
+
+```ts
+/** Recursive JSON value — same shape as @agentproto/redaction's JsonValue. */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly [key: string]: JsonValue }
+  | readonly JsonValue[]
+
+/** The declared mount point a Processor is running at. */
+type ProcessorSeam =
+  | "codec-import"   // value entering the process via a format-conversion step
+  | "codec-export"   // value leaving the process via a format-conversion step
+  | "agent-input"    // value entering an agent/operator boundary
+  | "agent-output"   // value leaving an agent/operator boundary
+  | "egress"         // value leaving the process to an external sink
+
+interface ProcessorContext {
+  readonly seam: ProcessorSeam
+  readonly field?: string          // free-form field/slot label, seam-scoped
+  readonly sessionId?: string
+  readonly destination?: string    // egress target identifier, when seam === "egress"
+}
+
+/** A pluggable transform applied to a value at a declared seam. */
+interface Processor {
+  readonly slug: string
+  readonly capability: string      // free tag in AIP-43's capability-metadata namespace
+  process(value: JsonValue, ctx: ProcessorContext): JsonValue
+}
+
+/** Composes N processors — each one's output feeds the next. */
+function chain(...processors: readonly Processor[]): Processor
+```
+
+`process` MUST be pure, total, and deterministic for **local**
+processors (no I/O, no randomness, same input always yields the same
+output). [Connect-class processors](#connect-class-processors) relax
+purity — they MAY perform I/O — but MUST still be total: every call
+returns a value, never throws past the boundary (see
+[Security Considerations](#security-considerations) for the
+fail-closed rule that follows from this).
+
+The `capability` field is a free string in the capability-metadata
+namespace [AIP-43](/docs/aip-43) already defines for handle lookup
+(`handle.capabilities`). `"redaction"` is one value a `Processor` can
+carry — it is not a distinct type, and the registry that catalogs
+processors doesn't privilege it over `"truncation"`, `"sampling"`, or
+any other tag a host chooses. The type is named `Processor`. There is
+no combined "boundary + processor" type — `boundary` is a
+classification of *seams*, not of the primitive (see
+[below](#seam-classification-not-part-of-the-type)).
+
+### Generalizes the shipped `Redactor`
+
+`@agentproto/redaction` (`ts/packages/redaction/src/types.ts`) already
+implements this shape under different names. The mapping is direct —
+field names carry over wherever the concept is unchanged:
+
+| `Redactor` (shipped today) | `Processor` (this AIP) | Change |
+|---|---|---|
+| `redact(value, ctx)` | `process(value, ctx)` | renamed method |
+| `RedactionContext.field: RedactionField` (closed enum: `prompt` \| `input` \| `output` \| `tool-args` \| `tool-result` \| `metadata`) | `ProcessorContext.field?: string` | widened — no longer a redaction-specific closed enum, since non-redaction processors label fields differently |
+| `RedactionContext.sessionId` | `ProcessorContext.sessionId` | unchanged |
+| *(implicit — the package is entirely redaction)* | `ProcessorContext.seam` | new — names the mount point explicitly, since a generic Processor can sit at seams a redactor never needed to distinguish |
+| *(none — redaction never leaves the process by itself)* | `ProcessorContext.destination` | new — egress target, populated only when `seam === "egress"` |
+| `slug` | `slug` | unchanged |
+| *(the whole package IS the capability)* | `capability` | new — makes the tag explicit so a chain can mix `"redaction"` with `"truncation"` processors and a host can query "every processor whose capability is X" via the AIP-43 registry |
+
+`chainRedactors([...])` generalizes to `chain(...)` with identical
+reduce semantics: `chain(a, b, c).process(value, ctx)` applies `a`,
+then feeds the result to `b`, then to `c`.
+
+### Built-in catalog
+
+The generic `Processor` type has no privileged built-ins. The catalog
+below is what `@agentproto/redaction` ships today, reframed as
+catalog entries — none of them get special treatment from the type or
+from `chain`:
+
+| Slug | Capability | Behavior |
+|---|---|---|
+| `none` | — | Passthrough — returns the value unchanged. |
+| `deny-list` | `redaction` | Deep, immutable walk that masks a value whose object **key** matches a deny pattern (credentials, tokens, cookies, …). |
+| `truncate` | `size-limit` | Caps long strings and long arrays so oversized payloads don't cross the seam. |
+| `value-scan` | `redaction` | Deep walk that scans string **values** for well-known secret shapes (prefixed API keys, JWTs, PEM private keys, cloud tokens) and masks the match regardless of key. Complements `deny-list`, which only matches by key. **Shipped in v1** (`ts/packages/redaction/src/redactors.ts`, registered in `redaction/src/catalog.ts`) — not a future or v2 capability. |
+| `chain` | — | Composes N catalog entries; the `secrets` composite (`deny-list` + `value-scan`) is the recommended default for egress. |
+
+A `ProcessorCatalogEntry` generalizes `RedactorCatalogEntry` the same
+way `Processor` generalizes `Redactor`:
+
+```ts
+interface ProcessorCatalogEntry {
+  readonly slug: string
+  readonly description: string
+  readonly capability: string
+  readonly needsCreds: boolean
+  build(options?: JsonValue): Processor
+}
+```
+
+Hosts resolve a declarative `ProcessorSpec` (a bare slug, a
+`{ slug, options }` object, or an array chaining several specs) to a
+concrete `Processor` the same way `resolveRedactor` resolves a
+`RedactorSpec` today — this AIP generalizes the spec shape alongside
+the type it resolves to.
+
+### Mount point: the codec, not the call site
+
+A `Processor` chain attaches to the **format-conversion step**
+(the codec) that carries a value across a seam — not to the
+individual call site that happens to invoke that codec. This is a
+structural choice: mounting at the codec means the chain runs on
+*every* crossing, with no call site able to forget to invoke it.
+`ProcessorContext` carries the runtime policy (`seam`, `field`,
+`destination`) so a single mounted chain can behave differently per
+crossing without needing a different mount per call site.
+
+v1 names two carrying codecs as the primitive's initial surface:
+
+1. The **ACP → sink projection** — the format-conversion step that
+   turns an [AIP-44](/docs/aip-44) session update into a persisted or
+   forwarded record (`codec-export` / `egress`).
+2. The **ingestion envelope** — the format-conversion step that
+   parses an inbound payload into the runtime's internal value shape
+   (`codec-import`).
+
+Extending Processor mounting to *every* `defineX`-produced doctype's
+import/export path is future work, out of scope for v1.
+
+### Seam classification, not part of the type
+
+`boundary` classifies **seams**, not processors. A seam is a
+`boundary` seam when it crosses a trust boundary: `codec-export`,
+`egress`, and `at-rest` are boundary seams; `codec-import` and the
+`agent-input`/`agent-output` pair are not, by default. This
+classification is consumed only by the [redaction profile](#redaction-profile)
+below — it is not a field on `Processor` or `ProcessorContext`, and
+there is no distinct boundary-flavored processor type. A `Processor`
+mounted at a boundary seam is still, structurally, a plain `Processor`.
+
+### Connect-class processors
+
+A local processor (`none`, `deny-list`, `truncate`, `value-scan`) is
+pure and dependency-free. A **connect-class** processor — e.g. a
+PII-detection service such as Presidio — MAY perform network I/O and
+MAY require credentials to reach its backend. When it does, the
+credential contract is [AIP-19](/docs/aip-19) SECRETS: the processor's
+catalog entry declares `needsCreds: true`, and the actual credential
+lives in a `SECRETS.md` slug, revealed through the AIP-19 lifecycle —
+never embedded in the processor's own config.
+
+The reference-implementation mechanism for discovering, setting up,
+and holding ready status for connect-class processor backends is
+`@agentproto/provider-kit` (a credentialed backend/provider registry
+with its own creds store, setup ledger, and `list_*`/`setup_*` MCP
+tooling). That mechanism is **informative** — a convenient existing
+implementation to point implementers at — not normative. The
+normative creds contract for any connect-class processor is AIP-19,
+full stop.
+
+### Redaction profile
+
+Redaction is a `Processor` capability like any other, but it carries
+one safety invariant this AIP states explicitly, as a **layered
+profile on top of the generic contract** — not as part of it:
+
+> Every **boundary** seam (per [Seam classification](#seam-classification-not-part-of-the-type))
+> MUST resolve a chain containing at least one processor whose
+> `capability` is `"redaction"`, OR explicitly opt out with a recorded
+> reason. Non-boundary seams are exempt.
+
+This is deliberately narrow and auditable by grep: a host can list
+every boundary-seam mount point and check each one resolves either a
+redaction-capable chain or a recorded opt-out — no runtime tracing
+required. Ingress-time and prompt-time PII handling are explicitly
+**out of scope for v1**; the invariant governs values leaving the
+process or landing at rest, not values arriving.
+
+Hosts MAY express enforcement of this invariant as an
+[AIP-38](/docs/aip-38) POLICY requirement (`kind: "redaction-required"`
+applied to the boundary-seam action), but the invariant's normative
+home is this AIP, not AIP-38 — POLICY is one enforcement surface among
+others a host may choose.
+
+### Related work: Hooks
+
+A sibling shape — `defineHook`, `(event, ctx) => void | veto` — covers
+observation and veto (tripwires, approval gates) rather than value
+transformation. Hooks do not return a transformed value; Processors
+never veto. The two compose (see [Mastra parity](#mastra-parity-documented-lift)
+below) but Hooks are related work with their own AIP, not specified
+here.
+
+### Mastra parity (documented lift)
+
+The Mastra framework has a native Input/Output Processor concept.
+Projecting an agentproto `Processor` chain into a Mastra processor is
+a **documented lift for the forthcoming ADAPTER AIP**, not a normative
+claim of this spec: the adapter composes a `Processor` chain (pure
+transform) with a Hook chain (veto/tripwire) into the one object
+Mastra expects. The invariant that survives the projection is
+"`Processor` always returns a value, has no side effects" — the
+adapter is responsible for keeping that true on the Mastra side, this
+AIP is not extended to describe Mastra's own types.
+
+## Rationale
+
+**Why generalize now, not wait for a second consumer.** Redaction
+already has four built-ins and a chaining combinator that a second
+consumer (truncation-only egress limits, schema coercion at import)
+would otherwise reinvent under a different name. Naming the primitive
+now, while there's exactly one shipped instance, keeps the
+generalization a rename plus a widened context field instead of a
+disruptive migration later.
+
+**Why the codec is the mount point, not the call site.** A call-site
+mount can be forgotten; a codec mount cannot be bypassed by a new call
+site that reuses the same codec. This mirrors why AIP-43's registry
+factors lookup out of ad-hoc host code — put the invariant where it's
+structurally enforced, not where a developer has to remember it.
+
+**Why `boundary` classifies seams, not the primitive.** A distinct
+boundary-flavored subtype would fork the type the moment any
+processor needed to run at both a boundary and a non-boundary seam
+(e.g. `truncate` is useful everywhere). Keeping `Processor` singular
+and pushing the boundary/non-boundary distinction into
+`ProcessorContext.seam` plus a profile-level rule keeps the type
+small and the invariant local to the one profile that needs it.
+
+**Why `value-scan` is a first-class built-in, not a future
+capability.** It's already shipped and registered in the redaction
+catalog (`ts/packages/redaction/src/redactors.ts`,
+`redaction/src/catalog.ts`) — describing it as anything but a current
+v1 built-in would misstate the reference implementation's actual
+state.
+
+## Backward Compatibility
+
+Not applicable in the breaking sense — this AIP introduces a new
+spec, and no shipped code changes as part of it. The generalization
+is expressed as an **informative migration appendix**, not a required
+runtime change:
+
+- `Redactor` → `Processor & { capability: "redaction" }` (type alias).
+- `RedactionContext` → `ProcessorContext` (with `field` widened per
+  the [mapping table](#generalizes-the-shipped-redactor) above).
+- `chainRedactors` → `chain` (identical reduce semantics).
+- `@agentproto/redaction`'s existing exports (`Redactor`,
+  `RedactionContext`, `chainRedactors`, `REDACTOR_CATALOG`,
+  `resolveRedactor`, …) keep re-exporting unchanged — nothing that
+  imports from `@agentproto/redaction` today breaks.
+
+Landing the `Redactor → Processor` alias, any `@agentproto/processor`
+package, and a Mastra processor bridge are follow-up runtime work in
+`ts/`, tracked separately from this spec PR.
+
+## Security Considerations
+
+- **Fail CLOSED at boundary seams.** When a processor mounted at a
+  boundary seam throws, the host MUST drop the affected field rather
+  than let the raw, unprocessed value cross the seam. This is a
+  deliberately different posture from a sink outage elsewhere in the
+  runtime, where isolating the failure and continuing is often the
+  right call — here, the value that would leak is exactly the one the
+  chain existed to protect, so "continue with the raw value" is never
+  an acceptable degradation. Non-boundary seams are not subject to
+  this rule; a processor failure there is an ordinary error path.
+- **Connect-class processors widen the threat model.** A local
+  processor cannot exfiltrate data — it has no network access. A
+  connect-class processor (Presidio-style PII detection) sends the
+  value to an external service *before* it's confirmed safe to leave
+  the process. Hosts MUST treat the connect-class processor's own
+  network call as a boundary crossing in its own right, subject to
+  whatever data-residency and vendor-trust review applies to any
+  third-party API call — the processor is not exempt from that review
+  just because its purpose is to make the eventual crossing safer.
+- **Credential handling is entirely AIP-19's concern.** This AIP
+  defines no credential storage, transport, or reveal mechanism of
+  its own — a connect-class processor's catalog entry sets
+  `needsCreds: true` and everything downstream of that flag is the
+  AIP-19 SECRETS contract. A processor implementation that reads a
+  credential from anywhere other than an AIP-19 reveal (an env var it
+  reads directly, a hardcoded key) is non-conformant.
+- **The redaction profile is declarative, not enforced by this spec.**
+  Stating the boundary-seam invariant doesn't implement it — a host
+  that never checks whether its boundary seams actually resolve a
+  redaction-capable chain has a spec violation invisible until
+  audited. The "auditable by grep" design ([Redaction profile](#redaction-profile))
+  exists specifically so that audit is cheap, not to imply the
+  runtime enforces it automatically.
+
+## Reference Implementation
+
+The canonical implementation is
+[`@agentproto/redaction`](https://github.com/agentproto/ts/tree/main/packages/redaction).
+It currently ships the `Redactor` / `RedactionContext` / `chainRedactors`
+names this AIP generalizes, plus the `none`, `deny-list`, `truncate`,
+and `value-scan` built-ins and the `secrets` composite. The
+`Redactor → Processor` alias and any standalone `@agentproto/processor`
+package are follow-up work, not part of this spec PR — see
+[Backward Compatibility](#backward-compatibility).
+
+## See also
+
+- [AIP-1 — `agentproto/v1` core invariants](/docs/aip-1) — handle
+  identity rules `Processor` instances inherit as catalog entries.
+- [AIP-2 — `define-doctype` factory](/docs/aip-2) — the template this
+  spec follows.
+- [AIP-19 — SECRETS.md](/docs/aip-19) — the normative creds contract
+  for connect-class processors.
+- [AIP-38 — POLICY.md](/docs/aip-38) — an optional enforcement surface
+  for the redaction-profile invariant.
+- [AIP-43 — REGISTRY](/docs/aip-43) — the capability-metadata
+  namespace `Processor.capability` is a tag in, and the catalog shape
+  a host uses to collect `Processor` instances.
+- [AIP-44 — ACP.md](/docs/aip-44) — one of v1's two carrying codecs
+  (the ACP → sink projection).
