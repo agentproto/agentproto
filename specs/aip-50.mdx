@@ -34,9 +34,12 @@ connection manifest. Clients discover server endpoints from the standard
 fallback. Flow engines are registered as plain objects keyed by `flow` id —
 no if/switch branching at dispatch sites.
 
-This spec aligns to the [WorkOS auth.md open standard](https://workos.com/auth-md),
-which composes RFC 8628 (device authorization), RFC 7523 (JWT-bearer grant),
-and RFC 8414 (authorization server metadata).
+The `service-auth` flow aligns to the [WorkOS auth.md open standard](https://workos.com/auth-md)
+claim ceremony, which itself composes RFC 8628 (device authorization), RFC
+7523 (JWT-bearer grant), and RFC 8414 (authorization server metadata). The
+`device-code` flow aligns directly to plain RFC 8628 device authorization,
+without the claim-ceremony indirection — auth.md governs one flow in this
+spec, not the whole of it.
 
 ## Motivation
 
@@ -82,8 +85,9 @@ YAML frontmatter delimited by `---`.
 id: <string>           # required — vendor id, 2–80 chars, ^[a-z0-9][a-z0-9._-]*$
 description: <string>  # required — ≤2000 chars
 apiBase: <url>         # required — canonical API base URL (no trailing slash)
+audience: <string>     # optional — credential plane hint (e.g. tunnel | api | mcp); see Audience binding
 auth:                  # required — authentication configuration
-  flow: pat | service-auth
+  flow: pat | service-auth | device-code
   # … flow-specific fields (see below)
 install:               # optional — provision target (AIP-19 companion)
   sealKey: <path>      # path template for the seal-key endpoint
@@ -131,6 +135,44 @@ The `service-auth` flow implements the [auth.md claim ceremony](https://workos.c
    `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` to obtain a fresh `access_token`.
    Restart at step 1 when the assertion itself expires or `invalid_grant` is returned.
 
+#### `auth` block — `device-code` flow
+
+```yaml
+auth:
+  flow: device-code
+  clientId: <string>      # optional; defaults to "agentproto-cli"
+  scope: <string>          # optional; space-delimited scopes requested
+  deviceLabel: <string>    # optional; human label shown during the authorization prompt (e.g. "MacBook Pro — bureau-cli")
+  tokenStore:
+    keychain: <service-name>
+    account: <literal | "{server}">
+```
+
+The `device-code` flow performs RFC 8628 device authorization directly against
+the token endpoint — there is no claim ceremony and no `identity_assertion`:
+
+1. Discovery: resolve `device_authorization_endpoint` and `token_endpoint`
+   per the Discovery algorithm below.
+2. Registration: `POST {device_authorization_endpoint} { client_id, scope? }`
+   → `{ device_code, user_code, verification_uri, verification_uri_complete?, expires_in, interval }`.
+3. Hand-off: open `verification_uri` (or `verification_uri_complete`) in the
+   default browser; print `user_code`.
+4. Poll: `POST {token_endpoint} grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=<device_code>&client_id=<client_id>`
+   every `interval` seconds until success, `authorization_pending`, `slow_down`
+   (back off), or `expired_token`.
+5. On success: the response carries `{ access_token, refresh_token?, expires_in, scope? }`.
+   The `access_token` issued here is a **durable** credential — a daemon/machine
+   credential suitable for unattended use — unlike the short-lived token
+   exchanged in the `service-auth` flow. Store both `access_token` and, if
+   present, `refresh_token` in the Keychain.
+6. Refresh (if a `refresh_token` was issued): exchange it at the token endpoint
+   with `grant_type=refresh_token` to rotate the `access_token` without
+   repeating the device-authorization ceremony.
+
+This flow targets the same `token_endpoint` used by `service-auth` — the
+server dispatches by `grant_type`, so `device_code`, `claim_token`, and
+`jwt-bearer` grants share one endpoint (see Rationale).
+
 #### `auth` block — `id-jag` flow (reserved)
 
 ```yaml
@@ -167,9 +209,18 @@ When a client resolves an `AUTH.md` handle for a given `server` URL:
 3. Fetch: `GET {authServerBase}/.well-known/oauth-authorization-server`.
 4. On success: parse JSON; extract `token_endpoint`, `revocation_endpoint`,
    `agent_auth.identity_endpoint`, `agent_auth.claim_endpoint`,
-   `agent_auth.identity_types_supported`.
-5. Return `DiscoveredEndpoints`. On any fetch error or missing required field:
-   throw `DiscoveryError` and let the caller fall back to the static manifest config.
+   `agent_auth.identity_types_supported`, `device_authorization_endpoint` (if present).
+5. Alternate metadata source: if step 1 or step 3 fails (non-200, network
+   error, or a missing required field), attempt
+   `GET {server}/.well-known/agentproto-host.json` before giving up. On
+   success, parse JSON and extract `device_authorization_endpoint` and
+   `token_endpoint` directly. This alternate source is tried strictly AFTER
+   the OAuth protected-resource / authorization-server chain (steps 1–4) —
+   it is a fallback metadata document, not a replacement for RFC 8414
+   discovery.
+6. Return `DiscoveredEndpoints`. On any fetch error or missing required field
+   from both sources: throw `DiscoveryError` and let the caller fall back to
+   the static manifest config.
 
 Clients MUST NOT fail permanently on discovery errors — static config MUST
 always work as a fallback. Discovery errors SHOULD be surfaced as debug
@@ -177,14 +228,35 @@ output, not user-facing errors.
 
 ### Token storage model (normative)
 
-- The PAT flow stores a raw `access_token` in the Keychain.
-- The `service-auth` flow stores the **`identity_assertion` JWT** in the
-  Keychain — NOT the `access_token`. The assertion is re-exchanged at the
-  token endpoint to obtain a fresh, short-lived `access_token` on demand.
-  This model avoids long-lived opaque tokens while remaining compatible with
-  the AIP-19 provision flow (which uses the `access_token` as a Bearer header).
-- `claim_token` values MUST be held in memory only for the duration of the
-  ceremony. They MUST NOT be persisted to disk or Keychain.
+Storage semantics are a property of the **flow**, not the storage layer: the
+Keychain (or platform equivalent, see `TokenStoreSpec` below) is a single
+mechanism, but what each flow persists into it differs by design, driven by
+that flow's own trust model.
+
+| Flow | Persisted | Memory-only (never persisted) |
+|---|---|---|
+| `pat` | raw `access_token` (durable) | — |
+| `service-auth` | `identity_assertion` JWT ONLY | `access_token`, `claim_token` |
+| `device-code` | `access_token` (durable) + `refresh_token` (if issued) | `device_code` |
+
+- **`pat`**: stores a raw `access_token` in the Keychain. The token is
+  durable and opaque; there is no ceremony artifact to distinguish it from.
+- **`service-auth`**: stores the **`identity_assertion` JWT ONLY**. The
+  `access_token` MUST NOT be persisted — it is re-exchanged at the token
+  endpoint (`jwt-bearer` grant) to obtain a fresh, short-lived `access_token`
+  on demand. `claim_token` values MUST be held in memory only for the
+  duration of the ceremony and MUST NOT be persisted to disk or Keychain.
+  (Unchanged from the original `service-auth` design.)
+- **`device-code`**: stores the durable `access_token` returned by the
+  device-authorization grant, plus the `refresh_token` if the server issued
+  one. `device_code` MUST be held in memory only for the duration of the
+  polling loop and MUST NOT be persisted.
+
+Implementations MUST NOT generalize one flow's persistence rule to another —
+e.g. a host MUST NOT infer from `pat` that `device-code` should also skip
+storing a `refresh_token`, nor infer from `service-auth` that `device-code`
+should withhold its `access_token`. Each flow's row above is authoritative
+for that flow alone.
 
 ### `TokenStoreSpec` (normative)
 
@@ -198,6 +270,26 @@ interface TokenStoreSpec {
 Hosts on non-macOS platforms MUST fall back to a per-platform secure store
 equivalent (e.g. `libsecret` on Linux, Windows Credential Store on Windows).
 The `keychain` field names the service; the platform adapter is host-resolved.
+
+### Audience binding
+
+Manifests MAY declare a top-level `audience` field (recommended values:
+`tunnel`, `api`, `mcp`; free-form strings are allowed for vendor-specific
+planes). It hints which credential plane a manifest's issued token belongs
+to, for vendors that expose more than one plane behind a single `apiBase`.
+
+Clients SHOULD embed `audience` in the credential store key (e.g. as a
+suffix on the Keychain `account`), and a broker resolving a stored credential
+MUST NOT return a credential across mismatched audiences.
+
+**Normative enforcement is server-side.** Client-side `audience` embedding is
+defense-in-depth against local credential mix-ups — it is NOT the security
+boundary. Servers MUST scope issued tokens per plane and MUST validate
+`scope`/`aud` claims (in addition to `grant_type` dispatch, see Rationale) on
+every request. A client that omits or mislabels `audience` MUST NOT thereby
+gain the ability to use a token outside its intended plane; implementations
+MUST NOT treat client-side audience embedding as sufficient isolation on its
+own.
 
 ### `FlowEngine` interface (normative)
 
@@ -220,8 +312,12 @@ interface FlowRunOptions {
 interface FlowResult {
   identityAssertion?: string   // service-signed JWT (service-auth flow)
   assertionExpires?: string    // ISO 8601 datetime
-  accessToken?: string         // short-lived token (pat flow; or from claim ceremony)
-  tokenKind: "pat" | "assertion" | "oat"
+  accessToken?: string         // short-lived token (pat/service-auth); durable token (device-code)
+  refreshToken?: string        // durable refresh credential (device-code flow, if issued)
+  scope?: string                // space-delimited granted scopes, if returned by the server
+  subject?: string               // resolved subject/account identifier, if returned by the server
+  revocationId?: string          // opaque id for server-side revocation, if returned by the server
+  tokenKind: "pat" | "assertion" | "oat" | "daemon"
 }
 ```
 
@@ -237,7 +333,8 @@ interface AuthProviderDefinition {
   id: string
   description: string
   apiBase: string
-  auth: PATAuthConfig | ServiceAuthConfig
+  audience?: string
+  auth: PATAuthConfig | ServiceAuthConfig | DeviceCodeAuthConfig
   install?: InstallConfig
 }
 
@@ -273,11 +370,15 @@ that read only the frontmatter. Recommended sections:
 
 ## Rationale
 
-**Alignment with WorkOS auth.md**: The `service-auth` claim ceremony maps
-one-to-one to the auth.md `service_auth` flow. Using the same grant URN
-(`urn:workos:agent-auth:grant-type:claim`) at the token endpoint means any
-agentproto client works out-of-the-box against any server that implements
-auth.md — including future third-party servers — without custom integration.
+**Alignment with WorkOS auth.md is scoped to `service-auth`**: auth.md
+governs one flow in this spec, not the whole of it. The `service-auth` claim
+ceremony maps one-to-one to the auth.md `service_auth` flow; using the same
+grant URN (`urn:workos:agent-auth:grant-type:claim`) at the token endpoint
+means any agentproto client works out-of-the-box against any server that
+implements auth.md — including future third-party servers — without custom
+integration. This interop is a retained asset of the spec, not something
+`device-code` replaces: `device-code` is for vendors that want plain RFC 8628
+device authorization without adopting the auth.md claim ceremony at all.
 
 **`identity_assertion` over long-lived token**: The two-step model (store
 assertion → exchange for access_token on demand) produces tokens that are
@@ -285,10 +386,13 @@ short-lived (≤1h), revocable at the registration layer, and stateless on the
 server side. The assertion acts as a capability certificate; the access_token
 is ephemeral. This is strictly better than storing a `gld_*` PAT forever.
 
-**`service-auth` grant URN, not RFC 8628 device_code**: Using a profile-specific
-URN prevents collision when the same token endpoint also handles standard RFC
-8628 device authorization — the server routes by `grant_type`, never confusing
-a `claim_token` with a `device_code`.
+**`service-auth` grant URN, not RFC 8628 `device_code`**: Using a
+profile-specific URN prevents collision now that the same token endpoint
+also dispatches standard RFC 8628 device authorization for the `device-code`
+flow — the server routes by `grant_type`, never confusing a `claim_token`
+with a `device_code`. This is exactly the one-endpoint, multi-grant dispatch
+this bullet anticipated: `device_code`, `claim_token`-based claim, and
+`jwt-bearer` refresh all resolve against the same `token_endpoint`.
 
 **Separate from AIP-19**: AIP-19 provision recipes answer "what credential to
 install, where does it live locally?" This AIP answers "how does the CLI
@@ -305,14 +409,17 @@ is the seam for hosts that ship their own manifests alongside their server.
 
 [`@agentproto/auth`](https://github.com/agentproto/ts/tree/main/packages/auth) —
 implements `defineAuthProvider`, `parseAuthProviderManifest`,
-`discoverEndpoints`, `FLOW_ENGINES` (`pat`, `service-auth`), and the module-level
-registry. See also [`./resources/aip-50/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-50/draft/ADAPTER.md).
+`discoverEndpoints`, `FLOW_ENGINES` (`pat`, `service-auth`, `device-code`), and
+the module-level registry. See also [`./resources/aip-50/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-50/draft/ADAPTER.md).
 
 ## Backwards Compatibility
 
-Not applicable — this AIP introduces a new spec. Existing `bureau login --token`
-flows continue to work unchanged (the PAT flow is the TS-literal builtin for all
-providers that have not migrated to `service-auth`).
+Existing credential formats and already-issued durable tokens remain valid.
+Adding the `device-code` flow and the optional `audience` field is purely
+additive: manifests that omit `audience`, or that use `flow: pat` or
+`flow: service-auth`, are unaffected. Existing `bureau login --token` flows
+continue to work unchanged (the PAT flow is the TS-literal builtin for all
+providers that have not migrated to `service-auth` or `device-code`).
 
 ## Security Considerations
 

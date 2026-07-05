@@ -25,6 +25,11 @@
       "format": "uri",
       "description": "Canonical API base URL (no trailing slash)."
     },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Credential plane hint (recommended: 'tunnel', 'api', 'mcp'; free-form allowed). Clients SHOULD embed this in the credential store key. Enforcement is server-side; this is defense-in-depth only."
+    },
     "auth": {
       "description": "Authentication configuration.",
       "oneOf": [
@@ -47,6 +52,19 @@
             "flow": { "const": "service-auth" },
             "clientId": { "type": "string", "minLength": 1 },
             "loginHint": { "type": "string", "minLength": 1 },
+            "tokenStore": { "$ref": "#/$defs/tokenStoreSpec" }
+          }
+        },
+        {
+          "description": "device-code flow — plain RFC 8628 device authorization, yielding a durable access token.",
+          "type": "object",
+          "required": ["flow", "tokenStore"],
+          "additionalProperties": false,
+          "properties": {
+            "flow": { "const": "device-code" },
+            "clientId": { "type": "string", "minLength": 1 },
+            "scope": { "type": "string", "minLength": 1 },
+            "deviceLabel": { "type": "string", "minLength": 1 },
             "tokenStore": { "$ref": "#/$defs/tokenStoreSpec" }
           }
         }
