@@ -138,6 +138,79 @@ test.skipIf(!process.env.YOUR_BIN)("end-to-end turn", async () => {
 Gating on an env var keeps CI green when the binary isn't installed,
 without losing the "real run on a developer's box" coverage.
 
+## Model bridging — using an AIP-45 CLI as a ModelPort
+
+Any AIP-45 agent CLI can be bridged into a generic `ModelPort` (the
+single-call `complete({ system?, prompt }) → { result }` contract used
+by corpus distill, report writer, and judgment steps). This lets corpus
+pipelines treat agent CLIs as LLM executors without knowing which model
+is underneath.
+
+### `makeAgentCliModel`
+
+```ts
+import { makeAgentCliModel } from "@agentproto/driver-agent-cli"
+
+const model = makeAgentCliModel(agentCliDefinition, {
+  cwd: "/path/to/workspace",
+  env: process.env,
+})
+
+// Use it as a DistillPort or ReportModelPort:
+const result = await model.complete({
+  system: "You are a concise analyst.",
+  prompt: "Extract the three key decisions from this transcript.",
+})
+// result.result is the agent's full text response
+```
+
+### How it works
+
+Under the hood, `makeAgentCliModel` spawns a fresh ACP session per
+`complete()` call (ephemeral session mode):
+
+1. `connect()` — spawn the binary with the provided `cwd` / `env`.
+2. Send a single user turn with the `prompt` (and optionally a `system`
+   prefix injected as a system prompt via the ACP `capabilities`
+   negotiation).
+3. Stream `text-delta` events until `turn-end`.
+4. `close()` — tear down the subprocess.
+5. Return the concatenated text as `{ result }`.
+
+Each call is stateless. The `makeAgentCliModel` bridge deliberately
+avoids `session.mode: persistent` — persistent sessions accumulate
+context across calls and would corrupt a stateless extraction pipeline.
+
+### When to use this
+
+Use `makeAgentCliModel` when:
+
+- You want to run corpus distillation or report generation through a
+  locally-installed agent CLI (e.g. `claude-code`, `codex`) instead of
+  a direct API call.
+- You're building a routing layer that transparently switches between
+  an API model and a local CLI model based on availability.
+
+Do NOT use it when:
+- The task requires multi-turn interaction (use a full agent session
+  instead).
+- You need streaming output (the bridge accumulates the full response).
+- The CLI's session state matters across calls.
+
+### Interface
+
+The returned object satisfies the `ModelLike` contract:
+
+```ts
+interface ModelLike {
+  complete(input: { system?: string; prompt: string }): Promise<{ result: string }>
+}
+```
+
+This is the same contract satisfied by `AnthropicModel`,
+`makeGeminiModel`, and `makeOpenAIModel` — interchangeable at any
+corpus seam that accepts a `ModelLike`.
+
 ## Publishing
 
 - Adapter packages: `@your-scope/adapter-<name>`, MIT/Apache-2.0

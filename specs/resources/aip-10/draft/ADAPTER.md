@@ -622,12 +622,107 @@ This is the standard "is this wiki conforming?" handshake.
 
 These stay out of the spec on purpose.
 
+## WriterPort — projecting entries into a backing knowledge engine
+
+The corpus kit never imports a knowledge provider directly. Instead it consumes
+a `WriterPort` interface that the host supplies. This keeps the kit pure and
+allows different backends (vector store, graph engine, search index) to be
+swapped without changing kit code.
+
+### Required methods
+
+```ts
+interface WriterPort {
+  /** Chunk an entry and push chunks to the backing store. */
+  pushChunks(input: PushChunksInput): Promise<readonly string[]>
+
+  /** Remove all chunks for an entry (tombstone or re-index). */
+  removeEntry(entrySlug: string): Promise<{ removed: number }>
+}
+```
+
+`pushChunks` receives:
+
+| Field | Type | Notes |
+|---|---|---|
+| `entrySlug` | `string` | Stable corpus-unique slug. |
+| `entryPath` | `string` | Workspace-relative path of the entry file. |
+| `title` | `string?` | Entry title (from frontmatter). |
+| `uri` | `string?` | Canonical URI for link resolution. |
+| `chunks` | `WriterChunk[]` | Text segments with optional metadata. |
+| `entryMetadata` | `Record<string,unknown>?` | Flattened scalar frontmatter fields for vector store filtering. |
+| `entryFrontmatter` | `Record<string,unknown>?` | Full parsed frontmatter — see `pushSource` below. |
+
+Vector engines use `chunks` and `entryMetadata`. Graph engines additionally
+read `entryFrontmatter` to extract the relation arrays (`links`, `supersedes`,
+`contradicts`) that the flattened `entryMetadata` drops, and build entry↔entry
+edges from them.
+
+### Optional: `pushSource`
+
+A host that also projects **source nodes** (not just entry chunks) into a graph
+engine SHOULD implement the optional `pushSource` method:
+
+```ts
+interface WriterPort {
+  // ... required methods ...
+
+  /**
+   * Project a knowledge.source/v1 document into the backing store.
+   *
+   * Sources never chunk into a vector engine (they are too large and too raw);
+   * only a graph-projection writer implements this. Vector-only writers MUST
+   * omit this method (or no-op it).
+   */
+  pushSource?(input: PushSourceInput): Promise<void>
+}
+
+interface PushSourceInput {
+  sourceId: string
+  sourcePath: string
+  title?: string
+  /** The source's full parsed frontmatter (knowledge.source/v1 shape). */
+  sourceFrontmatter: Readonly<Record<string, unknown>>
+}
+```
+
+**Why it exists.** When a graph engine indexes a corpus, it builds Source nodes
+alongside Entry nodes. Without `pushSource`, a Source node can only be a stub
+(created implicitly when an Entry's `DERIVED_FROM` edge lands) and loses the
+source's rich frontmatter: title, authority, content_hash, capturedAt,
+provenance, etc. `pushSource` lets the graph writer materialize a full Source
+node from the AIP-10 `knowledge.source/v1` frontmatter.
+
+**When the host calls it.** The indexer calls `pushSource` after reading each
+`sources/<id>.md` file, if and only if the writer implements it:
+
+```ts
+if (writer.pushSource) {
+  await writer.pushSource({
+    sourceId,
+    sourcePath,
+    title: frontmatter.title,
+    sourceFrontmatter: frontmatter,
+  })
+}
+```
+
+**Vector writers MUST omit it.** Sources are too large and too raw to chunk
+usefully into a vector store. A vector writer that implements `pushSource` as a
+no-op is conforming; one that chunks the raw source bytes is non-conforming
+(it would pollute the vector space with unrefined content).
+
+**Order invariant.** The indexer MUST call `pushSource` before any `pushChunks`
+call that references the same source via `entryFrontmatter.sources`. This ensures
+the Source node exists before any `DERIVED_FROM` edge is written.
+
 ## See also
 
 - [AIP-10 — agentknowledge/v1 spec](/docs/aip-10)
 - [AIP-1 — agent.json](/docs/aip-1)
 - [AIP-2 — capability surface](/docs/aip-2)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
+- [AIP-51 — Knowledge Lenses (multi-aspect distillation)](/docs/aip-51)
 - [`./KNOWLEDGE.schema.json`](./KNOWLEDGE.schema.json) — frontmatter validator
   (entry + source)
 - [`./SKILL.md`](./SKILL.md) — agent-side curation skill
