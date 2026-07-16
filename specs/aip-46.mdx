@@ -1,12 +1,12 @@
 ---
 title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
-description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings), the over-the-wire surface (HTTP + SSE + MCP tools), and the workspace-resolution pattern that lets a single host serve many bound directories. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn.
+description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition and AIP-38 (POLICY) as the delegation authority.
 aip: 46
 status: Draft
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 17, 19, 36, 44, 45]
+requires: [1, 2, 17, 19, 36, 38, 42, 44, 45]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: drivers
@@ -20,7 +20,8 @@ package: "@agentproto/runtime"
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
-| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
 
 ## Abstract
@@ -38,11 +39,21 @@ needs:
 - live observation (UI tails output, operator polls for the answer)
 - workspace-bound spawns (resolve `cwd` from a stable, named
   workspace handle instead of hand-typing absolute paths)
+- **nested sessions** — a session that spawns further sessions, and
+  the gate deciding whether it may (§[Delegation](#delegation-and-the-spawn-gate))
 
 A daemon implementing this AIP becomes a **control plane for local
 agents**. Any host (cloud orchestrator, IDE extension, mobile remote)
 can drive it through the standard surface — HTTP routes, an SSE
 stream, and MCP tools — without knowing which adapter is wrapped.
+
+A session is the *running instance*; what it runs is an
+[AIP-42](/docs/aip-42) AGENT. AIP-46 owns the process boundary and
+the lifecycle; it does not re-declare the agent's prompt, skills,
+tools, or permissions — those are AGENT fields, and the permission
+half is [AIP-38](/docs/aip-38) POLICY. This split is what keeps the
+spawn gate honest: the thing being gated is declared somewhere a
+human can read and sign, not inside the daemon.
 
 AIP-46 is opinionated about the lifecycle and the data shape; it is
 *not* opinionated about the wire format inside a turn (that's
@@ -70,6 +81,40 @@ fell apart for the actual product flows:
 
 Three different consumers, three workarounds, one missing primitive:
 *persistent, named, observable agent sessions*. AIP-46 fills it.
+
+### Why delegation is in scope (added 2026-07-17)
+
+The original cut treated a session as a leaf: something a human or a
+cloud host starts. Real orchestration made sessions spawn *other*
+sessions — a supervisor that decomposes work across children — and
+that turned a lifecycle protocol into an authority question the spec
+had no vocabulary for:
+
+4. **A session spawns further sessions, and nothing says whether it
+   may.** Reference implementations grew a private notion — agentproto's
+   `role: executor | supervisor` — carrying a prompt fragment, a
+   delegation switch, and a privilege level in one struct. Three
+   problems compound:
+
+   - **It is unspecified.** Two hosts implementing AIP-46 have
+     incompatible, undiscoverable delegation semantics. A consumer
+     cannot ask "may this session spawn?" in a portable way.
+   - **It re-invents AIP-42.** A prompt fragment is an AGENT body; a
+     skill list is `skills:`; an allowlist of spawnable children is
+     `delegates_to:`; a permission is [AIP-38](/docs/aip-38) POLICY.
+     The struct is those four primitives fused, minus their schemas.
+   - **It collides with [AIP-47](/docs/aip-47).** "Role" is already
+     taken: an organizational job template that AIP-47 §Role vs Policy
+     vs Governance says **MUST NOT grant permission**. A spawn-time
+     privilege tier is precisely what AIP-47 calls an *access role*
+     and forbids conflating with a role. Naming the delegation switch
+     `role` inverts a security invariant of a neighbouring AIP.
+
+   This amendment fills the gap without minting a fifth primitive:
+   the spawn request binds an AIP-42 AGENT, the AGENT's `delegates_to`
+   declares who it may spawn, AIP-38 POLICY decides effect, and AIP-46
+   specifies only the **enforcement point** — the one thing that is
+   genuinely session-lifecycle's own.
 
 ## Specification
 
@@ -104,10 +149,31 @@ interface Session {
   /** Free-text label the spawner attaches (conversation id, operator
    *  name, …) so consumers can group/filter. */
   label?: string
+
+  /** The AIP-42 AGENT this session runs, when one was bound at spawn.
+   *  Absent for a bare adapter spawn (adapter default behaviour).
+   *  Persisted: a consumer MUST be able to ask what a live session is
+   *  running without replaying its prompt. */
+  agentSlug?: string
+  /** Set when this session was spawned BY another session. Absent ⇒
+   *  a root spawn (a human or an external host started it). This is
+   *  the edge the spawn gate keys off — see §Delegation. */
+  parentSessionId?: string
+  /** Depth in the spawn tree: a root spawn is 0; a session spawned by
+   *  a session at depth d is d+1. Present whenever `parentSessionId`
+   *  is. Bounds recursion (§Delegation limits). */
+  depth?: number
 }
 ```
 
 The host MAY add fields; consumers MUST ignore unknown fields.
+
+`parentSessionId` + `depth` make the registry a **forest**: roots are
+sessions with no parent, and a consumer renders the tree by grouping
+on `parentSessionId`. A host that supports delegation MUST populate
+both — a nested session that reports no parent is indistinguishable
+from a root one, which defeats both the gate and every supervision UI
+built on top of it.
 
 ### Status transitions
 
@@ -159,6 +225,136 @@ spawns can reference a named handle instead of an absolute path:
 Hosts that don't implement workspaces MAY require explicit `cwd`
 on every spawn; consumers MUST then pass it.
 
+### Delegation and the spawn gate
+
+A **nested spawn** is a spawn whose caller is itself a session. The
+host MUST decide, at spawn time, whether the calling session may
+create the requested child. That decision is the **spawn gate**, and
+this section is the whole of what AIP-46 specifies about it: the
+enforcement point. *What* is permitted is declared by AIP-42 and
+decided by AIP-38 — AIP-46 only guarantees the check happens where it
+cannot be talked past.
+
+#### The agent binding
+
+A spawn request MAY carry `agent: <agent-ref>` — a reference to an
+[AIP-42](/docs/aip-42) AGENT, resolved by the host through AIP-42's
+`inline | ref | file` pattern. The bound AGENT supplies:
+
+| AGENT field | What it supplies to the session |
+|---|---|
+| body | the system prompt / disposition given to the child |
+| `skills[]` | [AIP-3](/docs/aip-3) skills the child loads |
+| `boundaries[]` | hard rules surfaced high-priority in the prompt |
+| `delegates_to[]` | **the closed allowlist of agents this one may spawn** |
+| `policy` | [AIP-38](/docs/aip-38) binding — the access decision |
+
+A host that resolves an AGENT MUST record it as `agentSlug` on the
+session. Absent `agent`, the host spawns the adapter's default
+behaviour and the session MUST be treated as declaring no
+`delegates_to` — i.e. deny (below).
+
+#### Who may spawn whom
+
+1. **Deny by default.** An agent whose resolved `delegates_to` is
+   absent or empty MUST NOT be permitted to spawn. This mirrors
+   AIP-38's `default: deny` and makes the safe case the silent one.
+2. **Closed allowlist.** When `delegates_to` is non-empty, the host
+   MUST permit a nested spawn only when the requested child's
+   agent-ref resolves to a member of the caller's `delegates_to`.
+   Membership is by resolved identity, not by the literal string.
+3. **No self-widening.** A child MUST NOT be able to alter its own
+   `delegates_to`, its policy, or the toolset the host granted it —
+   not through its prompt, not by requesting a wider binding at spawn,
+   not by re-spawning itself. The caller's grant is a ceiling; a
+   nested grant MUST be bounded by the parent's.
+4. **Role is never the authority.** A host MUST NOT derive delegation
+   permission from an [AIP-47](/docs/aip-47) ROLE, from an operator's
+   seniority, or from any organizational field. AIP-47 is explicit
+   that a role declares intent and MUST NOT grant access; an agent's
+   job title has no bearing on whether it may spawn a process.
+
+#### The enforcement point
+
+This is the normative core.
+
+- The gate MUST be evaluated **host-side, at spawn, before any tool
+  injection or process creation**. A rejected spawn MUST create no
+  session.
+- When the caller is denied delegation, the host MUST ensure the
+  delegation actions are **absent from every MCP surface the child
+  receives** — those the host injects *and* those the caller supplied.
+  A host that strips the delegating verbs only from its own injected
+  gateway has not implemented this gate: a caller can hand the child
+  an equivalent surface and the child is delegating again, unchecked.
+- **Prompt text is not enforcement.** A disposition, a `boundaries[]`
+  entry, or any instruction telling a child not to delegate is a
+  hint. A conforming host MUST NOT count it as the gate. Prose that
+  restates the gate is permitted and useful; prose *in place of* the
+  gate is non-conforming.
+- The gate MUST be the single decision point shared by enforcement
+  and introspection. A host exposing "what may this session spawn?"
+  MUST answer from the same predicate that rejects the spawn, so the
+  two can never disagree.
+
+**Delegation actions.** The verbs that spawn or drive another session
+— `agent_start` and `agent_prompt` in the tool table below — are
+[AIP-39](/docs/aip-39) actions for policy purposes. A host MUST gate
+them as actions, not as tool-name strings, so a renamed or aliased
+surface cannot route around the check.
+
+**Root spawns.** A spawn with no calling session (no
+`parentSessionId`) has no parent to gate against; it is authorised by
+the host's own auth boundary (§Security Considerations), not by this
+lattice. Hosts MUST NOT treat the absence of a parent as an implicit
+grant to the *child* — a root-spawned session is still subject to its
+own agent's `delegates_to` for anything it spawns in turn.
+
+#### Limits
+
+Independently of the allowlist, a host MUST bound recursion:
+
+| Limit | Meaning | On breach |
+|---|---|---|
+| `maxDepth` | greatest permitted `depth` | reject, create no session |
+| `maxChildren` | greatest number of concurrently alive children per session | reject, create no session |
+
+An allowlist that names a peer (`a` delegates to `a`) is legal and
+recursive; `maxDepth` — not the allowlist — is what terminates it.
+
+#### Errors
+
+A host MUST reject with a stable, machine-readable code. Codes below
+are normative; hosts MAY add their own.
+
+| Code | Cause |
+|---|---|
+| `invalid_agent` | `agent` ref does not resolve |
+| `delegation_denied` | caller's agent may not spawn the requested child |
+| `max_depth_exceeded` | `depth` would exceed `maxDepth` |
+| `child_quota_exceeded` | caller already at `maxChildren` |
+
+A rejection MUST be distinguishable from a spawn failure: the former
+means no session was permitted, the latter that one was permitted and
+failed to start.
+
+#### What this gate cannot reach (informative)
+
+An honest boundary, because implementations have shipped believing
+otherwise. The gate governs surfaces the **host** grants. It does not
+reach:
+
+- **An adapter's own native sub-agent facility.** A CLI that ships a
+  built-in task/sub-agent tool spawns off-protocol: no session id, no
+  parent edge, nothing for the host to strip. Hosts SHOULD disable it
+  via the adapter's AIP-45 options where the adapter exposes a flag,
+  MUST NOT report such spawns as gated, and SHOULD treat
+  [AIP-36](/docs/aip-36) sandboxing as the backstop.
+- **Anything the child reaches without the host.** Ambient
+  credentials, a shell, a network path to another daemon. The gate
+  bounds delegation *through this protocol*; it is not a sandbox.
+  AIP-36 is.
+
 ### HTTP surface
 
 The host MUST expose these routes under a fixed prefix (default
@@ -178,8 +374,12 @@ The host MUST expose these routes under a fixed prefix (default
 
 ```ts
 {
-  /** AIP-45 adapter slug. Required. */
+  /** AIP-45 adapter slug — WHICH CLI runs. Required. */
   adapter: string
+  /** AIP-42 AGENT ref — WHAT it runs (prompt, skills, delegates_to,
+   *  policy). Optional; absent ⇒ adapter default + no delegation.
+   *  See §Delegation. */
+  agent?: string
   /** Workspace handle. Optional — falls back to active. */
   workspaceSlug?: string
   /** Override cwd. Wins over workspaceSlug. */
@@ -190,6 +390,12 @@ The host MUST expose these routes under a fixed prefix (default
   label?: string
 }
 ```
+
+`adapter` and `agent` are orthogonal and both may be present: the
+adapter is the runtime (which binary), the agent is the definition
+(which prompt, skills, and delegation grant). The same
+`reviewer` AGENT MAY be run on any conforming adapter; the same
+adapter MAY run any agent. Hosts MUST NOT infer one from the other.
 
 #### SSE event format
 
@@ -214,27 +420,39 @@ so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
-| `start_agent_session` | `{adapter, workspaceSlug?, cwd?, prompt?, label?}` | Returns the `Session` JSON |
-| `prompt_agent_session` | `{sessionId, prompt}` | Fire-and-forget — call `get_agent_session_output` to read the reply |
-| `list_agent_sessions` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
-| `get_agent_session_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
-| `kill_agent_session` | `{sessionId}` | Returns `{ok, sessionId}` |
+| `agent_start` | `{adapter, agent?, workspaceSlug?, cwd?, prompt?, label?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
+| `agent_prompt` | `{sessionId, prompt}` | Fire-and-forget — call `agent_output` to read the reply. A delegation action (§Delegation). |
+| `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
+| `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
+| `agent_kill` | `{sessionId}` | Returns `{ok, sessionId}` |
 
 The MCP tools and the HTTP routes target the same underlying
 registry — calling either family results in the same observable
 state.
 
+**Naming (amended 2026-07-17).** This table previously specified
+`start_agent_session` / `prompt_agent_session` / `list_agent_sessions`
+/ `get_agent_session_output` / `kill_agent_session`. No known
+implementation ever registered those names; the reference
+implementation shipped the `agent_*` family above from the start, and
+the spec was never reconciled. The `agent_*` names are now normative —
+this is a correction to the document, not a rename of a deployed
+surface. `agent_start` and `agent_prompt` are the delegation actions
+of §Delegation; hosts gate them by action identity, so a host that
+additionally exposes the legacy names as aliases MUST gate the aliases
+too.
+
 ### Multi-turn semantics
 
 A session stays alive after each turn. Subsequent
-`prompt_agent_session` (or `POST /sessions/:id/prompt`) calls dispatch
+`agent_prompt` (or `POST /sessions/:id/prompt`) calls dispatch
 to the *same* underlying agent process; the agent retains its in-
 memory context (previous tool results, file reads, etc.) until the
 session is killed.
 
 The host MUST reject (HTTP 409 / MCP error) overlapping prompts on
 the same session — agents are single-turn-at-a-time. Consumers can
-poll `get_agent_session_output` or watch the SSE stream to know when
+poll `agent_output` or watch the SSE stream to know when
 a turn ended (look for the `turn-end` projected line).
 
 ### Output projection
@@ -268,9 +486,29 @@ Daemons started via `agentproto serve` (or built directly through
 - **MCP tools**: `runtime/src/session-tools.ts` — registered
   per-request via `mcpServerFactory`
 - **Registry**: `runtime/src/sessions.ts` — in-memory + persisted
-  to `~/.agentproto/sessions.json` (debounced)
+  to `~/.agentproto/sessions.json` (debounced); carries
+  `parentSessionId` + `depth`
 - **Workspaces config**: `runtime/src/workspaces-config.ts` —
   read+write helpers for `~/.agentproto/workspaces.json`
+- **Spawn gate**: `runtime/src/session-spawn.ts` — the enforcement
+  point of §Delegation
+
+§[Delegation](#delegation-and-the-spawn-gate) is specified ahead of
+its reference implementation — `@agentproto/runtime` does not yet
+conform. Divergences are tracked in that repository's issues rather
+than here: a spec carrying an implementation's bug list goes stale the
+moment the bugs close, which is how this document's tool names drifted
+in the first place.
+
+That gap generalises into a rule worth stating plainly, because the
+failure is silent and the consequence is credentialed processes:
+**a consumer MUST NOT assume a host enforces the spawn gate merely
+because the host implements AIP-46.** Delegation is the one part of
+this AIP whose absence is invisible from the outside — a host that
+never gates looks identical to one that does until something spawns
+that should not have. Hosts SHOULD advertise conformance to
+§Delegation explicitly; consumers that rely on the gate SHOULD verify
+it rather than infer it.
 
 The CLI shell `@agentproto/cli` adds:
 - `agentproto workspace add|list|remove|use` for managing the
@@ -290,6 +528,30 @@ installed; they then SHOULD return HTTP 501 from
 `POST /sessions/agent` with a clear message pointing at the install
 command.
 
+### The 2026-07-17 delegation amendment
+
+Three changes carry compatibility weight:
+
+1. **MCP tool names.** Corrected to the `agent_*` family that
+   implementations actually ship (§MCP tools). Documentation fix, not
+   a surface migration.
+2. **`agent` on the spawn request** is additive and optional. A host
+   that ignores it stays conforming for the non-delegating case: a
+   spawn with no `agent` binds no `delegates_to` and therefore may not
+   delegate, which is the pre-amendment behaviour of any host that
+   never implemented nesting.
+3. **`role` is deprecated where it meant delegation authority.** Hosts
+   that shipped a private `role: executor | supervisor` on the spawn
+   request SHOULD map it to AGENT refs — the delegating tier to an
+   AGENT declaring `delegates_to`, the leaf tier to one declaring none
+   — and SHOULD accept the legacy field as an alias through one major
+   version, resolving it to those agents. Hosts MUST NOT continue to
+   treat `role` as an [AIP-47](/docs/aip-47) ROLE: the two were never
+   the same thing, and AIP-47 forbids a role granting access. New
+   implementations MUST NOT introduce a `role` field on this surface;
+   organizational role belongs on the AIP-9 OPERATOR that *owns* the
+   agent, never on the spawn.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -300,10 +562,36 @@ command.
   the SSE stream. Hosts MAY redact known secret patterns, but the
   AIP does not require it; consumers MUST treat the buffer as
   potentially sensitive.
-- `start_agent_session` accepts `cwd` from the caller. Hosts SHOULD
+- `agent_start` accepts `cwd` from the caller. Hosts SHOULD
   reject paths outside their allowed surface (e.g. require the path
   to be a registered workspace, or under the workspaces' parent
   directory) when the auth principal is not the local UID.
+- **The spawn gate is an authority boundary, not a guardrail.** A
+  session that can spawn can spend money, write files, and reach the
+  network as the daemon's UID — recursively. Hosts MUST evaluate the
+  gate before process creation (§Delegation) and MUST NOT rely on the
+  child's cooperation. The failure mode is not a confused agent; it
+  is an unbounded fan-out of credentialed processes.
+- **Root authority is the host's auth, and it is total.** Because a
+  root spawn has no parent to gate against, whatever authenticates to
+  the spawn surface can request any agent. Hosts MUST NOT expose that
+  surface more broadly than they would a shell. Any surface reachable
+  by a *child* (a proxied gateway, a forwarded port, a tunnel) that
+  reaches the spawn routes without a parent edge is a privilege
+  escalation: it converts a gated nested spawn into an ungated root
+  one. Hosts MUST ensure a session's onward calls carry their parent
+  edge.
+- **A denied child must not be handed an equivalent surface.** The
+  most likely real-world defeat of this gate is not an attacker — it
+  is a well-meaning caller passing a child an MCP server that happens
+  to expose the delegation actions. Hosts MUST apply the strip to
+  caller-supplied surfaces (§Delegation), and SHOULD refuse, loudly,
+  rather than silently granting.
+- **Ring-buffer disclosure crosses the tree.** A parent reading a
+  child's output through `agent_output` sees whatever the child
+  printed, including secrets it was given. Delegation therefore
+  widens the blast radius of §the ring-buffer caveat above by one hop
+  per level.
 
 ## Open Questions
 
@@ -320,3 +608,28 @@ command.
   persists descriptors but not the live agent process. A future v2
   could specify rehydration (re-spawn + replay context) for
   adapters whose AIP-45 manifest declares `session.mode = "resumable"`.
+- **Privilege levels vs. explicit allowlists.** This amendment
+  specifies `delegates_to` (a closed allowlist) as the only
+  delegation mechanism, and deliberately does not standardise the
+  numeric privilege lattice the reference implementation grew
+  (`level`, with non-escalation as `child.level <= parent.level`).
+  The lattice is terser for large casts — N agents need no N² of
+  allowlist entries — but it is implicit: it grants by arithmetic
+  rather than by name, so nobody can read an agent and know what it
+  may spawn. The allowlist is auditable and matches AIP-42's existing
+  field. If a real cast outgrows enumeration, the lattice should
+  return as an AIP-42 concern (a computed `delegates_to`), not as a
+  second authority in AIP-46. Revisit when a host reports the
+  allowlist as the binding constraint.
+- **Fan-in / joins.** The gate governs spawn (one parent → many
+  children). Nothing here specifies a child reporting completion back
+  to a parent, or a parent blocking on N children. Reference
+  implementations do this with out-of-band completion policies. If a
+  common shape emerges it may belong in this AIP; it is deliberately
+  out of scope for the amendment.
+- **Should `agent_prompt` across the tree be gated separately from
+  `agent_start`?** Both are delegation actions today, so an agent that
+  may spawn may also drive. A supervisor that should observe children
+  without steering them has no way to say so. Possibly two actions
+  with separate grants; unclear whether the distinction earns its
+  keep.
