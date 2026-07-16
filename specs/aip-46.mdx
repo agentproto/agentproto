@@ -215,12 +215,19 @@ spawns can reference a named handle instead of an absolute path:
 }
 ```
 
-`cwd` resolution priority for any spawn that omits an explicit
-`cwd` field:
+`cwd` resolution priority for any **root** spawn that omits an
+explicit `cwd` field:
 
 1. lookup `workspaces[workspaceSlug]` → use its `path`
 2. fall back to `workspaces[active]` → use its `path`
 3. emit a warning + use the host's `process.cwd()`
+
+Steps 2 and 3 are **root-only**. A nested spawn (one whose caller is a
+session) MUST NOT reach them — it inherits its parent's `cwd`
+instead. See §[Delegation](#a-nested-spawn-inherits-its-parents-ground);
+the `active` workspace is ambient host state and resolving a child
+through it silently relocates that child outside the subtree its
+parent was working in.
 
 Hosts that don't implement workspaces MAY require explicit `cwd`
 on every spawn; consumers MUST then pass it.
@@ -281,12 +288,30 @@ This is the normative core.
 - The gate MUST be evaluated **host-side, at spawn, before any tool
   injection or process creation**. A rejected spawn MUST create no
   session.
-- When the caller is denied delegation, the host MUST ensure the
-  delegation actions are **absent from every MCP surface the child
-  receives** — those the host injects *and* those the caller supplied.
-  A host that strips the delegating verbs only from its own injected
-  gateway has not implemented this gate: a caller can hand the child
-  an equivalent surface and the child is delegating again, unchecked.
+- **The gate MUST bind to the calling session's identity, not to the
+  surface it connects through.** The host MUST resolve the caller's
+  grant from the *authenticated identity of the calling session* and
+  enforce it where the delegating action is invoked. A host MUST NOT
+  derive the grant from anything the caller supplies about itself: a
+  restriction expressed as a URL parameter, a header, a config entry,
+  or any other caller-controlled input is a **request, not a gate** —
+  the caller omits it and the restriction evaporates.
+- **Every surface that can reach a delegation action MUST carry
+  session identity.** A surface reachable *without* identity — an
+  unauthenticated loopback endpoint, a permissive local socket — is an
+  ungated surface, and its existence defeats the gate for every
+  session that can reach it, including sessions the host believes it
+  denied. Co-located children can reach loopback by construction;
+  "local" is not an authentication boundary when the thing being
+  authenticated is a process the host itself spawned.
+- **Removing the actions from the surface the host injects is defence
+  in depth, and MUST NOT be the only mechanism.** An adapter that
+  carries its own configuration for the host's endpoint will connect
+  to the ungated one; an adapter with a native delegation facility
+  will not use the host's surface at all. A host that gates only the
+  URL it hands out will report a child as denied while that child
+  delegates freely — the worst available outcome, because it is
+  silent and it reads as enforcement.
 - **Prompt text is not enforcement.** A disposition, a `boundaries[]`
   entry, or any instruction telling a child not to delegate is a
   hint. A conforming host MUST NOT count it as the gate. Prose that
@@ -309,6 +334,30 @@ the host's own auth boundary (§Security Considerations), not by this
 lattice. Hosts MUST NOT treat the absence of a parent as an implicit
 grant to the *child* — a root-spawned session is still subject to its
 own agent's `delegates_to` for anything it spawns in turn.
+
+#### A nested spawn inherits its parent's ground
+
+Identity is not the only thing a nested spawn must carry down. A host
+MUST resolve a nested spawn's `cwd` as:
+
+1. the request's explicit `cwd`, when given
+2. otherwise **the parent session's `cwd`**
+
+A host MUST NOT resolve a nested spawn through §Workspaces' ambient
+`workspaces[active]` fallback. That fallback exists for *root* spawns,
+where the human's active workspace is a sensible default. For a nested
+spawn it is actively wrong: `active` is a property of the human's
+session, mutable at any moment by an unrelated `workspace use`, and
+nothing about it is chosen by the spawning agent. A child resolved
+that way runs **with its parent's credentials in a directory its
+parent never named** — the parent believed it was delegating inside
+its own workspace, and the daemon silently placed the child somewhere
+else entirely.
+
+The general rule: a nested spawn's context is derived from its parent,
+never from ambient host state. Where the host has no parent value to
+inherit and the request names none, it MUST reject the spawn rather
+than substitute an ambient default.
 
 #### Limits
 
@@ -581,12 +630,22 @@ Three changes carry compatibility weight:
   escalation: it converts a gated nested spawn into an ungated root
   one. Hosts MUST ensure a session's onward calls carry their parent
   edge.
-- **A denied child must not be handed an equivalent surface.** The
-  most likely real-world defeat of this gate is not an attacker — it
-  is a well-meaning caller passing a child an MCP server that happens
-  to expose the delegation actions. Hosts MUST apply the strip to
-  caller-supplied surfaces (§Delegation), and SHOULD refuse, loudly,
-  rather than silently granting.
+- **Loopback is not an authentication boundary here.** The usual
+  reasoning — "only local processes can reach it, and local processes
+  are already trusted" — inverts for this AIP: the local processes are
+  precisely the untrusted party, because they are the agents being
+  gated, and the host spawned them there itself. A host that exempts
+  loopback from auth on any surface exposing the delegation actions
+  has published an ungated gateway to every child it runs. Hosts MUST
+  authenticate the delegation surface per-session even on loopback.
+- **The realistic defeat of this gate is not an attacker.** It is an
+  adapter shipping its own config entry for the host's own endpoint,
+  or a well-meaning caller handing a child a broader MCP server. Both
+  are ordinary configuration, neither looks like an attack, and both
+  produce a child the host reports as denied while it delegates. This
+  is why §Delegation binds the gate to session identity rather than to
+  surface composition: surface-based reasoning fails against config,
+  and config is the common case.
 - **Ring-buffer disclosure crosses the tree.** A parent reading a
   child's output through `agent_output` sees whatever the child
   printed, including secrets it was given. Delegation therefore
