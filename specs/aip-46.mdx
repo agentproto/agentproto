@@ -125,6 +125,11 @@ starting ──→ running ──→ exited
   matters, not its value).
 - `running → killed` fires when a consumer called `kill_session`,
   `DELETE /sessions/:id`, or the host shut down with a live agent.
+- **Interrupting a turn is not a transition.** A session whose in-flight
+  turn was cancelled (`POST /sessions/:id/interrupt`, or a prompt sent
+  with `interrupt: true`) stays `running` — the agent is alive, idle, and
+  holding its context. There is no `interrupted` status, and consumers
+  MUST NOT infer one from a turn ending early.
 - `* → error` fires on any unhandled spawn / protocol / IO error;
   `lastOutputAt` typically points at the corresponding line in the
   ring buffer.
@@ -170,9 +175,45 @@ The host MUST expose these routes under a fixed prefix (default
 | `POST` | `/sessions/agent` | `SpawnAgentRequest` | `Session` (201) |
 | `GET` | `/sessions/:id` | — | `Session` |
 | `POST` | `/sessions/:id/prompt` | `{ prompt: string }` | `{ ok: true, id }` |
+| `POST` | `/sessions/:id/interrupt` | — | `{ ok: true, id, wasBusy: boolean }` |
 | `POST` | `/sessions/:id/kill` | — | `{ ok: boolean, id }` |
 | `DELETE` | `/sessions/:id` | — | `{ ok: boolean, id }` (forget) |
 | `GET` | `/sessions/:id/stream` | — | SSE — see §sse |
+
+#### Interrupt (added 2026-07-17)
+
+`POST /sessions/:id/interrupt` cancels the in-flight turn and leaves the
+session **alive and idle**, ready for the next prompt with its context
+intact. It is the wire form of the Ctrl-C a human would press at the
+agent's own TUI, and hosts SHOULD implement it as exactly that (ACP
+`session/cancel`, or an adapter-specific SIGINT for process/PTY-backed
+adapters).
+
+It is deliberately **not** a status transition: an interrupted session
+stays `running` (see §Status transitions), which is the whole distinction
+from `kill` (`running → killed`, terminal). Consumers that want "stop what
+you're doing" MUST NOT reach for `kill` to get it — killing a session to
+end one turn discards the agent's context and forces a respawn, defeating
+the multi-turn continuity this AIP exists to provide.
+
+`wasBusy` reports whether a turn was actually cancelled. Interrupt is
+**idempotent**: on an idle or already-terminal session it MUST succeed as
+a no-op with `wasBusy: false` rather than erroring — a consumer racing a
+turn-end should not have to distinguish "stopped it" from "it had already
+finished", and both leave the session in the state the consumer asked
+for.
+
+Hosts MUST return 409 when the resolved adapter cannot cancel a turn at
+all: that is a capability refusal the consumer can act on (fall back to
+`kill`, or surface it), not a server fault.
+
+This route is the ONLY way to end a turn without supplying the next one.
+`POST /sessions/:id/prompt` with `interrupt: true` (see §Multi-turn
+semantics) cancels a turn too, but only as a means of redirecting the
+session onto a new prompt — it cannot express "stop, and send nothing".
+Hosts predating this route forced consumers to re-send a throwaway prompt
+purely to reach the cancel, which pollutes the transcript with a turn the
+user never asked for.
 
 #### SpawnAgentRequest
 
@@ -236,6 +277,21 @@ The host MUST reject (HTTP 409 / MCP error) overlapping prompts on
 the same session — agents are single-turn-at-a-time. Consumers can
 poll `get_agent_session_output` or watch the SSE stream to know when
 a turn ended (look for the `turn-end` projected line).
+
+**Redirecting a busy session (documented 2026-07-17).** A prompt MAY
+carry `interrupt: true`, which replaces that 409 with a redirect: the
+host cancels the in-flight turn (as §Interrupt describes), waits for it
+to settle, and then admits the new prompt on the same session, context
+intact. It is a no-op modifier on an idle session — the prompt is
+admitted normally, byte-identical to omitting the flag — so a consumer
+racing a turn-end never has to choose in advance. This flag has shipped
+in the reference implementation since before this AIP was written; the
+document simply never described it.
+
+`interrupt: true` and `POST /sessions/:id/interrupt` are not
+alternatives: the flag cancels a turn *in order to* start another one
+and cannot express "stop, send nothing"; the route ends a turn and stops
+there. A consumer wanting the latter MUST use the route.
 
 ### Output projection
 
