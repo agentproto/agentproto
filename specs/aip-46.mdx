@@ -1,12 +1,12 @@
 ---
 title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
-description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings), the over-the-wire surface (HTTP + SSE + MCP tools), and the workspace-resolution pattern that lets a single host serve many bound directories. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn.
+description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition and AIP-38 (POLICY) as the delegation authority.
 aip: 46
 status: Draft
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 17, 19, 36, 44, 45]
+requires: [1, 2, 17, 19, 36, 38, 42, 44, 45]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: drivers
@@ -20,7 +20,8 @@ package: "@agentproto/runtime"
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
-| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
 
 ## Abstract
@@ -37,12 +38,24 @@ needs:
 - multi-turn continuity per session (don't respawn for every prompt)
 - live observation (UI tails output, operator polls for the answer)
 - workspace-bound spawns (resolve `cwd` from a stable, named
-  workspace handle instead of hand-typing absolute paths)
+  workspace handle instead of hand-typing absolute paths) — and the
+  state each bound workspace accumulates, partitioned per workspace
+  rather than pooled (§[State partitioning](#state-partitioning-added-2026-07-17))
+- **nested sessions** — a session that spawns further sessions, and
+  the gate deciding whether it may (§[Delegation](#delegation-and-the-spawn-gate))
 
 A daemon implementing this AIP becomes a **control plane for local
 agents**. Any host (cloud orchestrator, IDE extension, mobile remote)
 can drive it through the standard surface — HTTP routes, an SSE
 stream, and MCP tools — without knowing which adapter is wrapped.
+
+A session is the *running instance*; what it runs is an
+[AIP-42](/docs/aip-42) AGENT. AIP-46 owns the process boundary and
+the lifecycle; it does not re-declare the agent's prompt, skills,
+tools, or permissions — those are AGENT fields, and the permission
+half is [AIP-38](/docs/aip-38) POLICY. This split is what keeps the
+spawn gate honest: the thing being gated is declared somewhere a
+human can read and sign, not inside the daemon.
 
 AIP-46 is opinionated about the lifecycle and the data shape; it is
 *not* opinionated about the wire format inside a turn (that's
@@ -70,6 +83,73 @@ fell apart for the actual product flows:
 
 Three different consumers, three workarounds, one missing primitive:
 *persistent, named, observable agent sessions*. AIP-46 fills it.
+
+### Why delegation is in scope
+
+The original cut treated a session as a leaf: something a human or a
+cloud host starts. Real orchestration made sessions spawn *other*
+sessions — a supervisor that decomposes work across children — and
+that turned a lifecycle protocol into an authority question the spec
+had no vocabulary for:
+
+4. **A session spawns further sessions, and nothing says whether it
+   may.** Reference implementations grew a private notion — agentproto's
+   `role: executor | supervisor` — carrying a prompt fragment, a
+   delegation switch, and a privilege level in one struct. Three
+   problems compound:
+
+   - **It is unspecified.** Two hosts implementing AIP-46 have
+     incompatible, undiscoverable delegation semantics. A consumer
+     cannot ask "may this session spawn?" in a portable way.
+   - **It re-invents AIP-42.** A prompt fragment is an AGENT body; a
+     skill list is `skills:`; an allowlist of spawnable children is
+     `delegates_to:`; a permission is [AIP-38](/docs/aip-38) POLICY.
+     The struct is those four primitives fused, minus their schemas.
+   - **It collides with [AIP-47](/docs/aip-47).** "Role" is already
+     taken: an organizational job template that AIP-47 §Role vs Policy
+     vs Governance says **MUST NOT grant permission**. A spawn-time
+     privilege tier is precisely what AIP-47 calls an *access role*
+     and forbids conflating with a role. Naming the delegation switch
+     `role` inverts a security invariant of a neighbouring AIP.
+
+   This amendment fills the gap without minting a fifth primitive:
+   the spawn request binds an AIP-42 AGENT, the AGENT's `delegates_to`
+   declares who it may spawn, AIP-38 POLICY decides effect, and AIP-46
+   specifies only the **enforcement point** — the one thing that is
+   genuinely session-lifecycle's own.
+
+### Why state partitioning is in scope (added 2026-07-17)
+
+This AIP's premise, stated in its own abstract, is "the
+workspace-resolution pattern that lets a single host serve many bound
+directories". §Workspaces delivered the *addressing* for that — a slug
+resolves to a path — and stopped there. The state those many
+directories generate stayed pooled in one store, with `workspaceSlug`
+demoted to a column:
+
+5. **The multi-workspace premise had no multi-workspace storage.** A
+   slug that only ever appears as a field is a label, not a boundary.
+   Three consequences, in ascending order of how hard they are to see:
+
+   - **Bounded retention becomes a race.** Any host capping how much
+     history it keeps caps it across every workspace at once, so the
+     cap is spent by whoever was busiest. The reference implementation
+     measured this: a 200-descriptor cap against a store holding 201
+     records from four different slugs, where a workspace contributing
+     8 of them is one busy afternoon away from losing all 8 — having
+     done nothing to deserve it. The eviction is silent and lands on
+     the quietest workspace.
+   - **Lifecycle has no unit.** "Remove this workspace and everything
+     it accumulated" is a filtered rewrite of a shared file rather than
+     the removal of a subtree, which is why no host offers it.
+   - **Scoping has nothing to scope to.** A host that wants to hand a
+     consumer a view of one workspace has to filter a global store on
+     every read, and every read that forgets is a leak. A partition
+     lets the host *not hold* what it should not serve.
+
+   This amendment does not mint a new primitive either: it takes the
+   slug §Workspaces already defines and makes it select storage rather
+   than annotate it.
 
 ## Specification
 
@@ -104,10 +184,31 @@ interface Session {
   /** Free-text label the spawner attaches (conversation id, operator
    *  name, …) so consumers can group/filter. */
   label?: string
+
+  /** The AIP-42 AGENT this session runs, when one was bound at spawn.
+   *  Absent for a bare adapter spawn (adapter default behaviour).
+   *  Persisted: a consumer MUST be able to ask what a live session is
+   *  running without replaying its prompt. */
+  agentSlug?: string
+  /** Set when this session was spawned BY another session. Absent ⇒
+   *  a root spawn (a human or an external host started it). This is
+   *  the edge the spawn gate keys off — see §Delegation. */
+  parentSessionId?: string
+  /** Depth in the spawn tree: a root spawn is 0; a session spawned by
+   *  a session at depth d is d+1. Present whenever `parentSessionId`
+   *  is. Bounds recursion (§Delegation limits). */
+  depth?: number
 }
 ```
 
 The host MAY add fields; consumers MUST ignore unknown fields.
+
+`parentSessionId` + `depth` make the registry a **forest**: roots are
+sessions with no parent, and a consumer renders the tree by grouping
+on `parentSessionId`. A host that supports delegation MUST populate
+both — a nested session that reports no parent is indistinguishable
+from a root one, which defeats both the gate and every supervision UI
+built on top of it.
 
 ### Status transitions
 
@@ -154,15 +255,342 @@ spawns can reference a named handle instead of an absolute path:
 }
 ```
 
-`cwd` resolution priority for any spawn that omits an explicit
-`cwd` field:
+`cwd` resolution priority for any **root** spawn that omits an
+explicit `cwd` field:
 
 1. lookup `workspaces[workspaceSlug]` → use its `path`
 2. fall back to `workspaces[active]` → use its `path`
 3. emit a warning + use the host's `process.cwd()`
 
+Steps 2 and 3 are **root-only**. A nested spawn (one whose caller is a
+session) MUST NOT reach them — it inherits its parent's `cwd`
+instead. See §[Delegation](#a-nested-spawn-inherits-its-parents-ground);
+the `active` workspace is ambient host state and resolving a child
+through it silently relocates that child outside the subtree its
+parent was working in.
+
 Hosts that don't implement workspaces MAY require explicit `cwd`
 on every spawn; consumers MUST then pass it.
+
+### State partitioning (added 2026-07-17)
+
+§Workspaces makes `workspaceSlug` a *field on a session*. That is
+enough to render a filter and not enough to keep two workspaces out of
+each other's way: a field distinguishes rows *inside* one store, and
+every row in that store still competes for the same bounded resource.
+This section makes the slug a **partition of the host's state**.
+
+#### Layout
+
+A host that persists session state and implements a workspace registry
+MUST partition that state per workspace. The reference layout:
+
+```
+~/.agentproto/
+├── workspaces.json              # the registry (§Workspaces)
+└── workspaces/                  # one bucket per workspace
+    ├── agentik-studio/
+    │   ├── sessions.json        # this workspace's registry snapshot
+    │   └── sessions/            # this workspace's transcripts
+    │       └── <sessionId>/…
+    ├── choisir-service-public-app/
+    │   └── …
+    └── default/                 # the fallback bucket — see below
+        └── …
+```
+
+`workspaces.json` (the registry, a file) and `workspaces/` (the state,
+a directory) are deliberate siblings: the registry names the
+workspaces, the directory holds what each one accumulated.
+
+| Store | Normative force |
+|---|---|
+| the sessions registry snapshot | MUST be per-bucket |
+| durably-kept transcripts / per-session output | SHOULD be per-bucket |
+| any other store whose records carry a workspace binding | SHOULD be per-bucket |
+| stores with no workspace binding (host config, pairings, adapter installs) | MUST stay global — bucketing them would assert a binding that does not exist |
+
+Hosts MAY choose a different root; the *partition*, not the path, is
+what this section requires.
+
+#### Bucket resolution
+
+For any record carrying a `workspaceSlug`, the host resolves its bucket:
+
+1. `workspaceSlug` is non-empty **and** matches a registered entry in
+   `workspaces.json` by exact identity → that workspace's bucket.
+2. Otherwise — absent, empty, or unregistered → the `default` bucket.
+
+A host MUST resolve by **exact match against the registry**, and MUST
+NOT derive a bucket directory from a slug that did not come back from
+that lookup. The registry's slugs are host-sanitised (§Workspaces); a
+slug on a spawn request is caller input, and a host that paths on it
+directly has handed the caller directory traversal under its own state
+root. Membership *is* the validation: an unregistered slug does not get
+a bucket of its own, it gets `default`.
+
+`default` is a real bucket, not an error state. It receives every
+record the registry cannot place — one-off `cwd` spawns, sessions from
+a workspace the user has since removed, and the pre-partition past.
+Records in `default` share a bucket with one another, i.e. they keep
+exactly the pooled behaviour this section replaces elsewhere.
+**Partitioning is therefore not an isolation mechanism for
+unregistered work**, and hosts MUST NOT present it as one: registering
+a workspace is what buys separation.
+
+#### Per-bucket bounds
+
+A host that bounds how many historical descriptors it retains MUST
+apply that bound **per bucket**, never across the union.
+
+This is the concrete fairness property the partition exists to buy. A
+global bound makes retention a race between workspaces: the busiest
+workspace's records evict the quietest one's, so a workspace can lose
+its history by having done nothing at all while a neighbour was busy —
+the eviction is silent, and the workspace that suffers it is the one
+with the least evidence that anything happened. A per-bucket bound
+makes retention local: a workspace's history is bounded by its own
+volume and nothing else's.
+
+Hosts SHOULD size the bound per bucket rather than dividing a global
+budget among buckets. The bound exists to keep a single store readable;
+after partitioning, each bucket *is* a single store.
+
+#### Migration
+
+A host that previously pooled this state in one global store MUST treat
+the move to buckets as **additive**:
+
+- The host MUST partition the legacy store's records into buckets by
+  the rule above, on first boot after the change.
+- The host MUST NOT delete, truncate, or rewrite the legacy artifact.
+  It is the user's data and their only rollback; the partitioned copy
+  is a derivative until they decide otherwise. A host MUST be able to
+  complete the migration with the legacy store held read-only.
+- The host SHOULD record a durable marker — what was migrated, when,
+  from where, and how many records landed in each bucket — so the split
+  is auditable, and so a later boot does not re-import records the user
+  has since deleted from a bucket.
+- A record whose slug does not resolve MUST land in `default`. The
+  migration MUST NOT drop a record it cannot place.
+
+Reclaiming the legacy artifact is a separate, human-gated decision. This
+AIP specifies no retention or garbage collection for any bucket; see
+§Open Questions.
+
+### Delegation and the spawn gate
+
+A **nested spawn** is a spawn whose caller is itself a session. The
+host MUST decide, at spawn time, whether the calling session may
+create the requested child. That decision is the **spawn gate**, and
+this section is the whole of what AIP-46 specifies about it: the
+enforcement point. *What* is permitted is declared by AIP-42 and
+decided by AIP-38 — AIP-46 only guarantees the check happens where it
+cannot be talked past.
+
+#### The agent binding
+
+A spawn request MAY carry `agent: <agent-ref>` — a reference to an
+[AIP-42](/docs/aip-42) AGENT, resolved by the host through AIP-42's
+`inline | ref | file` pattern. The bound AGENT supplies:
+
+| AGENT field | What it supplies to the session |
+|---|---|
+| body | the system prompt / disposition given to the child |
+| `skills[]` | [AIP-3](/docs/aip-3) skills the child loads |
+| `boundaries[]` | hard rules surfaced high-priority in the prompt |
+| `delegates_to[]` | **the closed allowlist of agents this one may spawn** |
+| `policy` | [AIP-38](/docs/aip-38) binding — the access decision |
+
+A host that resolves an AGENT MUST record it as `agentSlug` on the
+session. Absent `agent`, the host spawns the adapter's default
+behaviour and the session MUST be treated as declaring no
+`delegates_to` — i.e. deny (below).
+
+#### Who may spawn whom
+
+1. **Deny by default.** An agent whose resolved `delegates_to` is
+   absent or empty MUST NOT be permitted to spawn. This mirrors
+   AIP-38's `default: deny` and makes the safe case the silent one.
+2. **Closed allowlist.** When `delegates_to` is non-empty, the host
+   MUST permit a nested spawn only when the requested child's
+   agent-ref resolves to a member of the caller's `delegates_to`.
+   Membership is by resolved identity, not by the literal string.
+3. **No self-widening.** A child MUST NOT be able to alter its own
+   `delegates_to`, its policy, or the toolset the host granted it —
+   not through its prompt, not by requesting a wider binding at spawn,
+   not by re-spawning itself. The caller's grant is a ceiling; a
+   nested grant MUST be bounded by the parent's.
+4. **Role is never the authority.** A host MUST NOT derive delegation
+   permission from an [AIP-47](/docs/aip-47) ROLE, from an operator's
+   seniority, or from any organizational field. AIP-47 is explicit
+   that a role declares intent and MUST NOT grant access; an agent's
+   job title has no bearing on whether it may spawn a process.
+
+#### The enforcement point
+
+This is the normative core.
+
+- The gate MUST be evaluated **host-side, at spawn, before any tool
+  injection or process creation**. A rejected spawn MUST create no
+  session.
+- **The gate MUST bind to the calling session's identity, not to the
+  surface it connects through.** The host MUST resolve the caller's
+  grant from the *authenticated identity of the calling session* and
+  enforce it where the delegating action is invoked. A host MUST NOT
+  derive the grant from anything the caller supplies about itself: a
+  restriction expressed as a URL parameter, a header, a config entry,
+  or any other caller-controlled input is a **request, not a gate** —
+  the caller omits it and the restriction evaporates.
+- **Every surface that can reach a delegation action MUST carry
+  session identity.** A surface reachable *without* identity — an
+  unauthenticated loopback endpoint, a permissive local socket — is an
+  ungated surface, and its existence defeats the gate for every
+  session that can reach it, including sessions the host believes it
+  denied. Co-located children can reach loopback by construction;
+  "local" is not an authentication boundary when the thing being
+  authenticated is a process the host itself spawned.
+- **Removing the actions from the surface the host injects is defence
+  in depth, and MUST NOT be the only mechanism.** An adapter that
+  carries its own configuration for the host's endpoint will connect
+  to the ungated one; an adapter with a native delegation facility
+  will not use the host's surface at all. A host that gates only the
+  URL it hands out will report a child as denied while that child
+  delegates freely — the worst available outcome, because it is
+  silent and it reads as enforcement.
+- **Prompt text is not enforcement.** A disposition, a `boundaries[]`
+  entry, or any instruction telling a child not to delegate is a
+  hint. A conforming host MUST NOT count it as the gate. Prose that
+  restates the gate is permitted and useful; prose *in place of* the
+  gate is non-conforming.
+- The gate MUST be the single decision point shared by enforcement
+  and introspection. A host exposing "what may this session spawn?"
+  MUST answer from the same predicate that rejects the spawn, so the
+  two can never disagree.
+
+**Delegation actions.** The verbs that spawn or drive another session
+— `agent_start` and `agent_prompt` in the tool table below — are
+[AIP-39](/docs/aip-39) actions for policy purposes. A host MUST gate
+them as actions, not as tool-name strings, so a renamed or aliased
+surface cannot route around the check.
+
+**Root spawns.** A spawn with no calling session (no
+`parentSessionId`) has no parent to gate against; it is authorised by
+the host's own auth boundary (§Security Considerations), not by this
+lattice. Hosts MUST NOT treat the absence of a parent as an implicit
+grant to the *child* — a root-spawned session is still subject to its
+own agent's `delegates_to` for anything it spawns in turn.
+
+#### A nested spawn inherits its parent's ground
+
+Identity is not the only thing a nested spawn must carry down. A host
+MUST resolve a nested spawn's `cwd` as:
+
+1. the request's explicit `cwd`, when given
+2. otherwise **the parent session's `cwd`**
+
+A host MUST NOT resolve a nested spawn through §Workspaces' ambient
+`workspaces[active]` fallback. That fallback exists for *root* spawns,
+where the human's active workspace is a sensible default. For a nested
+spawn it is actively wrong: `active` is a property of the human's
+session, mutable at any moment by an unrelated `workspace use`, and
+nothing about it is chosen by the spawning agent. A child resolved
+that way runs **with its parent's credentials in a directory its
+parent never named** — the parent believed it was delegating inside
+its own workspace, and the daemon silently placed the child somewhere
+else entirely.
+
+The general rule: a nested spawn's context is derived from its parent,
+never from ambient host state. Where the host has no parent value to
+inherit and the request names none, it MUST reject the spawn rather
+than substitute an ambient default.
+
+**Ground narrows, like authority.** An explicit `cwd` on a nested
+spawn MUST resolve *inside the parent's own `cwd` subtree*; a host
+MUST reject a nested spawn naming ground outside it. Inheritance alone
+is only a default, and a default is not a boundary — without this rule
+a parent hands its child any path on the machine and the inheritance
+rule buys nothing.
+
+This is the same non-escalation principle `delegates_to` applies to
+authority, applied to the filesystem: **a child may be given less than
+its parent has, never more, on either axis.** A subtree is the natural
+shape for it — a parent working in one may legitimately want a child
+confined to a package inside it, and never has cause to send one
+somewhere it cannot itself reach.
+
+Hosts SHOULD compare resolved real paths, not lexical strings: `..`
+segments and symlinks out of the subtree are the obvious ways to
+satisfy a naive prefix check while landing outside. Where the host
+exposes filesystem or exec tools of its own, those MUST anchor to the
+session's `cwd` by the same rule — a spawn-time boundary that the
+session's own tools then ignore is not a boundary.
+
+#### Limits
+
+Independently of the allowlist, a host MUST bound recursion:
+
+| Limit | Meaning | On breach |
+|---|---|---|
+| `maxDepth` | greatest permitted `depth` | reject, create no session |
+| `maxChildren` | greatest number of concurrently alive children per session | reject, create no session |
+
+An allowlist that names a peer (`a` delegates to `a`) is legal and
+recursive; `maxDepth` — not the allowlist — is what terminates it.
+
+#### Errors
+
+A host MUST reject with a stable, machine-readable code. Codes below
+are normative; hosts MAY add their own.
+
+| Code | Cause |
+|---|---|
+| `invalid_agent` | `agent` ref does not resolve |
+| `delegation_denied` | caller's agent may not spawn the requested child |
+| `cwd_outside_parent` | nested spawn named ground outside its parent's subtree |
+| `max_depth_exceeded` | `depth` would exceed `maxDepth` |
+| `child_quota_exceeded` | caller already at `maxChildren` |
+
+A rejection MUST be distinguishable from a spawn failure: the former
+means no session was permitted, the latter that one was permitted and
+failed to start.
+
+#### What this gate cannot reach (informative)
+
+An honest boundary, because implementations have shipped believing
+otherwise. **Everything in §Delegation governs surfaces the host
+grants.** Every adapter also ships its own equivalent of those
+surfaces, and the host's rules do not reach them:
+
+| The host governs | The adapter's ungoverned twin |
+|---|---|
+| the delegation actions on the host's own gateway | a native task / sub-agent facility, spawning off-protocol |
+| host fs / exec tools anchored to the session's `cwd` | the CLI's own built-in shell and file tools |
+| what the host injects into the child's config | what the adapter already has in *its* config |
+
+The pattern is one fact wearing three hats: **an adapter can do
+natively whatever the host can do for it, and the host's version is
+the only one with rules on it.** A native sub-agent spawn has no
+session id and no parent edge — there is nothing to gate. A native
+shell reads any path the process can reach — `cwd` is where it starts,
+not a fence.
+
+Consequences a conforming host MUST accept:
+
+- It MUST NOT report as gated anything it did not actually gate.
+  A child spawned off-protocol is invisible, not denied; a path read
+  through the adapter's own shell is unbounded, not confined.
+- It SHOULD disable the native facility through the adapter's AIP-45
+  options wherever the adapter exposes a flag, and SHOULD treat the
+  absence of such a flag as a material property of that adapter.
+- It SHOULD treat [AIP-36](/docs/aip-36) as the only real backstop.
+  A boundary the child's own tooling can step over is a convention.
+  Where a host needs containment rather than convention, the
+  containment is the sandbox — nothing in AIP-46 substitutes for it.
+
+Stated plainly, because it is the rule most likely to be forgotten:
+**AIP-46 bounds what the host hands out. It is not a sandbox, and no
+amount of naming discipline inside it becomes one.**
 
 ### HTTP surface
 
@@ -219,8 +647,12 @@ user never asked for.
 
 ```ts
 {
-  /** AIP-45 adapter slug. Required. */
+  /** AIP-45 adapter slug — WHICH CLI runs. Required. */
   adapter: string
+  /** AIP-42 AGENT ref — WHAT it runs (prompt, skills, delegates_to,
+   *  policy). Optional; absent ⇒ adapter default + no delegation.
+   *  See §Delegation. */
+  agent?: string
   /** Workspace handle. Optional — falls back to active. */
   workspaceSlug?: string
   /** Override cwd. Wins over workspaceSlug. */
@@ -231,6 +663,12 @@ user never asked for.
   label?: string
 }
 ```
+
+`adapter` and `agent` are orthogonal and both may be present: the
+adapter is the runtime (which binary), the agent is the definition
+(which prompt, skills, and delegation grant). The same
+`reviewer` AGENT MAY be run on any conforming adapter; the same
+adapter MAY run any agent. Hosts MUST NOT infer one from the other.
 
 #### SSE event format
 
@@ -255,27 +693,30 @@ so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
-| `start_agent_session` | `{adapter, workspaceSlug?, cwd?, prompt?, label?}` | Returns the `Session` JSON |
-| `prompt_agent_session` | `{sessionId, prompt}` | Fire-and-forget — call `get_agent_session_output` to read the reply |
-| `list_agent_sessions` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
-| `get_agent_session_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
-| `kill_agent_session` | `{sessionId}` | Returns `{ok, sessionId}` |
+| `agent_start` | `{adapter, agent?, workspaceSlug?, cwd?, prompt?, label?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
+| `agent_prompt` | `{sessionId, prompt}` | Fire-and-forget — call `agent_output` to read the reply. A delegation action (§Delegation). |
+| `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
+| `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
+| `agent_kill` | `{sessionId}` | Returns `{ok, sessionId}` |
 
 The MCP tools and the HTTP routes target the same underlying
 registry — calling either family results in the same observable
 state.
 
+`agent_start` and `agent_prompt` are the delegation actions of
+§Delegation; hosts gate them by action identity, not by tool name.
+
 ### Multi-turn semantics
 
 A session stays alive after each turn. Subsequent
-`prompt_agent_session` (or `POST /sessions/:id/prompt`) calls dispatch
+`agent_prompt` (or `POST /sessions/:id/prompt`) calls dispatch
 to the *same* underlying agent process; the agent retains its in-
 memory context (previous tool results, file reads, etc.) until the
 session is killed.
 
 The host MUST reject (HTTP 409 / MCP error) overlapping prompts on
 the same session — agents are single-turn-at-a-time. Consumers can
-poll `get_agent_session_output` or watch the SSE stream to know when
+poll `agent_output` or watch the SSE stream to know when
 a turn ended (look for the `turn-end` projected line).
 
 **Redirecting a busy session (documented 2026-07-17).** A prompt MAY
@@ -313,6 +754,65 @@ The exact wire format is non-normative; the goal is that a CLI
 observer (`agentproto sessions --attach <id>`) sees a coherent
 transcript without parsing per-event JSON.
 
+## Rationale
+
+**Why buckets under the host's state root, and not inside the workspace
+itself.** The obvious alternative to `~/.agentproto/workspaces/<slug>/`
+is the git-style one: put each workspace's state in the workspace —
+`<repo>/.agentproto/` — where the partition is free, needs no registry
+lookup, no `default` fallback, and no migration, because the directory
+*is* the identity. It was rejected, and the reason is worth stating
+because the ergonomics genuinely are better.
+
+Transcripts are not metadata. They contain the full text of agent
+conversations: every prompt a user typed, every file the agent read
+back, and every secret that passed through a turn — §Security
+Considerations already warns that the ring buffer captures whatever the
+agent printed. Co-location writes that stream into a directory whose
+defining property is that it is *tracked, committed, and pushed*. The
+failure is not hypothetical or gradual: it is one forgotten
+`.gitignore` between a private transcript and a public remote, on a
+path the user did not choose and has no habit of auditing. A host that
+partitions this way has fixed a fairness bug by manufacturing a
+disclosure bug, and the disclosure bug ships to everyone who clones the
+repo.
+
+The registry lookup, the `default` bucket, and the migration are the
+price of keeping the state in a directory that exists to hold state.
+That is the trade this section makes deliberately.
+
+**Why membership in the registry is the validation.** A slug arrives
+from a caller; a bucket is a directory name. Every other approach to
+that gap is a sanitiser, and a sanitiser is a thing you can get subtly
+wrong forever. Requiring the slug to come *back from* the registry
+lookup collapses validation into a step the host already performs: the
+only strings that ever become directory names are ones the host itself
+minted and sanitised on the way in. An attacker-supplied slug is not
+rejected, escaped, or normalised — it simply fails to match, and lands
+in `default` like any other unregistered work.
+
+**Why `default` is a bucket and not an error.** Refusing to persist a
+session whose workspace is unregistered would make the partition a
+breaking change for every one-off `cwd` spawn, and hosts would respond
+by auto-registering, which turns a registry of the user's intent into a
+registry of everything that ever ran. Accepting them into a named,
+shared bucket keeps the migration additive and keeps the registry
+meaningful — at the cost, stated plainly above, that `default` gives
+its occupants no separation from each other.
+
+**Why partitioning is specified without a scoping rule.** A reader
+could reasonably expect this section to also say "and a consumer scoped
+to workspace X MUST NOT see workspace Y's sessions". It deliberately
+does not. Partitioning is a storage property; confidentiality is an
+access-control property, and the two are independent — a host can
+partition perfectly and still serve every bucket to every caller, which
+is exactly what a host does the day it lands this section. Specifying
+the storage boundary first is what makes the access rule expressible
+later; conflating them would let an implementer read this section, ship
+the layout, and believe they had shipped isolation. §Security
+Considerations says so in the negative, and §Open Questions carries the
+scoping rule as the follow-on work it is.
+
 ## Reference Implementation
 
 The `@agentproto/runtime` package implements AIP-46 alongside AIP-45.
@@ -324,9 +824,33 @@ Daemons started via `agentproto serve` (or built directly through
 - **MCP tools**: `runtime/src/session-tools.ts` — registered
   per-request via `mcpServerFactory`
 - **Registry**: `runtime/src/sessions.ts` — in-memory + persisted
-  to `~/.agentproto/sessions.json` (debounced)
+  (debounced) to the per-workspace snapshot
+  `~/.agentproto/workspaces/<slug>/sessions.json` of §State
+  partitioning; carries `parentSessionId` + `depth`
 - **Workspaces config**: `runtime/src/workspaces-config.ts` —
   read+write helpers for `~/.agentproto/workspaces.json`
+- **Bucket resolution + migration**: `runtime/src/workspace-buckets.ts`
+  — the slug→bucket rule, the `default` fallback, and the additive
+  split of the legacy global `sessions.json`
+- **Spawn gate**: `runtime/src/session-spawn.ts` — the enforcement
+  point of §Delegation
+
+§[Delegation](#delegation-and-the-spawn-gate) is specified ahead of
+its reference implementation — `@agentproto/runtime` does not yet
+conform. Divergences are tracked in that repository's issues rather
+than here: a spec carrying an implementation's bug list goes stale the
+moment the bugs close, which is how this document's tool names drifted
+in the first place.
+
+That gap generalises into a rule worth stating plainly, because the
+failure is silent and the consequence is credentialed processes:
+**a consumer MUST NOT assume a host enforces the spawn gate merely
+because the host implements AIP-46.** Delegation is the one part of
+this AIP whose absence is invisible from the outside — a host that
+never gates looks identical to one that does until something spawns
+that should not have. Hosts SHOULD advertise conformance to
+§Delegation explicitly; consumers that rely on the gate SHOULD verify
+it rather than infer it.
 
 The CLI shell `@agentproto/cli` adds:
 - `agentproto workspace add|list|remove|use` for managing the
@@ -336,15 +860,64 @@ The CLI shell `@agentproto/cli` adds:
 
 ## Backwards Compatibility
 
-AIP-46 is purely additive. Hosts that ship AIP-45 today can adopt
-AIP-46 by registering the registry + routes; existing
-`agentproto run` invocations continue to work unchanged (they bypass
-the registry, which is fine for one-shot scripting).
+**This AIP is Draft and pre-adoption: the reference implementation is
+its only consumer.** Breaking changes are therefore cheap, and this
+document prefers being right over being compatible with its own
+earlier drafts. Where the spec and the implementation disagree, the
+implementation moves. Once a second consumer exists this section gets
+stricter; until then, treat every rule here as settled by argument
+rather than by precedent.
+
+The session lifecycle itself is additive over AIP-45: hosts adopt it by
+registering the registry + routes, and existing `agentproto run`
+invocations continue to work unchanged (they bypass the registry, which
+is fine for one-shot scripting).
 
 Hosts MAY refuse to register the routes when no AIP-45 adapter is
 installed; they then SHOULD return HTTP 501 from
 `POST /sessions/agent` with a clear message pointing at the install
 command.
+
+### There is no `role` on this surface
+
+Some hosts grew a private `role: executor | supervisor` field carrying
+delegation authority. It is not part of this AIP and MUST NOT be
+introduced: a spawn names an `agent`, and authority comes from that
+agent's `delegates_to` + policy. Hosts carrying the field today should
+replace it — the delegating tier becomes an AGENT declaring
+`delegates_to`, the leaf tier an AGENT declaring none — and delete it
+rather than alias it. Organizational role belongs on the
+[AIP-9](/docs/aip-9) OPERATOR that *owns* the agent, never on the
+spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
+
+### The 2026-07-17 state-partitioning amendment
+
+§State partitioning changes where a conforming host keeps state, not
+what it serves. Compatibility weight sits in three places:
+
+1. **The wire surface is untouched.** `Session.workspaceSlug` keeps its
+   meaning and its field; the HTTP routes, the MCP tools, and the SSE
+   stream are unchanged. A consumer cannot observe the partition, which
+   is the point — this is a host-storage requirement, and a consumer
+   that reads `workspaceSlug` off a descriptor behaves identically
+   before and after.
+2. **Migration is additive by mandate.** The legacy global store is
+   read, split, and left intact (§Migration). A host that rolls the
+   change back finds its original artifact where it left it; a host
+   that rolls forward twice is protected by the marker. Nothing about
+   this amendment authorises deleting a user's history — retention is
+   explicitly not specified.
+3. **Per-bucket bounds change what survives, in the user's favour.** A
+   host moving a global cap to a per-bucket cap retains strictly more
+   history than before (each bucket now gets the whole bound rather
+   than a contested share). Hosts that sized a global cap against a
+   render budget SHOULD re-check it per §Per-bucket bounds rather than
+   dividing it, but a host that keeps its existing number is conforming
+   and simply retains more.
+
+Hosts with no workspace registry are unaffected: §State partitioning
+binds only hosts that implement §Workspaces, and a host without one has
+a single implicit workspace, which is already a partition of one.
 
 ## Security Considerations
 
@@ -356,10 +929,71 @@ command.
   the SSE stream. Hosts MAY redact known secret patterns, but the
   AIP does not require it; consumers MUST treat the buffer as
   potentially sensitive.
-- `start_agent_session` accepts `cwd` from the caller. Hosts SHOULD
+- `agent_start` accepts `cwd` from the caller. Hosts SHOULD
   reject paths outside their allowed surface (e.g. require the path
   to be a registered workspace, or under the workspaces' parent
   directory) when the auth principal is not the local UID.
+- **The spawn gate is an authority boundary, not a guardrail.** A
+  session that can spawn can spend money, write files, and reach the
+  network as the daemon's UID — recursively. Hosts MUST evaluate the
+  gate before process creation (§Delegation) and MUST NOT rely on the
+  child's cooperation. The failure mode is not a confused agent; it
+  is an unbounded fan-out of credentialed processes.
+- **Root authority is the host's auth, and it is total.** Because a
+  root spawn has no parent to gate against, whatever authenticates to
+  the spawn surface can request any agent. Hosts MUST NOT expose that
+  surface more broadly than they would a shell. Any surface reachable
+  by a *child* (a proxied gateway, a forwarded port, a tunnel) that
+  reaches the spawn routes without a parent edge is a privilege
+  escalation: it converts a gated nested spawn into an ungated root
+  one. Hosts MUST ensure a session's onward calls carry their parent
+  edge.
+- **Loopback is not an authentication boundary here.** The usual
+  reasoning — "only local processes can reach it, and local processes
+  are already trusted" — inverts for this AIP: the local processes are
+  precisely the untrusted party, because they are the agents being
+  gated, and the host spawned them there itself. A host that exempts
+  loopback from auth on any surface exposing the delegation actions
+  has published an ungated gateway to every child it runs. Hosts MUST
+  authenticate the delegation surface per-session even on loopback.
+- **The realistic defeat of this gate is not an attacker.** It is an
+  adapter shipping its own config entry for the host's own endpoint,
+  or a well-meaning caller handing a child a broader MCP server. Both
+  are ordinary configuration, neither looks like an attack, and both
+  produce a child the host reports as denied while it delegates. This
+  is why §Delegation binds the gate to session identity rather than to
+  surface composition: surface-based reasoning fails against config,
+  and config is the common case.
+- **Ring-buffer disclosure crosses the tree.** A parent reading a
+  child's output through `agent_output` sees whatever the child
+  printed, including secrets it was given. Delegation therefore
+  widens the blast radius of §the ring-buffer caveat above by one hop
+  per level.
+- **Partitioning is not isolation.** §State partitioning bounds what a
+  workspace's state *costs* other workspaces; it does not bound who may
+  read it. A host that has partitioned its state and changed nothing
+  else still serves every bucket to every authorised caller — the files
+  moved, the access did not. Hosts MUST NOT describe partitioning as an
+  isolation or privacy control, and consumers MUST NOT infer from a
+  partitioned layout that a scoped credential sees only its own
+  workspace. The rule that would make it one does not exist yet
+  (§Open Questions).
+- **A bucket name is caller input until the registry says otherwise.**
+  `workspaceSlug` reaches the host on a spawn request and a bucket is a
+  directory under the host's state root. A host that joins the two
+  without the exact-match lookup of §Bucket resolution has given the
+  caller a path-traversal write primitive — `../../` in a slug escapes
+  the state root entirely, as the daemon's UID. The lookup is what
+  makes this safe, which is why it is specified as membership rather
+  than as sanitisation: a host cannot forget to validate a value it
+  never chose.
+- **Transcripts are the payload, so where they live is a security
+  decision.** They hold prompts, file contents, and any secret that
+  crossed a turn. §Rationale records why they are not co-located inside
+  the user's workspace directory: a state store that lives in a git
+  repository is one missed `.gitignore` from a public remote. Hosts
+  adding their own stores under a bucket SHOULD apply the same test —
+  the directory must exist to hold state, not to be published.
 
 ## Open Questions
 
@@ -372,7 +1006,56 @@ command.
   `session.cancel()`, but the AIP doesn't expose it as an HTTP/MCP
   verb yet. Should be added once we have a real consumer demand
   (the ACP `cancel_turn` semantics differ across adapters).
-- Resume across daemon restarts — `~/.agentproto/sessions.json`
-  persists descriptors but not the live agent process. A future v2
-  could specify rehydration (re-spawn + replay context) for
-  adapters whose AIP-45 manifest declares `session.mode = "resumable"`.
+- Resume across daemon restarts — the per-workspace snapshot
+  (§State partitioning) persists descriptors but not the live agent
+  process. A future v2 could specify rehydration (re-spawn + replay
+  context) for adapters whose AIP-45 manifest declares
+  `session.mode = "resumable"`.
+- **Workspace-scoped reads.** §State partitioning gives a host the
+  boundary but no rule for honouring it: nothing here says a consumer
+  presenting a workspace-scoped credential MUST be served only that
+  workspace's bucket. Writing that rule means first answering what a
+  workspace-scoped credential *is* — the reference implementation has
+  no such thing today, so the honest state is that pairings and
+  orchestrator scope-tokens are daemon-wide and the partition is a
+  precondition rather than a control (§Security Considerations). The
+  scoping rule and the credential it keys off should land together, or
+  the rule will be written against an authority that does not exist.
+- **Retention and reclamation.** Buckets grow without bound; this AIP
+  specifies no GC. The obvious question — when may a host delete a
+  transcript, and who decides — is deliberately unanswered, because
+  the failure mode of guessing is deleting a user's only copy of work
+  they care about. A retention rule needs an explicit human policy
+  input, and probably belongs alongside the legacy-artifact
+  reclamation §Migration also leaves open.
+- **Should the bound be descriptors, or bytes?** §Per-bucket bounds
+  caps record count, inherited from the reference implementation.
+  Count is a poor proxy for the thing that actually hurts (a bucket's
+  transcripts are orders of magnitude larger than its descriptors), so
+  a host can be well under the cap and still unreadable on disk.
+  Revisit if a host reports the count bound as the wrong axis.
+- **Privilege levels vs. explicit allowlists.** This amendment
+  specifies `delegates_to` (a closed allowlist) as the only
+  delegation mechanism, and deliberately does not standardise the
+  numeric privilege lattice the reference implementation grew
+  (`level`, with non-escalation as `child.level <= parent.level`).
+  The lattice is terser for large casts — N agents need no N² of
+  allowlist entries — but it is implicit: it grants by arithmetic
+  rather than by name, so nobody can read an agent and know what it
+  may spawn. The allowlist is auditable and matches AIP-42's existing
+  field. If a real cast outgrows enumeration, the lattice should
+  return as an AIP-42 concern (a computed `delegates_to`), not as a
+  second authority in AIP-46. Revisit when a host reports the
+  allowlist as the binding constraint.
+- **Fan-in / joins.** The gate governs spawn (one parent → many
+  children). Nothing here specifies a child reporting completion back
+  to a parent, or a parent blocking on N children. Reference
+  implementations do this with out-of-band completion policies. If a
+  common shape emerges it may belong in this AIP; it is deliberately
+  out of scope for the amendment.
+- **Should `agent_prompt` across the tree be gated separately from
+  `agent_start`?** Both are delegation actions today, so an agent that
+  may spawn may also drive. A supervisor that should observe children
+  without steering them has no way to say so. Possibly two actions
+  with separate grants; unclear whether the distinction earns its
+  keep.
