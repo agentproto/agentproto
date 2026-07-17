@@ -11,7 +11,7 @@ existing AIP-9 OPERATOR runtime:
 
 | Verb | Purpose |
 |---|---|
-| `role.resolve(ref)` | Resolve a ROLE.md ref (slug, ws://ref, file path, http URL) to a merged effective config + resolution chain. |
+| `role.resolve(ref)` | Resolve a ROLE.md ref (slug, `ws://` ref, file path, http URL) to a merged effective config + resolution chain. |
 | `role.list(scope)` | List role refs available in a scope (workspace, org, public). |
 | `role.validate(content)` | Validate a `ROLE.md` content string against `ROLE.schema.json` and `extends`-chain rules. |
 | `role.hire(operator, role)` | Bind an operator (AIP-9) to a role. MUST fire `onAssign` if declared. |
