@@ -11,6 +11,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  check-refs:
+    name: Validate ws:// refs against AIP-27
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Every ws:// collection has a row in AIP-27 §Reference syntax
+        # The table in aip-27.mdx is the fixture — the script parses it out
+        # of the spec, so this can never drift from what the spec says.
+        run: node scripts/check-refs.mjs .
+
   lint-specs:
     name: Lint AIP frontmatter
     runs-on: ubuntu-latest
