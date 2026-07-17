@@ -82,7 +82,7 @@ fell apart for the actual product flows:
 Three different consumers, three workarounds, one missing primitive:
 *persistent, named, observable agent sessions*. AIP-46 fills it.
 
-### Why delegation is in scope (added 2026-07-17)
+### Why delegation is in scope
 
 The original cut treated a session as a leaf: something a human or a
 cloud host starts. Real orchestration made sessions spawn *other*
@@ -359,6 +359,27 @@ never from ambient host state. Where the host has no parent value to
 inherit and the request names none, it MUST reject the spawn rather
 than substitute an ambient default.
 
+**Ground narrows, like authority.** An explicit `cwd` on a nested
+spawn MUST resolve *inside the parent's own `cwd` subtree*; a host
+MUST reject a nested spawn naming ground outside it. Inheritance alone
+is only a default, and a default is not a boundary — without this rule
+a parent hands its child any path on the machine and the inheritance
+rule buys nothing.
+
+This is the same non-escalation principle `delegates_to` applies to
+authority, applied to the filesystem: **a child may be given less than
+its parent has, never more, on either axis.** A subtree is the natural
+shape for it — a parent working in one may legitimately want a child
+confined to a package inside it, and never has cause to send one
+somewhere it cannot itself reach.
+
+Hosts SHOULD compare resolved real paths, not lexical strings: `..`
+segments and symlinks out of the subtree are the obvious ways to
+satisfy a naive prefix check while landing outside. Where the host
+exposes filesystem or exec tools of its own, those MUST anchor to the
+session's `cwd` by the same rule — a spawn-time boundary that the
+session's own tools then ignore is not a boundary.
+
 #### Limits
 
 Independently of the allowlist, a host MUST bound recursion:
@@ -380,6 +401,7 @@ are normative; hosts MAY add their own.
 |---|---|
 | `invalid_agent` | `agent` ref does not resolve |
 | `delegation_denied` | caller's agent may not spawn the requested child |
+| `cwd_outside_parent` | nested spawn named ground outside its parent's subtree |
 | `max_depth_exceeded` | `depth` would exceed `maxDepth` |
 | `child_quota_exceeded` | caller already at `maxChildren` |
 
@@ -390,19 +412,39 @@ failed to start.
 #### What this gate cannot reach (informative)
 
 An honest boundary, because implementations have shipped believing
-otherwise. The gate governs surfaces the **host** grants. It does not
-reach:
+otherwise. **Everything in §Delegation governs surfaces the host
+grants.** Every adapter also ships its own equivalent of those
+surfaces, and the host's rules do not reach them:
 
-- **An adapter's own native sub-agent facility.** A CLI that ships a
-  built-in task/sub-agent tool spawns off-protocol: no session id, no
-  parent edge, nothing for the host to strip. Hosts SHOULD disable it
-  via the adapter's AIP-45 options where the adapter exposes a flag,
-  MUST NOT report such spawns as gated, and SHOULD treat
-  [AIP-36](/docs/aip-36) sandboxing as the backstop.
-- **Anything the child reaches without the host.** Ambient
-  credentials, a shell, a network path to another daemon. The gate
-  bounds delegation *through this protocol*; it is not a sandbox.
-  AIP-36 is.
+| The host governs | The adapter's ungoverned twin |
+|---|---|
+| the delegation actions on the host's own gateway | a native task / sub-agent facility, spawning off-protocol |
+| host fs / exec tools anchored to the session's `cwd` | the CLI's own built-in shell and file tools |
+| what the host injects into the child's config | what the adapter already has in *its* config |
+
+The pattern is one fact wearing three hats: **an adapter can do
+natively whatever the host can do for it, and the host's version is
+the only one with rules on it.** A native sub-agent spawn has no
+session id and no parent edge — there is nothing to gate. A native
+shell reads any path the process can reach — `cwd` is where it starts,
+not a fence.
+
+Consequences a conforming host MUST accept:
+
+- It MUST NOT report as gated anything it did not actually gate.
+  A child spawned off-protocol is invisible, not denied; a path read
+  through the adapter's own shell is unbounded, not confined.
+- It SHOULD disable the native facility through the adapter's AIP-45
+  options wherever the adapter exposes a flag, and SHOULD treat the
+  absence of such a flag as a material property of that adapter.
+- It SHOULD treat [AIP-36](/docs/aip-36) as the only real backstop.
+  A boundary the child's own tooling can step over is a convention.
+  Where a host needs containment rather than convention, the
+  containment is the sandbox — nothing in AIP-46 substitutes for it.
+
+Stated plainly, because it is the rule most likely to be forgotten:
+**AIP-46 bounds what the host hands out. It is not a sandbox, and no
+amount of naming discipline inside it becomes one.**
 
 ### HTTP surface
 
@@ -479,17 +521,8 @@ The MCP tools and the HTTP routes target the same underlying
 registry — calling either family results in the same observable
 state.
 
-**Naming (amended 2026-07-17).** This table previously specified
-`start_agent_session` / `prompt_agent_session` / `list_agent_sessions`
-/ `get_agent_session_output` / `kill_agent_session`. No known
-implementation ever registered those names; the reference
-implementation shipped the `agent_*` family above from the start, and
-the spec was never reconciled. The `agent_*` names are now normative —
-this is a correction to the document, not a rename of a deployed
-surface. `agent_start` and `agent_prompt` are the delegation actions
-of §Delegation; hosts gate them by action identity, so a host that
-additionally exposes the legacy names as aliases MUST gate the aliases
-too.
+`agent_start` and `agent_prompt` are the delegation actions of
+§Delegation; hosts gate them by action identity, not by tool name.
 
 ### Multi-turn semantics
 
@@ -567,39 +600,35 @@ The CLI shell `@agentproto/cli` adds:
 
 ## Backwards Compatibility
 
-AIP-46 is purely additive. Hosts that ship AIP-45 today can adopt
-AIP-46 by registering the registry + routes; existing
-`agentproto run` invocations continue to work unchanged (they bypass
-the registry, which is fine for one-shot scripting).
+**This AIP is Draft and pre-adoption: the reference implementation is
+its only consumer.** Breaking changes are therefore cheap, and this
+document prefers being right over being compatible with its own
+earlier drafts. Where the spec and the implementation disagree, the
+implementation moves. Once a second consumer exists this section gets
+stricter; until then, treat every rule here as settled by argument
+rather than by precedent.
+
+The session lifecycle itself is additive over AIP-45: hosts adopt it by
+registering the registry + routes, and existing `agentproto run`
+invocations continue to work unchanged (they bypass the registry, which
+is fine for one-shot scripting).
 
 Hosts MAY refuse to register the routes when no AIP-45 adapter is
 installed; they then SHOULD return HTTP 501 from
 `POST /sessions/agent` with a clear message pointing at the install
 command.
 
-### The 2026-07-17 delegation amendment
+### There is no `role` on this surface
 
-Three changes carry compatibility weight:
-
-1. **MCP tool names.** Corrected to the `agent_*` family that
-   implementations actually ship (§MCP tools). Documentation fix, not
-   a surface migration.
-2. **`agent` on the spawn request** is additive and optional. A host
-   that ignores it stays conforming for the non-delegating case: a
-   spawn with no `agent` binds no `delegates_to` and therefore may not
-   delegate, which is the pre-amendment behaviour of any host that
-   never implemented nesting.
-3. **`role` is deprecated where it meant delegation authority.** Hosts
-   that shipped a private `role: executor | supervisor` on the spawn
-   request SHOULD map it to AGENT refs — the delegating tier to an
-   AGENT declaring `delegates_to`, the leaf tier to one declaring none
-   — and SHOULD accept the legacy field as an alias through one major
-   version, resolving it to those agents. Hosts MUST NOT continue to
-   treat `role` as an [AIP-47](/docs/aip-47) ROLE: the two were never
-   the same thing, and AIP-47 forbids a role granting access. New
-   implementations MUST NOT introduce a `role` field on this surface;
-   organizational role belongs on the AIP-9 OPERATOR that *owns* the
-   agent, never on the spawn.
+Some hosts grew a private `role: executor | supervisor` field carrying
+delegation authority. It is not part of this AIP and MUST NOT be
+introduced: a spawn names an `agent`, and authority comes from that
+agent's `delegates_to` + policy. Hosts carrying the field today should
+replace it — the delegating tier becomes an AGENT declaring
+`delegates_to`, the leaf tier an AGENT declaring none — and delete it
+rather than alias it. Organizational role belongs on the
+[AIP-9](/docs/aip-9) OPERATOR that *owns* the agent, never on the
+spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
 
 ## Security Considerations
 
