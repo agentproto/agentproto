@@ -1,6 +1,6 @@
 ---
 title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
-description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition and AIP-38 (POLICY) as the delegation authority.
+description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition and AIP-38 (POLICY) as the delegation authority.
 aip: 46
 status: Draft
 type: Schema
@@ -38,7 +38,9 @@ needs:
 - multi-turn continuity per session (don't respawn for every prompt)
 - live observation (UI tails output, operator polls for the answer)
 - workspace-bound spawns (resolve `cwd` from a stable, named
-  workspace handle instead of hand-typing absolute paths)
+  workspace handle instead of hand-typing absolute paths) — and the
+  state each bound workspace accumulates, partitioned per workspace
+  rather than pooled (§[State partitioning](#state-partitioning-added-2026-07-17))
 - **nested sessions** — a session that spawns further sessions, and
   the gate deciding whether it may (§[Delegation](#delegation-and-the-spawn-gate))
 
@@ -115,6 +117,39 @@ had no vocabulary for:
    declares who it may spawn, AIP-38 POLICY decides effect, and AIP-46
    specifies only the **enforcement point** — the one thing that is
    genuinely session-lifecycle's own.
+
+### Why state partitioning is in scope (added 2026-07-17)
+
+This AIP's premise, stated in its own abstract, is "the
+workspace-resolution pattern that lets a single host serve many bound
+directories". §Workspaces delivered the *addressing* for that — a slug
+resolves to a path — and stopped there. The state those many
+directories generate stayed pooled in one store, with `workspaceSlug`
+demoted to a column:
+
+5. **The multi-workspace premise had no multi-workspace storage.** A
+   slug that only ever appears as a field is a label, not a boundary.
+   Three consequences, in ascending order of how hard they are to see:
+
+   - **Bounded retention becomes a race.** Any host capping how much
+     history it keeps caps it across every workspace at once, so the
+     cap is spent by whoever was busiest. The reference implementation
+     measured this: a 200-descriptor cap against a store holding 201
+     records from four different slugs, where a workspace contributing
+     8 of them is one busy afternoon away from losing all 8 — having
+     done nothing to deserve it. The eviction is silent and lands on
+     the quietest workspace.
+   - **Lifecycle has no unit.** "Remove this workspace and everything
+     it accumulated" is a filtered rewrite of a shared file rather than
+     the removal of a subtree, which is why no host offers it.
+   - **Scoping has nothing to scope to.** A host that wants to hand a
+     consumer a view of one workspace has to filter a global store on
+     every read, and every read that forgets is a leak. A partition
+     lets the host *not hold* what it should not serve.
+
+   This amendment does not mint a new primitive either: it takes the
+   slug §Workspaces already defines and makes it select storage rather
+   than annotate it.
 
 ## Specification
 
@@ -231,6 +266,112 @@ parent was working in.
 
 Hosts that don't implement workspaces MAY require explicit `cwd`
 on every spawn; consumers MUST then pass it.
+
+### State partitioning (added 2026-07-17)
+
+§Workspaces makes `workspaceSlug` a *field on a session*. That is
+enough to render a filter and not enough to keep two workspaces out of
+each other's way: a field distinguishes rows *inside* one store, and
+every row in that store still competes for the same bounded resource.
+This section makes the slug a **partition of the host's state**.
+
+#### Layout
+
+A host that persists session state and implements a workspace registry
+MUST partition that state per workspace. The reference layout:
+
+```
+~/.agentproto/
+├── workspaces.json              # the registry (§Workspaces)
+└── workspaces/                  # one bucket per workspace
+    ├── agentik-studio/
+    │   ├── sessions.json        # this workspace's registry snapshot
+    │   └── sessions/            # this workspace's transcripts
+    │       └── <sessionId>/…
+    ├── choisir-service-public-app/
+    │   └── …
+    └── default/                 # the fallback bucket — see below
+        └── …
+```
+
+`workspaces.json` (the registry, a file) and `workspaces/` (the state,
+a directory) are deliberate siblings: the registry names the
+workspaces, the directory holds what each one accumulated.
+
+| Store | Normative force |
+|---|---|
+| the sessions registry snapshot | MUST be per-bucket |
+| durably-kept transcripts / per-session output | SHOULD be per-bucket |
+| any other store whose records carry a workspace binding | SHOULD be per-bucket |
+| stores with no workspace binding (host config, pairings, adapter installs) | MUST stay global — bucketing them would assert a binding that does not exist |
+
+Hosts MAY choose a different root; the *partition*, not the path, is
+what this section requires.
+
+#### Bucket resolution
+
+For any record carrying a `workspaceSlug`, the host resolves its bucket:
+
+1. `workspaceSlug` is non-empty **and** matches a registered entry in
+   `workspaces.json` by exact identity → that workspace's bucket.
+2. Otherwise — absent, empty, or unregistered → the `default` bucket.
+
+A host MUST resolve by **exact match against the registry**, and MUST
+NOT derive a bucket directory from a slug that did not come back from
+that lookup. The registry's slugs are host-sanitised (§Workspaces); a
+slug on a spawn request is caller input, and a host that paths on it
+directly has handed the caller directory traversal under its own state
+root. Membership *is* the validation: an unregistered slug does not get
+a bucket of its own, it gets `default`.
+
+`default` is a real bucket, not an error state. It receives every
+record the registry cannot place — one-off `cwd` spawns, sessions from
+a workspace the user has since removed, and the pre-partition past.
+Records in `default` share a bucket with one another, i.e. they keep
+exactly the pooled behaviour this section replaces elsewhere.
+**Partitioning is therefore not an isolation mechanism for
+unregistered work**, and hosts MUST NOT present it as one: registering
+a workspace is what buys separation.
+
+#### Per-bucket bounds
+
+A host that bounds how many historical descriptors it retains MUST
+apply that bound **per bucket**, never across the union.
+
+This is the concrete fairness property the partition exists to buy. A
+global bound makes retention a race between workspaces: the busiest
+workspace's records evict the quietest one's, so a workspace can lose
+its history by having done nothing at all while a neighbour was busy —
+the eviction is silent, and the workspace that suffers it is the one
+with the least evidence that anything happened. A per-bucket bound
+makes retention local: a workspace's history is bounded by its own
+volume and nothing else's.
+
+Hosts SHOULD size the bound per bucket rather than dividing a global
+budget among buckets. The bound exists to keep a single store readable;
+after partitioning, each bucket *is* a single store.
+
+#### Migration
+
+A host that previously pooled this state in one global store MUST treat
+the move to buckets as **additive**:
+
+- The host MUST partition the legacy store's records into buckets by
+  the rule above, on first boot after the change.
+- The host MUST NOT delete, truncate, or rewrite the legacy artifact.
+  It is the user's data and their only rollback; the partitioned copy
+  is a derivative until they decide otherwise. A host MUST be able to
+  complete the migration with the legacy store held read-only.
+- The host SHOULD record a durable marker — what was migrated, when,
+  from where, and how many records landed in each bucket — so the split
+  is auditable, and so a later boot does not re-import records the user
+  has since deleted from a bucket.
+- A record whose slug does not resolve MUST land in `default`. The
+  migration MUST NOT drop a record it cannot place.
+
+Reclaiming the legacy artifact is a separate, human-gated decision. This
+AIP specifies no retention or garbage collection for any bucket; see
+§Open Questions.
 
 ### Delegation and the spawn gate
 
@@ -557,6 +698,65 @@ The exact wire format is non-normative; the goal is that a CLI
 observer (`agentproto sessions --attach <id>`) sees a coherent
 transcript without parsing per-event JSON.
 
+## Rationale
+
+**Why buckets under the host's state root, and not inside the workspace
+itself.** The obvious alternative to `~/.agentproto/workspaces/<slug>/`
+is the git-style one: put each workspace's state in the workspace —
+`<repo>/.agentproto/` — where the partition is free, needs no registry
+lookup, no `default` fallback, and no migration, because the directory
+*is* the identity. It was rejected, and the reason is worth stating
+because the ergonomics genuinely are better.
+
+Transcripts are not metadata. They contain the full text of agent
+conversations: every prompt a user typed, every file the agent read
+back, and every secret that passed through a turn — §Security
+Considerations already warns that the ring buffer captures whatever the
+agent printed. Co-location writes that stream into a directory whose
+defining property is that it is *tracked, committed, and pushed*. The
+failure is not hypothetical or gradual: it is one forgotten
+`.gitignore` between a private transcript and a public remote, on a
+path the user did not choose and has no habit of auditing. A host that
+partitions this way has fixed a fairness bug by manufacturing a
+disclosure bug, and the disclosure bug ships to everyone who clones the
+repo.
+
+The registry lookup, the `default` bucket, and the migration are the
+price of keeping the state in a directory that exists to hold state.
+That is the trade this section makes deliberately.
+
+**Why membership in the registry is the validation.** A slug arrives
+from a caller; a bucket is a directory name. Every other approach to
+that gap is a sanitiser, and a sanitiser is a thing you can get subtly
+wrong forever. Requiring the slug to come *back from* the registry
+lookup collapses validation into a step the host already performs: the
+only strings that ever become directory names are ones the host itself
+minted and sanitised on the way in. An attacker-supplied slug is not
+rejected, escaped, or normalised — it simply fails to match, and lands
+in `default` like any other unregistered work.
+
+**Why `default` is a bucket and not an error.** Refusing to persist a
+session whose workspace is unregistered would make the partition a
+breaking change for every one-off `cwd` spawn, and hosts would respond
+by auto-registering, which turns a registry of the user's intent into a
+registry of everything that ever ran. Accepting them into a named,
+shared bucket keeps the migration additive and keeps the registry
+meaningful — at the cost, stated plainly above, that `default` gives
+its occupants no separation from each other.
+
+**Why partitioning is specified without a scoping rule.** A reader
+could reasonably expect this section to also say "and a consumer scoped
+to workspace X MUST NOT see workspace Y's sessions". It deliberately
+does not. Partitioning is a storage property; confidentiality is an
+access-control property, and the two are independent — a host can
+partition perfectly and still serve every bucket to every caller, which
+is exactly what a host does the day it lands this section. Specifying
+the storage boundary first is what makes the access rule expressible
+later; conflating them would let an implementer read this section, ship
+the layout, and believe they had shipped isolation. §Security
+Considerations says so in the negative, and §Open Questions carries the
+scoping rule as the follow-on work it is.
+
 ## Reference Implementation
 
 The `@agentproto/runtime` package implements AIP-46 alongside AIP-45.
@@ -568,10 +768,14 @@ Daemons started via `agentproto serve` (or built directly through
 - **MCP tools**: `runtime/src/session-tools.ts` — registered
   per-request via `mcpServerFactory`
 - **Registry**: `runtime/src/sessions.ts` — in-memory + persisted
-  to `~/.agentproto/sessions.json` (debounced); carries
-  `parentSessionId` + `depth`
+  (debounced) to the per-workspace snapshot
+  `~/.agentproto/workspaces/<slug>/sessions.json` of §State
+  partitioning; carries `parentSessionId` + `depth`
 - **Workspaces config**: `runtime/src/workspaces-config.ts` —
   read+write helpers for `~/.agentproto/workspaces.json`
+- **Bucket resolution + migration**: `runtime/src/workspace-buckets.ts`
+  — the slug→bucket rule, the `default` fallback, and the additive
+  split of the legacy global `sessions.json`
 - **Spawn gate**: `runtime/src/session-spawn.ts` — the enforcement
   point of §Delegation
 
@@ -630,6 +834,35 @@ rather than alias it. Organizational role belongs on the
 [AIP-9](/docs/aip-9) OPERATOR that *owns* the agent, never on the
 spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
 
+### The 2026-07-17 state-partitioning amendment
+
+§State partitioning changes where a conforming host keeps state, not
+what it serves. Compatibility weight sits in three places:
+
+1. **The wire surface is untouched.** `Session.workspaceSlug` keeps its
+   meaning and its field; the HTTP routes, the MCP tools, and the SSE
+   stream are unchanged. A consumer cannot observe the partition, which
+   is the point — this is a host-storage requirement, and a consumer
+   that reads `workspaceSlug` off a descriptor behaves identically
+   before and after.
+2. **Migration is additive by mandate.** The legacy global store is
+   read, split, and left intact (§Migration). A host that rolls the
+   change back finds its original artifact where it left it; a host
+   that rolls forward twice is protected by the marker. Nothing about
+   this amendment authorises deleting a user's history — retention is
+   explicitly not specified.
+3. **Per-bucket bounds change what survives, in the user's favour.** A
+   host moving a global cap to a per-bucket cap retains strictly more
+   history than before (each bucket now gets the whole bound rather
+   than a contested share). Hosts that sized a global cap against a
+   render budget SHOULD re-check it per §Per-bucket bounds rather than
+   dividing it, but a host that keeps its existing number is conforming
+   and simply retains more.
+
+Hosts with no workspace registry are unaffected: §State partitioning
+binds only hosts that implement §Workspaces, and a host without one has
+a single implicit workspace, which is already a partition of one.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -680,6 +913,31 @@ spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
   printed, including secrets it was given. Delegation therefore
   widens the blast radius of §the ring-buffer caveat above by one hop
   per level.
+- **Partitioning is not isolation.** §State partitioning bounds what a
+  workspace's state *costs* other workspaces; it does not bound who may
+  read it. A host that has partitioned its state and changed nothing
+  else still serves every bucket to every authorised caller — the files
+  moved, the access did not. Hosts MUST NOT describe partitioning as an
+  isolation or privacy control, and consumers MUST NOT infer from a
+  partitioned layout that a scoped credential sees only its own
+  workspace. The rule that would make it one does not exist yet
+  (§Open Questions).
+- **A bucket name is caller input until the registry says otherwise.**
+  `workspaceSlug` reaches the host on a spawn request and a bucket is a
+  directory under the host's state root. A host that joins the two
+  without the exact-match lookup of §Bucket resolution has given the
+  caller a path-traversal write primitive — `../../` in a slug escapes
+  the state root entirely, as the daemon's UID. The lookup is what
+  makes this safe, which is why it is specified as membership rather
+  than as sanitisation: a host cannot forget to validate a value it
+  never chose.
+- **Transcripts are the payload, so where they live is a security
+  decision.** They hold prompts, file contents, and any secret that
+  crossed a turn. §Rationale records why they are not co-located inside
+  the user's workspace directory: a state store that lives in a git
+  repository is one missed `.gitignore` from a public remote. Hosts
+  adding their own stores under a bucket SHOULD apply the same test —
+  the directory must exist to hold state, not to be published.
 
 ## Open Questions
 
@@ -692,10 +950,34 @@ spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
   `session.cancel()`, but the AIP doesn't expose it as an HTTP/MCP
   verb yet. Should be added once we have a real consumer demand
   (the ACP `cancel_turn` semantics differ across adapters).
-- Resume across daemon restarts — `~/.agentproto/sessions.json`
-  persists descriptors but not the live agent process. A future v2
-  could specify rehydration (re-spawn + replay context) for
-  adapters whose AIP-45 manifest declares `session.mode = "resumable"`.
+- Resume across daemon restarts — the per-workspace snapshot
+  (§State partitioning) persists descriptors but not the live agent
+  process. A future v2 could specify rehydration (re-spawn + replay
+  context) for adapters whose AIP-45 manifest declares
+  `session.mode = "resumable"`.
+- **Workspace-scoped reads.** §State partitioning gives a host the
+  boundary but no rule for honouring it: nothing here says a consumer
+  presenting a workspace-scoped credential MUST be served only that
+  workspace's bucket. Writing that rule means first answering what a
+  workspace-scoped credential *is* — the reference implementation has
+  no such thing today, so the honest state is that pairings and
+  orchestrator scope-tokens are daemon-wide and the partition is a
+  precondition rather than a control (§Security Considerations). The
+  scoping rule and the credential it keys off should land together, or
+  the rule will be written against an authority that does not exist.
+- **Retention and reclamation.** Buckets grow without bound; this AIP
+  specifies no GC. The obvious question — when may a host delete a
+  transcript, and who decides — is deliberately unanswered, because
+  the failure mode of guessing is deleting a user's only copy of work
+  they care about. A retention rule needs an explicit human policy
+  input, and probably belongs alongside the legacy-artifact
+  reclamation §Migration also leaves open.
+- **Should the bound be descriptors, or bytes?** §Per-bucket bounds
+  caps record count, inherited from the reference implementation.
+  Count is a poor proxy for the thing that actually hurts (a bucket's
+  transcripts are orders of magnitude larger than its descriptors), so
+  a host can be well under the cap and still unreadable on disk.
+  Revisit if a host reports the count bound as the wrong axis.
 - **Privilege levels vs. explicit allowlists.** This amendment
   specifies `delegates_to` (a closed allowlist) as the only
   delegation mechanism, and deliberately does not standardise the
