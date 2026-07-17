@@ -1,12 +1,12 @@
 ---
 title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
-description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / cwd / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition and AIP-38 (POLICY) as the delegation authority.
+description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-27 (REF) as the session's ground.
 aip: 46
 status: Draft
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 17, 19, 36, 38, 42, 44, 45]
+requires: [1, 2, 17, 19, 27, 36, 38, 42, 44, 45]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: drivers
@@ -20,7 +20,7 @@ package: "@agentproto/runtime"
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
-| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-27](/docs/aip-27) (REF — the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
 | Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
 
@@ -37,8 +37,8 @@ needs:
   `~/code/bar`, aider in `~/blog`)
 - multi-turn continuity per session (don't respawn for every prompt)
 - live observation (UI tails output, operator polls for the answer)
-- workspace-bound spawns (resolve `cwd` from a stable, named
-  workspace handle instead of hand-typing absolute paths) — and the
+- workspace-bound spawns (resolve ground from a stable, named
+  [AIP-27](/docs/aip-27) ref instead of hand-typing absolute paths) — and the
   state each bound workspace accumulates, partitioned per workspace
   rather than pooled (§[State partitioning](#state-partitioning-added-2026-07-17))
 - **nested sessions** — a session that spawns further sessions, and
@@ -167,8 +167,14 @@ interface Session {
   /** Workspace handle (AIP-46 §workspaces) this session binds to.
    *  "default" when the host has no workspace registry. */
   workspaceSlug: string
-  /** Absolute path the agent runs in. Equals
-   *  `workspaces[workspaceSlug].path` when the slug resolved. */
+  /** The session's ground, as the resolved AIP-27 ref. This is the
+   *  value §Delegation's containment check compares against — a
+   *  child's ground MUST resolve inside its parent's. */
+  ground: string
+  /** Absolute path the agent runs in — `ground` resolved against the
+   *  host's filesystem. Reported for observability; it is NOT the
+   *  containment surface (`ground` is). Hosts MUST NOT reconstruct a
+   *  parent's ground by string-matching this. */
   cwd: string
   /** Lifecycle phase. State machine in §status-transitions. */
   status: "starting" | "running" | "exited" | "killed" | "error"
@@ -255,15 +261,23 @@ spawns can reference a named handle instead of an absolute path:
 }
 ```
 
-`cwd` resolution priority for any **root** spawn that omits an
-explicit `cwd` field:
+Each entry is addressable as an [AIP-27](/docs/aip-27) ref —
+`ws://workspaces/<id>` — and that ref, not the `path`, is what a spawn
+carries as its `ground`. The `path` is the host's private resolution
+of it. Per AIP-27 §Seams, an [AIP-34](/docs/aip-34) workspace id is
+`@<owner>/<slug>`, so a fully-qualified ground ref reads
+`ws://workspaces/@acme/agentik-studio`; a host whose registry predates
+AIP-34 ids MAY key by bare slug until it adopts them.
 
-1. lookup `workspaces[workspaceSlug]` → use its `path`
-2. fall back to `workspaces[active]` → use its `path`
+Ground resolution priority for any **root** spawn that omits an
+explicit `ground`:
+
+1. lookup `workspaces[workspaceSlug]` → use its ref
+2. fall back to `workspaces[active]` → use its ref
 3. emit a warning + use the host's `process.cwd()`
 
 Steps 2 and 3 are **root-only**. A nested spawn (one whose caller is a
-session) MUST NOT reach them — it inherits its parent's `cwd`
+session) MUST NOT reach them — it inherits its parent's `ground`
 instead. See §[Delegation](#a-nested-spawn-inherits-its-parents-ground);
 the `active` workspace is ambient host state and resolving a child
 through it silently relocates that child outside the subtree its
@@ -484,10 +498,10 @@ own agent's `delegates_to` for anything it spawns in turn.
 #### A nested spawn inherits its parent's ground
 
 Identity is not the only thing a nested spawn must carry down. A host
-MUST resolve a nested spawn's `cwd` as:
+MUST resolve a nested spawn's ground as:
 
-1. the request's explicit `cwd`, when given
-2. otherwise **the parent session's `cwd`**
+1. the request's explicit ground ref, when given
+2. otherwise **the parent session's ground**
 
 A host MUST NOT resolve a nested spawn through §Workspaces' ambient
 `workspaces[active]` fallback. That fallback exists for *root* spawns,
@@ -505,26 +519,40 @@ never from ambient host state. Where the host has no parent value to
 inherit and the request names none, it MUST reject the spawn rather
 than substitute an ambient default.
 
-**Ground narrows, like authority.** An explicit `cwd` on a nested
-spawn MUST resolve *inside the parent's own `cwd` subtree*; a host
-MUST reject a nested spawn naming ground outside it. Inheritance alone
-is only a default, and a default is not a boundary — without this rule
-a parent hands its child any path on the machine and the inheritance
-rule buys nothing.
+**Ground narrows, like authority.** A nested spawn's ground MUST
+resolve inside the parent's own; a host MUST reject one naming ground
+outside it (`cwd_outside_parent`). Inheritance alone is only a
+default, and a default is not a boundary — without this rule a parent
+hands its child any ground on the machine and the inheritance rule
+buys nothing.
 
 This is the same non-escalation principle `delegates_to` applies to
-authority, applied to the filesystem: **a child may be given less than
-its parent has, never more, on either axis.** A subtree is the natural
-shape for it — a parent working in one may legitimately want a child
-confined to a package inside it, and never has cause to send one
-somewhere it cannot itself reach.
+authority, applied to ground: **a child may be given less than its
+parent has, never more, on either axis.** A subtree is the natural
+shape — a parent may legitimately want a child confined to a package
+inside its own tree, and never has cause to send one somewhere it
+cannot itself reach.
 
-Hosts SHOULD compare resolved real paths, not lexical strings: `..`
-segments and symlinks out of the subtree are the obvious ways to
-satisfy a naive prefix check while landing outside. Where the host
-exposes filesystem or exec tools of its own, those MUST anchor to the
-session's `cwd` by the same rule — a spawn-time boundary that the
-session's own tools then ignore is not a boundary.
+The check is a containment test between two [AIP-27](/docs/aip-27)
+refs, not between two path strings. That is the whole reason ground is
+a ref: AIP-27 rejects lexical escapes (`..`, absolute paths) **at
+parse time** — §Security 1, *"the resolver layer is not the right
+place to catch this"* — so the escape a naive prefix check would miss
+is not expressible in the first place. A host that reduces refs to
+strings and prefix-matches those has re-opened what the ref grammar
+closed.
+
+Two limits, stated because parse-time validity is not containment:
+
+- **Symlinks resolve after parse.** A ref that is lexically inside the
+  parent's subtree MAY still land outside it through a symlink. Hosts
+  that treat the subtree as a security boundary MUST verify the
+  resolved real path; hosts that treat it as an orientation default
+  need not. AIP-46 does not decide which it is for you — see the
+  §Delegation boundary note.
+- **The host's own fs/exec tools MUST anchor to the session's ground**
+  by this same rule. A spawn-time boundary that the session's own
+  tools then ignore is not a boundary.
 
 #### Limits
 
@@ -565,15 +593,27 @@ surfaces, and the host's rules do not reach them:
 | The host governs | The adapter's ungoverned twin |
 |---|---|
 | the delegation actions on the host's own gateway | a native task / sub-agent facility, spawning off-protocol |
-| host fs / exec tools anchored to the session's `cwd` | the CLI's own built-in shell and file tools |
+| host fs / exec tools anchored to the session's ground | the CLI's own built-in shell and file tools |
 | what the host injects into the child's config | what the adapter already has in *its* config |
 
 The pattern is one fact wearing three hats: **an adapter can do
 natively whatever the host can do for it, and the host's version is
 the only one with rules on it.** A native sub-agent spawn has no
 session id and no parent edge — there is nothing to gate. A native
-shell reads any path the process can reach — `cwd` is where it starts,
-not a fence.
+shell reads any path the process can reach — ground is where it
+starts, not a fence.
+
+**Which decides whether ground is a boundary or a default**, the
+question §A nested spawn inherits its parent's ground defers here.
+Where the child's only reach is the host's own tools, ground *is* a
+boundary: the containment check holds, and verifying resolved real
+paths against symlinks is worth it. Where the child has a native
+shell — the common case — ground is an **orientation default**: it
+says where work starts, not where it can go, and no amount of
+symlink-checking at spawn changes that. Hosts SHOULD know which of the
+two they are running and MUST NOT describe the second as the first.
+Turning ground into a real boundary for an adapter with its own shell
+is [AIP-36](/docs/aip-36)'s job, not this AIP's.
 
 Consequences a conforming host MUST accept:
 
@@ -653,9 +693,16 @@ user never asked for.
    *  policy). Optional; absent ⇒ adapter default + no delegation.
    *  See §Delegation. */
   agent?: string
-  /** Workspace handle. Optional — falls back to active. */
-  workspaceSlug?: string
-  /** Override cwd. Wins over workspaceSlug. */
+  /** WHERE it runs — an AIP-27 ref naming the session's ground.
+   *  `ws://workspaces/@<owner>/<slug>` or its compact form, optionally
+   *  with a subtree body. Root spawns MAY omit it (§Workspaces
+   *  resolves a default); nested spawns inherit the parent's when
+   *  absent and MUST NOT escape it (§Delegation). */
+  ground?: string
+  /** DEPRECATED alias for `ground`, accepting a raw absolute path.
+   *  Root spawns only — a nested spawn MUST use `ground`, because a
+   *  raw path cannot express the containment check §Delegation
+   *  requires. Hosts SHOULD reject `cwd` on nested spawns. */
   cwd?: string
   /** Initial prompt — equivalent to start + prompt back-to-back. */
   prompt?: string
@@ -663,6 +710,17 @@ user never asked for.
   label?: string
 }
 ```
+
+`ground` replaces the old `workspaceSlug` + `cwd` pair. Those were two
+fields expressing one axis with a precedence rule between them ("cwd
+wins over workspaceSlug"), which is how a nested spawn ended up
+resolving through the ambient active workspace: the field that should
+have carried the parent's ground was optional, and the fallback behind
+it was global. One field, one ref, no precedence rule to get wrong.
+
+A ref also carries what a slug could not — a subtree
+(`ws://workspaces/@acme/studio/packages/runtime`), which is exactly
+what a parent needs to hand a child less ground than it holds.
 
 `adapter` and `agent` are orthogonal and both may be present: the
 adapter is the runtime (which binary), the agent is the definition
@@ -693,7 +751,7 @@ so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
-| `agent_start` | `{adapter, agent?, workspaceSlug?, cwd?, prompt?, label?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
+| `agent_start` | `{adapter, agent?, ground?, prompt?, label?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
 | `agent_prompt` | `{sessionId, prompt}` | Fire-and-forget — call `agent_output` to read the reply. A delegation action (§Delegation). |
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
@@ -890,6 +948,24 @@ rather than alias it. Organizational role belongs on the
 [AIP-9](/docs/aip-9) OPERATOR that *owns* the agent, never on the
 spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
 
+### `ground` replaces `workspaceSlug` + `cwd`
+
+The spawn surface previously carried two fields for one axis —
+`workspaceSlug` (a handle) and `cwd` (a raw path that "wins over" it).
+That precedence rule is how a nested spawn came to resolve through the
+ambient active workspace: the field that should have carried the
+parent's ground was optional, and the fallback behind it was global.
+
+`ground` is one [AIP-27](/docs/aip-27) ref and replaces both.
+`workspaceSlug` remains on the *Session* descriptor as a reported
+binding, but is no longer a spawn input. `cwd` survives on the spawn
+request as a **deprecated root-only alias** accepting a raw path,
+because a human naming a directory on their own machine is a real
+case and a ref buys nothing there. On a *nested* spawn it MUST NOT be
+honoured: a raw path cannot express the containment check §Delegation
+requires, and accepting one re-opens exactly the hole the ref closes.
+New implementations SHOULD NOT offer `cwd` at all.
+
 ### The 2026-07-17 state-partitioning amendment
 
 §State partitioning changes where a conforming host keeps state, not
@@ -929,10 +1005,14 @@ a single implicit workspace, which is already a partition of one.
   the SSE stream. Hosts MAY redact known secret patterns, but the
   AIP does not require it; consumers MUST treat the buffer as
   potentially sensitive.
-- `agent_start` accepts `cwd` from the caller. Hosts SHOULD
-  reject paths outside their allowed surface (e.g. require the path
-  to be a registered workspace, or under the workspaces' parent
-  directory) when the auth principal is not the local UID.
+- `agent_start` accepts ground from the caller. A `ground` ref is
+  bounded by the registry — it names a workspace the host already
+  knows, so an unregistered location is unnameable. The deprecated
+  raw-path `cwd` alias has no such property: hosts that still accept
+  it SHOULD reject paths outside their allowed surface (e.g. require
+  the path to be a registered workspace, or under the workspaces'
+  parent directory) when the auth principal is not the local UID.
+  That asymmetry is the argument for retiring the alias.
 - **The spawn gate is an authority boundary, not a guardrail.** A
   session that can spawn can spend money, write files, and reach the
   network as the daemon's UID — recursively. Hosts MUST evaluate the
