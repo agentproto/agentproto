@@ -41,7 +41,11 @@ The AIP defines:
    `local`, `url`, `git`, `github`, `ipfs`, `email`, `operator`,
    `user`, `persona`, `eth_tx`, `ots`.
 2. A **canonical compact form** with deterministic parse/serialize
-   round-tripping.
+   round-tripping, plus the equivalent **`ws://` URI spelling** the
+   rest of the family already uses (§Reference syntax) — including the
+   collection→kind table, the tenant-scope asymmetry between the two
+   forms, and the boundary against matchers (`role://`, `*`), which
+   are predicates rather than references and are therefore not refs.
 3. An **extension mechanism** so integration packages register new
    kinds (`youtube_video`, `slack_message`, `linear_issue`, …)
    without forking AIP-27.
@@ -387,8 +391,154 @@ ots-body      = inner-compact-ref            ; e.g. ots:local:engagements/.../24
 Reserved characters in path/url bodies (`@`, `:`, `#`, `%`) MUST be
 percent-encoded.
 
+### Reference syntax
+
+Manifests across the family cite an "AIP-47 §Reference syntax" that
+was never written, while using a `ws://` URI form this AIP never
+defined. This section is that definition. `ws://` is normatively part
+of AIP-27, not of any consuming AIP.
+
+Three surfaces name things. They look alike and are **not**
+interchangeable:
+
+| Form | What it is | Example |
+|---|---|---|
+| `<kind>:<body>` | the **canonical** ref value (§Compact form grammar) | `operator:atlas` |
+| `ws://<collection>/<body>` | the **URI spelling** of the same ref | `ws://operators/atlas` |
+| `<type>://<selector>` | a **matcher** — NOT a ref | `role://owner`, `user://current`, `*` |
+
+#### `ws://` — the URI spelling
+
+```
+ws-ref      = "ws://" collection "/" body
+collection  = lowercase-alpha-dash           ; the PLURAL catalog segment
+body        = kind-specific (see Per-kind body details)
+```
+
+`ws://<collection>/<body>` and `<kind>:<body>` denote the same ref and
+MUST round-trip. Implementations MUST accept both on input and MUST
+emit the compact form when serializing to a scalar.
+
+**The collection segment maps to a kind by table, never by string
+manipulation.** Stripping a trailing `s` is not the rule and does not
+work: `agencies`, `assemblies`, `policies`, `identities`, and
+`offices` all break it. The table is authoritative:
+
+| `ws://` collection | kind | Doctype |
+|---|---|---|
+| `operators` | `operator` | [AIP-9](/docs/aip-9) |
+| `personas` | `persona` | [AIP-25](/docs/aip-25) |
+| `users` | `user` | host user registry |
+| `companies` | `company` | [AIP-6](/docs/aip-6) |
+| `collections` | `collection_doc` | [AIP-18](/docs/aip-18) — see §Seams |
+| `wikis` | `wiki` | [AIP-10](/docs/aip-10) |
+| `workspaces` | `workspace` | [AIP-34](/docs/aip-34) — see §Seams |
+| `skills` | `skill` | [AIP-3](/docs/aip-3) |
+| `identities` | `identity_workspace` | [AIP-23](/docs/aip-23) — see §Seams |
+| `playbooks` | `playbook` | [AIP-12](/docs/aip-12) |
+| `agencies` | `agency` | [AIP-21](/docs/aip-21) |
+| `tools` | `tool` | [AIP-14](/docs/aip-14) |
+| `roles` | `role` | [AIP-47](/docs/aip-47) — see §Seams |
+| `assemblies` | `assembly` | [AIP-24](/docs/aip-24) |
+| `actions` | `action` | [AIP-39](/docs/aip-39) |
+| `policies` | `policy` | [AIP-38](/docs/aip-38) |
+| `workflows` | `workflow` | [AIP-15](/docs/aip-15) |
+| `offices` | `office` | [AIP-22](/docs/aip-22) |
+| `avatars` | `avatar` | [AIP-25](/docs/aip-25) asset |
+| `orgs` | `org` | host org registry |
+| `guilds` | `guild` | host guild registry |
+
+Kinds above beyond the eleven in §Base kind registry are registered by
+their owning AIP through §Extension mechanism; this table is the
+reservation record §Open questions #4 asks for. A consumer MUST NOT
+invent a collection — add a row here first.
+
+#### Multi-segment bodies
+
+A body MAY carry more than one segment. This is not an exception: it
+is the kind-specific body grammar `github` and `git` already use for
+`:path`. Forms in use, all normative in consuming AIPs:
+
+```
+ws://wikis/<slug>/KNOWLEDGE.md              ; doc inside a wiki
+ws://workspaces/<slug>/WORK.md              ; doc inside a workspace
+ws://assemblies/<slug>/<member>             ; member inside an assembly
+ws://companies/<slug>/teams/<team>          ; nested collection item
+```
+
+Each kind's body grammar declares its own segment structure.
+Consumers MUST NOT assume `ws://<collection>/<slug>` is exhaustive.
+
+#### Tenant scope is part of the contract
+
+`ws://` refs are **tenant-local by mandate**: hosts MUST resolve them
+in the same tenant scope as the citing file and reject cross-tenant
+bindings ([AIP-23](/docs/aip-23) — `identity_xref_unresolvable`).
+
+This is a real asymmetry with the compact form, and the reason the two
+are not blindly substitutable. `operator:<slug>[@<workspace>]` carries
+an OPTIONAL cross-workspace disambiguator (§operator); `ws://` has no
+such affordance, and its consumers are required to refuse what that
+disambiguator expresses. **A host MUST NOT introduce an
+`@<workspace>` suffix while rewriting a `ws://` ref into compact
+form** — that silently widens a security envelope the citing spec
+mandates be closed. The rewrite is lossless only when the suffix is
+absent.
+
+#### Matchers are not refs
+
+`role://owner`, `user://current`, `group://<name>`, `*`, and the
+wildcard forms used in `appliesTo` (`ws://orgs/*`, `ws://tools/admin/*`)
+are **matchers**: they select over a set at evaluation time. They are
+NOT refs, MUST NOT be registered as kinds, and MUST NOT be passed to
+`defineRef(...)`.
+
+The distinction is not stylistic. A ref denotes exactly one thing and
+resolves to it (§Resolver contract). A matcher denotes a *predicate*,
+evaluated by set intersection against a caller's identity tree.
+`user://current` names nothing until a request exists — it is a
+pronoun. `role://owner` is relative to a resource. `*` has no referent
+by construction. AIP-27's grammar admits no wildcard precisely because
+a wildcard is not an address.
+
+Matcher grammar belongs to the AIP that evaluates it —
+[AIP-38](/docs/aip-38) for policy principals. A field is either a ref
+field or a matcher field; a field accepting both MUST say so and MUST
+dispatch on form rather than guess.
+
+#### Seams
+
+Four places where one word does two jobs. Each is deliberate; none may
+be collapsed.
+
+- **`role`.** `ws://roles/<slug>` is an [AIP-47](/docs/aip-47) job
+  template — a ref. `role://owner|editor|viewer` is an
+  [AIP-38](/docs/aip-38) RBAC tier relative to a resource — a matcher.
+  AIP-47 §Role vs Position vs Access role requires these stay
+  distinct and calls conflating them a collapse of HR into security.
+  They share a word and nothing else: different grammar, different
+  spec, different layer. A host resolving one as the other has made
+  the exact mistake AIP-47 forbids.
+- **`identity`.** §Base collections registers `identity` as a
+  *collection* — the union `operator|user|persona|email`.
+  `ws://identities/<slug>` addresses an AIP-23 identity *workspace*, a
+  different thing. The kind is therefore `identity_workspace`.
+- **`collection`.** §Collections uses "collection" for kind groupings
+  (`file`, `identity`, `anchor`). `ws://collections/<name>` addresses
+  an [AIP-18](/docs/aip-18) typed collection doctype. The kind is
+  `collection_doc`, for the same reason.
+- **`workspace`.** [AIP-34](/docs/aip-34) ids are globally addressable
+  as `@<owner-slug>/<workspace-slug>` — two segments, not a bare slug.
+  So the body is that whole id (`workspace:@acme/marketing-ops`), and
+  `ws://workspaces/@acme/marketing-ops` is well-formed. Hosts MUST NOT
+  assume a workspace body is a single segment.
+
 ### Parsing rules
 
+0. If the input starts with `ws://`, take the segment up to the first
+   `/` as the collection, map it to a kind via §Reference syntax's
+   table (reject with `UnknownRefCollection` when absent), and treat
+   the remainder as the body. Otherwise:
 1. Find the **first** unescaped `:` — left side is `kind`, right
    side is body.
 2. Dispatch to the kind's body parser.
