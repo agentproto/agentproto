@@ -227,7 +227,7 @@ metadata: {}                         # OPTIONAL — vendor extensions under name
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `extends` | string | none | Ref to a parent role. Accepts any form in [Reference syntax](#reference-syntax): bare slug, scoped slug, `ws://roles/<slug>`, or relative path ending in `ROLE.md`. See [Composition](#composition-extends-chain). |
+| `extends` | string | none | Ref to a parent role. Accepts any form in [AIP-27 §Reference syntax](/docs/aip-27#reference-syntax): bare slug, scoped slug, `ws://roles/<slug>`, or relative path ending in `ROLE.md`. See [Composition](#composition-extends-chain). |
 | `department` | string | none | Free string. See [Departments](#departments-informative) for recommended values. |
 | `reports_to` | ws ref | none | Role-to-role reporting link. Cycles permitted at this level (handled by the company workspace, not by AIP-47). |
 | `capabilities` | string[] | `[]` | Competences in prose. Append-and-dedupe across `extends`. |
