@@ -709,6 +709,32 @@ accept any `Ref` whose kind has a resolver. Existing AIP-26
 manifests continue to validate (a bare path string is treated as
 `local:<path>`).
 
+### With AIP-10 (KNOWLEDGE)
+
+[AIP-10](/docs/aip-10) knowledge pages adopt `Ref` for cross-workspace
+references. A page's Layer-2 `refs:` frontmatter field is typed as a
+`Ref[]` — the typed "what this page points AT / is about, elsewhere"
+edge, kept distinct from `sources:` (raw-source provenance) and `[[slug]]`
+(intra-wiki body links):
+
+```
+refs : Ref<local|github|git|url|wiki>[]   // code files/symbols, documents,
+                                          // and pages in other wikis
+```
+
+The `wiki` kind is spelled `wiki:<wiki-slug>/<page-slug>` in compact form (the
+canonical frontmatter scalar) and `ws://wikis/<wiki-slug>/<page-slug>` as the
+`ws://` URI — do not list the URI spelling as a disjoint type.
+
+Code targets use the `file`-collection kinds (`local`, `github`, `git`,
+`url`) — the same addresses [AIP-26](/docs/aip-26) uses for `code.sources[]`.
+Cross-wiki page targets use the **`wiki` kind** (the `wikis` → `wiki` row of
+§Reference syntax), a multi-segment body (§Multi-segment bodies) where
+`<wiki-slug>` names the wiki and `<page-slug>` is that wiki's Layer-2 page
+slug. Like every ref it is tenant-local by mandate: a host MUST resolve it in
+the citing wiki's tenant scope. AIP-27 is only the wire shape — the AIP-10
+wiki is the source of truth for which pages exist.
+
 ### With AIP-13 / AIP-20 (work)
 
 Work-item assignees, parents, and blockers move from bare strings
@@ -789,6 +815,7 @@ kinds are accepted in a given field (e.g. `signer` does not accept
 
 - [AIP-7 — agentgovernance/v1 — audit & approval](/docs/aip-7) — primary consumer (signer, artifact, evidence, anchor)
 - [AIP-9 — agentoperators/v1 — operator runtime protocol](/docs/aip-9) — `operator` kind registry source
+- [AIP-10 — KNOWLEDGE.md](/docs/aip-10) — consumer: page `refs:` field + `ws://wikis/<wiki-slug>/<page-slug>` cross-wiki grammar; `wikis` collection source
 - [AIP-13 / AIP-20 — agentwork](/docs/aip-13) — work-item assignee/parent/blocker fields
 - [AIP-23 — IDENTITY.md](/docs/aip-23) — identity binding consumer
 - [AIP-25 — PERSONA.md](/docs/aip-25) — `persona` kind registry source

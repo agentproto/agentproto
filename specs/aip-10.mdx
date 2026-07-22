@@ -22,7 +22,7 @@ package: "@agentproto/knowledge"
 | Domain | knowledge.sh |
 | Doctypes | `knowledge.entry/v1` (curated), `knowledge.source/v1` (immutable), `knowledge.workspace/v1` (manifest + view) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
-| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-26](/docs/aip-26) (code-workspace refs), [AIP-27](/docs/aip-27) (typed refs) |
 | Reference Impl | [`@agentproto/knowledge`](https://github.com/agentproto/ts/tree/main/packages/knowledge) |
 
 ## Abstract
@@ -97,6 +97,7 @@ my-wiki/
 ├── AGENTS.md              # human-readable schema (RECOMMENDED, prose companion)
 ├── _index.md              # generated catalog (REQUIRED, root)
 ├── _log.md                # append-only activity log (REQUIRED, root)
+├── _manifest.json         # provenance/dedup manifest (REQUIRED, root)
 ├── sources/               # raw sources (immutable; LLM reads, never writes)
 │   ├── 2026-04-15-paper.pdf
 │   └── 2026-04-20-meeting.md
@@ -143,6 +144,14 @@ title: <human-readable title>
 sources:                              # provenance — refs into sources/
   - sources/2026-04-15-paper.pdf
   - sources/2026-04-20-meeting.md
+refs:                                 # OPTIONAL — AIP-27 Ref[]: what this page
+                                      #   POINTS AT in other workspaces (a code
+                                      #   file/symbol in an AIP-26 workspace, a
+                                      #   page in another wiki). Canonical
+                                      #   scalar form is AIP-27 compact. See
+                                      #   "Cross-workspace references (AIP-27)".
+  - github:agentproto/ts:packages/runtime/src/http-server.ts   # code, other workspace
+  - wiki:platform/http-server                                   # page, other wiki
 confidence: 0 .. 1                    # OPTIONAL, default 1.0
 updated_at: <ISO 8601>
 supersedes: [<slug>]                  # OPTIONAL — earlier pages this replaces
@@ -157,9 +166,116 @@ metadata:                             # OPTIONAL — vendor extensions
 <body — prose, tables, code, headings>
 ```
 
-Cross-references between pages MUST use the wikilink syntax `[[slug]]` or
-markdown links to relative `.md` paths. The runtime MUST be able to
-resolve both forms.
+Three reference surfaces exist on a page and MUST NOT be conflated:
+
+- **`[[slug]]` body links** — intra-wiki cross-references between pages of
+  *this* wiki. Cross-references between pages of the same wiki MUST use the
+  wikilink syntax `[[slug]]` or markdown links to relative `.md` paths; the
+  runtime MUST be able to resolve both forms.
+- **`sources:` frontmatter** — provenance IN: the raw `sources/` files this
+  page was distilled FROM (Layer 1).
+- **`refs:` frontmatter** — references OUT: what this page is ABOUT / POINTS
+  AT in *other* workspaces (see
+  [Cross-workspace references (AIP-27)](#cross-workspace-references-aip-27)).
+
+`refs:` is OPTIONAL and, when present, MUST be an array of
+[AIP-27](/docs/aip-27) `Ref` values in AIP-27 compact form (e.g. `github:…`,
+`local:…`, `git:…`, `url:…`, or the `wiki:<wiki-slug>/<page-slug>` /
+`ws://wikis/…` spelling for cross-wiki pages). It is DISTINCT from both `sources:` (raw-source
+provenance, where the knowledge came *from*) and `[[slug]]` body links
+(intra-wiki navigation): `refs:` is the typed, cross-workspace "this page is
+about that thing" edge. A runtime MUST NOT treat a `refs:` entry as a
+provenance source, and MUST NOT require its target to exist inside this wiki.
+
+### Cross-workspace references (AIP-27)
+
+The `refs:` page field carries [AIP-27](/docs/aip-27) `Ref` values so a
+knowledge page can point OUT of the wiki: at a code file or symbol in an
+[AIP-26](/docs/aip-26) code-workspace, at a resource on the web, or at a page
+in another wiki. `refs:` is the typed, machine-resolvable answer to "what is
+this page about, elsewhere?" — the edge a graph runtime traverses to walk
+code↔knowledge.
+
+Each `refs:` entry is a **base ref** — an AIP-27 compact form or object form —
+OPTIONALLY carrying an AIP-10-owned `#symbol=<name>` addressing fragment (see
+below). A runtime MUST first strip any `#symbol=` fragment, then parse the
+remaining base ref with an AIP-27-conformant parser, and MUST NOT redefine
+that grammar. Any AIP-27 kind is admissible; the kinds a knowledge page uses
+in practice are `local`, `github`, `git`, `url` (code / documents) and the
+`wiki` kind — compact `wiki:<wiki-slug>/<page-slug>`, URI-spelled
+`ws://wikis/<wiki-slug>/<page-slug>` — for pages in other wikis (see
+[Cross-wiki references](#cross-wiki-references)).
+
+#### Code references (AIP-26 workspaces)
+
+A page distilled from, or documenting, code addresses that code with a
+`file`-collection ref ([AIP-27](/docs/aip-27) §Base collections). The code
+lives in a DIFFERENT workspace than the wiki, so `github:` (or a
+`ws://workspaces/<slug>/…` form) that names the other workspace explicitly is
+the primary spelling:
+
+```yaml
+# A pr-review knowledge page that is ABOUT the HTTP server it reviewed:
+refs:
+  - github:agentproto/ts:packages/runtime/src/http-server.ts               # code in another repo
+  - github:agentproto/ts:packages/runtime/src/http-server.ts#symbol=serve  # a symbol within it
+  - local:packages/runtime/src/http-server.ts                              # ONLY in a monorepo (see below)
+```
+
+The `github`/`local` base bodies are exactly the file addresses
+[AIP-26](/docs/aip-26) uses for its `code.sources[]` (`github` = `owner/repo`
++ repo-relative path; `local` = workspace-relative path). `local:` resolves
+against the CITING wiki's own workspace root, so it addresses code
+cross-workspace ONLY when the wiki and the code-workspace share one filesystem
+root (a monorepo); otherwise use `github:` or the `ws://workspaces/<slug>/…`
+form, which name the other workspace explicitly.
+
+**`#symbol=<name>` is an AIP-10-owned addressing fragment, NOT part of
+AIP-27's grammar.** AIP-27 reserves `#` for its `#sha256=` suffix and requires
+`#` to be percent-encoded inside path bodies, so a `#symbol=` fragment is
+opaque to a strict AIP-27 parser (it would raise `InvalidRefBody`, not
+silently strip). A runtime MUST therefore STRIP any trailing `#symbol=<name>`
+from the ref string BEFORE handing the remaining, pure-AIP-27-conforming base
+body to the parser. A code-aware runtime MAY then resolve the stripped symbol
+name to a span inside the file — only AFTER AIP-27 has resolved the file
+itself; a runtime that ignores the fragment resolves the whole containing file
+(graceful degradation, never an error). The fragment lives entirely in
+AIP-10's layer and neither extends nor redefines AIP-27.
+
+#### Cross-wiki references
+
+AIP-10 today describes a SINGLE wiki, but a `refs:` entry MAY point at a page
+in ANOTHER wiki, via the AIP-27 `wiki` kind (the `wikis` → `wiki` row of
+[AIP-27](/docs/aip-27) §Reference syntax, a multi-segment body). It has two
+equivalent spellings — the compact form (canonical for frontmatter scalars)
+and the `ws://` URI form — and a host MUST accept both on input:
+
+```
+wiki:<wiki-slug>/<page-slug>              # compact — canonical in refs:
+ws://wikis/<wiki-slug>/<page-slug>        # equivalent ws:// URI spelling
+```
+
+```yaml
+# A page in the "product" wiki that is about a page in the "platform" wiki:
+refs:
+  - wiki:platform/http-server        # cross-wiki page ref (compact)
+  - wiki:platform/rate-limiting
+```
+
+`<wiki-slug>` names a wiki the host knows; `<page-slug>` is that wiki's
+Layer-2 page `slug`. This ref is tenant-local by the AIP-27 mandate (a host
+MUST resolve it in the citing wiki's tenant scope and MUST reject
+cross-tenant bindings). It is DISTINCT from `[[slug]]`, which stays
+intra-wiki: `[[slug]]` never crosses a wiki boundary; `wiki:…` always
+does.
+
+**The cross-wiki ref SYNTAX is normative here; building and traversing the
+graph is a RUNTIME concern.** Per the [Query contract](#query-contract), a
+wiki is queryable with file reads alone and a runtime MAY add auxiliary
+indices (BM25, embeddings, graph) on top. A runtime MAY therefore index the
+`refs:` edges — code↔knowledge and wiki↔wiki — and expose graph traversal
+(this is the spec a graph runtime such as gbrain implements), but the wiki
+files remain the source of truth and no index is required for conformance.
 
 ### Layer 3 — Human-readable schema (`AGENTS.md`)
 
@@ -454,6 +570,7 @@ the rest of the AIP family:
 | `governance` | [AIP-7](/docs/aip-7) policy / audit ref | Binds the workspace (or view) to a governance policy. Schema-poisoning mitigations and source-mutation audits flow through this ref. |
 | `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator, or a dimension ref (`<dimension>/<value>`) | A view declares which consumers OR dimensions it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer or a malformed dimension ref (`knowledge_appliesto_unresolvable`). A view bound to a dimension the host does not resolve is inert, not refused. |
 | `extends` | another `KNOWLEDGE.md` | Composition. |
+| `refs` (Layer-2 page field) | [AIP-27](/docs/aip-27) `Ref[]` — `local` / `github` / `git` / `url` / `ws://…` | AIP-10 is a **consumer** of AIP-27: a page's `refs:` field points OUT at code files/symbols in an [AIP-26](/docs/aip-26) workspace and at pages in other wikis (`ws://wikis/<wiki-slug>/<page-slug>`). AIP-10 is also a **producer** in the AIP-27 registry — the `wikis` collection row addresses AIP-10 wikis. See [Cross-workspace references (AIP-27)](#cross-workspace-references-aip-27). |
 
 `appliesTo` is **not inherited**. A view binds to its own consumers; a
 parent's bindings do not leak into the child. This is the rule that
@@ -483,8 +600,10 @@ grouped by `kind`, with the `slug`, `title`, and a one-line summary
 extracted from the page body. The runtime MUST regenerate `_index.md`
 on every ingest.
 
-`_log.md` — append-only activity log. Every ingest, query that produced
-a new page, and lint pass MUST append a line:
+`_log.md` — append-only activity log. Every ingest **that processes ≥1
+source**, query that produced a new page, and lint pass MUST append a line
+(an ingest that skips every source — see the Ingest contract's idempotency
+step — processes nothing, appends nothing, and stays a true no-op):
 
 ```
 ## [<ISO 8601>] <event-type> | <subject>
@@ -495,21 +614,61 @@ a new page, and lint pass MUST append a line:
 
 `event-type` ∈ { `ingest`, `query`, `lint`, `manual` }.
 
+`_manifest.json` — provenance/dedup manifest. A JSON object mapping every
+already-processed source to the pages it produced and the hash it was
+processed at:
+
+```json
+{
+  "version": 1,
+  "hashAlgo": "sha256",
+  "sources": {
+    "sources/2026-04-15-paper.pdf": { "contentHash": "ab12…", "slugs": ["compounding-knowledge", "andrej-karpathy"] },
+    "sources/2026-04-20-meeting.md": { "contentHash": "cd34…", "slugs": ["2026-04-20-meeting"] }
+  }
+}
+```
+
+Each entry maps `sourceId → { contentHash, slugs }`, where `sourceId` is the
+`sources/`-relative path of the raw source, `contentHash` is the digest of
+that source's bytes computed with the workspace's `sources.hashAlgo` (Layer 4
+`KNOWLEDGE.md`; default `sha256`), and `slugs` is the array of every Layer-2
+page the source produced or touched — one source can create or update many
+pages (Ingest steps 3–5). The runtime MUST record `hashAlgo` in the manifest
+so a reader can verify a `contentHash` without re-reading `KNOWLEDGE.md`. The
+idempotency check keys on `contentHash` (source BYTES) ALONE: editing
+`KNOWLEDGE.md` or `AGENTS.md` changes no `contentHash` and so does NOT
+re-trigger unchanged sources — re-curation after a schema change is an
+explicit operation, never an automatic side effect. The runtime MUST update
+`_manifest.json` in the same transaction as `_index.md` and `_log.md` on
+every ingest that processes a source.
+
 ### Ingest contract
 
 When a runtime ingests source `S`:
 
-1. The runtime MUST read `S` and the current `AGENTS.md`.
-2. It MUST identify wiki pages affected by `S` (entities mentioned,
+1. The runtime MUST compute `S`'s `contentHash` with the workspace's
+   `sources.hashAlgo` and look `S`'s `sourceId` up in `_manifest.json`. If a
+   manifest entry exists whose `contentHash` is unchanged, the runtime MUST
+   skip `S` — it MUST NOT re-distill the source and MUST NOT create or mutate
+   any page for it. This is the **idempotency guarantee**: re-running ingest
+   over an unchanged `sources/` tree is a no-op, and the same source never
+   produces a duplicate page. A source whose `sourceId` is absent, or present
+   with a different `contentHash` (the bytes changed), is (re)processed by the
+   remaining steps.
+2. The runtime MUST read `S` and the current `AGENTS.md`.
+3. It MUST identify wiki pages affected by `S` (entities mentioned,
    concepts touched, conflicting claims) by reading `_index.md` plus
    the relevant page bodies.
-3. It MUST produce *page diffs* — minimal markdown patches per affected
+4. It MUST produce *page diffs* — minimal markdown patches per affected
    page — and apply them atomically (all or nothing). Monolithic
    rewrites of unaffected pages are non-conforming.
-4. It MUST create new pages for entities/concepts not yet covered.
-5. It MUST update `_index.md` and append to `_log.md` in the same
+5. It MUST create new pages for entities/concepts not yet covered.
+6. It MUST update `_index.md`, upsert `S`'s entry in `_manifest.json`
+   (`sourceId → { contentHash, slugs }`, `slugs` listing every page created
+   or touched in steps 3–5), and append to `_log.md` — all in the same
    transaction.
-6. It SHOULD set `confidence` and `supersedes` based on the schema's
+7. It SHOULD set `confidence` and `supersedes` based on the schema's
    contradiction policy. Unresolved conflicts MUST be flagged via
    `contradicts`.
 
@@ -531,6 +690,13 @@ A maintenance pass MUST detect:
 - **Unresolved contradictions** — pages with `contradicts` populated.
 - **Broken refs** — wikilinks/markdown links pointing to missing pages.
 
+The **Broken refs** lint (the `broken-ref` lint kind) applies to intra-wiki
+`[[slug]]` and relative-markdown links ONLY. It MUST NOT flag `refs:`
+frontmatter entries: a `refs:` target is cross-workspace by design and is
+validated by AIP-27 resolution (or left unresolved), NEVER by wiki-local page
+existence. A `refs:` entry whose target does not exist inside this wiki is
+correct, not broken.
+
 Lint output is appended to `_log.md` as an event of type `lint`.
 
 ### Vendor extensions
@@ -551,6 +717,50 @@ the LLM to update both atomically. Making them part of the spec — rather
 than implementation detail — lets a third party verify after the fact
 that the wiki was maintained according to its schema, and lets a runtime
 detect a poorly-applied ingest by inspecting log + index alone.
+
+**Why a provenance/dedup manifest (`_manifest.json`).** `_log.md` records
+*what happened* for humans; `_index.md` catalogs *what exists* for readers.
+Neither answers the question ingest actually needs before it does any work:
+"have I already processed these exact bytes, and if so which pages did they
+become?" Without a machine-readable `sourceId → { contentHash, slugs }` map, a
+re-run either re-distills every source (wasteful, non-deterministic LLM
+output) or risks emitting a second page for a source already covered. Making
+the manifest a REQUIRED generated file turns idempotency into a checkable
+property: a third party can verify that ingest skipped unchanged sources by
+diffing `_manifest.json` against the `sources/` tree, and the runtime gets an
+O(1) skip check keyed on the existing `sources.hashAlgo` rather than
+re-reasoning over prose. It is generated integrity metadata, not a new
+authority — the wiki files remain the source of truth.
+
+**Why `refs:` (typed cross-workspace references), and why a new field.** A
+page has three reasons to name something, and collapsing them loses
+information. `sources:` is provenance IN — the raw bytes the page was
+distilled *from*; `[[slug]]` is intra-wiki navigation — an edge to another
+page of *this* wiki. Neither can express "this page is *about* that code file
+in another workspace" or "…that page in another wiki". That third relation is
+references OUT, and it wants a typed value, not a string — hence a new field
+holding an [AIP-27](/docs/aip-27) `Ref[]`. The name `refs:` was chosen over
+`related:` deliberately: it maps one-to-one onto AIP-27's own **Ref** term, so
+the field reads as exactly what it holds ("the typed refs this page is
+about"), whereas `related:` is a vaguer word that invites overloading with
+`[[slug]]`-style intra-wiki links and blurs the very split this field exists
+to draw. The crisp pairing is `sources:` (provenance IN) vs `refs:`
+(references OUT) vs `[[slug]]` (navigation WITHIN) — three fields, three jobs,
+no ambiguity. Reusing AIP-27 rather than inventing a local encoding also means
+the same parser, resolver, and `ws://` spelling the rest of the family already
+uses apply unchanged.
+
+**Why the cross-wiki ref syntax is normative but the graph is not.** AIP-10
+is filesystem-first: a wiki must be queryable with file reads alone. So the
+spec pins the one thing that must be portable — the `ws://wikis/<wiki-slug>/<page-slug>`
+SYNTAX for addressing a page across wikis, aligned exactly with AIP-27's
+`wikis` collection — and deliberately stops there. Building an index over the
+`refs:` edges and traversing code↔knowledge / wiki↔wiki as a graph is a
+runtime optimization, already permitted by the Query contract's "MAY add
+auxiliary indices (BM25, embeddings, graph)" clause. Fixing the syntax while
+leaving the index optional lets a graph runtime (e.g. gbrain) implement
+traversal without forcing every conforming host to ship a graph engine, and
+keeps two hosts interoperable at the file level even when only one indexes.
 
 **Why a workspace manifest (`KNOWLEDGE.md`).** Prose describes intent;
 machines need contracts. Earlier drafts of this AIP made `AGENTS.md` the
@@ -663,3 +873,21 @@ The wiki is *write surface* for an LLM. Threats:
   wiki ingest pulls a source from the wrong tenant. Mitigation: runtime
   MUST scope `sources/` reads to the wiki's tenant; the spec is
   filesystem-first and inherits whatever isolation the host provides.
+- **Manifest integrity vs authority** — `_manifest.json` is integrity
+  metadata, NOT a trust root. Its `contentHash` lets a runtime detect
+  *change* (and thus skip unchanged sources); it does not by itself prove a
+  source is authentic — an attacker who can rewrite a source under
+  `sources/` can also rewrite its manifest entry. Provenance authenticity
+  belongs to the `governance:` signing gate ([AIP-7](/docs/aip-7)), not to
+  this file. The manifest carries its own `hashAlgo` (mirroring
+  `sources.hashAlgo`) to keep the hash algorithm **agile**: as `sha256`
+  weakens, a workspace re-baselines to `sha512`/`blake3` and the recorded
+  `hashAlgo` tells a reader which digest a stored `contentHash` was computed
+  with, so verification never silently compares across algorithms.
+- **Cross-workspace ref resolution** — a `refs:` entry (`url:`, `github:`,
+  `ws://…`) is an [AIP-27](/docs/aip-27) `Ref`: an identity, not trusted
+  bytes. A runtime that resolves one MUST apply AIP-27's own safeguards
+  (path-escape rejection on `local`, `http(s)`-only on `url`, tenant-local
+  resolution of `ws://`) and MUST treat fetched bytes as untrusted until
+  validated. `refs:` never bypasses source immutability (Layer 1): it points
+  at other workspaces, it does not import them into `sources/`.
