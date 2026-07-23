@@ -166,6 +166,19 @@ metadata:                             # OPTIONAL — vendor extensions
 <body — prose, tables, code, headings>
 ```
 
+The **`slug`** is the page's canonical identity: a bare kebab-case token
+(`[a-z0-9-]+`, no `/`), unique within the wiki, equal by convention to the
+page filename without its `.md` extension. It is REQUIRED. A runtime MAY
+namespace its *internal* node identifier by the page's containing directory
+(e.g. `<dir>/<slug>`) for retrieval or graph indexing, but that namespacing is
+the runtime's own concern and MUST NOT leak into the frontmatter contract: a
+conforming host MUST accept the bare frontmatter `slug`, MUST NOT require it to
+carry a path prefix, and MUST NOT reject a page whose `slug` equals its path
+basename. A runtime that refuses a conformant bare `slug` — or that forces the
+author to omit `slug` or spell it as a non-kebab path — is **non-conforming**;
+the portable wiki keeps its bare slugs and the runtime derives whatever
+internal id it needs from them.
+
 Three reference surfaces exist on a page and MUST NOT be conflated:
 
 - **`[[slug]]` body links** — intra-wiki cross-references between pages of
@@ -749,6 +762,22 @@ to draw. The crisp pairing is `sources:` (provenance IN) vs `refs:`
 no ambiguity. Reusing AIP-27 rather than inventing a local encoding also means
 the same parser, resolver, and `ws://` spelling the rest of the family already
 uses apply unchanged.
+
+**Why the bare `slug` binds the runtime, not the other way around.** The `slug`
+is the wiki's portable page identity, so it must stay a bare kebab token — the
+same value a `[[slug]]` link, an `_index.md` row, and a `_manifest.json` entry
+all reference. A retrieval or graph runtime often wants a path-namespaced node
+id (`notes/foo` vs `pr-reviews/foo`) to keep same-named pages in different
+directories distinct; that is legitimate, but it is the runtime's *internal*
+derivation. Making the frontmatter carry the prefixed form would break the
+no-slash kebab rule and couple the portable artifact to one runtime's indexing
+scheme — the exact non-portability this AIP exists to avoid. Hence the
+direction of the obligation: the wiki keeps bare slugs, and a conforming
+runtime MUST accept them and derive its own ids. A runtime that rejects a
+conformant `slug` (forcing the author to omit it or spell a path) is
+non-conforming — a real case observed against a graph backend that derived the
+node id from the file path and then refused a differing frontmatter `slug`,
+which would have silently eroded conformance had the wiki bent to it.
 
 **Why the cross-wiki ref syntax is normative but the graph is not.** AIP-10
 is filesystem-first: a wiki must be queryable with file reads alone. So the
