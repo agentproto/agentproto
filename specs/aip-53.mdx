@@ -1,0 +1,478 @@
+---
+title: "AIP-53: APP — app/v1 (installable multi-agent unit)"
+description: A markdown + frontmatter format for declaring an app — the smallest deliverable unit — as N AIP-42 agents, the AIP-15 workflows they run, any attached AIP artifacts (AIP-6/25/47, policies), and an optional AIP-34 workspace whose owner is the tenant. Defines the APP.md root manifest, the attachment invariant that couples agents to their workflows, the `requires.tools` contract validated at install (not at step dispatch), and non-normative install/run runtime expectations. Pairs with the `defineApp` standard signature.
+aip: 53
+status: Draft
+type: Schema
+created: 2026-08-07
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 15, 34, 36, 42]
+discussions-to: https://github.com/agentproto/agentproto/discussions/53
+layer: coordination
+package: "@agentproto/app-kit"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/app-kit
+---
+
+| Field | Value |
+|---|---|
+| AIP | 53 |
+| Title | APP — app/v1 (installable multi-agent unit) |
+| Status | Draft |
+| Type | Schema |
+| Domain | apps.sh |
+| Requires | [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-42](/docs/aip-42) (AGENT) |
+| Composes with | [AIP-6](/docs/aip-6) / [AIP-25](/docs/aip-25) / [AIP-47](/docs/aip-47) (attached company / persona / role artifacts), [AIP-38](/docs/aip-38) (POLICY, via `attach`) |
+| Out of scope | [AIP-43](/docs/aip-43) (catalog/distribution of installable apps), [AIP-46](/docs/aip-46) (the daemon's tenant path) |
+| Reference Impl | [`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit) |
+
+## Abstract
+
+`app/v1` is a markdown-with-frontmatter format that packages an **app**
+— the smallest unit a runtime can install and run as a coherent
+whole: one or more [AGENT.md (AIP-42)](/docs/aip-42) agents, the
+[WORKFLOW.md (AIP-15)](/docs/aip-15) workflows those agents execute,
+any other AIP artifact riding along (a company, persona, role, policy),
+and an optional home [WORKSPACE.md (AIP-34)](/docs/aip-34) whose
+`owner` is the app's tenant.
+
+The format pairs with the `defineApp(...)` standard signature, which
+validates the **attachment invariant** — agents and the workflows they
+name must reference each other, exactly, with no dangling refs and no
+orphans — and two consumption paths: `toMastraAgents(...)` (build
+runnable agents in-process) and `emit(dir)` (write the bundle to disk
+as `AGENT.md` / `WORKFLOW.md` / `WORKSPACE.md` files under a
+`APP.md`-indexed root).
+
+This AIP is **spec-after-proof**: its shape is grounded in a working
+`@agentproto/app-kit` reference implementation and in real execution
+findings (an emitted app ran end-to-end as a Mastra agent; a workflow
+step failed at dispatch time on an unregistered tool id — the exact
+gap `requires.tools` closes).
+
+## Motivation
+
+Before this AIP, "an app" existed only as a TypeScript module calling
+`defineApp` from `@agentproto/app-kit` — real, but with three gaps
+that block treating an app as an installable, portable unit:
+
+1. **No index.** `emit(dir)` writes one `AGENT.md` per agent and one
+   shared `WORKFLOW.md` per workflow under `<dir>/.agentproto/`, but
+   nothing at that root says "this directory is one app, here is its
+   id, version, and member list." A host can enumerate the files; it
+   cannot *discover* the app without re-deriving structure from
+   directory layout.
+
+2. **No install-time contract for tools.** An app's workflows name
+   tool ids (`apply_patch`, `read_diff`, …) that a given host may or
+   may not have registered. Today that mismatch surfaces as a runtime
+   failure — a workflow step dispatches, the runtime looks up the
+   tool id, and fails mid-run. Confirmed empirically: running the
+   `deliver-change` workflow of an emitted app against a real daemon
+   failed with `unknown daemon tool "apply_patch"` at step-dispatch
+   time, not at install time. An app has no way to declare its tool
+   surface up front so a host can refuse the install with a precise,
+   actionable list instead of failing a live run.
+
+3. **No named runtime contract.** "Install" and "run" are host
+   behaviors today, not a spec. Every host (the agentproto daemon, a
+   Mastra-in-process host like Guilde) re-derives what "install this
+   app" and "run this app" mean from its own plumbing.
+
+`APP.md` closes gap 1. The `requires.tools` contract closes gap 2.
+A non-normative "Runtime expectations" section names the shape of gap
+3 without freezing it — the daemon verbs that implement install/run
+are still being built (see [Reference Implementation](#reference-implementation)).
+
+## Design principles
+
+1. **An app is a composition, not a new primitive.** Every field an
+   app carries already has a home AIP — agents (AIP-42), workflows
+   (AIP-15), workspace (AIP-34), attachments (AIP-6/25/47/38 and
+   others). `APP.md` does not re-specify any of their fields; it
+   indexes references to them and adds exactly one new invariant
+   (attachment) and one new contract (`requires.tools`).
+
+2. **The attachment invariant is the one thing app-kit adds.**
+   Agent ids are unique within the app; every `agent.workflows[]` ref
+   MUST resolve to a workflow the app bundles; every bundled workflow
+   MUST be referenced by at least one agent. A dangling ref (an agent
+   points at a workflow the app doesn't ship) or an orphan (a bundled
+   workflow no agent lists) is invalid — not a warning, a hard
+   validation failure at definition time.
+
+3. **Tool requirements are declared, not discovered.** An app that
+   names tools its workflows depend on says so up front in
+   `requires.tools`, so a host validates satisfiability once, at
+   install, instead of learning about a missing tool the first time a
+   run reaches that step.
+
+4. **Install validates; run executes.** The two verbs are cleanly
+   separated: install never spawns an agent session or dispatches a
+   workflow step; run never re-validates a manifest it already
+   installed. Hosts implementing both MUST NOT interleave them.
+
+5. **Workspace is optional and, when present, is the tenant.** An app
+   without a `workspace` field is a portable, tenant-less bundle
+   (a library entry, a template). An app with a `workspace` field
+   is *installed for* the tenant named by that workspace's `owner`
+   (AIP-34) — there is no separate tenant field to invent.
+
+6. **Provisional frontmatter, stable invariants.** The exact shape of
+   the `APP.md` frontmatter tracks the in-progress app-kit
+   implementation (WP-B1) and MAY change field names or nesting
+   before this AIP reaches Review. The attachment invariant and the
+   install/run split are considered stable; implementers SHOULD treat
+   frontmatter field names as provisional and the invariants as load-bearing.
+
+## Specification
+
+### File location and emission layout
+
+An app's manifests live under an agentproto-owned base inside its
+directory — never squatting the shared `.agents/` convention other
+AIPs use for standalone collections:
+
+```
+<dir>/
+  WORKSPACE.md                              ← AIP-34, only when the app has a workspace; owner = tenant
+  .agentproto/
+    APP.md                                  ← this AIP — the root index
+    agents/<id>/AGENT.md                    ← one per agent (AIP-42)
+    workflows/<id>/WORKFLOW.md              ← one per bundled workflow (AIP-15), shared across agents
+```
+
+`<id>` in `agents/<id>/` and `workflows/<id>/` is the manifest's `id`
+with any `@<owner>/` registry prefix stripped, so
+`@agentik/reviewer` emits to `agents/reviewer/AGENT.md`.
+
+`APP.md` is written at the same level as `agents/` and `workflows/`,
+not at `<dir>` root — the root is reserved for the optional
+`WORKSPACE.md`, matching the existing app-kit `emit(dir)` layout.
+
+### Frontmatter
+
+**Provisional** — aligned on the `@agentproto/app-kit` implementation
+(WP-B1) currently in progress. Field names and nesting MAY change
+before Review; the required/optional split below reflects the
+reference implementation's `AppDefinition` / `EmittedApp` shapes as of
+this draft.
+
+YAML frontmatter, delimited by `---` lines. Case-sensitive.
+
+#### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | string | Always `app/v1`. |
+| `version` | semver | Spec version of THIS file. |
+| `agents` | object[] | `[{ id, path }]` — one entry per bundled agent. `id` matches the agent's own AIP-42 `id`; `path` is the workspace-relative path to its `AGENT.md` (`./agents/<id>/AGENT.md` under the standard layout). |
+| `workflows` | object[] | `[{ id, path }]` — one entry per bundled workflow. `id` matches the workflow's own AIP-15 `id`; `path` is the workspace-relative path to its `WORKFLOW.md`. |
+
+#### Optional fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | string | — | Machine identifier for the app itself, if published/addressed independently of its workspace. Same format rules as [AIP-42](/docs/aip-42) `id`. |
+| `name` | string | — | Human-readable display name. |
+| `description` | string | `""` | One-paragraph purpose. ≤2000 chars. |
+| `workspace` | object | (none) | `{ ref: <path to WORKSPACE.md> }` — present iff the app was emitted with a home workspace. Absent for a workspace-less (tenant-less) bundle. |
+| `requires` | object | `{ tools: [] }` | See [The `requires.tools` contract](#the-requirestools-contract). |
+| `attach` | object[] | `[]` | Structural refs `{ id, schema? }` to any other AIP artifact riding with the app (AIP-6 company, AIP-25 persona, AIP-47 role, AIP-38 policy, …). Carried verbatim — `APP.md` does not depend on each doctype's schema to declare the slot. |
+| `tags` | string[] | `[]` | Free-form discovery tags. |
+| `metadata` | object | `{}` | Free-form, namespaced. |
+
+### The attachment invariant (normative)
+
+This is the one hard rule `app/v1` adds on top of AIP-42 and AIP-15,
+enforced by `defineApp(...)` at definition time and re-checked by any
+loader (`loadAppHandle`) that reads an `APP.md` off disk:
+
+1. **Agent ids are unique** within the app. Two bundled agents sharing
+   an `id` is invalid.
+2. **Every `agent.workflows[]` ref resolves to a bundled workflow.**
+   If an agent's own AIP-42 `workflows[]` names a workflow id, that id
+   MUST appear in the app's `workflows[]`. A ref to a workflow the app
+   does not bundle — even if that workflow exists and is valid
+   elsewhere — is a **dangling ref** and invalid.
+3. **Every bundled workflow is referenced by ≥1 agent.** A workflow
+   present in the app's `workflows[]` that no agent's `workflows[]`
+   names is an **orphan** and invalid.
+
+Conformance rule: a loader or validator MUST reject an `APP.md` (or an
+in-code app definition) that violates any of the three rules above,
+with an error identifying the offending id(s) — not a silent drop or
+a warning. This mirrors [AIP-15](/docs/aip-15)'s own registration-time
+rejection posture (unknown step kinds, forbidden inline bodies): app
+composition errors surface before anything runs, not during a run.
+
+### The `requires.tools` contract
+
+```yaml
+requires:
+  tools:
+    - { id: apply_patch, kind: workspace }
+    - { id: read_diff,   kind: workspace }
+    - { id: send_slack_message, kind: mcp }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | The tool id as named by the app's workflow steps (`kind: "tool"` step `tool:` field) or by an agent's declared toolset. |
+| `kind` | `"mcp"` \| `"workspace"` | Which registry the id must resolve against: `mcp` — the host's MCP/daemon tool registry (workflow step dispatch); `workspace` — the adapter's workspace toolset (e.g. `makeWorkspaceTools`, an agent's runtime tool surface). |
+
+**Conformance rule — validated at INSTALL, not at step dispatch.**
+A host implementing app install MUST resolve every `requires.tools`
+entry against the registry named by its `kind` *before* the app is
+considered installed, and MUST refuse the install with the complete
+list of unresolved ids when any entry fails to resolve. A host MUST
+NOT defer this check to workflow-step execution time.
+
+This rule is motivated directly by an observed failure, not by
+speculation: running an emitted app's `deliver-change` workflow
+against a real daemon produced `unknown daemon tool "apply_patch"` —
+a step-dispatch-time error, deep into a run that had already spawned
+agent sessions and made partial progress. `requires.tools` moves that
+exact failure to install time, where it costs nothing to surface and
+nothing to unwind.
+
+An app's tool surface spans **two distinct registries** and both MUST
+be covered:
+
+- **Workflow-step tools** (`kind: "mcp"`) — ids a `kind: "tool"` step
+  in a bundled WORKFLOW.md dispatches to, resolved against the host's
+  MCP/daemon tool registry per [AIP-15](/docs/aip-15) step execution.
+- **Agent tools** (`kind: "workspace"`) — ids an agent's own AIP-42
+  `tools[]` names, resolved against the runtime adapter's workspace
+  toolset when the agent is instantiated as a session.
+
+A `requires.tools` entry that omits either registry's ids it actually
+needs does not make the app safe to install; it makes the omitted
+gap surface at dispatch time exactly as before. Authors SHOULD
+enumerate every tool id the bundle's agents and workflows actually
+name.
+
+## Runtime expectations (non-normative)
+
+This section names the shape hosts are converging on; it is **not
+normative** — no `MUST` in this section binds a conforming
+implementation, because the daemon verbs it describes (`app_install`,
+`app_run`, …) are still in development. It exists so implementers
+building toward this AIP share a target instead of each guessing.
+
+**Install** — validate, don't execute:
+
+- Load and parse `APP.md`; re-run the [attachment invariant](#the-attachment-invariant-normative).
+- Resolve every `requires.tools` entry against its named registry
+  (see above); collect *all* failures before refusing, not just the
+  first.
+- Confirm the runtime adapter(s) the app's agents need are present on
+  the host (e.g. a `mastra-agent` adapter for a Mastra-shaped agent).
+  An adapter missing on the host is an install-time failure with the
+  same "refuse with a precise list" posture as an unresolved tool.
+- When the app targets a sandboxed runtime ([AIP-36](/docs/aip-36)),
+  confirm the sandbox image/template provisions the required adapters
+  — booting a microVM that can't resolve the agent's own adapter is
+  the same class of late failure `requires.tools` exists to prevent,
+  observed directly: an emitted app's agent booted correctly in a
+  sandboxed VM whose base image did not include the adapter the agent
+  needed, and failed inside the box instead of at install.
+
+**Run** — execute what install already validated:
+
+- Each bundled agent becomes one runtime session (per
+  [AIP-46](/docs/aip-46) session lifecycle, where the host is the
+  agentproto daemon) or one built agent via `toMastraAgents(...)`
+  (where the host runs Mastra in-process and never touches the
+  daemon). Both paths are conforming; this AIP does not prefer one.
+- Each bundled workflow executes via the [AIP-15](/docs/aip-15)
+  workflow engine the host implements. A workflow run started for an
+  app SHOULD be grouped under a single app-run identifier so a host
+  can report and stop the app's sessions and workflow runs together.
+
+## Out of scope
+
+This AIP deliberately does not specify:
+
+- **Declarative `agent` steps inside WORKFLOW.md.** A `kind: "tool"`
+  step can dispatch to a tool; a step that dispatches to *another
+  bundled agent* (`kind: "agent"`, or equivalent) is not yet part of
+  [AIP-15](/docs/aip-15) — today that composition exists only as a
+  passthrough through a workflow's own `entry.mjs`, outside the
+  declarative manifest. Expressing "then the reviewer agent runs" as
+  pure step data is future work on AIP-15, not this AIP.
+- **Distribution and catalog.** How an app becomes installable by
+  reference (`agentproto apps install @scope/app-name` resolving from
+  git/npm/a registry) is [AIP-43](/docs/aip-43) REGISTRY's concern.
+  This AIP defines the unit that gets cataloged, not the catalog.
+- **The daemon's tenant path.** Where a host persists per-tenant app
+  state (a `tenants/<t>/…` root segment or otherwise) is
+  [AIP-46](/docs/aip-46)'s concern. This AIP's `workspace.owner`
+  names the tenant identity; it does not prescribe a storage layout
+  for it.
+
+## The `defineApp` standard signature
+
+```ts
+defineApp(definition: AppDefinition): AppHandle
+
+interface AppDefinition {
+  agents:      readonly (AgentEntry | AgentHandle)[]   // AIP-42 handles, optionally paired with a body
+  workflows?:  readonly WorkflowHandle[]                // AIP-15 handles
+  attach?:     readonly DoctypeHandle[]                 // any other AIP handle: { id, schema? }
+  workspace?:  WorkspaceHandle | WorkspaceShorthand      // AIP-34, owner = tenant
+}
+
+interface AgentEntry {
+  agent: AgentHandle          // AIP-42
+  body?: string                // the AGENT.md body / system prompt; composed from
+                                // persona/boundaries/traits when omitted
+}
+
+interface AppHandle {
+  agents:       readonly AgentEntry[]
+  workflows:    readonly WorkflowHandle[]
+  attachments:  readonly DoctypeHandle[]
+  workspace?:   WorkspaceHandle
+
+  toMastraAgents(opts: ToMastraAgentOptions, only?: readonly string[]): Promise<Record<string, BuiltMastraAgent>>
+  toMastraAgent(opts: ToMastraAgentOptions): Promise<BuiltMastraAgent>   // single-agent convenience
+  pick(ids: readonly string[]): readonly AgentEntry[]
+
+  emit(dir: string): Promise<EmittedApp>   // writes AGENT.md / WORKFLOW.md / WORKSPACE.md per the layout above
+}
+```
+
+### Conformance rules
+
+1. **Canonical name.** The definition entry point MUST be named
+   `defineApp`. Implementations MAY re-export under host-specific
+   aliases; `defineApp` is what this AIP and any authoring SKILL.md
+   reference.
+
+2. **Validation at definition time, not at consumption time.** The
+   [attachment invariant](#the-attachment-invariant-normative) MUST be
+   checked when `defineApp(...)` is called (or when an `APP.md` is
+   loaded), before `toMastraAgents`, `emit`, or any install verb runs.
+
+3. **`emit` output round-trips.** `defineApp(def).emit(dir)` followed
+   by loading `<dir>/.agentproto/APP.md` back into an app handle MUST
+   reproduce the same agent/workflow id sets and the same attachment
+   relationships as `def`. (Frontmatter field values round-trip
+   exactly; this AIP does not require byte-identical files.)
+
+4. **No I/O at definition time.** Calling `defineApp(...)` MUST NOT
+   trigger network calls, registry lookups, or adapter instantiation.
+   `emit` and `toMastraAgents` are the I/O-performing operations.
+
+5. **`attach` is structural.** Entries in `attach` carry only `{ id,
+   schema? }` at the app-kit layer — `APP.md` MUST NOT require
+   consumers to depend on every attached doctype's own package to
+   read an app's attachment list.
+
+## Reference Implementation
+
+[`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit)
+implements `defineApp`, the attachment invariant (`validateAttachment`
+in `define-app.ts`, throwing `AppDefinitionError`), `toMastraAgents` /
+`toMastraAgent` / `pick`, and `emit(dir)` per the
+[file location layout](#file-location-and-emission-layout) above.
+
+Not yet implemented (tracked as follow-up work, referenced here so
+this AIP's provisional marking has a concrete target):
+
+- The `APP.md` root manifest itself and a corresponding
+  `loadAppHandle(dir)` loader — `emit` today writes agents and
+  workflows but no index file.
+- The `requires.tools` field and its install-time validation.
+- Daemon verbs (`app_install` / `app_run` / `app_list` / `app_status`
+  / `app_stop`) implementing the [Runtime expectations](#runtime-expectations-non-normative)
+  section.
+
+These gaps were confirmed by direct execution, not inferred: an
+emitted app's agent ran end-to-end as a real Mastra agent via the
+existing `mastra-agent` adapter (proving the agent leg of "run"
+works today); the same app's workflow failed at step-dispatch with an
+unresolved tool id (proving the `requires.tools` gap); the same
+agent booted inside an [AIP-36](/docs/aip-36) sandboxed VM whose image
+lacked the adapter it needed (proving the install-time adapter/image
+provisioning gap named in Runtime expectations).
+
+## Backward compatibility
+
+This AIP is purely additive. `@agentproto/app-kit`'s existing
+`defineApp` / `toMastraAgents` / `emit` behavior is unchanged by this
+spec — `APP.md` and `requires.tools` are new artifacts layered on top
+of an already-shipping implementation, not a breaking revision of it.
+An app bundle emitted before `APP.md` support lands is still a valid
+set of `AGENT.md` / `WORKFLOW.md` files; it simply lacks the root
+index a loader can use to discover it without directory conventions.
+
+## Security considerations
+
+`APP.md` is **declarative** and, like every AIP-34-adjacent manifest,
+MUST be treated as untrusted input by a host:
+
+- **`requires.tools` is a claim, not a grant.** Declaring a tool
+  requirement does not grant the app access to it — installation
+  validates *satisfiability* against the host's registries; the
+  actual capability grant still flows through each tool's own
+  [AIP-38](/docs/aip-38) POLICY / [AIP-39](/docs/aip-39) ACTION
+  gating at run time, unchanged.
+- **`attach` can name artifacts the installer has no authority
+  over.** A host MUST verify the identity installing the app has
+  authority to bind every attached company/persona/role/policy, the
+  same way [AIP-42](/docs/aip-42) requires for `identity` claims on a
+  single agent.
+- **`workspace.owner` is the tenant claim.** A malicious `APP.md`
+  can name any `owner`. Hosts MUST verify the installing identity's
+  authority over the claimed tenant before materializing the
+  workspace, per [AIP-34](/docs/aip-34)'s own security posture.
+- **Sandbox provisioning at install expands the trust boundary.**
+  When install provisions an adapter into a sandbox image (per
+  [Runtime expectations](#runtime-expectations-non-normative)), that
+  provisioning step MUST be subject to the same [AIP-36](/docs/aip-36)
+  network/resource policy as any other sandboxed command — an app's
+  declared tool/adapter needs are not an excuse to bypass sandbox
+  egress rules.
+- **The attachment invariant is a correctness check, not a security
+  boundary.** A structurally valid app (no dangling refs, no orphans)
+  can still bundle agents whose combined tool/action surface a host's
+  policy should refuse. Attachment validation and POLICY grant
+  checking are independent gates; passing one says nothing about the
+  other.
+
+## Open questions
+
+1. **`id` uniqueness scope.** Is an app's `id` unique per-registry
+   (like an AIP-42 agent `id`) or per-installing-tenant? Likely the
+   former once [AIP-43](/docs/aip-43) catalogs apps; left open until
+   that AIP's app-kind slot is designed.
+2. **Versioning across `emit` re-runs.** When an app's source
+   definition changes and is re-emitted into the same directory, does
+   `APP.md.version` bump automatically, or is that author-driven like
+   every other AIP manifest? Likely the latter (author-driven, no
+   magic), consistent with AIP-42/AIP-15's own stable-identity rules.
+3. **`requires.tools` granularity.** Should an entry be able to name
+   a minimum tool *version* or capability, not just an id? Deferred
+   until a host actually needs to distinguish tool revisions at
+   install time.
+4. **Multi-workspace apps.** Today an app has at most one home
+   workspace. Whether an app should ever span more than one (e.g. one
+   agent's workspace differs from its siblings') is unaddressed;
+   current design principle 5 assumes a single tenant per app.
+
+## See also
+
+- [AIP-6 — COMPANY.md](/docs/aip-6) — an `attach`-able doctype
+- [AIP-9 — OPERATOR](/docs/aip-9) — the runtime contract an app's
+  agent sessions ultimately conform to
+- [AIP-14 — TOOL.md](/docs/aip-14) — the doctype backing `requires.tools` ids
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — the workflows an app bundles
+- [AIP-25 — PERSONA.md](/docs/aip-25) — an `attach`-able doctype
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — the app's optional home workspace; `owner` = tenant
+- [AIP-36 — SANDBOX.md](/docs/aip-36) — compute policy referenced by Runtime expectations
+- [AIP-38 — POLICY.md](/docs/aip-38) — an `attach`-able doctype; the real capability gate behind `requires.tools`
+- [AIP-42 — AGENT.md](/docs/aip-42) — the agents an app bundles
+- [AIP-43 — REGISTRY](/docs/aip-43) — distribution/catalog of installable apps (out of scope here)
+- [AIP-46 — AGENT-SESSIONS](/docs/aip-46) — the session lifecycle an app's daemon-hosted agents run under; owns the tenant storage path (out of scope here)
+- [AIP-47 — ROLE.md](/docs/aip-47) — an `attach`-able doctype
