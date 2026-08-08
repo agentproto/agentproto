@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- agentproto app icon — GREEN field, tri-color. Phosphor tile, ink chevron, paper (white) cursor.
+       Inverts the accent: on light/dark the cursor is phosphor; on a phosphor tile it becomes paper. -->
+  <rect width="64" height="64" rx="15" fill="#2f9e63"/>
+  <path d="M13 17 L30 32 L13 47" fill="none" stroke="#1b1b1c" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="40" y="14" width="14" height="36" rx="3" fill="#f4f0e6"/>
+</svg>
