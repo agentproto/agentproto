@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>agentproto — mono typeface options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1b1b1c;
+    --paper: #f4f0e6;
+    --phosphor: #2f9e63;
+    --sys-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', monospace;
+    --jetbrains: 'JetBrains Mono', var(--sys-mono);
+    --plex: 'IBM Plex Mono', var(--sys-mono);
+    --space: 'Space Mono', var(--sys-mono);
+  }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.5 var(--sys-mono); padding: 32px; }
+  .meta { font-size: 11px; color: #85857f; margin-bottom: 28px; max-width: 70ch; }
+  .meta b { color: var(--ink); }
+  .option { border: 1px solid #ddd8cc; border-radius: 10px; background: #fff; padding: 28px 32px; margin-bottom: 24px; }
+  .option .tag { font-size: 11px; color: var(--phosphor); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .option .desc { font-size: 11px; color: #85857f; margin-bottom: 20px; max-width: 62ch; }
+  .title { font-weight: 700; font-size: 32px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .subtitle { font-size: 16px; color: #55554f; margin: 0 0 14px; }
+  .body { font-size: 14px; max-width: 62ch; margin: 0 0 14px; }
+  .code { font-size: 12.5px; background: var(--ink); color: var(--paper); padding: 10px 14px; border-radius: 6px; display: inline-block; }
+  .code .prompt { color: var(--phosphor); }
+  .abc { font-size: 22px; letter-spacing: 0.02em; margin-top: 4px; color: #55554f; }
+
+  .baseline .title, .baseline .subtitle, .baseline .body, .baseline .code, .baseline .abc { font-family: var(--sys-mono); }
+  .jetbrains .title, .jetbrains .subtitle, .jetbrains .body, .jetbrains .code, .jetbrains .abc { font-family: var(--jetbrains); }
+  .plex .title, .plex .subtitle, .plex .body, .plex .code, .plex .abc { font-family: var(--plex); }
+  .space .title, .space .subtitle, .space .body, .space .code, .space .abc { font-family: var(--space); }
+</style>
+</head>
+<body>
+  <div class="meta"><b>agentproto</b> — monospace typeface options, 2026-08-07. All-mono direction locked (see design.md); this compares which mono. Real embedded fonts (Google Fonts) so it renders the same for everyone, unlike the OS-dependent system stack.</div>
+
+  <div class="option baseline">
+    <div class="tag">Baseline — system stack (current)</div>
+    <div class="desc">ui-monospace / SF Mono / Menlo / Cascadia Mono — whatever the OS has. Free, zero load, but renders differently per platform.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+    <div class="abc">ABCDEFG abcdefg 0123456789 -&gt;== !=</div>
+  </div>
+
+  <div class="option jetbrains">
+    <div class="tag">Option 1 — JetBrains Mono</div>
+    <div class="desc">Free, OFL-licensed. The most widely adopted dev-tool mono today (VS Code, Linear, countless CLIs). Tall x-height, distinct 0/O and l/1, ligatures available. Safe, proven, slightly "default choice" at this point.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+    <div class="abc">ABCDEFG abcdefg 0123456789 -&gt;== !=</div>
+  </div>
+
+  <div class="option plex">
+    <div class="tag">Option 2 — IBM Plex Mono</div>
+    <div class="desc">Free, OFL-licensed. Slightly more geometric/neutral than JetBrains, narrower — reads a bit more "corporate infra tool" than "editor font." Pairs cleanly with Plex Sans/Serif if this system ever needs a non-mono fallback.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+    <div class="abc">ABCDEFG abcdefg 0123456789 -&gt;== !=</div>
+  </div>
+
+  <div class="option space">
+    <div class="tag">Option 3 — Space Mono</div>
+    <div class="desc">Free, OFL-licensed. Quirky/retro-terminal character (rounder terminals, distinct italics) — most "brand personality," least neutral. Great for the wordmark/marketing titles, arguably too loud for dense docs body copy at length.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+    <div class="abc">ABCDEFG abcdefg 0123456789 -&gt;== !=</div>
+  </div>
+</body>
+</html>

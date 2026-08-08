@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>agentproto — brand system (locked 2026-08-07)</title>
+<style>
+  body { margin: 0; background: #faf8f2; color: #1b1b1c; font: 14px/1.5 -apple-system, sans-serif; padding: 32px; }
+  h1 { font: 700 22px Georgia, serif; margin: 0 0 2px; }
+  .sub { color: #85857f; font-size: 12px; margin-bottom: 24px; font-family: ui-monospace, Menlo, monospace; }
+  .grid { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
+  .card { border: 1px solid #ddd8cc; border-radius: 8px; overflow: hidden; background: #fff; }
+  .card .label { padding: 6px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #85857f; border-top: 1px solid #eee8da; }
+  .sw { display: flex; }
+  .cell { width: 160px; height: 120px; display: flex; align-items: center; justify-content: center; }
+  .cell.cream { background: #f4f0e6; }
+  .cell.ink { background: #1b1b1c; }
+  .cell.wide { width: 360px; }
+  .fav { display: flex; gap: 18px; align-items: flex-end; padding: 14px 0 4px; }
+  .fav figure { margin: 0; text-align: center; }
+  .fav figcaption { font-size: 10px; color: #85857f; font-family: ui-monospace, monospace; margin-top: 4px; }
+  .tokens { display: flex; gap: 12px; }
+  .tok { width: 120px; border-radius: 6px; padding: 10px; font-family: ui-monospace, monospace; font-size: 11px; border: 1px solid #ddd8cc; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: #85857f; margin: 26px 0 10px; }
+</style>
+</head>
+<body>
+  <h1>agentproto — brand system</h1>
+  <div class="sub">locked 2026-08-07 · mark (org avatar / site) + cli glyph (favicon / terminal) + wordmark · ink #1b1b1c · paper #f4f0e6 · phosphor #2f9e63</div>
+
+  <h2>Mark — “a file with a contract” (a3)</h2>
+  <div class="grid"><div class="card"><div class="sw">
+    <div class="cell cream"><img src="mark.svg" width="72" /></div>
+    <div class="cell ink"><img src="mark.svg" width="72" style="filter: invert(1) hue-rotate(180deg);" /></div>
+  </div><div class="label">mark.svg — dark ctx: use cream-stroke variant, not a CSS invert (shown here as approximation)</div></div></div>
+
+  <h2>CLI glyph — prompt + cursor (b1r/b3r)</h2>
+  <div class="grid"><div class="card"><div class="sw">
+    <div class="cell cream"><img src="cli.svg" width="72" /></div>
+    <div class="cell ink"><img src="cli-dark.svg" width="72" /></div>
+  </div><div class="label">cli.svg / cli-dark.svg</div></div></div>
+
+  <h2>Wordmark (d3)</h2>
+  <div class="grid"><div class="card"><div class="sw">
+    <div class="cell cream wide"><img src="wordmark.svg" width="300" /></div>
+    <div class="cell ink wide"><img src="wordmark-dark.svg" width="300" /></div>
+  </div><div class="label">wordmark.svg / wordmark-dark.svg — convert text to outlines before external upload</div></div></div>
+
+  <h2>Lockup — L1 “bracket” (site header / README)</h2>
+  <div class="grid"><div class="card"><div class="sw">
+    <div class="cell cream wide"><img src="lockup.svg" width="290" /></div>
+    <div class="cell ink wide"><img src="lockup-dark.svg" width="290" /></div>
+  </div><div class="label">lockup.svg / lockup-dark.svg — ❯ agentproto ▮ · the word is the command</div></div></div>
+
+  <h2>Favicon survival</h2>
+  <div class="fav">
+    <figure><img src="cli.svg" width="16" height="16" /><figcaption>16</figcaption></figure>
+    <figure><img src="cli.svg" width="32" height="32" /><figcaption>32</figcaption></figure>
+    <figure><img src="mark.svg" width="16" height="16" /><figcaption>mark 16</figcaption></figure>
+    <figure><img src="mark.svg" width="32" height="32" /><figcaption>mark 32</figcaption></figure>
+  </div>
+
+  <h2>Tokens</h2>
+  <div class="tokens">
+    <div class="tok" style="background:#1b1b1c;color:#f4f0e6">ink<br/>#1b1b1c</div>
+    <div class="tok" style="background:#f4f0e6">paper<br/>#f4f0e6</div>
+    <div class="tok" style="background:#2f9e63;color:#fff">phosphor<br/>#2f9e63</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- agentproto mark — "a file with a contract" (from candidate a3, redrawn as vector).
+       Tokens: ink #1b1b1c · phosphor #2f9e63 (sampled from a3). Background intentionally transparent. -->
+  <path d="M20 8 H37 L50 21 V52 Q50 56 46 56 H20 Q14 56 14 50 V14 Q14 8 20 8 Z"
+        fill="none" stroke="#1b1b1c" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M37 8 V21 H50" fill="none" stroke="#1b1b1c" stroke-width="4" stroke-linejoin="round"/>
+  <line x1="22" y1="31" x2="42" y2="31" stroke="#1b1b1c" stroke-width="4" stroke-linecap="round"/>
+  <line x1="22" y1="39" x2="42" y2="39" stroke="#1b1b1c" stroke-width="4" stroke-linecap="round"/>
+  <line x1="22" y1="47" x2="34" y2="47" stroke="#2f9e63" stroke-width="4" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64">
+  <text x="12" y="43" font-family="'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', monospace"
+        font-size="34" font-weight="600" letter-spacing="-0.5" fill="#f4f0e6">agentproto</text>
+  <rect x="222" y="12" width="15" height="34" rx="2" fill="#2f9e63"/>
+</svg>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>agentproto — typography exploration</title>
+<style>
+  :root {
+    --ink: #1b1b1c;
+    --paper: #f4f0e6;
+    --phosphor: #2f9e63;
+    --mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', monospace;
+    --sans: -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --serif: ui-serif, Georgia, serif;
+  }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.5 var(--sans); padding: 32px; }
+  .meta { font-family: var(--mono); font-size: 11px; color: #85857f; margin-bottom: 28px; }
+  .meta b { color: var(--ink); }
+  .option { border: 1px solid #ddd8cc; border-radius: 10px; background: #fff; padding: 28px 32px; margin-bottom: 28px; }
+  .option .tag { font-family: var(--mono); font-size: 11px; color: var(--phosphor); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .option .desc { font-family: var(--mono); font-size: 11px; color: #85857f; margin-bottom: 20px; max-width: 60ch; }
+  .title { font-weight: 700; font-size: 32px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .subtitle { font-size: 16px; color: #55554f; margin: 0 0 14px; }
+  .body { font-size: 14px; max-width: 62ch; margin: 0 0 14px; }
+  .code { font-family: var(--mono); font-size: 12.5px; background: var(--ink); color: var(--paper); padding: 10px 14px; border-radius: 6px; display: inline-block; }
+  .code .prompt { color: var(--phosphor); }
+
+  /* Option A — all mono */
+  .a .title, .a .subtitle, .a .body { font-family: var(--mono); }
+  .a .title { letter-spacing: -0.02em; }
+
+  /* Option B — mono chrome + system sans headings/body */
+  .b .title, .b .subtitle, .b .body { font-family: var(--sans); }
+
+  /* Option C — mono chrome + serif display + sans body */
+  .c .title { font-family: var(--serif); font-weight: 700; }
+  .c .subtitle, .c .body { font-family: var(--sans); }
+</style>
+</head>
+<body>
+  <div class="meta"><b>agentproto</b> — typography exploration, 2026-08-07. Logotype/mono is locked (see README.md); this compares 3 directions for headings/body/UI copy. All system-font-only, zero webfont cost.</div>
+
+  <div class="option a">
+    <div class="tag">Option A — all mono</div>
+    <div class="desc">Wordmark's stack (ui-monospace / SF Mono / Menlo) reused for everything. Fully terminal-native.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+  </div>
+
+  <div class="option b">
+    <div class="tag">Option B — mono chrome + system sans</div>
+    <div class="desc">Mono stays for the logo/code/CLI only. Headings + body switch to system sans (-apple-system / Segoe UI / Roboto) — the standard dev-tool docs pattern.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+  </div>
+
+  <div class="option c">
+    <div class="tag">Option C — mono chrome + serif display + sans body</div>
+    <div class="desc">Big titles in a serif display face (ui-serif / Georgia), body in system sans, mono still for code/logo. More editorial, less generic-SaaS — this is what the brand-kit preview page's own &lt;h1&gt; used informally, before anyone wrote it down.</div>
+    <div class="title">Run any agent, from any CLI.</div>
+    <div class="subtitle">agentproto is the open protocol that lets Claude Code, hermes, and codex talk to the same daemon.</div>
+    <p class="body">A session survives a restart. A worktree isolates a parallel agent. A policy gates a commit on a green test run — durable supervision, not a chat window you have to babysit.</p>
+    <div class="code"><span class="prompt">❯</span> agentproto sessions start --adapter claude-code</div>
+  </div>
+</body>
+</html>

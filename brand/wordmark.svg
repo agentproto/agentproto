@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64">
+  <!-- agentproto wordmark — M3 proportions (locked 2026-08-07): cursor at 125% of cap-height,
+       overshooting the x-height. Convert text to outlines before external upload. -->
+  <text x="12" y="43" font-family="'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', monospace"
+        font-size="34" font-weight="600" letter-spacing="-0.5" fill="#1b1b1c">agentproto</text>
+  <rect x="222" y="12" width="15" height="34" rx="2" fill="#2f9e63"/>
+</svg>

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>agentproto — cli glyph proportion studies</title>
+<style>
+  body { margin: 0; background: #faf8f2; color: #1b1b1c; font: 14px/1.5 -apple-system, sans-serif; padding: 32px; }
+  h1 { font: 700 20px Georgia, serif; margin: 0 0 2px; }
+  .sub { color: #85857f; font-size: 12px; margin-bottom: 22px; font-family: ui-monospace, Menlo, monospace; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: #85857f; margin: 26px 0 8px; }
+  .grid { display: flex; gap: 14px; flex-wrap: wrap; }
+  .v { border: 1px solid #ddd8cc; border-radius: 8px; background: #fff; overflow: hidden; width: 252px; }
+  .v .sw { display: flex; }
+  .v .cell { width: 126px; height: 100px; display: flex; align-items: center; justify-content: center; }
+  .cell.cream { background: #f4f0e6; }
+  .cell.ink { background: #1b1b1c; }
+  .v .favrow { display: flex; gap: 14px; align-items: flex-end; justify-content: center; padding: 8px 0; background: #fff; border-top: 1px solid #eee8da; }
+  .v .label { padding: 5px 10px 7px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: #85857f; border-top: 1px solid #eee8da; }
+  .v.pick { outline: 2px solid #2f9e63; }
+  .wide .cell { width: 340px; }
+  .wide { width: 682px; }
+</style>
+</head>
+<body>
+  <h1>CLI glyph — proportion studies</h1>
+  <div class="sub">chevron ↔ cursor relative sizes · each: cream / ink / 16-32px favicon row · green outline = my pick</div>
+
+  <h2>1 · Cursor size sweep (chevron constant)</h2>
+  <div class="grid" id="g1"></div>
+
+  <h2>2 · Chevron weight sweep (cursor constant)</h2>
+  <div class="grid" id="g2"></div>
+
+  <h2>3 · Structural — dominance &amp; spacing</h2>
+  <div class="grid" id="g3"></div>
+
+  <h2>4 · Wordmark — cursor relative to type</h2>
+  <div class="grid" id="g4"></div>
+
+  <h2>5 · Revision round — X4 wide air, bar matched to chevron height (+ M3 wordmark)</h2>
+  <div class="grid" id="g5"></div>
+  <div class="grid" id="g5b" style="margin-top:14px"></div>
+
+  <h2>6 · Lockups — text + logo (glyph = X4c, cursor = M3) · LOCKED: glyph X4c, wordmark M3</h2>
+  <div class="grid" id="g6"></div>
+
+<script>
+  // Parametric glyph: chevron (stroke S, span from cx0 to tip) + cursor rect (w, h, gap after tip).
+  function glyph(p, dark) {
+    const ink = dark ? "#f4f0e6" : "#1b1b1c";
+    const tip = p.tip ?? 34, back = p.back ?? 17, spread = p.spread ?? 15;
+    const cy = 32, s = p.stroke ?? 7;
+    const cw = p.cw ?? 10, ch = p.ch ?? 24, gap = p.gap ?? 6, rx = Math.min(2, cw / 4);
+    const cx = tip + gap;
+    return '<svg viewBox="0 0 64 64" width="' + (p.px || 64) + '" height="' + (p.px || 64) + '" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M' + back + ' ' + (cy - spread) + ' L' + tip + ' ' + cy + ' L' + back + ' ' + (cy + spread) + '" fill="none" stroke="' + ink + '" stroke-width="' + s + '" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<rect x="' + cx + '" y="' + (cy - ch / 2) + '" width="' + cw + '" height="' + ch + '" rx="' + rx + '" fill="#2f9e63"/></svg>';
+  }
+  function card(name, p, pick, note) {
+    return '<div class="v' + (pick ? " pick" : "") + '">' +
+      '<div class="sw"><div class="cell cream">' + glyph({...p, px: 64}) + '</div>' +
+      '<div class="cell ink">' + glyph({...p, px: 64}, true) + "</div></div>" +
+      '<div class="favrow">' + glyph({...p, px: 16}) + glyph({...p, px: 24}) + glyph({...p, px: 32}) + "</div>" +
+      '<div class="label">' + name + (note ? " — " + note : "") + "</div></div>";
+  }
+
+  // 1 · cursor sweep — chevron fixed (stroke 7, spread 15)
+  document.getElementById("g1").innerHTML = [
+    card("S1 · cursor 8×16", { cw: 8, ch: 16 }, false, "timid; dies at 16px"),
+    card("S2 · cursor 10×24 (locked v1)", { cw: 10, ch: 24 }, false, "current"),
+    card("S3 · cursor 12×30", { cw: 12, ch: 30 }, true, "cursor = chevron height; strongest 16px"),
+    card("S4 · cursor 14×36", { cw: 14, ch: 36 }, false, "cursor starts to dominate"),
+  ].join("");
+
+  // 2 · chevron weight sweep — cursor fixed 12×30
+  document.getElementById("g2").innerHTML = [
+    card("W1 · stroke 5", { stroke: 5, cw: 12, ch: 30 }, false, "elegant, thin at 16px"),
+    card("W2 · stroke 7", { stroke: 7, cw: 12, ch: 30 }, true, "= S3"),
+    card("W3 · stroke 9", { stroke: 9, cw: 12, ch: 30 }, false, "chunky; chevron closes up small"),
+  ].join("");
+
+  // 3 · structural
+  document.getElementById("g3").innerHTML = [
+    card("X1 · cursor-dominant", { stroke: 5, back: 14, tip: 26, spread: 10, cw: 16, ch: 34, gap: 6 }, false, "small prompt, big block — 'the agent is the point'"),
+    card("X2 · equal partners", { stroke: 7, back: 15, tip: 33, spread: 16, cw: 12, ch: 32, gap: 6 }, false, "chevron+cursor same visual weight"),
+    card("X3 · tight pair", { stroke: 7, cw: 12, ch: 30, gap: 3 }, false, "kerned tight — reads as one glyph"),
+    card("X4 · wide air", { stroke: 7, back: 13, tip: 30, cw: 12, ch: 30, gap: 10 }, false, "roomy; loses unity at 16px"),
+  ].join("");
+
+  // 4 · wordmark cursor ratios
+  function wm(hRatio, wPx, pick, name, note) {
+    const fs = 34, baseY = 43, capH = 25; // approximate cap-height box of the mono text
+    const ch = Math.round(capH * hRatio), cy = baseY - capH + (capH - ch) / 2;
+    const svg = (dark) =>
+      '<svg viewBox="0 0 320 64" width="300" xmlns="http://www.w3.org/2000/svg">' +
+      '<text x="12" y="' + baseY + '" font-family="ui-monospace, Menlo, monospace" font-size="' + fs + '" font-weight="600" letter-spacing="-0.5" fill="' + (dark ? "#f4f0e6" : "#1b1b1c") + '">agentproto</text>' +
+      '<rect x="222" y="' + cy + '" width="' + wPx + '" height="' + ch + '" rx="2" fill="#2f9e63"/></svg>';
+    return '<div class="v wide' + (pick ? " pick" : "") + '">' +
+      '<div class="sw"><div class="cell cream">' + svg(false) + '</div><div class="cell ink">' + svg(true) + "</div></div>" +
+      '<div class="label">' + name + " — " + note + "</div></div>";
+  }
+  document.getElementById("g4").innerHTML = [
+    wm(0.75, 11, false, "M1 · cursor 75% of cap-height", "discreet, blog-header safe"),
+    wm(1.0, 13, true, "M2 · cursor = cap-height (locked v1)", "reads as the 11th character"),
+    wm(1.25, 15, false, "M3 · cursor 125%, x-height overshoot", "louder; cursor becomes the subject"),
+  ].join("");
+
+  // 5 · revision — X4's wide spacing, but the bar's VISUAL height matches the chevron
+  // (chevron spans 2*spread + stroke caps ≈ 37px, so ch=36-37, not 30).
+  document.getElementById("g5").innerHTML = [
+    card("X4 · original (bar 30, reads shorter)", { stroke: 7, back: 13, tip: 30, cw: 12, ch: 30, gap: 10 }, false, "for reference"),
+    card("X4b · bar = chevron height (36)", { stroke: 7, back: 13, tip: 30, cw: 12, ch: 36, gap: 10 }, false, "requested"),
+    card("X4c · same, wider bar (14)", { stroke: 7, back: 13, tip: 30, cw: 14, ch: 36, gap: 10 }, false, "heavier presence"),
+    card("X1 · previous pick", { stroke: 5, back: 14, tip: 26, spread: 10, cw: 16, ch: 34, gap: 6 }, false, "for reference"),
+  ].join("");
+  document.getElementById("g5b").innerHTML = [
+    wm(1.25, 15, false, "M3 · wordmark at 125% (requested pairing)", "pairs with the equal-height glyph"),
+  ].join("");
+
+  // 6 · lockups — combining the X4c glyph with the M3 wordmark.
+  const MONO = "ui-monospace, 'SF Mono', Menlo, monospace";
+  function lockup(kind, dark) {
+    const ink = dark ? "#f4f0e6" : "#1b1b1c";
+    const text = (x, y, fs) => '<text x="' + x + '" y="' + y + '" font-family="' + MONO + '" font-size="' + fs + '" font-weight="600" letter-spacing="-0.5" fill="' + ink + '">agentproto</text>';
+    if (kind === "prefix") { // [❯ ▮] agentproto — full glyph as prefix, text plain
+      return '<svg viewBox="0 0 400 64" width="330" xmlns="http://www.w3.org/2000/svg">' +
+        '<path d="M14 19 L27 32 L14 45" fill="none" stroke="' + ink + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<rect x="36" y="16" width="12" height="32" rx="2.5" fill="#2f9e63"/>' +
+        text(64, 43, 34) + "</svg>";
+    }
+    if (kind === "bracket") { // ❯ agentproto ▮ — the glyph's two elements bracket the word
+      return '<svg viewBox="0 0 400 64" width="330" xmlns="http://www.w3.org/2000/svg">' +
+        '<path d="M14 19 L27 32 L14 45" fill="none" stroke="' + ink + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>' +
+        text(40, 43, 34) +
+        '<rect x="252" y="12" width="15" height="34" rx="2" fill="#2f9e63"/></svg>';
+    }
+    if (kind === "stack") { // glyph above, text below (vertical lockup)
+      return '<svg viewBox="0 0 240 120" width="200" xmlns="http://www.w3.org/2000/svg">' +
+        '<g transform="translate(88,4) scale(0.75)">' +
+        '<path d="M13 17 L30 32 L13 47" fill="none" stroke="' + ink + '" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<rect x="40" y="14" width="14" height="36" rx="3" fill="#2f9e63"/></g>' +
+        '<text x="120" y="92" text-anchor="middle" font-family="' + MONO + '" font-size="24" font-weight="600" letter-spacing="-0.5" fill="' + ink + '">agentproto</text></svg>';
+    }
+    // "trail": text + M3 cursor (wordmark alone, reference)
+    return '<svg viewBox="0 0 320 64" width="280" xmlns="http://www.w3.org/2000/svg">' + text(12, 43, 34) +
+      '<rect x="222" y="12" width="15" height="34" rx="2" fill="#2f9e63"/></svg>';
+  }
+  function lcard(kind, name, note, pick, tall) {
+    return '<div class="v wide' + (pick ? " pick" : "") + '">' +
+      '<div class="sw"><div class="cell cream' + (tall ? '" style="height:150px' : "") + '">' + lockup(kind, false) + '</div>' +
+      '<div class="cell ink' + (tall ? '" style="height:150px' : "") + '">' + lockup(kind, true) + "</div></div>" +
+      '<div class="label">' + name + " — " + note + "</div></div>";
+  }
+  document.getElementById("g6").innerHTML = [
+    lcard("bracket", "L1 · bracket — ❯ agentproto ▮", "the word IS the command: prompt before, cursor after; glyph and wordmark become one system", true),
+    lcard("prefix", "L2 · prefix — [❯▮] agentproto", "full glyph as badge, text plain; two greens never compete since text has no cursor"),
+    lcard("trail", "L3 · wordmark alone (M3)", "reference — no chevron"),
+    lcard("stack", "L4 · stacked — glyph over text", "vertical lockup for square placements (og:image, banner tiles)", false, true),
+  ].join("");
+</script>
+</body>
+</html>
