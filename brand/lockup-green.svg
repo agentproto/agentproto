@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" width="280" height="64">
+  <!-- agentproto lockup — GREEN field, tri-color. Phosphor field, ink chevron + wordmark,
+       paper (white) cursor — mirrors icon-green (phosphor cursor inverts to white on green).
+       Convert text to outlines before external upload (system mono stack). -->
+  <rect width="280" height="64" rx="14" fill="#2f9e63"/>
+  <path d="M14 19 L27 32 L14 45" fill="none" stroke="#1b1b1c" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="40" y="43" font-family="'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', monospace"
+        font-size="34" font-weight="600" letter-spacing="-0.5" fill="#1b1b1c">agentproto</text>
+  <rect x="252" y="12" width="15" height="34" rx="2" fill="#f4f0e6"/>
+</svg>
