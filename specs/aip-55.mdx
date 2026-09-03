@@ -165,6 +165,11 @@ catalog](/docs/aip-54): filter by `kind === "pricing"`, resolve each
   out-of-band objects; deriving them from the Price id is impossible.
   Making the requirement structural (validation refuses pay-per-call
   on the stripe rail without `meterId`) prevents the projection hack.
+- **Named `defineProduct`, not `defineAsset`.** AIP-49 already owns
+  `defineAsset`/`AssetDeclaration` for a wallet unit of value — reusing
+  the name inside the same ecosystem would collide. The Stripe
+  Product/Price model is the deliberate mental model: a product
+  *contains* assets, it is not one.
 - **AIP-52's legacy `pricing` block** (`{ebook?, bundle, step?}`) is
   unitless and predates this spec. THIS product's price is
   authoritative; hosts SHOULD warn when a pack's `pricing` diverges
