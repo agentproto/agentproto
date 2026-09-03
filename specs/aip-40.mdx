@@ -1,6 +1,6 @@
 ---
 title: "AIP-40: EXTENSION.md — agentextension/v1 (custom doctype declarations)"
-description: A meta-doctype that lets a workspace declare its own custom doctype as an extension of an existing AIP — adding fields, tightening constraints, overriding defaults, and choosing a path convention — without going through the public AIP process. The runtime (@agentproto/manifest verbs, MCP server, scaffolder) treats local extensions identically to public AIPs.
+description: A meta-doctype that lets a workspace declare its own custom doctype as an extension of an existing AIP — adding fields, tightening constraints, selectively removing non-required parent fields (remove_fields, guarded), choosing which aspects compose per-aspect (inherit), overriding defaults, and choosing a path convention — without going through the public AIP process. The runtime (@agentproto/manifest verbs, MCP server, scaffolder) treats local extensions identically to public AIPs.
 aip: 40
 status: Draft
 type: Meta
@@ -107,6 +107,9 @@ defaults:
   approval: on-mutate
   cost_class: metered
 path_convention: "deals/<slug>/DEAL.md"     # else inherits parent's
+remove_fields: [territory]                  # v2 (2026-09-04) — guarded, see below
+inherit:                                    # v2 (2026-09-04) — per-aspect selection
+  parse: false                              # take schema, supply own parser
 requires: [13, 27]
 ```
 
@@ -125,6 +128,8 @@ requires: [13, 27]
 | `tighten` | object | no | Per-field constraint overrides. Each entry MAY narrow `pattern`, `enum`, `minLength`, `maxLength`, `minimum`, `maximum`. MUST NOT widen — runtimes reject extensions whose tightening is looser than the parent. |
 | `defaults` | object | no | Default values for fields. Applied at `define()` time when the field is omitted. |
 | `path_convention` | string | no | Template like `"deals/<slug>/DEAL.md"`. Tokens: `<slug>` from the doctype's identity field, `<DOCTYPE>` from the extension's slug name part. Defaults to parent's convention. |
+| `remove_fields` | string[] | no | **v2 (added 2026-09-04).** Parent property names this extension REMOVES from the inherited schema. GUARDED: a field in the parent's `required[]` MUST NOT be removed — removing it would invalidate parent-validated instances (mirrors AIP-18's "children MUST NOT remove an inherited status"). Runtimes MUST refuse registration when the guard is violated. Removed fields are ENFORCED away: the composed `define` rejects inputs carrying them. |
+| `inherit` | object | no | **v2 (added 2026-09-04).** Per-aspect selection — `{schema, defaults, parse, path}`, each boolean defaulting to `true`. Omitted entirely = v1's wholesale inheritance. `parse: false` requires the extension to supply its own parser at registration (root-doctype rule). `path: false` makes `path_convention` REQUIRED. `schema: false` composes root-like (add_fields becomes the full schema). |
 | `requires` | number[] | no | AIPs the extension depends on (in addition to parent's). |
 | `metadata` | object | no | Free-form vendor extensions under namespaced keys. |
 
@@ -146,6 +151,28 @@ requires: [13, 27]
 5. **Path convention.** Extension's takes precedence; parent's is the fallback.
 
 6. **Status monotonicity.** Extensions live forever at `Local`. They never move to `Draft`/`Review`/`Final` — those values are reserved for the public registry.
+
+7. **Removal guard (v2, added 2026-09-04).** `remove_fields` MUST NOT
+   name a field in the parent's `required[]`. Removing a required field
+   would invalidate instances the parent already validates. This
+   mirrors AIP-18's composition rule that children MUST NOT remove an
+   inherited status. Hosts that know the parent's schema MUST enforce
+   the guard at registration; the reference runtime takes the parent's
+   required list as `opts.parentRequired` because the manifest layer's
+   JSON Schema is not introspectable from the composition function.
+
+8. **Removed fields are enforced away (v2).** Dropping a field from
+   the composed schema is not enough — the composed `define` MUST
+   reject inputs that carry a removed field, so a stale caller fails
+   loudly instead of silently losing data.
+
+9. **Per-aspect selection (v2).** The four composition aspects —
+   `schema`, `defaults`, `parse`, `path` — are independently selectable
+   via `inherit`. Unspecified aspects default to `true`, so a v1
+   EXTENSION.md composes byte-identically under a v2 runtime. The
+   same dependency rules as root doctypes apply when an aspect is
+   opted out: `parse: false` requires a replacement parser;
+   `path: false` requires `path_convention`.
 
 ### Slug namespace
 
