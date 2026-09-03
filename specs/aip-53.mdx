@@ -1,0 +1,865 @@
+---
+title: "AIP-53: APP.md — app/v1 (agent app bundle + UI surface)"
+description: A markdown + frontmatter format for bundling one or more AIP-42 agents with the AIP-15 workflows they run, plus an optional static UI surface, into one shippable unit — `.agentproto/APP.md` on disk, `.agentapp` as a packaged, checksummed distributable. Defines the emitted bundle layout, the `window.McpApp` bridge contract a UI surface consumes, the tools-allowlist enforcement a host applies to UI-originated calls, and the three runtime modes (host / bridge / standalone) a UI's client library resolves between.
+aip: 53
+status: Draft
+type: Schema
+created: 2026-08-13
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 14, 15, 34, 42]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/app-kit
+layer: surfaces
+package: "@agentproto/app-kit"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 53 |
+| Title | APP.md — app/v1 (agent app bundle + UI surface) |
+| Status | Draft |
+| Type | Schema |
+| Domain | apps.sh |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-42](/docs/aip-42) (AGENT) |
+| Reference Impl | [`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit) |
+
+## Abstract
+
+`app/v1` names and fixes the contract for an **app**: the smallest
+shippable unit that couples one or more [AGENT.md (AIP-42)](/docs/aip-42)
+agents with the [WORKFLOW.md (AIP-15)](/docs/aip-15) workflows they run,
+optionally alongside a static UI surface, into a single bundle a host can
+install, run, and expose. On disk an app is a directory carrying
+`.agentproto/APP.md` — a root index manifest listing every agent/workflow
+ref the app bundles — plus the referenced `AGENT.md` / `WORKFLOW.md`
+files themselves and, when the app ships one, a `ui/` static surface.
+Packaged for distribution, an app becomes a single `.agentapp` file: a
+tar.gz with a `manifest.json` carrying an aggregate SHA-256 over every
+bundled file's contents.
+
+This AIP also fixes the **UI surface contract**: the static-file layout
+under `.agentproto/ui/`, the `window.McpApp` bridge object a host injects
+so the UI can call tools, the tools allowlist a host enforces against
+every UI-originated call, and the three runtime modes (`host`, `bridge`,
+`standalone`) a UI's client library resolves between so the same
+`index.html` runs unmodified whether embedded in an MCP-Apps panel,
+served standalone by the reference CLI, or opened bare with no daemon at
+all.
+
+## Motivation
+
+Before this AIP, "an agent that does something end-to-end and shows you
+the result" had no canonical shape. Three things existed in isolation:
+
+1. **Agents and workflows composed only by convention.** [AGENT.md
+   (AIP-42)](/docs/aip-42) declares a `workflows[]` ref list and
+   [WORKFLOW.md (AIP-15)](/docs/aip-15) declares `kind: agent` steps that
+   ref an agent back — but nothing validated that the two sides of that
+   reference actually resolved against each other inside one shipped
+   bundle. A workflow could reference an agent the bundle never included;
+   an agent could list a workflow nobody shipped.
+
+2. **No shippable unit.** A multi-agent capability (search jobs, tailor a
+   CV, hand back a dossier) lived as a scatter of files a host had to
+   assemble by hand — there was no single directory a host could point
+   `install` at and get a validated, runnable whole.
+
+3. **UI surfaces had no bridge contract.** Several daemon-side app UIs
+   shipped ad hoc (`packages/runtime/src/*-app.ts` in the reference
+   implementation: session panels, a terminal panel, an agents overview)
+   each hand-wiring its own way of calling back into the daemon. Nothing
+   named the shape of that callback object, so every UI reinvented
+   `window.McpApp`-equivalent plumbing, and nothing enforced which tools
+   a given UI was allowed to call — an embedded HTML surface had the same
+   reach as the agent that installed it.
+
+4. **No portable package format.** Handing an app to another host or
+   another machine meant copying a directory by hand, with no integrity
+   check and no metadata describing what was inside.
+
+`app/v1` fixes all four: the **attachment invariant** (agents and
+workflows must reference each other, checked at bundle-definition time),
+the **bundle layout** (`.agentproto/agents/<id>/AGENT.md`,
+`.agentproto/workflows/<id>/WORKFLOW.md`, `.agentproto/ui/`, plus
+optional `.agentproto/artifact/` and `.agentproto/skill/` surfaces), the
+**`.agentapp` package format** (a checksummed, portable single file), and
+the **UI bridge contract** (`window.McpApp`, the tools allowlist, the
+three runtime modes). It composes AIP-42 and AIP-15 rather than
+replacing either — an app is a cross-linked collection of already-valid
+agent and workflow handles, not a new agent or workflow primitive.
+
+## Design principles
+
+1. **Bundle, don't redefine.** An app's agents and workflows are
+   ordinary `defineAgent` / `defineWorkflow` handles. `defineApp` adds
+   exactly one new invariant — that the two sides reference each other —
+   and otherwise carries the handles through unchanged. Field-level
+   validation is AIP-42's and AIP-15's job, not this AIP's.
+
+2. **The attachment invariant is bidirectional.** Every agent's
+   `workflows[]` ref MUST resolve to a workflow the app bundles, and
+   every bundled workflow MUST be referenced by at least one agent's
+   `workflows[]`. A dangling ref and an orphaned workflow are both
+   errors — "attached" means checkable both ways, not merely "shipped in
+   the same folder."
+
+3. **An agentproto-owned base, not a shared namespace.** Emitted
+   manifests live under `.agentproto/`, never under the bare `.agents/`
+   convention [AGENT.md (AIP-42)](/docs/aip-42) uses for standalone
+   agents. An app's agents don't squat the shared collection root a
+   workspace's own hand-authored agents live in.
+
+4. **The UI is a static surface, not a server.** `ui.html` is a single
+   document `emit` writes verbatim to `.agentproto/ui/index.html`. There
+   is no build step in the contract itself — a hand-written single-file
+   UI is first-class. A `ui/` **source** project (Vite, TypeScript) that
+   *builds into* `.agentproto/ui/` is a separate, optional convention
+   (see [The `ui/` source-project convention](#the-ui-source-project-convention)),
+   not a requirement.
+
+5. **Every UI call is allowlisted, never ambient.** A UI surface never
+   gets the reach of the agent that installed the app. Every tool a UI
+   may call is named explicitly in `ui.tools[]` at author time; a host
+   MUST reject any call to a tool id absent from that list before
+   dispatch, regardless of what the UI's JavaScript asks for.
+
+6. **The bridge degrades gracefully, never silently wrong.** A UI's
+   client library resolves, in order, to `host` mode (an injected
+   `window.McpApp`), `bridge` mode (a same-origin dev-proxy route), or
+   `standalone` mode (caller-supplied mock handlers) — and never throws
+   merely because no host is present. It only rejects when a *present*
+   bridge itself fails, which is a real error rather than an absent one.
+
+7. **Packaging is verifiable, not just portable.** A `.agentapp` carries
+   an aggregate SHA-256 over every bundled file's contents, computed in a
+   fixed sorted order. Unpacking recomputes and compares before trusting
+   the contents — a corrupted or tampered bundle is refused, not
+   silently installed.
+
+## Specification
+
+### File location
+
+An app directory is any directory containing a valid `.agentproto/APP.md`:
+
+```
+job-application-kit/
+  .agentproto/
+    APP.md                          ← this AIP — root index, always present
+    agents/
+      job-scout/AGENT.md            ← AIP-42, one per bundled agent
+      job-tailor/AGENT.md
+    workflows/
+      job-hunt/WORKFLOW.md          ← AIP-15, one per bundled workflow
+    ui/
+      index.html                    ← optional — the UI surface (this AIP)
+  base-cv.json                      ← app-specific data, outside .agentproto/
+  dossiers/…
+```
+
+When the app has a home [WORKSPACE (AIP-34)](/docs/aip-34), its root
+manifest is written as a sibling of `.agentproto/`:
+
+```
+<dir>/WORKSPACE.md                  ← AIP-34, only when the app declares `workspace`
+<dir>/.agentproto/…
+```
+
+Authors do not hand-author this layout directly in the common case — it
+is what `defineApp({...}).emit(dir)` writes (see
+[Emitted layout](#emitted-layout)). Hand-editing an emitted `APP.md` (or
+its referenced `AGENT.md` / `WORKFLOW.md` files) is legal as long as the
+result still round-trips through the frontmatter shape below and the
+attachment invariant.
+
+### The `defineApp` standard signature
+
+```ts
+defineApp(definition: AppDefinition): AppHandle
+
+interface AppDefinition {
+  agents:        (AgentEntry | AgentHandle)[]   // REQUIRED, non-empty
+  workflows?:    WorkflowHandle[]
+  attach?:       DoctypeHandle[]                  // any other AIP handle to carry along
+  workspace?:    WorkspaceHandle | WorkspaceShorthand
+
+  id?:           string                           // machine id — absent = anonymous bundle
+  name?:         string
+  version?:      string                            // default "0.1.0" when `id` is set
+  description?:  string                             // becomes the APP.md body
+  requires?:     string[]                            // app ids this app depends on
+
+  ui?:           AppUiDefinition
+  artifact?:     AppArtifactSurface
+  skill?:        AppSkillSurface
+  artifacts?:    AppArtifactDecl[]
+  dev?:          AppDevDefinition
+}
+
+interface AgentEntry {
+  agent: AgentHandle       // an AIP-42 defineAgent() handle
+  body?: string            // the AGENT.md body / system prompt (composed if absent)
+}
+
+interface AppUiDefinition {
+  html:          string                    // the full document — required
+  title?:        string
+  description?:  string
+  tools?:        string[]                   // the ui_tool_call allowlist
+  port?:         number                      // preferred local port hint for `app serve`
+  csp?: {
+    connectDomains?:  string[]
+    resourceDomains?: string[]
+  }
+}
+```
+
+`agents` MUST be a non-empty array. Each entry is either a bare
+`AgentHandle` (no body — the prompt composes from the agent's structured
+fields) or an `AgentEntry` pairing the handle with the `body` string that
+becomes its `AGENT.md`'s body (its system prompt) — [AIP-42](/docs/aip-42)
+frontmatter is `.strict()` and carries no `systemPrompt` field, so the
+free-text prompt only ever lives in an `AGENT.md` body.
+
+`workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`, and
+`workspace` are all optional. An app with agents and nothing else is
+still a conforming app.
+
+### Conformance rules
+
+1. **Non-empty agents.** `agents` MUST contain at least one entry. An
+   app with zero agents is not a conforming `AppDefinition` — `defineApp`
+   MUST refuse it.
+
+2. **Unique agent ids, unique workflow ids.** Two bundled agents MUST NOT
+   share an `id`; two bundled workflows MUST NOT share an `id`.
+   `defineApp` MUST refuse a definition that violates either.
+
+3. **The attachment invariant, both directions.** For every agent in the
+   bundle, every ref in that agent's `workflows[]` MUST resolve to the
+   `id` of a workflow the same app bundles. For every workflow the app
+   bundles, at least one agent's `workflows[]` MUST reference it.
+   `defineApp` MUST refuse a definition violating either direction — a
+   dangling ref (agent → unbundled workflow) or an orphan (bundled
+   workflow → no referencing agent) are both non-conforming.
+
+4. **`id` non-empty when present.** `id` MUST be a non-empty string when
+   set. Setting `id` is what makes the app *installable/discoverable* —
+   `emit` writes it into `APP.md`'s identity block, and a host's install
+   path (`app_install`) refuses a handle with no `id`. An app MAY omit
+   `id` and remain a valid, emittable, runnable-in-process bundle; it
+   simply cannot be installed by id.
+
+5. **`ui.html` non-empty when `ui` is present.** `defineApp` MUST refuse
+   a `ui` block whose `html` is missing or empty.
+
+6. **`dev.launch` non-empty when `dev` is present.** Same shape of rule
+   for the optional dev-launch config.
+
+7. **`artifact.path` / `skill.path` non-empty when present**, and both
+   MUST be absolute filesystem paths — `emit` copies from them at write
+   time and a relative path has no defined base to resolve against.
+
+8. **Version default.** When `id` is set and `version` is omitted,
+   `defineApp` MUST default `version` to `"0.1.0"`. An anonymous bundle
+   (no `id`) carries no default version.
+
+9. **No I/O at `defineApp` time.** Constructing an `AppHandle` via
+   `defineApp` MUST NOT perform filesystem or network I/O. I/O is
+   confined to `emit(dir)` (write) and `loadAppHandle(dir)` (read) — the
+   mirror pair every doctype in the AIP series keeps separate from its
+   pure `defineX` constructor.
+
+### Emitted layout
+
+`emit(dir)` (equivalently, a conforming host's install/write path) MUST
+write:
+
+```
+<dir>/WORKSPACE.md                                  (only when `workspace` is set)
+<dir>/.agentproto/agents/<id>/AGENT.md               (one per agent — id with any
+                                                       `@owner/` prefix stripped)
+<dir>/.agentproto/workflows/<wf.id>/WORKFLOW.md      (one per workflow — a workflow
+                                                       MAY be referenced by more
+                                                       than one agent, so it is
+                                                       written once and shared)
+<dir>/.agentproto/ui/index.html                      (only when `ui` is set)
+<dir>/.agentproto/artifact/index.html                (only when `artifact` is set —
+                                                       copied from `artifact.path`)
+<dir>/.agentproto/skill/                             (only when `skill` is set —
+                                                       copied recursively from
+                                                       `skill.path`, which MUST
+                                                       contain a SKILL.md)
+<dir>/.agentproto/APP.md                             (root index — ALWAYS written)
+```
+
+Every `AGENT.md` / `WORKFLOW.md` is the handle's frontmatter serialized
+to YAML plus the entry's body (agent) or description (workflow) as the
+markdown body. Because a `defineWorkflow` handle is pure data, its
+`WORKFLOW.md` needs no separate `entry:` module — the manifest *is* the
+workflow.
+
+`APP.md`'s frontmatter is:
+
+```yaml
+schema: app/v1
+id: "@owner/app-id"                # only when `id` is set
+name: "Human name"                 # only when `name` is set
+version: "0.1.0"                   # always present — defaulted per rule 8
+description: "…"                   # only when `description` is set
+agents:
+  - id: "@owner/agent-id"
+    path: .agentproto/agents/agent-id/AGENT.md
+workflows:
+  - id: workflow-id
+    path: .agentproto/workflows/workflow-id/WORKFLOW.md
+workspace: "@owner/workspace-id"   # only when `workspace` is set
+requires: ["@owner/other-app"]     # only when `requires` is set
+ui:                                 # only when `ui` is set
+  path: .agentproto/ui/index.html
+  title: "…"
+  description: "…"
+  tools: [tool_id, ...]
+  port: 4173
+  csp: { connectDomains: [...], resourceDomains: [...] }
+artifact: { path: .agentproto/artifact/index.html, title: "…", description: "…" }
+skill: { path: .agentproto/skill, title: "…", description: "…" }
+artifacts: [{ type: "…", description: "…" }]
+dev: { launch: [{ name: "…", runtimeExecutable: "…", runtimeArgs: [...], port: 4173, url: "…" }] }
+```
+
+`agents[]` and `workflows[]` entries are `{ id, path }` refs, `path`
+relative to `dir`. The body of `APP.md` is the app's `description`
+(empty string when absent). Every field the definition omitted MUST be
+omitted from the written frontmatter — the emitter MUST NOT write
+`undefined`/`null` placeholders.
+
+### Loading (`loadAppHandle`)
+
+A conforming loader reading `<dir>/.agentproto/APP.md` back into an
+`AppHandle` MUST:
+
+1. Reject frontmatter whose `schema` is not exactly `"app/v1"`.
+2. Reject `agents`/`workflows` frontmatter that is not an array of
+   `{ id: string, path: string }`.
+3. Resolve every `{ id, path }` ref against `dir` (relative paths are
+   joined to `dir`; absolute paths pass through) and load each
+   `AGENT.md` via the AIP-42 manifest reader and each `WORKFLOW.md` via
+   the AIP-15 loader.
+4. When `workspace` names an id, read the sibling `<dir>/WORKSPACE.md`
+   and parse it via the AIP-34 manifest reader.
+5. Re-run the loaded agents/workflows through the same construction path
+   as `defineApp` — so the attachment invariant (rule 3, above)
+   re-validates on every load exactly as it did at authoring time. A
+   hand-edited `APP.md` whose refs drifted from its `AGENT.md` /
+   `WORKFLOW.md` files MUST fail to load, the same way a bad
+   `defineApp({...})` call fails to construct.
+
+A loader failure MUST name the offending path (which file, which ref) —
+a bare "invalid app" is not sufficient diagnostic detail.
+
+### Example — minimal, from a shipped app
+
+The following is the reference implementation's own
+`job-application-kit` example app (abridged), rendered per the emitted
+layout above:
+
+```md
+---
+schema: app/v1
+id: '@agentproto/job-application-kit'
+name: Job Application Kit
+version: 0.1.0
+description: >-
+  Search job boards, rank results against a candidate profile, tailor CVs and
+  cover letters per top match.
+agents:
+  - id: '@agentproto/job-scout'
+    path: .agentproto/agents/job-scout/AGENT.md
+  - id: '@agentproto/job-tailor'
+    path: .agentproto/agents/job-tailor/AGENT.md
+workflows:
+  - id: job-hunt
+    path: .agentproto/workflows/job-hunt/WORKFLOW.md
+ui:
+  path: .agentproto/ui/index.html
+  title: Job Application Kit
+  tools:
+    - app_run
+    - app_status
+    - app_stop
+    - agent_output
+    - app_list
+    - app_data_read
+    - app_data_write
+    - app_data_list
+    - app_data_migrate
+---
+
+Search job boards, rank results against a candidate profile, tailor CVs and
+cover letters per top match.
+```
+
+`job-scout`'s `AGENT.md` frontmatter carries `workflows: [{ ref: job-hunt }]`;
+`job-hunt`'s `WORKFLOW.md` has one `kind: agent` step referencing
+`@agentproto/job-scout` and one referencing `@agentproto/job-tailor` — the
+attachment invariant holds in both directions.
+
+## The `.agentapp` package format (`agentapp/v1`)
+
+An emitted app directory is the *installed* form. `.agentapp` is the
+*distributable* form: one self-contained, checksummed file — packaged and
+unpacked by the reference `agentproto app pack` / `agentproto app unpack`
+CLI verbs.
+
+### `pack`
+
+Given an app directory `<appDir>` containing a valid
+`.agentproto/APP.md`, `pack` MUST:
+
+1. Parse `APP.md`'s frontmatter into bundle metadata: `id` (falling back
+   to a `slug` field, then the literal string `"app"`), `version`
+   (falling back to `"0.1.0"`), `name`, `description`, the `agents[]` /
+   `workflows[]` id lists, and the basenames of any `ui` / `artifact` /
+   `skill` paths.
+2. Walk the entire `<appDir>` tree and collect every regular file as a
+   path relative to `<appDir>`, **skipping any directory named
+   `node_modules` or `.git` at any depth** — a `ui/` *source* project
+   ships both, and neither belongs in a shipped app.
+3. Sort the collected file list lexicographically by path.
+4. Compute one SHA-256 hash over the **concatenated bytes of every
+   file's contents, fed in the sorted order** — a single aggregate
+   digest, not a per-file manifest of digests.
+5. Write a `manifest.json` (schema below) at the bundle root.
+6. Tar (`tar -czf`) the app directory's **contents** (not the directory
+   itself, so extraction yields `manifest.json` + `.agentproto/` + any
+   loose files at the top level) into the output `.agentapp` file.
+   Without an explicit output path, the default is
+   `<safe-id>-<version>.agentapp` in the current directory, where
+   `<safe-id>` strips a leading `@` and replaces every run of characters
+   outside `[A-Za-z0-9._-]` with `-`.
+
+The `manifest.json` schema:
+
+```ts
+interface AgentAppManifest {
+  format:            "agentapp/v1"
+  id:                string
+  name?:             string
+  version:           string
+  description?:      string
+  agents:            string[]        // agent ids
+  workflows:         string[]        // workflow ids
+  ui?:               string[]        // basenames of ui-related files, if any
+  files:             string[]        // every bundled file's path, sorted
+  fileCount:         number
+  totalSize:         number          // bytes, sum of every file's size
+  sha256:            string          // the aggregate digest (rule 4 above)
+  createdAt:         string          // ISO-8601 timestamp
+  agentprotoVersion: string          // compatibility range, e.g. ">=0.1.0"
+}
+```
+
+`manifest.json` itself is excluded from `files[]` and from the SHA-256
+computation — it describes the bundle, it is not part of it.
+
+### `unpack`
+
+Given a `.agentapp` file, `unpack` MUST:
+
+1. Extract the archive to a fresh temporary directory.
+2. Require a `manifest.json` at its root; a bundle without one is not a
+   valid `.agentapp` and MUST be refused.
+3. Require `manifest.format === "agentapp/v1"`; any other value MUST be
+   refused with the actual format named in the error.
+4. Recompute the aggregate SHA-256 over the files listed in
+   `manifest.files`, in the order listed, and compare against
+   `manifest.sha256`. **A mismatch MUST refuse the unpack** — the bundle
+   is corrupted or was tampered with, and unpack MUST NOT silently
+   restore it anyway.
+5. Only once the digest verifies, remove `manifest.json` from the
+   extracted contents (a bundle artifact, not part of the app) and move
+   the remaining contents into the destination directory. Without an
+   explicit destination, the default is `<safe-id>-<version>` in the
+   current directory.
+
+## The UI surface contract
+
+### Static layout
+
+A UI surface is a static file tree rooted at `.agentproto/ui/`, with
+`index.html` as its entry point. Conformance rules:
+
+1. **`index.html` is the entry point.** A conforming host serving a UI
+   surface MUST treat `.agentproto/ui/index.html` as the document to
+   return for the root path and for any directory-style request.
+2. **Asset paths MUST be relative.** A UI ships as a portable static
+   tree — it does not know in advance whether it will be served at
+   `http://127.0.0.1:<port>/`, mounted under a host panel's own path
+   scheme, or opened via `file://`. Absolute root-relative paths
+   (`/app.js`) are non-conforming; `./app.js` or `app.js` are required.
+3. **No server-side routing.** A UI surface is static files, not an
+   application server — there is no route table for a host to consult.
+   A UI that wants client-side navigation MUST use hash-based routing
+   (`#/jobs/42`) rather than the History API's `pushState`, since a
+   static file server has no fallback rule to reroute a deep-linked
+   path back to `index.html`.
+4. **A `ui/` *source* directory is a distinct, optional thing** from the
+   emitted `.agentproto/ui/` — see
+   [The `ui/` source-project convention](#the-ui-source-project-convention).
+
+### The `window.McpApp` bridge
+
+A conforming host that renders a UI surface — embedding it in a panel,
+or serving it standalone — MUST inject a global `window.McpApp` object
+of this shape before the page's own scripts run:
+
+```ts
+interface McpAppGlobal {
+  connect(): Promise<McpAppBridge>
+}
+
+interface McpAppBridge {
+  callTool(name: string, args?: Record<string, unknown>): Promise<unknown>
+  updateModelContext(ctx: Record<string, unknown>): Promise<unknown>
+  openLink(url: string): Promise<unknown>
+  onTeardown(cb: () => void): void
+}
+```
+
+- `callTool(name, args)` invokes a tool by id and resolves with the raw
+  MCP `tools/call` result envelope (`{ isError?, structuredContent?,
+  content? }`) — unwrapping is the UI client library's job (see
+  [Result unwrapping](#result-unwrapping)), not the bridge's.
+- `updateModelContext(ctx)` lets the UI push context back to whatever
+  model/session is driving the host. A host with nothing to persist it
+  to MUST treat this as a no-op, not an error.
+- `openLink(url)` opens an external URL. A conforming implementation
+  MUST NOT navigate the UI's own frame away from the app — it opens a
+  new context (tab/window).
+- `onTeardown(cb)` registers a callback fired when the UI's session
+  ends (page unload, or the host tearing down the panel).
+
+A UI author MUST NOT assume `window.McpApp` is present — it is absent
+outside `host` mode. Either of two conforming access patterns satisfies
+this: a client library implementing the resolution order below, or an
+explicit presence check with graceful degraded rendering when the bridge
+is missing (the hand-written single-file pattern).
+
+### Runtime modes
+
+A UI surface's client library resolves a connection through exactly
+three modes, in this order, and MUST NOT throw merely because a mode
+isn't available — only `standalone` failing to find a handler for a
+called tool, or a *present* bridge itself failing, are real errors:
+
+| Mode | When | How `callTool` resolves |
+|---|---|---|
+| `host` | `window.McpApp` is already present (an MCP-Apps panel injected it, or a conforming `serve` verb did) | Passed straight through to the injected bridge. Terminal — `host` mode MUST NOT downgrade. |
+| `bridge` | No `window.McpApp`, but a same-origin `POST /__agentproto/tool-call` route exists | The library POSTs `{ name, args }` to the route and unwraps the JSON response as the MCP result envelope. |
+| `standalone` | Neither of the above | The library dispatches to a caller-supplied mock handler for the named tool; a tool with no registered handler rejects. |
+
+Resolution from `bridge` to `standalone` MUST be lazy and optimistic: a
+client library MUST NOT perform an upfront network probe to decide
+between them. It constructs a `bridge`-mode connection immediately and
+only discovers whether the route is real on the **first** `callTool` —
+a network failure, an HTTP 404, or a non-JSON response on that first
+call permanently downgrades the connection to `standalone` and replays
+that same call against the standalone handlers. Once a `bridge`
+connection has had one call **succeed**, a later failure on that same
+connection MUST be treated as a real error (the route existed and then
+broke) — not a fresh signal to downgrade.
+
+`host` mode connections are terminal from the start: a present
+`window.McpApp` is authoritative and a rejection from its own
+`connect()` MUST propagate as a real error, not trigger a fallback.
+
+### Result unwrapping
+
+A client library's `callTool<T>(name, args)` MUST unwrap the raw MCP
+`tools/call` envelope by this precedence:
+
+1. `envelope.isError === true` → reject with an error naming the tool
+   and mode, carrying the concatenated text of every `content` block as
+   detail.
+2. `envelope.structuredContent` present → return it as `T`.
+3. Else, if `envelope.content` is a non-empty array, take the first
+   entry's `text`: `JSON.parse` it and return the parsed value if it
+   parses, else return the raw text.
+4. Else (no content) → return an empty object.
+
+This precedence is a **frozen wire contract**: `structuredContent`
+always wins over `content` when both are present, and a single text
+block that happens to be JSON is transparently parsed. A caller
+supplies the expected result shape via the type parameter; the library
+does not runtime-verify it matches.
+
+### The dev-bridge route
+
+The reserved route `POST /__agentproto/tool-call` is the same-origin
+(`bridge`-mode) surface a UI's client library targets by default. A
+conforming server exposing this route MUST:
+
+1. Accept a JSON body `{ name: string, args?: object }`; reject any
+   other shape with HTTP 400.
+2. Forward `{ name, arguments: args ?? {} }` as an MCP `tools/call`
+   through its own connection to the daemon (or equivalent tool
+   dispatcher).
+3. Return the raw MCP result envelope with HTTP 200 — **including** when
+   `isError` is true. An `isError` result is a resolved call, not a
+   transport failure; it MUST NOT be mapped to a non-2xx status, so a
+   UI's unwrapping code (rule 1, above) behaves identically whether the
+   error arrived via `postMessage` (a host panel) or via this HTTP
+   route.
+4. Return a non-2xx status only for a genuine transport/dispatch
+   failure (bad request shape → 400; the daemon/tool-dispatcher
+   unreachable → 502; the tool call itself threw → 502) — never for a
+   well-formed `isError` result.
+
+### Tools allowlist enforcement
+
+Every UI-originated tool call MUST be checked against the allowlist the
+app declared at author time (`ui.tools[]`) **before** dispatch. A
+conforming gateway (the reference implementation's `app_tool_call`
+MCP tool, and its HTTP twin) MUST:
+
+1. Resolve the installed app by id; refuse with an error if the app
+   isn't installed or has no `ui` block.
+2. Reject the call — without dispatching it — if the requested tool id
+   is absent from that app's `ui.tools[]`, naming the tool id and the
+   full allowlist in the error.
+3. Only once allowlisted, dispatch: a tool id prefixed
+   `imported:<alias>/<toolName>` MUST route through the named imported
+   MCP server; every other id dispatches through the host's own
+   registered tools.
+
+This is the enforcement boundary that makes rule 5 of
+[Design principles](#design-principles) real: the UI's *reach* is
+exactly `ui.tools[]`, never the installing agent's full tool surface,
+and the check happens on every call — there is no session-level or
+one-time grant that widens it.
+
+### The `ui/` source-project convention
+
+Separate from the *emitted* `.agentproto/ui/` static tree, an app
+directory MAY additionally contain a `ui/` **source** project — a Vite +
+TypeScript (or equivalent) project that *builds into*
+`.agentproto/ui/`. This is a convention the reference tooling supports,
+not a requirement this AIP imposes on every app:
+
+- A hand-written single-file `.agentproto/ui/index.html` with no `ui/`
+  source project and no build step remains fully first-class — the
+  common case for a simple dashboard.
+- When a `ui/` source project exists (`<appDir>/ui/package.json` with a
+  `"scripts.build"`), the reference `agentproto app build` verb runs it
+  and the output lands in `.agentproto/ui/`. A `ui/` project with no
+  build script, or no `ui/` project at all, is a no-op success for
+  `build` — not an error.
+- When the `ui/` project additionally has a `"scripts.dev"`, the
+  reference `agentproto app dev` verb runs that dev server directly
+  (Vite HMR, its own port) alongside a **bridge-only** HTTP server (no
+  static files, just the `/__agentproto/tool-call` route with real CORS
+  headers, since the dev server and the bridge are different origins).
+  A `ui/` project without a dev script has nothing to hot-reload — the
+  static build is served with `agentproto app serve` instead.
+
+A `ui/` source tree's `node_modules/` and `.git/` are excluded from
+`.agentapp` packaging (see [`pack`](#pack)) regardless of whether the
+project ships a build step — they are never part of the shipped app.
+
+## Reference tooling (informative)
+
+The reference implementation exposes an app's lifecycle through five CLI
+verbs under `agentproto app <verb>`, none of which is itself normative
+(the wire/file contracts above are); they are named here because the
+UI-mode table and the dev-bridge route above assume their existence:
+
+| Verb | Role |
+|---|---|
+| `pack` | Directory → `.agentapp` (see [`pack`](#pack)) |
+| `unpack` | `.agentapp` → directory, SHA-256 verified (see [`unpack`](#unpack)) |
+| `serve` | Serves `.agentproto/ui/` standalone with an injected `host`-mode bridge to a running daemon's MCP endpoint — port resolution: `--port` > `APP.md`'s `ui.port` hint > OS-assigned |
+| `build` | Builds a `ui/` source project into `.agentproto/ui/` (no-op success when there's nothing to build) |
+| `dev` | Runs a `ui/` source project's own dev server plus a bridge-only server for live `window.McpApp` calls |
+
+The daemon-side install/run surface (`app_install`, `app_run`,
+`app_status`, `app_stop`, `app_apply` / `app_unapply`, `app_tool_call`,
+`app_catalog`, `app_artifact_get`, `app_skill_get`) is likewise
+reference behavior built on top of the file contract this AIP fixes,
+not itself part of the normative surface — a conforming alternative host
+MAY expose a different install/run API as long as it honors the
+allowlist enforcement and bridge contract above for any UI it renders.
+
+## Rationale
+
+**Why compose AIP-42/AIP-15 rather than define a new agent-collection
+primitive?** [ASSEMBLY (AIP-24)](/docs/aip-24) already names "a
+collective of agents." An app is a narrower, different concern: not how
+agents coordinate at runtime, but how a *shippable, installable unit*
+packages agents with the workflows they run and (optionally) a UI. An
+app's agents don't need an ASSEMBLY's voting/council/hierarchy modes —
+they need to round-trip through disk as one bundle a host can validate
+and hand to a user. Reusing AIP-42/AIP-15 handles directly, rather than
+re-declaring agent/workflow shape inside APP.md, keeps the two concerns
+orthogonal: an app can bundle agents that also participate in an
+ASSEMBLY elsewhere.
+
+**Why the attachment invariant in both directions?** A one-directional
+check (agent → workflow) would allow orphaned workflows to accumulate
+silently in a bundle nobody's agent actually drives — dead weight that
+still ships in every `.agentapp`. Checking the reverse direction too
+(every bundled workflow has a referencing agent) keeps a bundle's
+contents legible: everything present is reachable from an agent.
+
+**Why is `.agentapp`'s checksum an aggregate hash over sorted
+concatenated bytes, not a per-file manifest of digests?** A per-file
+manifest (`{path: sha256}` for every file) is more granular — it can
+name *which* file changed on a mismatch — but for an app-sized bundle
+(dozens of files, not thousands) that granularity isn't worth the
+larger manifest and the extra hashing bookkeeping. One aggregate digest
+over a fixed sort order is simpler to implement correctly on both
+sides and is sufficient to answer the one question `unpack` needs
+answered: is this bundle exactly what `pack` produced.
+
+**Why `node_modules`/`.git` exclusion instead of a `.agentappignore`
+file?** A `ui/` source project's `node_modules` can be gigabytes and is
+always regenerable (`npm install`); a `.git` directory is never part of
+a *shipped* app under any circumstance. Both are unconditional excludes
+because there is no scenario where either belongs in a `.agentapp` —
+adding a general ignore-file mechanism for a two-item, always-true
+exclusion list is unwarranted complexity. A future revision MAY add
+general ignore rules if a real second case emerges.
+
+**Why does `host` mode never downgrade but `bridge` mode does?** A
+present `window.McpApp` is an explicit signal from a host that chose to
+inject it — if its `connect()` then fails, that is the host
+malfunctioning, not "no bridge here." Silently falling back to
+`standalone` in that case would hide a real host-side bug behind mock
+data. `bridge` mode, by contrast, starts from *no* signal either way
+(no injected global, just an assumption that the well-known route might
+exist) — so discovering it doesn't is exactly the "no bridge, use
+standalone" case the mode ladder exists to handle gracefully.
+
+**Why must `isError` results return HTTP 200 from the dev-bridge
+route?** The whole point of the runtime-mode contract is that a UI's
+`callTool` unwrapping code behaves identically across `host` and
+`bridge` mode. A host panel's `postMessage`-based `tools/call` reply
+*resolves* (doesn't reject the transport promise) even when the tool
+itself reports `isError: true` — only [Result
+unwrapping](#result-unwrapping) rule 1 turns that into a rejected
+`callTool` promise, at the *library* layer, not the transport layer.
+Mapping `isError` to a non-2xx HTTP status in `bridge` mode would make
+the two mode's error-handling diverge exactly where they need to agree.
+
+## Backward compatibility
+
+Not applicable — this AIP introduces a new spec canonizing bundle,
+package, and UI-bridge conventions that already shipped as working code
+(`@agentproto/app-kit`'s `defineApp`/`emitApp`/`loadAppHandle`, the CLI's
+`app pack`/`unpack`/`serve`/`build`/`dev` verbs, `@agentproto/app-client`'s
+`connectMcpApp`, and the daemon's `app_*` tool family). No prior AIP
+claimed the `app/v1` or `agentapp/v1` schema strings or the
+`.agentproto/` bundle layout, so there is nothing to migrate from or
+supersede.
+
+## Security considerations
+
+- **The UI tools allowlist is the primary security boundary.** A UI
+  surface runs arbitrary, often third-party-authored, JavaScript inside
+  a page the host renders. Without allowlist enforcement (see [Tools
+  allowlist enforcement](#tools-allowlist-enforcement)), that JavaScript
+  would inherit the full tool reach of whatever installed the app. Hosts
+  MUST enforce the allowlist on every call, server-side — a
+  client-side-only check is not a boundary, since the page's own script
+  is exactly what a hostile or compromised UI controls.
+
+- **`imported:<alias>/<toolName>` widens the surface a UI can reach into
+  an external MCP server.** A host wiring `callImportedTool` MUST apply
+  the same allowlist discipline to imported-tool ids as to native ones —
+  `ui.tools[]` is the single allowlist for both namespaces, not two
+  separate trust levels.
+
+- **A CORS-permissive dev bridge is a local-only surface.** `app serve`'s
+  and `app dev`'s `Access-Control-Allow-Origin: *` is deliberate for a
+  bare local-loopback tool-call route with no cookies or session state —
+  but implementers reusing this route pattern behind anything other than
+  `127.0.0.1` MUST NOT keep the wildcard origin, since it would let any
+  page on the internet POST tool calls through a reachable bridge.
+
+- **`csp.connectDomains` / `csp.resourceDomains` are declared, not
+  enforced by this AIP.** `AppUiDefinition.csp` names the domains a UI
+  intends to reach; a conforming host SHOULD translate this into an
+  actual Content-Security-Policy header/meta tag when serving the UI,
+  but this AIP does not itself mandate the enforcement mechanism —
+  only that the declaration exists and is carried through `emit` /
+  `loadAppHandle` unmodified.
+
+- **`.agentapp` integrity is checksum, not signature.** The aggregate
+  SHA-256 (see [`unpack`](#unpack)) detects corruption and
+  accidental tampering but is not a cryptographic signature — it proves
+  the bundle matches what its own `manifest.json` claims, not that the
+  claimed `id`/`version`/`agentprotoVersion` came from a trusted
+  publisher. A registry distributing third-party `.agentapp` files
+  SHOULD layer a signing scheme on top; this AIP does not define one.
+
+- **`app_install` validates workflow tool ids, not agent tool ids.** The
+  reference install path cross-checks every `WORKFLOW.md` `tool` step's
+  id against the host's dispatchable tools (surfacing all missing ids
+  at once), but explicitly does NOT validate an agent's own declared
+  `tools[]` — those are the chosen agent adapter's business (e.g.
+  workspace tools like `read_file` a `mastra-agent` adapter resolves
+  independently). Implementers relying on `app_install` succeeding
+  MUST NOT read that as a guarantee every agent-declared tool ref is
+  resolvable; `unvalidatedAgentTools` on the install result names
+  exactly which refs were skipped.
+
+- **`extends`-style cross-app trust is out of scope for v1.** Unlike
+  [AGENT.md's `extends`](/docs/aip-42#conformance-rules), an app has no
+  inheritance mechanism in this AIP — `requires[]` names a dependency
+  relationship (another app must be applied to the same scope first) but
+  does not pull in or execute that app's code. There is therefore no
+  parent-SHA-pinning concern analogous to AIP-42's for apps in v1.
+
+## Open questions
+
+1. **Signing and provenance.** `.agentapp` integrity today is a
+   checksum, not a signature (see [Security
+   considerations](#security-considerations)). A future revision may
+   define a signing envelope, likely composing with whatever AIP-19
+   SECRETS-adjacent identity primitive is chosen for publisher keys.
+
+2. **UI framework conventions beyond Vite.** The `ui/` source-project
+   convention (`package.json` with `scripts.build`/`scripts.dev`) is
+   deliberately tool-agnostic in principle but the reference tooling's
+   `detectPackageManager` and dev-proxy env var
+   (`AGENTPROTO_BRIDGE_URL`) were designed against a Vite-shaped dev
+   server. Whether other bundlers need first-class support, or whether
+   the convention already generalizes, is open.
+
+3. **Multi-UI apps.** `AppDefinition.ui` is singular — one UI surface
+   per app. Whether an app should be able to declare multiple named UI
+   entry points (e.g. an admin view and an end-user view) is deferred
+   until real demand appears.
+
+4. **`requires[]` version constraints.** Today `requires` is a bare list
+   of app ids with no version range — an applied dependency satisfies it
+   regardless of version. Whether this needs `^`/`~`-style constraints
+   (as `AGENT.md extends` pinning is flagged as an open question in
+   [AIP-42](/docs/aip-42#open-questions)) is open.
+
+## See also
+
+- [AIP-14 — TOOL.md](/docs/aip-14) — the tool contract `ui.tools[]`
+  allowlists against and agents declare `tools[]` from
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — the workflow primitive an app
+  bundles; the other half of the attachment invariant
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — the optional home workspace an
+  app MAY declare via `workspace`
+- [AIP-42 — AGENT.md](/docs/aip-42) — the agent primitive an app
+  bundles; `AgentEntry.body` fills the AGENT.md body this AIP's
+  frontmatter carries no equivalent field for
+- [AIP-24 — ASSEMBLY.md](/docs/aip-24) — the multi-agent coordination
+  primitive this AIP deliberately does not duplicate (see
+  [Rationale](#rationale))
+- [AIP-19 — SECRETS](/docs/aip-19) — where a future `.agentapp` signing
+  scheme would anchor publisher identity (see [Open
+  questions](#open-questions))
