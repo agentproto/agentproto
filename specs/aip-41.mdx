@@ -1,6 +1,6 @@
 ---
 title: "AIP-41: ROUTINE.md — agentroutine/v1 (recurring schedule + target)"
-description: A markdown + frontmatter format for declaring a recurring or event-driven invocation of an action, workflow, or tool. Decouples "when" (the schedule) from "what" (the target). Supports cron / interval / calendar / manual / event-driven schedules, with retry, jitter, catchup policy, identity attribution, and failure routing.
+description: A markdown + frontmatter format for declaring a recurring or event-driven invocation of an action, workflow, tool, or agent. Decouples "when" (the schedule) from "what" (the target). Supports cron / interval / calendar / manual / event-driven schedules, with retry, jitter, catchup policy, identity attribution, and failure routing.
 aip: 41
 status: Draft
 type: Schema
@@ -28,7 +28,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/routine
 
 `ROUTINE.md` is a markdown-with-frontmatter file format that packages
 a single **recurring or event-driven invocation** — a schedule (the
-"when") bound to a target action / workflow / tool (the "what"), plus
+"when") bound to a target action / workflow / tool / agent (the "what"), plus
 retry, jitter, catchup, identity attribution, and failure routing.
 
 Routines are the agentic equivalent of cron jobs, but composable across
@@ -86,7 +86,7 @@ uniformly.
    workspaces; the same target can be driven by different schedules.
 
 2. **Bottom-up target binding.** A ROUTINE points AT its target via
-   `target.action` / `target.workflow` / `target.tool`. The target
+   `target.action` / `target.workflow` / `target.tool` / `target.agent`. The target
    doesn't know about the routine. Targets remain reusable in
    non-routine contexts.
 
@@ -167,7 +167,7 @@ YAML frontmatter, delimited by `---` lines. All fields are case-sensitive.
 | `id` | string | Machine identifier. Lowercase, digits, dashes, dots. 2–80 chars. Format `<owner>?/<slug>` or bare `<slug>`. Unique within the registry that hosts the routine. |
 | `description` | string | One-paragraph purpose. ≤2000 chars. |
 | `schedule` | object | When to fire. See [Schedule kinds](#schedule-kinds). |
-| `target` | object | What to invoke. Exactly one of `action` / `workflow` / `tool`. See [Target](#target). |
+| `target` | object | What to invoke. Exactly one of `action` / `workflow` / `tool` / `agent`. See [Target](#target). |
 
 #### Optional fields
 
@@ -223,7 +223,8 @@ schedule:
 
 ### Target
 
-The `target` field selects exactly one of `action`, `workflow`, or `tool`:
+The `target` field selects exactly one of `action`, `workflow`, `tool`,
+or `agent`:
 
 ```yaml
 # Target an ACTION (preferred — resolver picks tool implementation)
@@ -243,11 +244,24 @@ target:
 target:
   tool: pricing-snapshot
   inputs: { ... }
+
+# Target an AGENT (spawn an interactive/autonomous session)
+target:
+  agent:
+    adapter: "claude-code"        # agent adapter slug
+    prompt: "Summarize overnight support tickets and flag anything urgent."
+    model: "claude-sonnet-5"      # OPTIONAL
+    cwd: "./support-triage"       # OPTIONAL working directory
 ```
 
 `inputs` are passed as the invocation payload. They MAY reference
 secrets (`${{ vault.NAME }}`) and runtime context (`${{ now }}`,
 `${{ routine.run_id }}`).
+
+The `agent` target lowers to `agent_start`: it spawns an agent session
+with `adapter` and `prompt` (required), plus optional `model` and
+`cwd`. The spawned session is attributed `origin: "routine:<id>"` so
+downstream tooling can trace it back to the firing routine.
 
 ### Retry
 
@@ -285,7 +299,7 @@ interface RoutineDefinition {
   version?:     string
 
   schedule:     ScheduleCron | ScheduleInterval | ScheduleCalendar | ScheduleManual | ScheduleEvent
-  target:       TargetAction | TargetWorkflow | TargetTool
+  target:       TargetAction | TargetWorkflow | TargetTool | TargetAgent
 
   identity?:    IdentityRef                              // AIP-23
   retry?: {
@@ -321,7 +335,7 @@ interface RoutineDefinition {
    sub-fields. Validators MUST reject ambiguous shapes.
 
 3. **Exactly one target.** `target` MUST contain exactly one of
-   `action`, `workflow`, `tool`. Validators MUST reject
+   `action`, `workflow`, `tool`, `agent`. Validators MUST reject
    multi-target routines (split into multiple ROUTINEs instead).
 
 4. **Identity authorisation at load time.** Resolvers MUST verify the

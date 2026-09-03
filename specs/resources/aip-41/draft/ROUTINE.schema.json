@@ -186,7 +186,8 @@
       "oneOf": [
         { "$ref": "#/$defs/targetAction" },
         { "$ref": "#/$defs/targetWorkflow" },
-        { "$ref": "#/$defs/targetTool" }
+        { "$ref": "#/$defs/targetTool" },
+        { "$ref": "#/$defs/targetAgent" }
       ]
     },
     "targetAction": {
@@ -237,6 +238,24 @@
         "inputs": {
           "type": "object",
           "additionalProperties": true
+        }
+      }
+    },
+    "targetAgent": {
+      "type": "object",
+      "required": ["agent"],
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "object",
+          "required": ["adapter", "prompt"],
+          "additionalProperties": false,
+          "properties": {
+            "adapter": { "type": "string", "minLength": 1, "description": "Agent adapter slug (e.g. 'claude-code', 'hermes')." },
+            "prompt": { "type": "string", "minLength": 1, "description": "Initial prompt / consigne sent to the spawned agent." },
+            "model": { "type": "string", "minLength": 1, "description": "Optional model identifier forwarded to the adapter." },
+            "cwd": { "type": "string", "minLength": 1, "description": "Working directory for the spawned session." }
+          }
         }
       }
     },
