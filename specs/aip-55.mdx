@@ -1,0 +1,196 @@
+---
+title: "AIP-55: PRODUCT — product/v1 (pricing capability attached via AIP-54 ref)"
+description: A pricing capability — a one-time / prepaid-pool / pay-per-call price plus a billing-rail projection config — attached to ANY AIP artifact through an AIP-54 ref/v1. The target AIP needs zero pricing awareness. Minor units are normative; the billing rail is projection config, never the source of truth. Stripe and Autumn projections are normative appendices.
+aip: 55
+status: Draft
+type: Schema
+created: 2026-09-04
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 54]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/product
+layer: primitives
+package: "@agentproto/product"
+resources: ./resources/aip-55/draft
+---
+
+| Field | Value |
+|---|---|
+| AIP | 55 |
+| Title | PRODUCT — product/v1 (pricing capability attached via AIP-54 ref) |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-54](/docs/aip-54) (REF — the only reference field) |
+| Reference Impl | [`@agentproto/product`](https://github.com/agentproto/ts/tree/main/packages/product) |
+| Resources | [`./resources/aip-55`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-55/draft) — [`PRODUCT.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-55/draft/PRODUCT.schema.json) |
+
+## Abstract
+
+This AIP defines the **pricing capability**: a `product/v1` manifest
+that attaches a price — `one-time`, `prepaid-pool`, or `pay-per-call`,
+with **minor-unit amounts as the normative representation** — plus a
+billing-rail projection config (`stripe` / `autumn` / `tbd` /
+vendor-open) to ANY AIP artifact through an [AIP-54](/docs/aip-54)
+`ref/v1`. The target AIP needs zero pricing awareness: "a sandbox has
+a price" is expressible without the sandbox spec changing.
+
+## Motivation
+
+Agentik's products pair content/repo/app assets with real billing, but
+there was no shared primitive for "a sellable thing with a price":
+
+1. **No priced primitive exists anywhere in the ecosystem.** AIP-49
+   WALLET models value *movement* (assets, partitions, settlement);
+   nothing models the *catalog entry* — the price a buyer sees.
+2. **Hand-rolled per-project pricing.** Each product's pricing/config
+   is hand-written JSON per project; downstream billing config
+   (Stripe, Autumn) is generated FROM it rather than derived.
+3. **The wrapper-per-target-kind trap.** An earlier draft made the
+   product a wrapper doctype with a bespoke reference per target kind
+   (`appRef`, `packRef`, …). Every new target kind would have needed
+   another field. Inverting — a capability attached via the general
+   [AIP-54](/docs/aip-54) ref — makes the mechanism total: one call
+   prices an app, a pack, a tool, or a sandbox.
+4. **The ×100 bug class.** Floating-point dollar amounts are how
+   pricing bugs happen. Minor units are normative here, the same
+   lesson AIP-49 encodes in `decimals`.
+
+Adjacency: AITP owns inter-agent payment *transactions*; MCP owns
+transport; Anthropic Skills own packaging. None own the
+*intra-ecosystem pricing catalog entry*. This spec extends, not forks —
+it layers on AIP-54's reference and leaves settlement to AIP-49's
+`SettlementPort` and the named rails.
+
+## Specification
+
+A conforming PRODUCT.md is a markdown file with YAML frontmatter
+matching [`PRODUCT.schema.json`](./resources/aip-55/draft/PRODUCT.schema.json)
+and a free-form prose body. The file lives at `products/<id>.md` in
+the workspace; the body is purely documentary.
+
+### Frontmatter
+
+```yaml
+schema: product/v1
+id: book1-coder
+kind: pricing
+title: book1 companion — coder
+on: aip://14/coder                       # AIP-54 ref — the ONLY reference field
+
+price:
+  model: pay-per-call
+  unitPriceMinor: 2
+  currency: usd
+  meter: agent-call
+
+billingRail:
+  rail: stripe
+  priceId: price_metered_1
+  meterId: meter_abc                     # REQUIRED for pay-per-call on stripe
+  recurrence: month
+```
+
+### Field-by-field
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `schema` | string | yes | Literal `product/v1`. |
+| `id` | string | yes | Kebab-case product id, `^[a-z][a-z0-9-]*$`, 2–96 chars. |
+| `kind` | string | yes | Literal `pricing`. Other capability kinds may share the pattern without their own AIP. |
+| `on` | ref/v1 | yes | An [AIP-54](/docs/aip-54) ref (object or `aip://` URI) naming the priced artifact. The target AIP needs zero pricing awareness. Hosts MUST refuse unresolvable refs. |
+| `price` | object | yes | Discriminated on `model` — see § Price models. |
+| `billingRail` | object | no | Projection config, never the price's source of truth — see § Billing rails. |
+| `title`, `description` | string | no | Display fields. |
+| `metadata` | object | no | Vendor extensions, namespaced under `<vendor>`. Hosts MUST tolerate unknown keys. |
+
+### Price models
+
+- **`one-time`** — `{amountMinor, currency}`. Single payment,
+  perpetual access.
+- **`prepaid-pool`** — `{unitPriceMinor, currency, grantUnits}`. Buy a
+  pool of meter units up front; consumption draws it down. **Pool
+  state is host-side on every rail** — the rail only initiates the
+  top-up payment. If a wallet asset (AIP-49) backs the pool, units
+  MUST be minor units of that asset's `decimals`.
+- **`pay-per-call`** — `{unitPriceMinor, currency, meter}`. Post-paid
+  metering. `meter` is a host-declared meter id (e.g. `agent-call`,
+  `sandbox-hour`); hosts SHOULD namespace host-specific meters.
+
+**Minor units are normative.** `amountMinor` / `unitPriceMinor` are
+integers in the currency's smallest unit (cents for `usd`).
+Major-unit floats are forbidden — they are the ×100 bug class.
+
+### Billing rails
+
+The rail is **config, not truth**. A generator derives the provider
+objects FROM `price`; the ids stored on the rail are caches of the
+last projection.
+
+- **`stripe`** — `one-time` maps 1:1 to a Stripe Product +
+  `one_time` Price (no leak). `pay-per-call` maps to a metered Price
+  **plus a Stripe Meter**, which Stripe creates out-of-band:
+  `meterId` is REQUIRED (overloading `priceId` is invalid).
+  `prepaid-pool` has NO native Stripe primitive — pool state lives
+  host-side; Stripe only initiates the payment.
+- **`autumn`** — natively models both metered usage and prepaid credit
+  grants; both metered shapes project onto one `featureId`
+  (`grantId` when the grant is a distinct object). No leak.
+- **`tbd`** — commerce shape decided, provider not chosen.
+- **Vendor rails** — `^[a-z][a-z0-9-]*$` not colliding with the known
+  three; rail-specific config rides along under namespaced keys.
+  Hosts that only consume the price union MUST tolerate unknown rails.
+
+### "A collection of priced things"
+
+Joining priced capabilities with resolvable artifacts is a
+one-expression query over the capability list and the [AIP-54
+catalog](/docs/aip-54): filter by `kind === "pricing"`, resolve each
+`on`. One list, one shape, any target AIP.
+
+## Rationale
+
+- **Capability, not wrapper.** The wrapper design (product contains a
+  target with per-kind reference fields) fails the total-coverage
+  test: it priced 3 hand-picked kinds and needed a new field for each
+  next one. The capability design prices any registry citizen with
+  zero per-kind plumbing — verified by driving one identical
+  constructor against four different AIP families (AIP-42 app, AIP-52
+  pack, AIP-14 tool, hypothetical AIP-61 sandbox).
+- **`on` via AIP-54, not a bespoke union.** The reference problem is
+  solved exactly once, one level below this spec. Duplicating it here
+  would reintroduce the drift AIP-54 exists to kill.
+- **Minor units.** AIP-49's `decimals` convention exists because of
+  this exact bug class; pricing repeats it unless the representation
+  is fixed in the schema.
+- **Stripe `meterId` is required, not implicit.** Stripe Meters are
+  out-of-band objects; deriving them from the Price id is impossible.
+  Making the requirement structural (validation refuses pay-per-call
+  on the stripe rail without `meterId`) prevents the projection hack.
+- **AIP-52's legacy `pricing` block** (`{ebook?, bundle, step?}`) is
+  unitless and predates this spec. THIS product's price is
+  authoritative; hosts SHOULD warn when a pack's `pricing` diverges
+  from a pricing capability attached to it. Deprecation path is
+  tracked in the ref-impl repo.
+
+## Reference Implementation
+
+[`@agentproto/product`](https://github.com/agentproto/ts/tree/main/packages/product)
+— depends on `@agentproto/ref-catalog` (AIP-54). 13 unit tests,
+including the four-kind composability proof (one pricing call across
+app/pack/tool/sandbox), full validation matrix, and the billing-rail
+rules.
+
+## Backwards Compatibility
+
+Not applicable — new spec, no `replaces`.
+
+## Security Considerations
+
+- A pricing capability is **catalog data, not enforcement**. Attaching
+  a price does not authorize a buyer; entitlement checks remain with
+  the host and (where value actually moves) AIP-49's restriction
+  lattice.
+- `billingRail` entries carry provider ids that are caches of external
+  state; they MUST NOT be treated as secrets. Provider credentials
+  stay in host configuration, never in the manifest.
+- Refusal semantics matter: an unresolvable `on` ref MUST fail the
+  manifest loudly, or a mistyped `aip://` URI silently prices nothing.
