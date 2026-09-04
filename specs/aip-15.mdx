@@ -253,7 +253,7 @@ Each entry in `steps[]`:
 |---|---|---|
 | `id` | string | Kebab-case, unique within the workflow. |
 | `name` | string | Display label. |
-| `kind` | enum | `"tool"`, `"branch"`, `"parallel"`, `"suspend"`, `"approval"`, `"map"`, `"loop"`, `"subworkflow"`. |
+| `kind` | enum | `"tool"`, `"agent"`, `"branch"`, `"parallel"`, `"suspend"`, `"approval"`, `"map"`, `"loop"`, `"subworkflow"`. |
 | `description` | string | One-line purpose. |
 | `inputs` | object | Mapping from upstream values to this step's input. Keys are the step's input fields; values are JSON-pointer-style references like `$input.productUrl`, `$steps.fetch-page.html`, or literals (`{ "kind": "literal", "value": 42 }`). |
 | `outputs` | JSON Schema | Schema of this step's output. Other steps reference it via `$steps.<id>.*`. |
@@ -486,6 +486,52 @@ when the step runs.
     topic: $input.audience
     outline: $steps.plan.outline
 ```
+
+##### `kind: "agent"`
+
+Spawn or reuse an agent session and send it a prompt — the declarative
+counterpart of an [AIP-42](/docs/aip-42) agent. `agent.ref` names an
+app-scoped agent id the host resolves to a concrete adapter + spawn
+options at compile time; an unresolvable ref fails compilation, never
+the run.
+
+| Field | Type | Notes |
+|---|---|---|
+| `agent` | `{ref}` | App-scoped agent id to resolve at compile time. Omit to spawn a plain `adapter` (no app-ref resolution) or reuse via `sessionRef`. |
+| `prompt` | string | The prompt sent to the session. |
+| `adapter` | string | Adapter slug for spawning a NEW session. Ignored when `agent.ref` resolves one. Omit both this and `agent` to reuse via `sessionRef`. |
+| `sessionRef` | step id | Reuse an earlier agent step's spawned session, by that step's id. |
+| `sandbox` | string \| object | Sandbox provider override. |
+| `cacheable` | bool | Cache this step's output under the run's cacheKey. Default `false`. |
+| `maxRetries` | int | Re-prompt-and-retry attempts on `outputSchema` mismatch. Default `2`. |
+| `outputSchema` | JSON Schema | Schema of the session's final message; the host re-prompts on mismatch. |
+| `policy` | object | Approval posture for tool calls the session makes: `{awaiting: "auto-allow", prompt}`, `{awaiting: "escalate", webhookUrl?, timeoutMs?}`, or `{awaiting: "fail"}`. See [AIP-38](/docs/aip-38). |
+
+```yaml
+- id: review-chapter
+  kind: agent
+  agent: { ref: "@my-app/reviewer" }
+  prompt: $steps.draft.text
+  outputSchema: { type: object, properties: { verdict: { type: string } } }
+  next: revise
+```
+
+**The `options` pass-through.** An agent step MAY carry an `options` object. The manifest loader is
+deliberately loose: unknown step fields — `options` included — are
+passed through to the host's compile step untouched, so apps can thread
+adapter-specific spawn options (the common case is `options.model`) to
+their agent adapter without a spec amendment per key. Two rules apply:
+
+1. The loader MUST NOT reject an agent step for carrying `options` (or
+   any other unknown key) and MUST NOT strip it.
+2. Keys inside `options` are NOT portable — a host that does not
+   recognise a key ignores it. Authors SHOULD prefer the typed fields
+   above and declare portability requirements in the app's
+   documentation.
+
+> First-class harness pinning (per-step `model`/`effort`/`role`/tools/
+> skills/`cwd`/prompt file + hash) is specified separately and will be
+> folded here when its implementation lands.
 
 ### Expressions
 

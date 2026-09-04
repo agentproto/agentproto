@@ -173,6 +173,7 @@
         "kind": {
           "enum": [
             "tool",
+            "agent",
             "branch",
             "parallel",
             "suspend",
@@ -198,6 +199,7 @@
         {
           "oneOf": [
             { "$ref": "#/$defs/stepTool" },
+            { "$ref": "#/$defs/stepAgent" },
             { "$ref": "#/$defs/stepBranch" },
             { "$ref": "#/$defs/stepParallel" },
             { "$ref": "#/$defs/stepSuspend" },
@@ -225,6 +227,88 @@
               }
             }
           ]
+        }
+      }
+    },
+    "stepAgent": {
+      "type": "object",
+      "required": ["kind", "prompt"],
+      "properties": {
+        "kind": { "const": "agent" },
+        "agent": {
+          "description": "App-scoped agent id to resolve at compile time. Omit to spawn a plain `adapter` or reuse via `sessionRef`.",
+          "type": "object",
+          "required": ["ref"],
+          "additionalProperties": false,
+          "properties": {
+            "ref": { "type": "string", "minLength": 1 }
+          }
+        },
+        "prompt": {
+          "description": "The prompt sent to the session (may use the expression grammar).",
+          "type": "string"
+        },
+        "adapter": {
+          "description": "Adapter slug for spawning a NEW session. Ignored when `agent.ref` resolves one. Omit both to reuse via `sessionRef`.",
+          "type": "string"
+        },
+        "sessionRef": {
+          "description": "Reuse an earlier agent step's spawned session, by that step's id.",
+          "type": "string"
+        },
+        "sandbox": {
+          "description": "Sandbox provider override: a provider slug or `{provider, ...}`.",
+          "anyOf": [
+            { "type": "string" },
+            { "type": "object" }
+          ]
+        },
+        "cacheable": {
+          "description": "Cache this step's output under the run's cacheKey. Default false.",
+          "type": "boolean",
+          "default": false
+        },
+        "maxRetries": {
+          "description": "Re-prompt-and-retry attempts on `outputSchema` mismatch. Default 2.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputSchema": { "$ref": "#/$defs/jsonSchema" },
+        "policy": {
+          "description": "Approval posture for tool calls the session makes (AIP-38).",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["awaiting", "prompt"],
+              "additionalProperties": false,
+              "properties": {
+                "awaiting": { "const": "auto-allow" },
+                "prompt": { "type": "string" }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["awaiting"],
+              "additionalProperties": false,
+              "properties": {
+                "awaiting": { "const": "escalate" },
+                "webhookUrl": { "type": "string" },
+                "timeoutMs": { "type": "integer", "minimum": 1 }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["awaiting"],
+              "additionalProperties": false,
+              "properties": {
+                "awaiting": { "const": "fail" }
+              }
+            }
+          ]
+        },
+        "options": {
+          "description": "Adapter-specific spawn options passed through to the host's compile step untouched (e.g. `options.model`). Keys are NOT portable — hosts that do not recognise a key ignore it. Unknown agent-step fields are likewise passed through, never stripped.",
+          "type": "object"
         }
       }
     },

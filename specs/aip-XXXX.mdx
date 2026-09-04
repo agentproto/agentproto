@@ -1,0 +1,301 @@
+---
+aip: XXXX
+title: "APP — agentapp/v1 (the app bundle contract)"
+author: Jeremy André <jeremy@agentik.net>
+status: Draft
+type: Schema
+created: 2026-09-05
+requires: [15, 16, 17, 34, 37, 38, 40, 42]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/app-kit
+discussions-to: https://github.com/agentproto/agentproto/discussions
+resources: ./resources/aip-XXXX/draft
+---
+
+| Field | Value |
+|---|---|
+| AIP | XXXX (editors assign) |
+| Title | APP — agentapp/v1 (the app bundle contract) |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-16](/docs/aip-16) (IO), [AIP-17](/docs/aip-17) (RUNNER), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-37](/docs/aip-37) (LIFECYCLE events), [AIP-38](/docs/aip-38) (POLICY), [AIP-40](/docs/aip-40) (EXTENSION), [AIP-42](/docs/aip-42) (AGENT) |
+| Reference Impl | [`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit) |
+| Resources | [`./resources/aip-XXXX`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-XXXX/draft) — [`APP.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-XXXX/draft/APP.schema.json) |
+
+## Abstract
+
+This AIP defines **agentapp/v1** — the `APP.md` manifest and the bundle
+layout around it. An app is a **contract hosted by a daemon**, not a
+folder of prompts: it declares which [AIP-42](/docs/aip-42) agents and
+[AIP-15](/docs/aip-15) workflows it bundles, which UI surface it ships,
+where its data lives, how its configuration is validated, and which
+command is its single source of truth for "is this app correct". The
+daemon owns the app's state; the app only declares.
+
+An app IS NOT an agent. [AIP-42](/docs/aip-42) owns the agent
+primitive; an app *bundles* agents and workflows under one installable,
+versioned, runnable identity. An app IS NOT a deployment unit for
+arbitrary code — its bundle is markdown manifests, one UI file, and
+declarative configuration.
+
+## Motivation
+
+Today `app/v1` is loader-defined and has no AIP: the reference loader
+says so verbatim — *"there's no AIP number for 'app' yet"* — and keeps
+frontmatter validation intentionally loose so a future key could
+round-trip. An audit of 14 shipped apps (8 in-repo, 6 installed) shows
+a strong de-facto trame: 14/14 use `.agentproto/APP.md` + `agents/` +
+`workflows/` with `{id, path}` refs; 10/10 UI apps declare a
+`ui.tools` allowlist and call `window.McpApp`; 8 ship a single-file
+vanilla `ui/index.html`. But the divergences are exactly where no spec
+exists: state is written by whoever feels like it (an agent
+self-certifying its own `CHECKPOINT.json`, or ad-hoc scripts), zero of
+14 apps have validated configuration, gates live as out-of-band scripts
+with thresholds in prose, and there is no `app validate` or `app
+verify`.
+
+This AIP fixes the contract so a third party can author, validate, and
+host an app without reading the loader.
+
+## Specification
+
+> **Status of this section.** Everything an app already does today
+> (bundle layout, `APP.md` core frontmatter, agent/workflow refs, UI
+> conventions, data dir) is **normative now** — it matches the
+> reference loader and 14/14 audited apps. Fields and subsystems that
+> require loader/daemon work that has not merged yet are marked
+> **`draft`** and MUST be treated as optional by implementers until
+> promoted: the `config/`, `contracts/`, and `gates/` directories, the
+> state ledger, and the `verify` command.
+
+### Relationship to the other AIPs
+
+| Concern | Owned by |
+|---|---|
+| The agents an app bundles | [AIP-42](/docs/aip-42) AGENT.md — model, tools, boundaries, skills |
+| The workflows an app bundles | [AIP-15](/docs/aip-15) WORKFLOW.md — steps, approvals, retries |
+| Step inputs/outputs and file contracts | [AIP-16](/docs/aip-16) IO |
+| Where gate/config scripts execute | [AIP-17](/docs/aip-17) RUNNER (process boundary) |
+| The optional home workspace | [AIP-34](/docs/aip-34) WORKSPACE / [AIP-35](/docs/aip-35) STORAGE |
+| App state event vocabulary | [AIP-37](/docs/aip-37) LIFECYCLE (this AIP's ledger envelope is an app-scoped application of it — `draft`) |
+| Composable policy gates | [AIP-38](/docs/aip-38) POLICY |
+| Extra doctypes an app carries (`attach`) | [AIP-40](/docs/aip-40) EXTENSION |
+
+### Bundle layout
+
+```
+<app>/
+  .agentproto/
+    APP.md                    # agentapp/v1 — this AIP (normative now)
+    agents/<id>/AGENT.md      # AIP-42 (normative now)
+    workflows/<id>/WORKFLOW.md  # AIP-15 (normative now)
+    ui/index.html             # single-file UI (normative now, §UI)
+    skills/<slug>/            # optional AIP-42 skill dirs (normative now)
+    allowed-commands.json     # optional daemon command allowlist
+  config/                     # draft — human-edited YAML, schema-validated
+  contracts/                  # draft — generated from config, never hand-written
+  gates/                      # draft — gate scripts; thresholds read from contracts
+  scripts/                    # deterministic writers; the ONLY writers of derived JSON
+  data/                       # app_data_* plane (normative now)
+  data/DATA.md                # key dictionary + who-writes-what
+  tests/                      # at least one test per gate + script
+```
+
+Normative-now rules (already enforced by the reference loader):
+
+1. `.agentproto/APP.md` is the root manifest. It lists every agent and
+   workflow as `{id, path}` refs relative to the app dir.
+2. Loading an app re-runs the full `defineApp` validation — the
+   attachment invariant (every agent/workflow ref resolves in both
+   directions) — so a stale hand-edited APP.md fails exactly like a bad
+   `defineApp({...})` call.
+3. `data/` (or the declared `data.dir`) is the app-scoped data plane,
+   accessed through path-safe `app_data_*` tools. Keys are path-like.
+   Optional read-only seeds MAY ship in `.agentproto/data`, separate
+   from the live `data/` dir.
+
+### APP.md frontmatter
+
+Core fields (normative now; derived verbatim from the reference
+`defineApp` surface and `emit` writer):
+
+| Field | Type | Req | Notes |
+|---|---|---|---|
+| `schema` | `"app/v1"` | yes | Literal discriminator. |
+| `id` | string | no | Machine id (`@scope/name` style). Setting it makes the app discoverable. |
+| `name` | string | no | Human-readable name. |
+| `version` | semver | yes | Defaults to `0.1.0` when `id` is set. |
+| `description` | string | no | Becomes the APP.md body. |
+| `agents` | `{id, path}[]` | no* | AIP-42 refs. `*` required unless `ui` is present — an app with neither agents nor a `ui` block is rejected. |
+| `workflows` | `{id, path}[]` | no | AIP-15 refs. |
+| `attach` | handle[] | no | Other AIP doctypes carried with the app (AIP-40). |
+| `workspace` | string | no | AIP-34 workspace id; `emit` writes a root `WORKSPACE.md`. |
+| `requires` | string[] | no | APP ids this app depends on. |
+| `ui` | object | no | `{path, title, description, tools[], port?, csp?}`. `tools` is the `ui.tools` allowlist — the ONLY daemon tools the UI may call. |
+| `artifact` | `{path, title?}` | no | Persistent dashboard HTML, copied to `.agentproto/artifact/index.html`. |
+| `skill` | `{path}` | no | Cowork skill dir, copied to `.agentproto/skill/`. |
+| `artifacts` | `{type, description?}[]` | no | Artifact types the app's agents produce, declared for discovery. |
+| `dev` | object | no | Dev-launch configuration. |
+| `data` | `{dir}` | no | Data-plane dir hint (relative to app dir). |
+| `externalReadRoots` | string[] | no | Host dirs granted READ-ONLY access outside the app dir. There is no write path. |
+| `category` | string | no | Freeform catalog grouping. |
+
+Draft fields (optional until promoted):
+
+| Field | Type | Notes |
+|---|---|---|
+| `config` | `{files: string[]}` | draft — YAML config files, human-edited, validated against an emitted JSON Schema. |
+| `state` | `{ledger: string}` | draft — path of the append-only event ledger (default `data/state/events.jsonl`). Daemon-owned; see below. |
+| `verify` | `{command}` | draft — shell command composing every check; the app's single truth. |
+
+JSON Schema: [`APP.schema.json`](./resources/aip-XXXX/draft/APP.schema.json)
+(draft fields marked optional).
+
+### The four rules
+
+1. **Config is edited by humans and validated by schema.** `config/`
+   files are hand-edited YAML validated against a zod-derived JSON
+   Schema; no agent writes config. **draft** — no app has validated
+   config today.
+2. **Content is produced by agents inside a pinned harness.** Agents
+   run with the model, tools, and boundaries declared in their
+   AIP-42 AGENT.md (and, once AIP-15's harness block lands, per-step
+   overrides in WORKFLOW.md). The app never re-implements a primitive
+   the platform lacks — the primitive is added upstream first.
+3. **State is written only by the daemon's ledger**, from gate results
+   and approvals. Agents and UIs read state; they never write it. This
+   replaces agent-written checkpoint files (self-certification) with
+   daemon-written events. **draft** — pending `app_state_*` tools.
+4. **`verify` is the single truth.** One declared command composes
+   config validation, contract hash checks, gates, ledger validity, and
+   any render step. CI, the UI's Validate button, and a reviewer all
+   run the same command. **draft** — pending `app validate`/`app
+   verify` CLI verbs.
+
+### State event envelope (`draft`)
+
+The ledger is an append-only JSONL file under the app data dir
+(`state.ledger`, default `data/state/events.jsonl`). Events are
+appended by the daemon's ledger tools (`app_state_append` /
+`app_state_get` / `app_state_list`) and validated against a zod
+envelope; a snapshot is the fold over the log. The ledger tools are
+NOT exposed to agent `ui.tools` allowlists by default — agents cannot
+write state; the tool gate is by caller role.
+
+Event envelope (`draft` — to be aligned with the reference
+implementation PR when it lands):
+
+```json
+{
+  "ts": "2026-09-05T12:00:00.000Z",
+  "appRunId": "run-01j…",
+  "stage": "write-chapter",
+  "item": "book:03",
+  "kind": "gate-report",
+  "by": "runner",
+  "payload": { "gate": "chapter-contract", "exit": 0 }
+}
+```
+
+| Field | Type | Req | Notes |
+|---|---|---|---|
+| `ts` | ISO-8601 timestamp | yes | Append time. |
+| `appRunId` | string | no | The app run that produced the event. |
+| `stage` | string | no | Workflow/stage name. |
+| `item` | string | no | Path-like key of the item the event is about. |
+| `kind` | enum | yes | `stage-started` \| `gate-report` \| `approval` \| `stage-done` \| `blocked`. |
+| `by` | enum | yes | `runner` \| `human` \| `policy` — who caused the event. |
+| `payload` | object | yes | Kind-specific body (e.g. a gate's JSON report). |
+
+The event `kind` vocabulary is an app-scoped application of
+[AIP-37](/docs/aip-37) lifecycle events.
+
+### UI conventions (normative now)
+
+1. **One UI file**: `.agentproto/ui/index.html` — a single-file vanilla
+   HTML page. Apps that genuinely need a build step MAY ship a
+   `ui/` source tree, but the emitted bundle always carries one
+   `index.html`.
+2. **The bridge**: the page talks to the daemon exclusively through
+   `window.McpApp.callTool(name, args)`, which the daemon forwards to
+   its `/mcp` endpoint. Remote mode is supported by the same bridge.
+3. **The allowlist**: `ui.tools[]` in APP.md declares the exact tool
+   names the UI may call. Tools outside the allowlist are refused by
+   the daemon. State-ledger tools are excluded by default (rule 3).
+4. **Stage board**: a UI that shows progress renders from state —
+   reading the ledger via `app_state_get`/`app_state_list` and
+   `app_status` — never from agent narration. (The shared
+   daemon-served stage-board script is `draft`.)
+
+### Conformance checklist (what `app validate` would run)
+
+`app validate` is itself `draft`; this is the checklist it composes,
+and what a conforming implementation checks at load/install time:
+
+1. `.agentproto/APP.md` exists and parses as agentapp/v1.
+2. Every `agents[].path` and `workflows[].path` resolves to a
+   well-formed AIP-42 / AIP-15 manifest.
+3. Attachment invariant: every agent/workflow ref resolves in both
+   directions (re-validation via `defineApp`).
+4. At least one of `agents` or `ui` is present.
+5. `ui.tools`, when present, contains only known daemon tool names,
+   and excludes state-ledger tools.
+6. `data.dir`, when present, is a relative path inside the app dir.
+7. `externalReadRoots` entries exist as real host directories
+   (install-time check).
+8. `draft` — each `config.files[]` entry validates against its emitted
+   JSON Schema.
+9. `draft` — `contracts/` match their config-derived hashes.
+10. `draft` — every `gates/` script has a test and reads thresholds
+    from `contracts/`, not prose.
+11. `draft` — the state ledger is valid: JSONL, every event matches
+    the envelope, sequence monotonic.
+12. `draft` — `verify.command` runs green.
+
+## Rationale
+
+- **A new AIP, not an AIP-40 EXTENSION doctype.** The app is not a
+  custom payload carried by another doctype — it is the top-level
+  bundle contract the daemon hosts, with its own loader, CLI verbs,
+  and data plane. AIP-40 remains the right home for genuinely
+  third-party doctypes an app attaches.
+- **State moves from self-certification to a daemon ledger.** The
+  audit's sharpest divergence: one flagship app's agents write their
+  own `CHECKPOINT.json` with no write-checkpoint tool. An append-only,
+  agent-unwritable event log with a fixed envelope makes progress
+  auditable and gives the UI one source to render from.
+- **`verify` as one declared command.** Gates duplicated per book with
+  thresholds in prose; there was no single "is this app correct"
+  answer. One command, run by CI and the UI alike, is the smallest
+  contract that fixes both.
+- **Loose-then-tight frontmatter.** The reference loader deliberately
+  keeps validation loose so unknown keys round-trip. This AIP freezes
+  the shape that 14/14 apps already converge on and marks only the
+  unimplemented parts `draft`, so adoption costs nothing today.
+
+## Reference Implementation
+
+[`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit)
+— `defineApp` / `loadAppHandle` / `emit` implement the normative-now
+subset (manifest, refs, attachment invariant, UI surface, data dir).
+The `draft` subset (config kit, state ledger, gate steps, verify) is
+tracked as upstream PRs against `agentproto/ts`.
+
+## Security Considerations
+
+- **`ui.tools` is a capability boundary.** The daemon MUST refuse
+  calls outside the allowlist; a UI is untrusted page content.
+- **`externalReadRoots` is read-only by construction** — there is no
+  write or delete path for these roots anywhere in the daemon.
+- **State-ledger tools MUST NOT be in agent tool allowlists.** If an
+  agent could write state, rule 3 collapses into self-certification.
+- **Gate scripts run under the AIP-17 runner's process boundary** —
+  subprocess/sandbox, never in-process for untrusted apps.
+- **`verify.command` executes host-local code** from the app bundle;
+  installers SHOULD surface it for review, and `app validate` SHOULD
+  run it sandboxed.
+
+## Backwards Compatibility
+
+Not applicable — new spec, no `replaces`. Existing `app/v1` manifests
+are conforming as-is: every normative-now field matches what the
+reference loader already emits and accepts; draft fields are optional.
