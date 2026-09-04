@@ -456,6 +456,37 @@ this step's `outputs`.
     artifact: $steps.build.artifactPath
 ```
 
+A `subworkflow` step MAY instead declare `with:` — a declarative input
+projection for the child workflow. `with` and `inputs` are
+**equivalent**: `with` is an alias of `inputs` with identical
+semantics, using the same reference grammar as every other `inputs`
+mapping (literals, `$input.*`, `$steps.<id>.*`; a leading `$$`
+escapes a literal `$`), resolved against the **parent's** bindings
+when the step runs.
+
+1. A `subworkflow` step without `with:` (and without `inputs`) passes
+   the parent's input object to the child **verbatim** — unchanged
+   behaviour.
+2. Declaring both `with` and `inputs` on the same step MUST be a
+   load-time error naming the step.
+3. A `with:` reference to a step id not declared anywhere in the
+   workflow (nested bodies included) MUST be rejected at load time,
+   naming the step and the offending key.
+4. At run time, a reference whose path does not exist in the parent's
+   bindings MUST be an error naming the subworkflow step and key —
+   never a silent `undefined` handed to the child.
+5. Hosts MUST walk nested step lists (map / loop / parallel bodies,
+   branch arms) when applying these rules.
+
+```yaml
+- id: produce-book
+  kind: subworkflow
+  workflow: write-book             # child WORKFLOW.md id
+  with:
+    topic: $input.audience
+    outline: $steps.plan.outline
+```
+
 ### Expressions
 
 The minimum expression grammar adapters MUST support:
@@ -760,6 +791,15 @@ objects resolve recursively). `outputs` stays the output **shape**;
 `result` is the value that fills it. Fully backward-compatible — omit
 `result` and the output remains the final step's result, the prior
 behaviour. See [EXAMPLES § 12](./resources/aip-15/draft/EXAMPLES.md).
+
+### Subworkflow `with:` input projection (2026-09-04 revision)
+
+Adds an optional `with:` block to `kind: "subworkflow"` steps — a
+declarative input projection for the child workflow, equivalent to
+`inputs` (same reference grammar, resolved against the parent's
+bindings). Steps that use neither `with:` nor `inputs` are unchanged
+and pass the parent's input verbatim. Fully backward-compatible — see
+[§ `kind: "subworkflow"](#kind-subworkflow)`.
 
 ### With pre-AIP runtime-specific workflow definitions
 
