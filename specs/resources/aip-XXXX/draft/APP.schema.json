@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentproto.sh/schemas/aip-app/APP.schema.json",
+  "title": "APP.md frontmatter (agentapp/v1 — AIP draft)",
+  "description": "Validates the YAML frontmatter portion of an agentapp/v1 APP.md manifest. Fields derived from the reference defineApp surface. Fields marked 'draft' in the AIP (config, state, verify) are optional until promoted.",
+  "type": "object",
+  "required": ["schema", "version"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "app/v1" },
+    "id": {
+      "description": "Machine identifier for the app (distinct from its agents' ids). Optional; setting it makes the app discoverable.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][a-zA-Z0-9.-]+)?$"
+    },
+    "description": { "type": "string", "maxLength": 2000 },
+    "agents": {
+      "description": "AIP-42 agent refs. Required unless a ui block is present — an app with neither agents nor ui is rejected by defineApp.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/manifestRef" }
+    },
+    "workflows": {
+      "description": "AIP-15 workflow refs.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/manifestRef" }
+    },
+    "attach": {
+      "description": "Other AIP doctype handles carried with the app (AIP-40).",
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "workspace": {
+      "description": "AIP-34 workspace id; emit writes a root WORKSPACE.md.",
+      "type": "string"
+    },
+    "requires": {
+      "description": "APP ids this app depends on.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "UI HTML file; emit copies it to .agentproto/ui/index.html.",
+          "type": "string"
+        },
+        "title": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string" },
+        "tools": {
+          "description": "The ui.tools allowlist — the only daemon tools the UI may call via window.McpApp.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "port": {
+          "description": "Preferred local port for `agentproto app serve`. A hint; falls back to auto-assignment.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "csp": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connectDomains": { "type": "array", "items": { "type": "string" } },
+            "resourceDomains": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "artifact": {
+      "description": "Persistent HTML dashboard; emit copies it to .agentproto/artifact/index.html.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "skill": {
+      "description": "Cowork skill directory; emit copies it to .agentproto/skill/.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" }
+      }
+    },
+    "artifacts": {
+      "description": "Artifact types this app's agents may produce, declared for discovery.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "dev": {
+      "description": "Dev-launch configuration for running the app locally.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "data": {
+      "description": "Default data directory hint for the app_data_* plane (relative to the app dir).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string" }
+      }
+    },
+    "externalReadRoots": {
+      "description": "Host directories granted READ-ONLY access outside the app dir. Validated to exist at install time; there is no write path.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "category": {
+      "description": "Freeform catalog grouping (e.g. \"book\").",
+      "type": "string"
+    },
+    "config": {
+      "description": "draft — human-edited YAML config files, validated against an emitted JSON Schema.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "state": {
+      "description": "draft — the daemon-owned append-only event ledger.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ledger": {
+          "description": "Path of the append-only JSONL ledger (default data/state/events.jsonl).",
+          "type": "string"
+        }
+      }
+    },
+    "verify": {
+      "description": "draft — the single truth: one command composing every check.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "manifestRef": {
+      "description": "An {id, path} ref to a bundled AGENT.md or WORKFLOW.md, relative to the app dir.",
+      "type": "object",
+      "required": ["id", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "An app with neither agents nor a ui block has nothing to do — defineApp rejects it.",
+      "if": {
+        "not": {
+          "anyOf": [
+            { "required": ["agents"], "properties": { "agents": { "minItems": 1 } } },
+            { "required": ["ui"] }
+          ]
+        }
+      },
+      "then": false
+    }
+  ]
+}
