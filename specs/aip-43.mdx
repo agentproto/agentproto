@@ -75,7 +75,7 @@ factored doctype identity: one shape, one set of verbs, one capability
 namespace, valid across every doctype family.
 
 The companion observation: `defineX` already returns a
-**`createDoctype`-built handle** (AIP-1 / AIP-2). The registry doesn't
+**`createDoctype`-built handle** ([AIP-56](/docs/aip-56)). The registry doesn't
 need to know which doctype it's storing — it operates on the universal
 handle shape (id, frozen body, optional capabilities) and yields the
 handle back unchanged. One impl, every doctype family.
@@ -177,7 +177,8 @@ fully conforming.
 
 Handles registered into a registry are immutable. The registry MUST NOT
 mutate the handle body; consumers MUST NOT mutate it after registration
-(the `createDoctype` `Object.freeze` invariant from AIP-1 makes this
+(the `createDoctype` `Object.freeze` invariant from
+[AIP-56](/docs/aip-56) makes this
 runtime-enforced for compliant handles).
 
 The registry's lifetime is the host process. Persistence across
@@ -255,8 +256,8 @@ refusal, capability-lookup correctness, discovery-hook idempotency.
 
 - [AIP-1 — `agentproto/v1` core invariants](/docs/aip-1) — handle
   identity rules.
-- [AIP-2 — `define-doctype` factory](/docs/aip-2) — what produces the
-  handles the registry stores.
+- [AIP-56 — DOCTYPE, the `createDoctype` meta-factory](/docs/aip-56) —
+  what produces the handles the registry stores.
 - [AIP-29 — CLI.md](/docs/aip-29) — `defineCli` whose handles a CLI
   registry catalogs.
 - [AIP-35 — STORAGE.md](/docs/aip-35) — `defineStorage` whose handles
