@@ -1,0 +1,192 @@
+---
+title: "AIP-56: DOCTYPE — the `createDoctype` meta-factory for `defineX` constructors"
+description: The shared invariant prologue behind every AIP `defineX` constructor. `createDoctype<TDef, THandle>(opts)` validates the identity against a default kebab/snake/dot pattern (overridable), validates description length (1–2000 by default, disableable), runs spec-specific `validate`, and returns a top-level `Object.freeze`d handle — with a canonical error prefix naming the constructor, doctype, and AIP. Includes `filterSerializable`, the pure projection of a validated definition to its YAML-serialisable subset.
+aip: 56
+status: Draft
+type: Schema
+created: 2026-09-07
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+layer: primitives
+package: "@agentproto/define-doctype"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/define-doctype
+---
+
+| Field | Value |
+|---|---|
+| AIP | 56 |
+| Title | DOCTYPE — the `createDoctype` meta-factory for `defineX` constructors |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Reference Impl | [`@agentproto/define-doctype`](https://github.com/agentproto/ts/tree/main/packages/define-doctype) |
+
+## Abstract
+
+Every AIP that defines a markdown-with-frontmatter doctype ships a
+`defineX(definition)` constructor — `defineTool` for
+[AIP-14](/docs/aip-14), `defineDriver` for [AIP-30](/docs/aip-30),
+`defineAsset` for [AIP-49](/docs/aip-49), and so on. Those constructors
+share a small invariant prologue: validate the `id` against a regex,
+validate the `description` length, throw with a canonical error prefix,
+freeze the returned handle.
+
+This AIP specifies `createDoctype`, the meta-factory that lifts that
+prologue to one place. Each per-AIP package supplies the spec-specific
+bits via `validate(def)` and `build(def)`; the factory wires them
+together with the shared rules. It also specifies `filterSerializable`,
+the pure projection used to turn a validated definition into a
+manifest-shaped object before writing it to disk.
+
+## Motivation
+
+Without one factory, every `defineX` re-implements the same checks — and
+re-implementations drift. A definition rejected by `defineTool` for an
+invalid id might be accepted by `defineDriver`; an error thrown deep
+inside a framework adapter might not say which spec rejected the
+definition, or which field was at fault.
+
+`@agentproto/define-doctype` is imported by **41 packages** in the
+`agentproto/ts` monorepo. The invariants below are load-bearing across
+the whole doctype ecosystem; centralising them means one fix repairs
+every constructor, and one error format is learnable once.
+
+## Design principles
+
+1. **One prologue, many doctypes.** The factory owns the invariants that
+   are identical across AIPs (identity syntax, prose length, canonical
+   errors, handle freezing). Per-AIP rules live in `validate` and
+   `build` and never leak into the factory.
+
+2. **Errors name the spec.** A thrown stack frame inside a framework
+   adapter still tells you which AIP rejected the definition and why:
+   the prefix embeds the constructor name, the doctype name, and the
+   AIP number.
+
+3. **Validate before build.** Spec-specific `validate` runs after the
+   default id and description checks and before `build`, so the build
+   path can assume a validated definition and never duplicates checks.
+
+4. **The factory freezes the top level only.** `build` returns the
+   handle; the factory applies the top-level `Object.freeze`. Deep
+   freezing of nested arrays/objects is the per-AIP spec's own freezing
+   rule, implemented inside `build`.
+
+5. **Purity.** The package performs zero I/O. `filterSerializable` is a
+   pure function; `createDoctype` returns a pure constructor.
+
+## Specification
+
+### The default definition shape
+
+`DoctypeDefinitionBase` is `{ id: string; description: string }` — the
+shape every AIP definition is assumed to satisfy when no custom
+extractors are passed. Most AIPs carry `id` + `description`; AIPs that
+depart from the convention (e.g. AIP-7 POLICY uses `slug` + `name`)
+supply their own extractors via `DoctypeOptions`.
+
+### `createDoctype`
+
+```ts
+function createDoctype<TDef, THandle>(
+  opts: DoctypeOptions<TDef, THandle>,
+): (def: TDef) => THandle
+```
+
+`DoctypeOptions` fields:
+
+| Field | Type | Default | Role |
+|---|---|---|---|
+| `aip` | `number` | required | AIP number; surfaces in the error tag `(AIP-<n>)`. |
+| `name` | `string` | required | Doctype name (lower-case singular). Builds the error prefix: `name = "tool"` → `defineTool: …`. |
+| `readIdentity` | `(def) => string` | `(def) => (def as { id }).id` | Extract the identity string to validate against `idPattern`. |
+| `idPattern` | `RegExp` | `DOCTYPE_DEFAULT_ID_PATTERN` | Override the identity pattern for AIPs with stricter rules. |
+| `readDescription` | `((def) => string \| undefined) \| false` | `(def) => (def as { description }).description` | Extract the LLM-facing prose for the length check. Pass `false` to skip the length validation entirely (AIPs where description is optional or lives elsewhere). |
+| `maxDescriptionLen` | `number` | `DOCTYPE_MAX_DESCRIPTION_LEN` (2000) | Override the maximum prose length. |
+| `validate` | `(def) => void` | none | Spec-specific validations that throw on failure; run AFTER the default id and description checks. |
+| `build` | `(def) => THandle` | required | Build the immutable handle from a validated definition: apply defaults, freeze nested arrays/objects per the spec's freezing rules. The factory applies the top-level `Object.freeze`. |
+
+The returned constructor performs, in order:
+
+1. **Identity check.** `readIdentity(def)` MUST be a string matching
+   `idPattern`, otherwise throw:
+   `define<Name> (AIP-<n>): invalid id '<identity>' — must match <idPattern>`.
+2. **Description check** (skipped when `readDescription === false`).
+   `readDescription(def)` MUST be a string, non-empty, and at most
+   `maxDescriptionLen` characters, otherwise throw:
+   `define<Name> (AIP-<n>): id='<identity>' description must be 1–<max> chars`.
+3. **Spec-specific validation.** `opts.validate?.(def)` runs; it throws
+   on failure.
+4. **Freeze.** Return `Object.freeze(opts.build(def))`.
+
+**The handle freeze invariant.** Every `createDoctype`-built handle is
+frozen at the top level: implementations and consumers MUST NOT mutate a
+returned handle, and attempts to do so are runtime errors. [AIP-43](/docs/aip-43)
+relies on this invariant for registry immutability. Note the precise
+scope: the freeze is shallow — freezing of nested structures is each
+spec's own rule, delegated to `build`.
+
+### Default identity pattern
+
+```
+DOCTYPE_DEFAULT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{1,79}$/
+```
+
+Lower-case, 2–80 characters, leading alphanumeric, then kebab / snake /
+dot separated. AIPs with stricter rules override via `idPattern`
+(e.g. AIP-7 POLICY uses `^[a-z0-9][a-z0-9-]*$`, no dots).
+
+### Default prose length
+
+```
+DOCTYPE_MAX_DESCRIPTION_LEN = 2000
+```
+
+AIPs whose doctypes carry longer normative text on the doctype itself
+MAY raise this via `maxDescriptionLen`; most SHOULD keep the default for
+prompt-injection resistance.
+
+### `filterSerializable`
+
+```ts
+function filterSerializable(value: unknown): unknown
+```
+
+Projects a value to its YAML-serialisable subset:
+
+- functions are removed (e.g. driver `execute[id]: ExecuteFn`);
+- zod schemas are removed — detected by the `_def` own-property plus a
+  callable `parse` (e.g. tool `inputSchema`, `outputSchema`,
+  `contextSchema`, which live in TS, not in frontmatter);
+- `undefined` values are dropped from objects and arrays, so the YAML
+  output carries no empty keys; **`null` is preserved** as a real value.
+
+Used by per-AIP `createX(params, opts)` to project a validated
+definition into a manifest-shaped object before writing to disk. Pure
+function; no I/O.
+
+## Reference implementation
+
+[`@agentproto/define-doctype`](https://github.com/agentproto/ts/tree/main/packages/define-doctype)
+— pure, zero-dependency. Exports `createDoctype`, `DoctypeDefinitionBase`,
+`DoctypeOptions`, `DOCTYPE_DEFAULT_ID_PATTERN`,
+`DOCTYPE_MAX_DESCRIPTION_LEN`, and `filterSerializable`. Consumers
+include `defineTool` (AIP-14), `defineDriver` (AIP-30), `defineAsset`
+(AIP-49), and the other doctype factories across the monorepo.
+
+## Known limitations
+
+- **The freeze is shallow.** The factory freezes only the top-level
+  handle; nested mutability is each spec's responsibility inside
+  `build`. A host that needs deep immutability cannot assume it from
+  this package alone.
+- **The zod detection is structural, not type-based.** A plain object
+  with a `_def` property and a callable `parse` is treated as a schema
+  and stripped by `filterSerializable`; a non-zod value shaped that way
+  would be dropped too.
+- **Default extractors use unchecked casts.** The default
+  `readIdentity` / `readDescription` cast the definition to
+  `{ id }` / `{ description }`; a definition without those fields
+  surfaces as an invalid id or description error rather than a
+  type-level failure — which is why AIPs departing from
+  `DoctypeDefinitionBase` MUST supply their own extractors.
