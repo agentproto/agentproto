@@ -610,6 +610,277 @@ walks an agent through both flows.
 | Validation | full schema check | schema check + chain validation + one-way-switch check |
 | Lifecycle | versioned with the tracker | versioned with the consumer |
 
+## Runtime binding: work items ↔ a task ledger
+
+Everything above assumes a filesystem-first workspace: items are
+`ITEM.md` files, concurrency is git's problem, and `WORK.md` is a file
+a host parses off disk. Some hosts back a workspace with a live
+runtime store instead — an in-memory or journalled ledger with
+optimistic-concurrency writes, addressed through an API rather than a
+file path, with no `ITEM.md` tree and no `_index/` to regenerate. This
+section specifies how such a **runtime-backed workspace** conforms to
+`agentwork/v2`. The reference implementation is agentproto's daemon
+Task ledger (`task-ledger.ts`): a `TaskRecord` store keyed by
+`taskId`, with a `boardId` grouping/visibility scope, a nullable
+`owner` (a session id, `"human"`, or `"operator"`), an append-only
+`sessions[]` claim history, an informational `blockedBy[]`, an
+optional `verify` gate and a `verification` record of how `done` was
+reached, and a `rev` CAS token on every write.
+
+### Conformance profile
+
+A **runtime-backed workspace** is a `work.workspace/v2` deployment
+whose items live in a runtime store rather than as `ITEM.md` files
+under [AIP-18](/docs/aip-18) collections. The following are REQUIRED
+for conformance:
+
+1. The runtime MUST expose, per item, the [AIP-18](/docs/aip-18)
+   universal-core semantics — a stable id, a title, and single-collection
+   membership (an item belongs to exactly one collection-equivalent
+   type, even if the runtime implements only one implicit collection).
+2. The runtime MUST implement a status machine with an explicitly
+   enumerated status set and a well-defined terminal subset, and MUST
+   validate every transition against it (mirroring [AIP-18](/docs/aip-18)'s
+   status state machine and this AIP's transition-validation posture).
+3. The runtime MUST expose containment and ownership as independently
+   queryable dimensions — the reference ledger already does, via
+   `boardId` and `owner` respectively. The runtime SHOULD additionally
+   expose applicability as a dimension separable from containment, per
+   the decomposition in "The three axes" below; the reference ledger
+   does not separate the two today.
+4. The runtime MUST provide a concurrency-safe write path, per
+   "Concurrency" below.
+
+The following are OPTIONAL:
+
+- A literal `WORK.md` / `COLLECTION.md` / `ITEM.md` file tree. A
+  runtime-backed workspace MAY declare its shape (enabled collections,
+  scope-axis config, status rollup policy) in whatever host-native
+  form it already uses for configuration; it is not required to
+  materialize that shape as on-disk markdown to conform. Likewise
+  `_index/work.json`-style caches are moot — the runtime store IS the
+  index.
+- Multiple collections. A runtime MAY implement a single implicit
+  collection (as the reference ledger does — every `TaskRecord` is the
+  same shape) and still conform, provided the single-collection
+  membership rule in point 1 holds.
+- The verification extension (below).
+
+### Status mapping
+
+`work`'s status vocabulary (`open | claimed | in-progress | blocked |
+done | archived`, from [AIP-13](/docs/aip-13)) and the reference
+ledger's `TaskStatus` (`pending | in_progress | done | failed |
+cancelled`) overlap on exactly one value verbatim (`done`) and one
+more by rename (`in-progress` / `in_progress`). A runtime-backed
+workspace exposing a `work`-shaped view MUST translate at the boundary
+using the following tables, and MUST NOT expose both spellings of the
+same state as if they were distinct values.
+
+**`work` → ledger:**
+
+| `work` status | Ledger `TaskStatus` | Notes |
+|---|---|---|
+| `open` | `pending` | Direct correspondence — unclaimed, available to claim. |
+| `claimed` | `in_progress` | The ledger has no intermediate "claimed but not started" state — `claim()` sets `status: in_progress` in the same write that assigns `owner`. A runtime MUST NOT synthesize a `claimed` state that does not correspond to a real, independently-observable ledger state. |
+| `in-progress` | `in_progress` | Same state; hyphen vs underscore is a lexical difference the translation boundary MUST normalize. |
+| `blocked` | — (none) | The ledger has no `blocked` status. See the note on `blockedBy` below. |
+| `done` | `done` | Direct correspondence. |
+| `archived` | — (none) | The ledger has no post-terminal archival tier distinct from `done` / `failed` / `cancelled`. |
+
+**Ledger → `work`:**
+
+| Ledger `TaskStatus` | `work` status | Notes |
+|---|---|---|
+| `pending` | `open` | |
+| `in_progress` | `in-progress` | A `work`-shaped consumer that also wants to distinguish "claimed, not yet started" from "actively being worked" gets no help from the ledger — both collapse to `in_progress`. |
+| `done` | `done` | |
+| `failed` | — (none) | No `work` counterpart. A runtime SHOULD represent this as `done` plus a queryable failure marker (`meta`, a label, or a workspace-level status-list extension via AIP-20's `statuses[]` merge), rather than silently coercing `failed` into `done` with no trace. |
+| `cancelled` | — (none) | No `work` counterpart. Same guidance as `failed`. |
+
+**Rule for values with no counterpart.** A runtime-backed workspace
+MUST NOT drop information crossing either direction: `failed` and
+`cancelled` MUST remain distinguishable from `done` somewhere
+queryable even when surfaced through a `work`-shaped view, and a
+`work` item's `blocked` or `archived` state MUST remain distinguishable
+even when surfaced through a ledger-shaped view. Silent collapse
+(mapping `failed` straight to `done` with nothing to tell them apart)
+is non-conforming.
+
+**Adopting `blocked` resolves a real ambiguity.** The ledger's
+`blockedBy[]` is informational only — no scheduler reads it, and it
+does not gate the status machine. A task that is genuinely blocked on
+something and a task that is simply unclaimed both read as `pending`;
+the only way to tell them apart is to separately inspect `blockedBy`.
+`work`'s first-class `blocked` status names the distinction the ledger
+currently leaves as a side channel. A runtime adopting the mapping
+above SHOULD promote `blockedBy`-non-empty `pending` items to a real
+`blocked` status in its `work`-shaped view rather than leaving the
+caller to reconstruct the distinction by hand.
+
+### The three axes
+
+[AIP-13](/docs/aip-13) §"Scope semantics (normative)" holds
+containment (`parent`), applicability (`scope`), and ownership
+(`assignee` / `lead`) as three orthogonal axes and states that their
+null states MUST NOT be conflated — that conflation is exactly the bug
+AIP-13's Motivation names in existing trackers. The reference ledger
+has a single flat `boardId` (`tree:<rootSessionId>`, derived by
+walking session lineage to its depth-0 root; `ws:<slug>` for an
+operator caller; or a spawn-stamped `meta.boardId` override) that does
+double duty as **both** the containment grouping (which tasks belong
+to the same coordinating unit) **and** the visibility boundary (a
+session caller may reach any board within its own lineage but never a
+sibling lineage's). That is precisely the single-field conflation
+AIP-13 and AIP-20 (see "Scope axes" above) exist to avoid.
+
+A runtime-backed workspace SHOULD decompose this into two separately
+addressable fields at its API boundary, even if the underlying store
+still keeps one physical value. This is a SHOULD, not a MUST: the only
+reference implementation does not do it today, and no second runtime
+has validated the split against a differently-shaped grouping model.
+
+- **`parent` (containment).** Identifies the unit of work the item
+  belongs to. For a lineage-scoped runtime, the natural value is the
+  same grouping the runtime already computes (e.g. `tree:<rootId>`).
+- **`scope` (applicability).** Governs *visibility* independently of
+  containment. Where a runtime implements this split, its DEFAULT MUST
+  inherit from the item's `parent` — an item contained in tree X is by
+  default visible only within tree X — which reproduces the ledger's
+  current access behavior exactly and satisfies AIP-13's inheritance
+  rule. A runtime MAY allow `scope` to be set independently of `parent`
+  (narrowed to a single operator within the tree, or widened to a
+  whole company); the point of splitting the fields is that this
+  becomes *possible* without redesigning the grouping primitive
+  itself.
+
+This is a RECOMMENDED decomposition for `agentwork/v2`, not a
+description of `task-ledger.ts` as it stands today — the reference
+ledger's `boardId` remains a single field. It is the minimal
+decomposition: default-inherit keeps existing callers' visibility
+unchanged while making applicability independently settable for a
+runtime that chooses to adopt it.
+
+### Ownership
+
+Ownership is the axis with the cleanest match: the ledger's `owner`
+field lines up directly with AIP-20's `owner` axis field (see "Scope
+axes" above) — same name, same job. The one gap is vocabulary:
+[AIP-13](/docs/aip-13)'s `assignee.kind` is `operator | user`, but the
+ledger's `owner` may hold a bare session id — a runtime execution
+instance, not a durable [AIP-9](/docs/aip-9) operator identity or a
+human user.
+
+Mapping a session id onto `kind: operator` would conflate two
+different lifetimes: an AIP-9 operator is a durable, named persona; a
+session is an ephemeral runtime instance, and a single operator may
+have many sessions (sequential or concurrent) claiming work over its
+lifetime. Collapsing them loses exactly the distinction the rest of
+this section exists to preserve.
+
+**Recommendation.** A runtime-backed workspace SHOULD extend the
+ownership-kind vocabulary with a third value, `session`, whose `ref`
+is a runtime session id: `kind: operator | user | session`. Resolving
+a `session`-kind owner to a durable operator identity, if the host
+tracks one, is a host mapping concern and out of scope for this AIP.
+This extension is additive — a host that never surfaces runtime
+sessions through its `work`-shaped view has no need to add the third
+kind.
+
+### Verification (OPTIONAL extension)
+
+Neither [AIP-13](/docs/aip-13) nor the base of this AIP specifies how
+a `done` transition is substantiated — a `work` item's `status: done`
+in the file-first model is exactly as trustworthy as whoever last
+edited the frontmatter. The reference ledger's two-tier done-integrity
+model has no counterpart in either spec and is genuine prior art worth
+naming as an OPTIONAL conformance extension for runtime-backed
+workspaces:
+
+- **Tier 0 — self-report.** No gate declared for the item; a `done`
+  report is accepted immediately and MUST be stamped with how it was
+  reached (`verification: {kind: "self-report" | "human", ...}`) —
+  visibly, not silently, casual.
+- **Tier 1 — gated.** A gate is declared on the item up front. A
+  `done` report against a gated item MUST NOT transition immediately;
+  the runtime runs the declared gate (synchronously or in the
+  background) and transitions to `done` only on a passing result,
+  recording `verification: {kind: "gate", policyId?}`. A failing gate
+  MUST leave the item in its prior non-terminal status and MUST record
+  the failure (e.g. a `lastVerifyError`-equivalent field) rather than
+  discarding it.
+
+A runtime implementing this extension MUST:
+
+1. Record `verification` on every `done` item — never leave it absent
+   — so a reader can distinguish an asserted done from a verified one.
+2. Refuse or defer a `done` write against a Tier-1 item unless it is
+   backed by either a fresh gate run or an evidence shortcut naming an
+   already-passed, independently-checkable gate result.
+3. Never launder a failed gate into `done` — a red result MUST surface
+   to the caller, not silently retry into acceptance.
+
+A runtime MAY skip this extension entirely and treat every `done` as
+Tier 0 — that is exactly the base `work.workspace` posture today, and
+remains fully conforming.
+
+### `statusRollup` alignment
+
+This AIP's "Status rollup" section (above) already specifies rollup as
+DERIVED, never stored as authoritative, with `when:` clauses including
+`any-child-blocked → blocked`. A runtime's live-activity projection —
+a query-time view recomputed on every read — satisfies this
+requirement naturally: there is no on-disk `rolledStatus` field that
+can drift out of sync, because nothing persists it by default. A
+conforming runtime-backed workspace:
+
+- MUST compute rollup at query/projection time, matching this AIP's
+  default (`exposeViaField` unset).
+- MUST NOT persist a rolled/aggregated status as an item's own
+  authoritative `status`.
+- MAY materialize a rollup into a projection field for read
+  performance, subject to the same staleness caveat this AIP attaches
+  to `exposeViaField`.
+
+### Concurrency (REQUIRED for runtime-backed workspaces)
+
+The file-first model's concurrency story is git: two writers racing on
+the same `ITEM.md` produce a merge conflict a human resolves, or a
+last-write-wins clobber if neither locks first. That story does not
+extend to a runtime store — there is no working tree, no diff, no
+merge tool standing between two concurrent callers.
+
+A runtime-backed workspace MUST implement optimistic concurrency
+control on every write: each item MUST carry a monotonically
+increasing revision token (`rev` in the reference implementation), and
+every write (claim, status transition, field edit) MUST supply the
+revision it last read. A write whose supplied revision does not match
+the item's current revision MUST fail with a conflict response — never
+a silent overwrite — and that response MUST include the current
+record so the caller can rebase.
+
+This is REQUIRED, not OPTIONAL, because the failure mode without it is
+silent: two callers racing to claim the same item without CAS can both
+believe they succeeded, and the resulting double-claim is invisible
+until the two owners' work collides. Filesystem-first workspaces get
+this guarantee for free from git; a runtime-backed workspace MUST
+implement it explicitly.
+
+### Open questions
+
+- Whether `failed` and `cancelled` should become normative additions
+  to the base `work` status vocabulary ([AIP-13](/docs/aip-13) /
+  AIP-20), or remain a runtime-local extension applied through this
+  AIP's `statuses[]` merge mechanism, is undecided.
+- Whether the third ownership kind proposed above (`session`) belongs
+  in the base spec or should stay a runtime-backed-workspace-only
+  extension is undecided.
+- Whether the `parent` / `scope` decomposition should be RAISED from
+  SHOULD to MUST once a second runtime implementation validates it
+  against a differently-shaped grouping model is open — this section
+  currently recommends rather than requires the split precisely
+  because that validation doesn't exist yet.
+
 ## Rationale
 
 **Why split workspace concerns from item-schema concerns.**
