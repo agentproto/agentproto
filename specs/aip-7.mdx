@@ -6,7 +6,7 @@ status: Draft
 type: Core
 created: 2026-04-26
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 27]
+requires: [1, 2, 54]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/governance/core
 discussions-to: https://github.com/agentproto/agentproto/discussions/7
 layer: coordination
@@ -20,7 +20,7 @@ package: "@agentproto/governance"
 | Status | Draft |
 | Type | Core |
 | Domain | governance.sh |
-| Requires | [AIP-27](/docs/aip-27) |
+| Requires | [AIP-54](/docs/aip-54) |
 | Doctypes | `signature` (approval event), `audit-event` (append-only log line), `policy` (declarative rule), `governance.workspace/v1` (manifest + view) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-13](/docs/aip-13) (work) |
 | Reference Impl | [`packages/governance/core`](https://github.com/agentproto/ts/tree/main/packages/governance/core) |
@@ -95,13 +95,13 @@ Conventions adopted:
 The hash-chain protocol for `audit-event` is published separately and
 allows third-party verifiers in any language to validate the chain.
 
-### References (AIP-27)
+### References (AIP-54)
 
 All pointer fields on every governance doctype are **typed references**
-under [AIP-27 REF.md](/docs/aip-27). The fields use AIP-27's
+under [AIP-54 REF](/docs/aip-54). The fields use AIP-54's
 collection-typed form so consumers get extension-friendly constraints:
 
-| Doctype field | AIP-27 collection | Example values |
+| Doctype field | AIP-54 collection | Example values |
 |---|---|---|
 | `signature.signer` | `RefIn<"identity">` | `operator:atlas`, `user:abc123`, `persona:atlas`, `email:jeremy@agentik.net` |
 | `signature.artifact` | `RefIn<"file">` | `local:engagements/acme/proposal.md`, `github:agentik/studio@main:CONTRIBUTING.md` |
@@ -116,10 +116,10 @@ collection-typed form so consumers get extension-friendly constraints:
 Earlier drafts encoded these as ad-hoc strings (`"operator:atlas"`,
 `"engagements/acme/proposal.md"`). Each string had its own
 parse/validate logic, an ad-hoc escape rule, and no extension story. As
-AIP-27 details, this drift is the principal blocker to harmonizing
-across the agentproto registry. AIP-7 imports AIP-27 to:
+AIP-54 details, this drift is the principal blocker to harmonizing
+across the agentproto registry. AIP-7 imports AIP-54 to:
 
-1. **Replace `kind:slug` regex parsing** with the canonical AIP-27
+1. **Replace `kind:slug` regex parsing** with the canonical AIP-54
    parser. Adding a new identity kind (e.g. `did`, `fediverse_handle`)
    becomes "register a kind into the `identity` collection"; AIP-7
    needs no change.
@@ -135,12 +135,12 @@ across the agentproto registry. AIP-7 imports AIP-27 to:
 #### Migration path
 
 AIP-7 v1 (this draft) ships **dual acceptance**: the legacy string
-forms remain valid wire formats and are preprocessed into AIP-27 `Ref`
+forms remain valid wire formats and are preprocessed into AIP-54 `Ref`
 values at parse time. Validators normalize on read. Producers SHOULD
-emit AIP-27 object form on write; consumers MUST accept either.
+emit AIP-54 object form on write; consumers MUST accept either.
 
 A future AIP-7 v2 will deprecate the legacy string forms and require
-AIP-27 object form on write. The reference implementation tracks this
+AIP-54 object form on write. The reference implementation tracks this
 transition; see the package roadmap.
 
 ## Workspace root manifest (`GOVERNANCE.md`)
@@ -393,8 +393,8 @@ parser, validator, hash-chain implementation, and policy evaluator.
 ## Backwards Compatibility
 
 First version of the spec, with one wire-format transition already on
-the roadmap: the AIP-27 Ref migration described above. Within this
-draft, both the legacy `kind:slug` string form and the AIP-27 object
+the roadmap: the AIP-54 Ref migration described above. Within this
+draft, both the legacy `kind:slug` string form and the AIP-54 object
 form are normative inputs; producers SHOULD emit object form, consumers
 MUST accept either.
 

@@ -6,7 +6,7 @@ status: Draft
 type: Schema
 created: 2026-05-03
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 7, 23, 27, 39]
+requires: [1, 2, 7, 23, 54, 39]
 discussions-to: https://github.com/agentproto/agentproto/discussions/38
 layer: primitives
 package: "@agentproto/policy"
@@ -20,7 +20,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/policy
 | Status | Draft |
 | Type | Schema |
 | Domain | policy.sh |
-| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-23](/docs/aip-23) (IDENTITY-ref), [AIP-27](/docs/aip-27) (REF), [AIP-39](/docs/aip-39) (ACTION) |
+| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-23](/docs/aip-23) (IDENTITY-ref), [AIP-54](/docs/aip-54) (REF), [AIP-39](/docs/aip-39) (ACTION) |
 | Consumers | [WORKSPACE.md](/docs/aip-34), [STORAGE.md](/docs/aip-35), [SANDBOX.md](/docs/aip-36), [CODE.md](/docs/aip-26), [SECRETS.md](/docs/aip-19), [TOOL.md](/docs/aip-14) |
 
 ## Abstract
@@ -489,7 +489,7 @@ unless the parent explicitly opts into delegation.
 - [AIP-19 — SECRETS.md](/docs/aip-19) — `access:` block migrating to this AIP
 - [AIP-23 — IDENTITY-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — `principal` schemes
 - [AIP-26 — CODE.md](/docs/aip-26) — consumer (`policy?:` field)
-- [AIP-27 — REF.md](/docs/aip-27) — ref primitive
+- [AIP-54 — REF.md](/docs/aip-54) — ref primitive
 - [AIP-34 — WORKSPACE.md](/docs/aip-34) — primary consumer
 - [AIP-35 — STORAGE.md](/docs/aip-35) — consumer
 - [AIP-36 — SANDBOX.md](/docs/aip-36) — consumer

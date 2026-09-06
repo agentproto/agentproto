@@ -1,12 +1,12 @@
 ---
 title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
-description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-27 (REF) as the session's ground.
+description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-54 (REF) as the session's ground.
 aip: 46
 status: Draft
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 17, 19, 27, 36, 38, 42, 44, 45]
+requires: [1, 2, 17, 19, 54, 36, 38, 42, 44, 45]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: drivers
@@ -20,7 +20,7 @@ package: "@agentproto/runtime"
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
-| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-27](/docs/aip-27) (REF — the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-54](/docs/aip-54) (REF — the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
 | Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
 
@@ -38,7 +38,7 @@ needs:
 - multi-turn continuity per session (don't respawn for every prompt)
 - live observation (UI tails output, operator polls for the answer)
 - workspace-bound spawns (resolve ground from a stable, named
-  [AIP-27](/docs/aip-27) ref instead of hand-typing absolute paths) — and the
+  [AIP-54](/docs/aip-54) ref instead of hand-typing absolute paths) — and the
   state each bound workspace accumulates, partitioned per workspace
   rather than pooled (§[State partitioning](#state-partitioning-added-2026-07-17))
 - **nested sessions** — a session that spawns further sessions, and
@@ -167,7 +167,7 @@ interface Session {
   /** Workspace handle (AIP-46 §workspaces) this session binds to.
    *  "default" when the host has no workspace registry. */
   workspaceSlug: string
-  /** The session's ground, as the resolved AIP-27 ref. This is the
+  /** The session's ground, as the resolved AIP-54 ref. This is the
    *  value §Delegation's containment check compares against — a
    *  child's ground MUST resolve inside its parent's. */
   ground: string
@@ -261,10 +261,10 @@ spawns can reference a named handle instead of an absolute path:
 }
 ```
 
-Each entry is addressable as an [AIP-27](/docs/aip-27) ref —
+Each entry is addressable as an [AIP-54](/docs/aip-54) ref —
 `ws://workspaces/<id>` — and that ref, not the `path`, is what a spawn
 carries as its `ground`. The `path` is the host's private resolution
-of it. Per AIP-27 §Seams, an [AIP-34](/docs/aip-34) workspace id is
+of it. Per AIP-54 §Seams, an [AIP-34](/docs/aip-34) workspace id is
 `@<owner>/<slug>`, so a fully-qualified ground ref reads
 `ws://workspaces/@acme/agentik-studio`; a host whose registry predates
 AIP-34 ids MAY key by bare slug until it adopts them.
@@ -533,11 +533,10 @@ shape — a parent may legitimately want a child confined to a package
 inside its own tree, and never has cause to send one somewhere it
 cannot itself reach.
 
-The check is a containment test between two [AIP-27](/docs/aip-27)
+The check is a containment test between two [AIP-54](/docs/aip-54)
 refs, not between two path strings. That is the whole reason ground is
-a ref: AIP-27 rejects lexical escapes (`..`, absolute paths) **at
-parse time** — §Security 1, *"the resolver layer is not the right
-place to catch this"* — so the escape a naive prefix check would miss
+a ref: AIP-54 rejects lexical escapes (`..`, absolute paths) **at
+parse time** (§Reference syntax, per-kind bodies) — so the escape a naive prefix check would miss
 is not expressible in the first place. A host that reduces refs to
 strings and prefix-matches those has re-opened what the ref grammar
 closed.
@@ -693,7 +692,7 @@ user never asked for.
    *  policy). Optional; absent ⇒ adapter default + no delegation.
    *  See §Delegation. */
   agent?: string
-  /** WHERE it runs — an AIP-27 ref naming the session's ground.
+  /** WHERE it runs — an AIP-54 ref naming the session's ground.
    *  `ws://workspaces/@<owner>/<slug>` or its compact form, optionally
    *  with a subtree body. Root spawns MAY omit it (§Workspaces
    *  resolves a default); nested spawns inherit the parent's when
@@ -956,7 +955,7 @@ That precedence rule is how a nested spawn came to resolve through the
 ambient active workspace: the field that should have carried the
 parent's ground was optional, and the fallback behind it was global.
 
-`ground` is one [AIP-27](/docs/aip-27) ref and replaces both.
+`ground` is one [AIP-54](/docs/aip-54) ref and replaces both.
 `workspaceSlug` remains on the *Session* descriptor as a reported
 binding, but is no longer a spawn input. `cwd` survives on the spawn
 request as a **deprecated root-only alias** accepting a raw path,

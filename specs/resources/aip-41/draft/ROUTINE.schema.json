@@ -267,7 +267,7 @@
         "file": { "type": "string", "minLength": 1 },
         "inline": { "type": "object", "additionalProperties": true }
       },
-      "description": "AIP-27 ref primitive — exactly one of ref|file|inline."
+      "description": "AIP-54 ref primitive — exactly one of ref|file|inline."
     },
     "identityRef": {
       "oneOf": [

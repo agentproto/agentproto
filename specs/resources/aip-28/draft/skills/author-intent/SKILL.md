@@ -113,7 +113,7 @@ Don't blanket all surfaces — every surface you add is UX you owe.
   `placeholder`, `hint`, validation bounds.
 - Pick the right `type`: `text`, `textarea`, `number`, `toggle`, `choice`,
   `multi-choice`, `file`, `image`, `date`, `markdown`, `code`, `ref` (per
-  [AIP-27](/docs/aip-27)).
+  [AIP-54](/docs/aip-54)).
 - Use `choice` with explicit `values` when there's a small enum; users
   pick faster from a dropdown than a text field.
 - Keep field count low. 3–5 fields per intent is the sweet spot. More

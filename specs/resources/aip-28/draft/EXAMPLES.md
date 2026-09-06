@@ -38,7 +38,7 @@ surfaces: [chat, menu]
 inputs:
   - name: invoiceId
     label: { en: "Invoice" }
-    type: ref                     # AIP-27 ref picker
+    type: ref                     # AIP-54 ref picker
     accept: ["invoice"]
     required: true
   - name: cc
