@@ -301,6 +301,26 @@ This AIP deliberately does **not** define:
 
 ## Terminology reconciliation
 
+### The three senses of "adapter"
+
+The word "adapter" carries three unrelated meanings across the AIP
+family. They are distinct today and MUST NOT be conflated when reading a
+spec; which sense an AIP means is determined by what it binds, not by
+the word:
+
+| Sense | What it binds | Example AIP | Example package |
+|---|---|---|---|
+| adapter over an **agent CLI** | wraps an agent CLI (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
+| adapter into a **foreign framework** | projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/mastra` |
+| adapter to a **backend service** | routes a declared kind to a concrete backend — settlement rails, tunnel, sandbox, eval-reporter providers | [AIP-49](/docs/aip-49) | `@agentproto/provider-kit` |
+
+AIP-52 means the second sense: the outward framework bridge. Qualified
+names for the three senses have been proposed but are **not** settled
+vocabulary; until they are, specs SHOULD disambiguate in prose the way
+this table does, not by inventing compound terms. The reconciliations
+below cover the remaining uses of the word within this AIP's own
+history.
+
 "Adapter" already appears in three places in the agentproto ecosystem.
 This AIP claims all three coherently so future readers stop conflating
 them:
