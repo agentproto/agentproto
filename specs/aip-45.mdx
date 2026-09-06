@@ -32,7 +32,8 @@ hosts an agent loop (Hermes, Claude Code, OpenCode, Goose, Gemini CLI)
 and converses bidirectionally with a client over stdio or a similar
 duplex channel. Each manifest declares how to install, version-check,
 sandbox, authenticate, and **talk to** the binary, with a `protocol`
-discriminator (`acp` | `mcp` | `proprietary`) selecting the wire shape.
+discriminator (`acp` | `mcp` | `proprietary` | `print`) selecting the
+wire shape.
 
 AIP-45 is a sibling, not a rival, of [AIP-29](/docs/aip-29). AIP-29
 remains the home for **tool CLIs** — `gh`, `stripe`, `kubectl`,
@@ -67,9 +68,9 @@ runner code.
 
 The companion observation: agent CLIs converge on **ACP**. Hermes,
 Claude Code, OpenCode, Cursor all speak it. Treating ACP as the
-default while leaving room for MCP (Goose) and proprietary REPLs
-(Gemini CLI today) yields one runner with one wire-stable arm and two
-fallback adapters.
+default while leaving room for MCP (Goose), proprietary REPLs
+(Gemini CLI today), and headless one-shot CLIs driven `print`-style
+yields one runner with one wire-stable arm and three fallback arms.
 
 ## Specification
 
@@ -100,6 +101,10 @@ A manifest is **AIP-45-conformant** iff:
 8. When `continuation` is present, `default` is in `supported`; if
    `default == "native-resume"` then `capabilities.resumable: true`
    MUST also be declared.
+9. When `protocol: "print"`, the manifest MAY omit the `print` block
+   (Claude Code defaults apply); when `print.event_schema` is
+   declared, it MUST be one of the closed enum values listed in
+   § The `print` arm below.
 
 ### Frontmatter
 
@@ -120,10 +125,11 @@ Top-level fields (informative summary):
 | `setup` | No | Post-install configuration steps (AIP-29 `$ref`) — daemons, bind-time prompts, OAuth, external pickers |
 | `auth` | No | Auth surface (AIP-29 `$ref`) |
 | `sandbox` | Yes | Sandbox profile (AIP-36 `$ref`) |
-| `protocol` | Yes | `acp` \| `mcp` \| `proprietary` |
+| `protocol` | Yes | `acp` \| `mcp` \| `proprietary` \| `print` |
 | `acp` | When `protocol=acp` | Ref to AIP-44 ACP.md describing the wire profile |
 | `mcp` | When `protocol=mcp` | Inline MCP server config |
 | `adapter` | When `protocol=proprietary` | NPM package implementing `AgentCliClient` |
+| `print` | When `protocol=print` | Inline print surface config (optional — Claude Code defaults when omitted) |
 | `session` | No | Session policy: mode, idle_timeout_ms, max_turns |
 | `models` | No | Model routing: default, allowed, env-mapped |
 | `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |
@@ -134,7 +140,7 @@ Top-level fields (informative summary):
 
 ### `protocol` discriminator
 
-Three values, with cross-field requirements:
+Four values, with cross-field requirements:
 
 ```yaml
 # protocol: "acp" → MUST declare `acp` referencing an AIP-44 ACP.md
@@ -151,10 +157,55 @@ mcp:
 # protocol: "proprietary" → MUST declare `adapter` (NPM package)
 protocol: proprietary
 adapter: "@agentproto/adapter-gemini-cli"
+
+# protocol: "print" → one fresh subprocess per turn (headless one-shot).
+# The `print` block is OPTIONAL — omitted, Claude Code defaults apply.
+protocol: print
+print:
+  prompt_flag: "--prompt"       # absent ⇒ prompt is the last positional arg
+  output_format: ["--output", "jsonl"]
+  pre_prompt: ["--no-interactive"]
+  resume: { flag: "--resume", kind: "value" }
+  event_schema: mastra-jsonl
 ```
 
 Runtimes that don't recognise the declared `protocol` MUST refuse to
 load the manifest; this is a hard error, not a warning.
+
+### The `print` arm
+
+> **Amendment — codifies shipped behaviour.** `protocol: "print"` is a
+> fourth discriminator arm. It is validated by the closed enum
+> `z.enum(["acp", "mcp", "proprietary", "print"])` in
+> `packages/driver/agent-cli/src/schema.ts` and driven by
+> `packages/driver/agent-cli/src/protocol/print-arm.ts` in the
+> reference implementation.
+
+`print` serves **headless one-shot CLIs**: instead of a long-lived
+connection, the driver spawns **one fresh subprocess per turn** and
+maps the CLI's stdout event stream onto the normalised taxonomy. The
+driver-side session object persists across turns; only the per-turn
+child is fresh. Because no child outlives a turn, the arm is immune
+to the stale-proxy race that long-lived connections are exposed to.
+
+The `print` manifest block declares the CLI's one-shot surface:
+
+| Field | Description |
+|---|---|
+| `prompt_flag` | How the prompt text is passed. Absent (or `"positional"`) — appended as the last positional arg. A string — passed as `--<prompt_flag> <text>` before any trailing positional args. |
+| `output_format` | Output-format flags appended before the prompt. Default `["--output-format", "stream-json"]` (Claude Code); e.g. Mastra Code uses `["--output", "jsonl"]`. |
+| `pre_prompt` | Extra flags inserted between `output_format` and the prompt (e.g. Claude Code's `["--no-interactive"]`). |
+| `resume` | Resume/continue flag for reattaching to a prior session: `flag` plus `kind` — `"value"` passes `--flag <sessionId>`, `"boolean"` passes the bare flag. |
+| `event_schema` | Closed enum selecting the event mapper: `claude-stream-json` (default) \| `mastra-jsonl` \| `antigravity-stream-json` \| `jcode-ndjson`. |
+
+**Session tracking and resume.** The session's `sessionId` starts
+empty (or pre-seeded from a prior session id) and is captured after
+the first successful turn from the wire event that carries the
+session / thread identifier (Claude: `result.session_id`; Mastra:
+`result.threadId`). Subsequent turns pass the declared `resume` flag
+so the CLI rehydrates the conversation. Because the session object —
+not the child process — carries the id, resume works without any
+long-lived connection.
 
 ### Session model
 
@@ -387,9 +438,17 @@ make `commands` ambiguous. A sibling spec keeps both clean.
 **Why a `protocol` discriminator, not separate AIPs per protocol.**
 The install / version / auth / sandbox / capabilities / session
 fields are 90% of an agent-CLI manifest. Splitting per protocol
-would force three near-duplicate schemas and three runners. One
-runner with three protocol arms keeps the integration surface one
+would force four near-duplicate schemas and four runners. One
+runner with four protocol arms keeps the integration surface one
 package.
+
+**Why a declarative `print` arm.** A whole class of agent CLIs
+(Claude Code's `--print`, mastracode) are best driven headless: one
+subprocess per turn, events on stdout. Giving them a dedicated arm
+keeps them out of the `proprietary` arm — which exists for
+in-process adapter packages, a different integration shape — and
+out of long-lived ACP connections, whose stale-proxy failure modes
+the per-turn subprocess simply doesn't have.
 
 **Why ACP is the default.** Network effects: 14k weekly TS-SDK
 downloads, multi-vendor adoption, a growing IDE ecosystem. New agent
@@ -426,8 +485,8 @@ The package exposes:
   `session/cancel` for ACP, equivalent for other protocols).
 - `Session.close()` — tear down the session and (if last) the
   subprocess.
-- Protocol arms under `src/protocol/{acp,mcp,proprietary}.ts`. The
-  ACP arm delegates to `@agentproto/acp` (AIP-44).
+- Protocol arms under `src/protocol/{acp,mcp,proprietary,print}.ts`.
+  The ACP arm delegates to `@agentproto/acp` (AIP-44).
 
 The reference impl is the source of truth for the schema during the
 Draft phase; spec changes propagate through `scaffold-aip` regen.

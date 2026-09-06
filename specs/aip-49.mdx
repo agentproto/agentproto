@@ -183,16 +183,75 @@ Verbs (`event_kind`): `mint · burn · reserve · capture · release · convert_
 convert_out · transfer`. A `convert` emits a correlated `convert_out` +
 `convert_in` pair atomically; a hold is `reserve` then `capture` (settle) or
 `release` (return). `fold(events, now)` projects lots
-`{ original, remaining, reserved, expiresAt?, status }`; spendable balance for an
-asset = Σ(remaining − reserved) over live (active, unexpired) lots.
+`{ original, remaining, reserved, expiresAt?, status }`; the **net position** for
+an asset = Σ(remaining − reserved) over unexpired lots (the `spendableBalance`
+accessor). Exhausted lots are NOT skipped: a normal one contributes 0, but a
+drawn-down short lot carries a negative residual that is a real liability. Once
+floors exist this is no longer the same number as what a spend may draw — see
+*Net position vs spend capacity*.
+
+### Lot floors (short positions)
+
+> **Amendment — codifies shipped behaviour.** Declared and folded in
+> `packages/wallet/src/fold.ts` (`WalletEvent.floor`, `Lot.floor`,
+> `floorOf`) and honoured by spend in
+> `packages/wallet/src/coalescing.ts`.
+
+A `mint` / `convert_in` event MAY carry `floor?: number | null`, which becomes
+the lot's lower bound for `remaining`. Three cases:
+
+| `floor` | Meaning |
+|---|---|
+| absent (default) | `0` — a normal lot; it cannot go short. |
+| a negative number | A **bounded short position** — `remaining` may be drawn down to the floor (e.g. borrowing down to `−500`). |
+| `null` | An **unbounded short position** — no lower bound. |
+
+`floorOf` collapses the three cases to the numeric bound. A lot is
+`exhausted` once `remaining <= floor` — a partially drawn short lot stays
+`active`, and an unbounded one never exhausts via draws. Per-lot spendable
+availability is `max(0, remaining − reserved − floor)`, so a short lot's
+negative headroom is spendable.
+
+The kit is deliberately **asset-agnostic about what a short position
+means** — a postpaid overdraft settled monthly, a platform credit line, a
+clearing counter — that meaning is the host's decision, carried only in
+the floor it mints. The primitive enforces the arithmetic (bounds,
+exhaustion, spend ordering), never the semantics.
+
+#### Net position vs spend capacity
+
+Floors split one number into two, and an implementation MUST NOT substitute
+either for the other:
+
+| | Formula | Range | Answers |
+|---|---|---|---|
+| **Net position** (`spendableBalance`) | Σ(`remaining` − `reserved`) over unexpired lots | may be negative | *what does this principal hold?* |
+| **Spend capacity** (per-lot, folded by coalescing) | Σ `max(0, remaining − reserved − floor)` over eligible lots | never negative | *what may this principal draw right now?* |
+
+Before floors the two coincided, so the distinction had no observable
+consequence. With a short lot they diverge by the undrawn headroom: a lot with
+`floor: −500`, `remaining: 0`, `reserved: 0` has net position `0` and spend
+capacity `500`. A pre-flight check that gates a spend on the net position will
+refuse a spend the coalescer would have funded; a balance surfaced to a user as
+"available" that reports the net position will understate it by the credit
+line. Settlement rails reconcile against the **net position** — it is the
+liability. Spend admission uses the **spend capacity**.
+
+An unbounded short lot (`floor: null`) has `floorOf → −∞`, hence spend capacity
+`Infinity`. This is intended, and it is why spend capacity MUST be evaluated per
+lot against a concrete requested amount rather than aggregated for display.
 
 ### Coalescing (intra-asset spend)
 
 A spend names `asset + category + amount`. Eligible lots are those whose asset
 matches and whose (partition-narrowed) `spendableOn` covers the category.
-Default order: **restricted-first** (spend constrained value before fungible),
-then **expiring-first**, then oldest. An asset with `spendableOn: []` (e.g.
-loyalty points) has NO eligible spend lot — it can only `convert`.
+Default order: **owned-first — short (`floor < 0`) lots last** — then
+**restricted-first** (spend constrained value before fungible), then
+**expiring-first**, then oldest. The ordering consequence is normative:
+borrowing from a short lot happens only once every real holding is drained,
+so general credit is spent before the account goes negative. An asset with
+`spendableOn: []` (e.g. loyalty points) has NO eligible spend lot — it can
+only `convert`.
 
 ### Convert (inter-asset) + no-arbitrage
 
@@ -201,6 +260,17 @@ loyalty points) has NO eligible spend lot — it can only `convert`.
 scale across `decimals`. A conformant implementation MUST provide a
 `verifyNoArbitrage` check (negative-cycle detection over `-log(rate)`) and gate
 it in CI: no cycle of convert edges may have a rate product > 1.
+
+**`ConvertEdge.cap` — reserved, not yet enforced.** A convert edge MAY declare
+`cap?: { amount, windowSec }` (declared in
+`packages/wallet/src/asset.ts` — anti-inflation throughput limiting,
+load-bearing for guild-mint). This field is **reserved and NOT yet
+enforced**: the reference convert path (`packages/wallet/src/convert.ts`)
+reads only `to`, `rate`, and `addsRestriction`. (The `cap` the authorize
+engine bounds is a different field — `envelope.operating.cap`.) Tracked
+code gap: <https://github.com/agentproto/ts/issues/1203>. Until that gap
+closes, hosts MUST NOT rely on `cap` being enforced and MUST apply their
+own throughput limiting on convert volume.
 
 ### Authorize + delegation
 
@@ -223,7 +293,8 @@ confined to these.
 [`@agentproto/wallet`](https://github.com/agentproto/ts/tree/main/packages/wallet)
 — pure (zero runtime/filesystem/HTTP), property-tested:
 `restriction-lattice` (semilattice axioms), `fold` (replay invariance + hold
-cycle), `coalescing` (restricted-/expiring-first, ineligibility of points),
+cycle), `coalescing` (owned-first with short lots last, restricted-/expiring-first,
+ineligibility of points),
 `convert` (decimals scaling, restriction accumulation, no-arbitrage cycle
 detection), `authorize` (intent gating, lineage-min). Exposes `defineAsset` via
 the AIP-1 `createDoctype` scaffold.
