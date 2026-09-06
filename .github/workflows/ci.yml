@@ -25,6 +25,23 @@ jobs:
         # (Lived in AIP-27 until #29 superseded it and moved the scheme.)
         run: node scripts/check-refs.mjs .
 
+  check-aip-refs:
+    name: Validate inter-AIP references
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Every requires:/link/ref-impl/package reference resolves
+        # NON-BLOCKING on purpose: the corpus is clean today, so anything
+        # this reports is fresh breakage. Flips to blocking once the
+        # findings it reports are fixed in follow-up PRs — a link fix must
+        # be reviewable on its own. (The ref-impl/package rules skip when
+        # no ts checkout sits alongside, which is always true here.)
+        continue-on-error: true
+        run: node scripts/check-aip-refs.mjs .
+
   lint-specs:
     name: Lint AIP frontmatter
     runs-on: ubuntu-latest
