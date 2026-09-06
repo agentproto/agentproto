@@ -12,16 +12,17 @@ concurrency:
 
 jobs:
   check-refs:
-    name: Validate ws:// refs against AIP-27
+    name: Validate ws:// refs against AIP-54
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Every ws:// collection has a row in AIP-27 §Reference syntax
-        # The table in aip-27.mdx is the fixture — the script parses it out
+      - name: Every ws:// collection has a row in AIP-54 §Reference syntax
+        # The table in aip-54.mdx is the fixture — the script parses it out
         # of the spec, so this can never drift from what the spec says.
+        # (Lived in AIP-27 until #29 superseded it and moved the scheme.)
         run: node scripts/check-refs.mjs .
 
   lint-specs:
