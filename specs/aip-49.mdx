@@ -30,7 +30,7 @@ resources: ./resources/aip-49/draft
 This AIP defines a **principal-owned, multi-asset wallet** primitive and the
 **`defineAsset(...)`** signature that declares the assets it holds.
 
-A wallet belongs to a **principal** (user / org / guild / operator / agent — any
+A wallet belongs to a **principal** (user / org / team / operator / agent — any
 addressable identity). It holds one or more **assets**, each declared
 **ERC-20-style** (`ref`, `symbol`, `decimals`, `standard`, optional `peg`, and a
 `ruleSet`). Each asset is divided into **partitions** — ERC-1410 tranches that
@@ -58,7 +58,7 @@ A single mutable `balance` integer cannot express what agentic products already
 need, and bolting features onto it produces drift:
 
 1. **Multiple assets, one wallet.** Loyalty points, paid credits, currency
-   balances, and (runtime) guild- or chain-issued tokens are different assets
+   balances, and (runtime) host- or chain-issued tokens are different assets
    with different pegs, networks, and rules — not one number. ERC-20-style
    declaration gives each a precise identity; `decimals` alone retires the
    recurring ×100 unit-bug class.
@@ -126,7 +126,7 @@ code for fiat). Full field schema in
 
 ```
 asset {
-  ref         GUILDE_CREDITS | GUILDE_POINTS | USD | ERC20_USDT | SPL_USDC
+  ref         APP_CREDITS | APP_POINTS | USD | ERC20_USDT | SPL_USDC
   name · symbol
   decimals    minor-unit precision (2 = centi, 6 = USDC, 18 = most ERC-20)
   standard    internal | iso4217 | erc20 | spl     (→ adapter, not a taxonomy)
@@ -264,7 +264,7 @@ it in CI: no cycle of convert edges may have a rate product > 1.
 **`ConvertEdge.cap` — reserved, not yet enforced.** A convert edge MAY declare
 `cap?: { amount, windowSec }` (declared in
 `packages/wallet/src/asset.ts` — anti-inflation throughput limiting,
-load-bearing for guild-mint). This field is **reserved and NOT yet
+load-bearing for host-mint). This field is **reserved and NOT yet
 enforced**: the reference convert path (`packages/wallet/src/convert.ts`)
 reads only `to`, `rate`, and `addsRestriction`. (The `cap` the authorize
 engine bounds is a different field — `envelope.operating.cap`.) Tracked
@@ -304,7 +304,7 @@ the AIP-1 `createDoctype` scaffold.
 - **Held multi-currency (B) and on-chain-authority custody** are declared in the
   model but not part of the reference cloud pipeline; convert-on-entry and
   custodial-mirror are the day-1 defaults.
-- **Runtime/DB-backed asset declarations** (guild-minted tokens, arbitrary
+- **Runtime/DB-backed asset declarations** (host-minted tokens, arbitrary
   deposited ERC-20s) extend the config-first registry with a DB loader; the
   `ref` is the shared key so call sites are stable.
 - **Agent-to-agent netting** is supported by the event substrate but
