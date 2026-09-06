@@ -183,8 +183,12 @@ Verbs (`event_kind`): `mint · burn · reserve · capture · release · convert_
 convert_out · transfer`. A `convert` emits a correlated `convert_out` +
 `convert_in` pair atomically; a hold is `reserve` then `capture` (settle) or
 `release` (return). `fold(events, now)` projects lots
-`{ original, remaining, reserved, expiresAt?, status }`; spendable balance for an
-asset = Σ(remaining − reserved) over live (active, unexpired) lots.
+`{ original, remaining, reserved, expiresAt?, status }`; the **net position** for
+an asset = Σ(remaining − reserved) over unexpired lots (the `spendableBalance`
+accessor). Exhausted lots are NOT skipped: a normal one contributes 0, but a
+drawn-down short lot carries a negative residual that is a real liability. Once
+floors exist this is no longer the same number as what a spend may draw — see
+*Net position vs spend capacity*.
 
 ### Lot floors (short positions)
 
@@ -209,10 +213,33 @@ availability is `max(0, remaining − reserved − floor)`, so a short lot's
 negative headroom is spendable.
 
 The kit is deliberately **asset-agnostic about what a short position
-means** — a postpaid overdraft settled monthly, a guild credit line, a
+means** — a postpaid overdraft settled monthly, a platform credit line, a
 clearing counter — that meaning is the host's decision, carried only in
 the floor it mints. The primitive enforces the arithmetic (bounds,
 exhaustion, spend ordering), never the semantics.
+
+#### Net position vs spend capacity
+
+Floors split one number into two, and an implementation MUST NOT substitute
+either for the other:
+
+| | Formula | Range | Answers |
+|---|---|---|---|
+| **Net position** (`spendableBalance`) | Σ(`remaining` − `reserved`) over unexpired lots | may be negative | *what does this principal hold?* |
+| **Spend capacity** (per-lot, folded by coalescing) | Σ `max(0, remaining − reserved − floor)` over eligible lots | never negative | *what may this principal draw right now?* |
+
+Before floors the two coincided, so the distinction had no observable
+consequence. With a short lot they diverge by the undrawn headroom: a lot with
+`floor: −500`, `remaining: 0`, `reserved: 0` has net position `0` and spend
+capacity `500`. A pre-flight check that gates a spend on the net position will
+refuse a spend the coalescer would have funded; a balance surfaced to a user as
+"available" that reports the net position will understate it by the credit
+line. Settlement rails reconcile against the **net position** — it is the
+liability. Spend admission uses the **spend capacity**.
+
+An unbounded short lot (`floor: null`) has `floorOf → −∞`, hence spend capacity
+`Infinity`. This is intended, and it is why spend capacity MUST be evaluated per
+lot against a concrete requested amount rather than aggregated for display.
 
 ### Coalescing (intra-asset spend)
 
