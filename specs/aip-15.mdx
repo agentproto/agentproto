@@ -253,7 +253,7 @@ Each entry in `steps[]`:
 |---|---|---|
 | `id` | string | Kebab-case, unique within the workflow. |
 | `name` | string | Display label. |
-| `kind` | enum | `"tool"`, `"branch"`, `"parallel"`, `"suspend"`, `"approval"`, `"map"`, `"loop"`, `"subworkflow"`. |
+| `kind` | enum | `"tool"`, `"branch"`, `"parallel"`, `"suspend"`, `"approval"`, `"map"`, `"loop"`, `"subworkflow"`, `"agent"`, `"gate"`. |
 | `description` | string | One-line purpose. |
 | `inputs` | object | Mapping from upstream values to this step's input. Keys are the step's input fields; values are JSON-pointer-style references like `$input.productUrl`, `$steps.fetch-page.html`, or literals (`{ "kind": "literal", "value": 42 }`). |
 | `outputs` | JSON Schema | Schema of this step's output. Other steps reference it via `$steps.<id>.*`. |
@@ -487,6 +487,105 @@ when the step runs.
     outline: $steps.plan.outline
 ```
 
+##### `kind: "agent"`
+
+Spawn or reuse an agent session and send it a prompt, waiting for the
+turn to complete. This subsection codifies `@agentproto/workflow`'s
+shipped `StepAgent` interface — `packages/workflow/src/types.ts` —
+and its runtime projection in `@agentproto/workflow-runtime`
+(`packages/workflow-runtime/src/types.ts`).
+
+| Field | Type | Description |
+|---|---|---|
+| `agent.ref` | string | App-scoped agent id (e.g. `"@my-app/reviewer"`) the host resolves to a concrete adapter + spawn options at compile time. An unresolvable ref fails compilation, never the run. Omit to spawn a plain `adapter`, or to reuse via `sessionRef`. |
+| `prompt` | string | Required. The prompt sent to the session. |
+| `adapter` | string | Adapter slug for spawning a NEW session. Ignored (and unnecessary) when `agent.ref` resolves one. Omit both `adapter` and `agent` to reuse via `sessionRef`. |
+| `sessionRef` | string | Reuse an earlier agent step's spawned session, by that step's `id`. |
+| `sandbox` | string \| object | Run the step's session inside a sandbox — a provider slug or an inline spec (`{ provider: ... }`). Only meaningful with `adapter`; a `sessionRef` reuse inherits the referenced session's placement. Hosts without sandbox support MUST fail the spawn loudly rather than silently running on the host. |
+| `cacheable` | boolean | Cache this step's output under the run's cacheKey. Default `false`. |
+| `maxRetries` | integer | Re-prompt-and-retry attempts on `outputSchema` mismatch. Default 2. |
+| `outputSchema` | JSON Schema | Validates the session's final message; re-prompts on mismatch. |
+| `policy` | object | `awaiting`: `"auto-allow"` (with `prompt`) \| `"escalate"` (with optional `webhookUrl`, `timeoutMs`) \| `"fail"` — what to do when the session asks for something outside its permission. |
+| `options` | object | Adapter option id → value, forwarded to a NEW spawn's `startSession({ options })`. Only meaningful with `adapter`; ignored on a `sessionRef` reuse. |
+| `harness` | object | Harness pinning for this step's spawn — optional `model`, `effort`, `role`, `tools` (per-spawn allowlist), `skills`, `cwd`, `promptFile` (+ loader-computed `promptSha`), and `knowledge[]` (AIP-10 corpus materialized into the step's cwd under `.knowledge/` before the session runs). Precedence when a field is also set elsewhere: step `harness` > the resolved AGENT.md's frontmatter > caller args > adapter default. |
+
+```yaml
+- id: review-draft
+  kind: agent
+  agent:
+    ref: "@my-app/reviewer"
+  prompt: "Review the draft at $steps.draft.path and reply with findings."
+  outputSchema: { type: object, properties: { findings: { type: array, items: { type: string } } } }
+```
+
+##### `kind: "gate"`
+
+Run a shell command through the host's subprocess runner (AIP-17) as
+a deterministic pass/fail check. Exit code 0 is a pass; any other
+exit code is a failure, subject to the step's common `retry` policy.
+This subsection codifies `@agentproto/workflow`'s shipped `StepGate`
+contract — `packages/workflow/src/types.ts:370-412`.
+
+| Field | Type | Description |
+|---|---|---|
+| `command` | string | Required. The command to execute. No shell interpolation — the command is invoked as an argv vector (`command` + `args`), never through a shell. |
+| `args` | string[] | Argv vector (no shell). Each string may carry a LEADING `$…` run-time reference: a leading `$input` / `$item` / `$steps.<id>` / `$index` token is resolved per run against the run bindings and any trailing text is appended verbatim (`"$input.bookDir/knowledge"` → `"<resolved bookDir>/knowledge"`); `$$` escapes a literal `$`; an unresolvable ref throws naming the step and the arg index. |
+| `cwd` | string | Working directory; defaults to the workflow run's own cwd. May carry the same leading-`$…` ref rule as `args`. The resolved cwd is made absolute — a relative resolved cwd resolves against the run's cwd, never the daemon process cwd. |
+| `report` | string | Path (relative to `cwd`) of a JSON report file, consulted when stdout doesn't itself parse as JSON. |
+| `on_fail` | object | Re-prompt-and-rerun on a failing exit code, bounded by `retry.max_attempts`. Runs BEFORE each retry attempt after the first: sends the named prior agent step's session (reused via that step's `sessionRef`) a prompt with this gate's last report injected (`reprompt` names the step id; `with` merges extra literal context), waits for its turn, then re-runs the gate command. |
+
+**Reporting.** The process' stdout, if it parses as JSON, becomes the
+gate's report; otherwise the file at `report` is read and parsed as
+JSON. The report — plus `ok` and `exitCode` — is bound at
+`$steps.<id>.report` / `.ok` / `.exitCode` for later steps to read,
+and each attempt's outcome (pass/fail, exit code, attempt index,
+duration, and parsed report) is reported as a `gate-report` event on
+the run's event stream as it happens, so per-attempt outcomes are
+observable mid-run rather than only at step completion.
+
+```yaml
+- id: check-wordcount
+  kind: gate
+  command: node
+  args: ["scripts/check-wordcount.js", "$input.bookDir/manuscript"]
+  report: "./report.json"
+```
+
+#### Runtime-internal node types are not authorable
+
+A runtime MAY compile the ten authorable step kinds into internal
+node types of its own. Such internal types are NOT manifest-authorable
+and are NOT part of the `kind` enum. This codifies shipped behaviour:
+`@agentproto/workflow-runtime`'s node algebra (`transform`, `pipeline`,
+`group`, alongside its own `tool`/`branch`/`map`/`loop`/`parallel`/
+`approval`/`suspend`/`subworkflow`/`agent`/`gate` nodes) is a
+compilation target for the manifest kinds — evidence:
+`packages/workflow-runtime/src/types.ts`. Manifests listing
+`kind: "transform"` (or `pipeline` / `group`) are invalid.
+
+#### Accepted compile subset (normative)
+
+This AIP describes a step DAG with arbitrary `next` successors. The
+shipped reference compiler (`@agentproto/workflow-runtime`'s
+`compileWorkflow` — `packages/workflow-runtime/src/compile-workflow.ts`,
+module doc) accepts only the **linear / structured subset** of that
+grammar, and conformant implementations SHOULD support at least the
+same subset:
+
+- Steps run in **document order**.
+- `map` / `loop` / `parallel` nest their child step lists.
+- Non-linear `next` gotos are **rejected** with a clear diagnostic.
+- `kind: "branch"` compiles in its **forward-only** form: every
+  `branches[].next` and `default` must name a **later sibling in the
+  same step list** — never backward, never into a nested `map` /
+  `loop` / `parallel` body.
+
+Compiling a full goto graph (backward jumps, cross-scope targets) is
+a separable follow-up. Retry-style control flow is hand-authored as a
+`loop` step rather than a backward branch. The point of pinning the
+subset here is that a manifest that is legal-per-spec but outside the
+subset failing to compile must not come as a surprise.
+
 ### Expressions
 
 The minimum expression grammar adapters MUST support:
@@ -597,6 +696,7 @@ interface StepDefinition {
   description?: string
   kind:         "tool" | "branch" | "parallel" | "suspend"
               | "approval" | "map" | "loop" | "subworkflow"
+              | "agent" | "gate"
 
   inputs?:      InputMapping     // see manifest spec
   outputs?:     JSONSchema | unknown
@@ -610,7 +710,7 @@ interface StepDefinition {
 
   // Kind-specific fields — see manifest spec for the full list.
   // (`tool`, `branch`, `parallel`, `suspend`, `approval`, `map`,
-  // `loop`, `subworkflow` each carry their own extras.)
+  // `loop`, `subworkflow`, `agent`, `gate` each carry their own extras.)
   [kindSpecific: string]: unknown
 }
 ```
@@ -678,10 +778,16 @@ interface WorkflowHandle {
    `inputs` mapping before its body executes. Steps MUST NOT
    re-validate; they receive parsed input.
 
-3. **Step kinds are exhaustive.** `defineStep` accepts only the eight
+3. **Step kinds are exhaustive.** `defineStep` accepts only the ten
    kinds enumerated. Unknown kinds MUST be rejected at registration
    with a clear error — runtimes MAY add proprietary extensions, but
-   they live OUTSIDE the standard signature.
+   they live OUTSIDE the standard signature. This escape hatch does
+   NOT cover `kind: "agent"` and `kind: "gate"`: those two sit INSIDE
+   the core union (`@agentproto/workflow`'s shipped `StepCommon.kind`
+   — `packages/workflow/src/types.ts`), so the eight-kind enumeration
+   this rule previously stated was a real conformance breach of the
+   standard signature, not a proprietary extension. This amendment
+   codifies the shipped ten-kind union.
 
 4. **`approval`, `riskLevel`, `timeoutMs`, `retry`, `compensation`
    are enforced by the host**, not the step body. Steps assume
@@ -697,11 +803,25 @@ interface WorkflowHandle {
    containing `defineWorkflow(...)` MUST be safely importable without
    side effects. All I/O happens inside step bodies.
 
-7. **Suspend points persist.** When a step has `kind: "suspend"` or
-   `kind: "approval"`, the implementation MUST persist enough run
-   state to resume from that step on a matching event after process
-   restart. In-memory-only implementations MUST refuse to register
-   suspendable workflows or document the limitation explicitly.
+7. **Suspend points persist.** When a step has `kind: "approval"`,
+   the implementation MUST persist enough run state to resume from
+   that step on a human decision after process restart. This
+   requirement is normative for `kind: "approval"` only — it is NOT
+   yet required for `kind: "suspend"`. In-memory-only implementations
+   MUST refuse to register suspendable workflows or document the
+   limitation explicitly.
+
+   This narrowing codifies the shipped daemon runner's behaviour:
+   on reload, a run parked awaiting a human approval is deliberately
+   exempt from being failed and its `awaitingApproval` record is
+   durable, while any other in-flight run (`running` /
+   `awaiting-input`) is marked `failed` with "interrupted by daemon
+   restart" — `packages/runtime/src/workflow-runner.ts:335-343`. The
+   shipped runner's current behaviour of silently failing a run
+   suspended at `kind: "suspend"` on reload is a known defect,
+   tracked at https://github.com/agentproto/ts/issues/1195; this
+   amendment records what is true today rather than blessing that
+   behaviour.
 
 ### Implementer's guide
 
@@ -764,21 +884,26 @@ through:
 
 ### With AIP-26 / AIP-17 / AIP-19 (2026-04-30 revision)
 
-The 2026-04-30 revision adds top-level `code:`, `run:`, `runner:`,
+The 2026-04-30 revision adds top-level `code:`, `run:`, `runtime:`,
 `secrets:`, `network:` blocks defined in their respective sibling
 AIPs, and removes the legacy `entry:` and `runtime:` shapes from
 the manifest. The migration mirrors AIP-14 § Compatibility:
 
 ```
 manifest.entry           → manifest.run            (single-file → string-path form)
-manifest.runtime.mode    → manifest.runner.engine
+manifest.runtime.mode    → manifest.runtime.engine
 manifest.runtime.env     → manifest.secrets        (per AIP-19)
 manifest.runtime.fs      → manifest.inputsFiles / outputsFiles  (per AIP-16)
 manifest.runtime.network → manifest.network        (top-level)
-manifest.runtime.cpu_ms_max     → manifest.runner.limits.cpu_ms
-manifest.runtime.memory_mb_max  → manifest.runner.limits.memory_mb
-manifest.runtime.timeout_ms     → manifest.runner.limits.timeout_ms
+manifest.runtime.cpu_ms_max     → manifest.runtime.limits.cpu_ms
+manifest.runtime.memory_mb_max  → manifest.runtime.limits.memory_mb
+manifest.runtime.timeout_ms     → manifest.runtime.limits.timeout_ms
 ```
+
+Note: this table previously named the block `runner`; the canonical
+`WORKFLOW.schema.json` (the `"runtime"` property) and the shipped
+`packages/workflow/src/schema.ts` both name it `runtime` — the prose
+now aligns with the schema and the implementation.
 
 Hosts SHOULD accept both shapes during the deprecation window.
 
