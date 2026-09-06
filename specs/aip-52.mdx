@@ -308,18 +308,29 @@ family. They are distinct today and MUST NOT be conflated when reading a
 spec; which sense an AIP means is determined by what it binds, not by
 the word:
 
-| Sense | What it binds | Example AIP | Example package |
+| Type | Sense / what it binds | Example AIP | Example package |
 |---|---|---|---|
-| adapter over an **agent CLI** | wraps an agent CLI (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
-| adapter into a **foreign framework** | projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/mastra` |
-| adapter to a **backend service** | routes a declared kind to a concrete backend — settlement rails, tunnel, sandbox, eval-reporter providers | [AIP-49](/docs/aip-49) | `@agentproto/provider-kit` |
+| `HarnessAdapter` | adapter over an **agent CLI** — wraps an agent CLI (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
+| `FrameworkAdapter` | adapter into a **foreign framework** — projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/mastra` |
+| `ServiceAdapter` | adapter to a **backend service** — routes a declared kind to a concrete backend: settlement rails, tunnel, sandbox, eval-reporter providers | [AIP-49](/docs/aip-49) | `@agentproto/provider-kit` |
 
-AIP-52 means the second sense: the outward framework bridge. Qualified
-names for the three senses have been proposed but are **not** settled
-vocabulary; until they are, specs SHOULD disambiguate in prose the way
-this table does, not by inventing compound terms. The reconciliations
-below cover the remaining uses of the word within this AIP's own
-history.
+AIP-52 means the second sense: `FrameworkAdapter`, the outward framework
+bridge. These type names are the settled vocabulary for the three
+contracts; specs SHOULD refer to the sense by its type name.
+
+The npm prefix stays **flat**. All 22 adapter packages are published
+under `adapters/*` uniformly as `@agentproto/adapter-<x>`
+(`@agentproto/adapter-claude-code` is at 2.1.10) and are **not** renamed:
+the flat prefix already provides discoverability, and what was missing
+was never the package name but a statement of WHICH contract each one
+implements. Renaming would be a breaking change buying something the
+prefix already gives.
+
+The distinction is carried at the **type level**, not by a naming
+convention, because an unenforced convention drifts — as when this
+repo's CI job kept announcing AIP-27 for hours after AIP-54 absorbed the
+content, because only prose said otherwise. The reconciliations below
+cover the remaining uses of the word within this AIP's own history.
 
 "Adapter" already appears in three places in the agentproto ecosystem.
 This AIP claims all three coherently so future readers stop conflating
