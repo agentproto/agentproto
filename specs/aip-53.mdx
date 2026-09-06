@@ -5,8 +5,10 @@ aip: 53
 status: Draft
 type: Schema
 created: 2026-08-13
+updated: 2026-09-06
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42]
+resources: ./resources/aip-53/draft
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/app-kit
 layer: surfaces
 package: "@agentproto/app-kit"
@@ -20,6 +22,7 @@ package: "@agentproto/app-kit"
 | Type | Schema |
 | Domain | apps.sh |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-42](/docs/aip-42) (AGENT) |
+| Resources | [`./resources/aip-53`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft) — `ADAPTER.md`, `APP.schema.json` |
 | Reference Impl | [`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit) |
 
 ## Abstract
@@ -177,7 +180,7 @@ attachment invariant.
 defineApp(definition: AppDefinition): AppHandle
 
 interface AppDefinition {
-  agents:        (AgentEntry | AgentHandle)[]   // REQUIRED, non-empty
+  agents?:       (AgentEntry | AgentHandle)[]   // REQUIRED (non-empty) UNLESS `ui` is present
   workflows?:    WorkflowHandle[]
   attach?:       DoctypeHandle[]                  // any other AIP handle to carry along
   workspace?:    WorkspaceHandle | WorkspaceShorthand
@@ -193,11 +196,25 @@ interface AppDefinition {
   skill?:        AppSkillSurface
   artifacts?:    AppArtifactDecl[]
   dev?:          AppDevDefinition
+  data?:         AppDataDefinition                   // default data-dir hint for the app_data_* plane
+  category?:     string                               // coarse grouping surfaced in catalogs/trees
 }
 
 interface AgentEntry {
   agent: AgentHandle       // an AIP-42 defineAgent() handle
   body?: string            // the AGENT.md body / system prompt (composed if absent)
+}
+
+/**
+ * Where the app's durable data lives (the `app_data_*` plane — see
+ * [The app data plane](#the-app-data-plane-app_data_)). `dir` is a path
+ * RELATIVE to the app dir — `"data"` means `<appDir>/data`, which is also
+ * what a host uses when the hint is absent. It is a hint: an explicit
+ * `dataDir` passed at install time overrides it, and the resolved absolute
+ * path is persisted on the installed-app record.
+ */
+interface AppDataDefinition {
+  dir?: string
 }
 
 interface AppUiDefinition {
@@ -213,22 +230,48 @@ interface AppUiDefinition {
 }
 ```
 
-`agents` MUST be a non-empty array. Each entry is either a bare
+`agents` MUST be a non-empty array UNLESS `ui` is present, in which case
+it MAY be empty or omitted entirely — a **UI-only app** ships a `ui`
+block and no agent behaviour, and is a first-class conforming app (this
+codifies `packages/app-kit/src/define-app.ts:49-52`'s shipped UI-only
+carve-out, pinned by `define-app.test.ts`'s "UI-only apps (zero
+agents)" suite, and matches the five daemon builtin panels —
+`sessions-panel`, `agents-overview`, `bureau-sessions`, `session-story`,
+`live-session` — that ship as `agents: []` in
+`packages/apps/src/index.ts:14-20`). Each entry is either a bare
 `AgentHandle` (no body — the prompt composes from the agent's structured
 fields) or an `AgentEntry` pairing the handle with the `body` string that
 becomes its `AGENT.md`'s body (its system prompt) — [AIP-42](/docs/aip-42)
 frontmatter is `.strict()` and carries no `systemPrompt` field, so the
 free-text prompt only ever lives in an `AGENT.md` body.
 
-`workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`, and
-`workspace` are all optional. An app with agents and nothing else is
-still a conforming app.
+`workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`,
+`data`, `category`, and `workspace` are all optional. An app with agents
+and nothing else is still a conforming app, as is a UI-only app with an
+empty `agents` array.
+
+`data`, when set, is the default data-dir hint for the `app_data_*`
+plane (see [The app data plane](#the-app-data-plane-app_data_)) — a
+string path relative to the app dir; it MUST be non-empty when present.
+`category` is a freeform, non-empty-when-present coarse grouping label
+(e.g. `"book"`) surfaced in host catalogs and trees; hosts MUST NOT
+validate it against a fixed enum, so new categories can appear without a
+schema release. Both are carried verbatim into `APP.md` frontmatter by
+`emit` and back by `loadAppHandle`.
 
 ### Conformance rules
 
-1. **Non-empty agents.** `agents` MUST contain at least one entry. An
-   app with zero agents is not a conforming `AppDefinition` — `defineApp`
-   MUST refuse it.
+1. **Non-empty agents, unless `ui`.** `agents` MUST contain at least one
+   entry UNLESS `ui` is present. A UI-only app — a `ui` block with an
+   empty or omitted `agents` array — is conforming. An app with zero
+   agents AND no `ui` block is not a conforming `AppDefinition` —
+   `defineApp` MUST refuse it. This rule codifies shipped behaviour:
+   `packages/app-kit/src/define-app.ts:49-52` accepts `(agents empty ||
+   omitted) && ui === undefined` as the only rejection case, its test
+   suite pins UI-only apps as expected behaviour
+   (`packages/app-kit/src/__tests__/define-app.test.ts`, "UI-only apps
+   (zero agents)"), and the five daemon builtin panels
+   (`packages/apps/src/index.ts:14-20`) ship exactly that way.
 
 2. **Unique agent ids, unique workflow ids.** Two bundled agents MUST NOT
    share an `id`; two bundled workflows MUST NOT share an `id`.
@@ -240,7 +283,11 @@ still a conforming app.
    bundles, at least one agent's `workflows[]` MUST reference it.
    `defineApp` MUST refuse a definition violating either direction — a
    dangling ref (agent → unbundled workflow) or an orphan (bundled
-   workflow → no referencing agent) are both non-conforming.
+   workflow → no referencing agent) are both non-conforming. For a
+   UI-only app (rule 1) the check is trivially satisfied: no agents
+   reference anything and no workflows may be bundled alongside them
+    (a workflow with no referencing agent would be an orphan), so a
+   conforming UI-only app bundles zero workflows.
 
 4. **`id` non-empty when present.** `id` MUST be a non-empty string when
    set. Setting `id` is what makes the app *installable/discoverable* —
@@ -325,6 +372,8 @@ artifact: { path: .agentproto/artifact/index.html, title: "…", description: "�
 skill: { path: .agentproto/skill, title: "…", description: "…" }
 artifacts: [{ type: "…", description: "…" }]
 dev: { launch: [{ name: "…", runtimeExecutable: "…", runtimeArgs: [...], port: 4173, url: "…" }] }
+data: { dir: "data" }              # only when `data` is set — app_data_* hint, relative to <dir>
+category: "book"                   # only when `category` is set — freeform catalog grouping
 ```
 
 `agents[]` and `workflows[]` entries are `{ id, path }` refs, `path`
@@ -356,6 +405,17 @@ A conforming loader reading `<dir>/.agentproto/APP.md` back into an
 
 A loader failure MUST name the offending path (which file, which ref) —
 a bare "invalid app" is not sufficient diagnostic detail.
+
+### Implementer's guide
+
+For step-by-step guidance on building an `app/v1` conformant host —
+bundle validation, `emit`/`load`, install/run lifecycle, the UI bridge,
+and the data plane — see
+[`./resources/aip-53/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft).
+The AIP only defines the contract; the resource doc walks an
+implementer through the projection. The `APP.md` frontmatter shape is
+machine-checkable against
+[`./resources/aip-53/draft/APP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft).
 
 ### Example — minimal, from a shipped app
 
@@ -666,6 +726,116 @@ A `ui/` source tree's `node_modules/` and `.git/` are excluded from
 `.agentapp` packaging (see [`pack`](#pack)) regardless of whether the
 project ships a build step — they are never part of the shipped app.
 
+## The app data plane (`app_data_*`)
+
+An installed app owns a **durable, app-scoped data directory** — the
+plane its UI and agents persist state through (`app_data_read`,
+`app_data_write`, `app_data_list`), distinct from the app's *source*
+tree, which is whatever `install`/`unpack` wrote and is never
+agent-writable by this contract. This section is normative. It codifies
+shipped behaviour: `packages/runtime/src/app-data.ts` (its header
+comment states the resolution rule verbatim, and
+`resolveAppDataPath`/`locateAppDataPath`/`atomicWrite` implement it),
+wired as MCP tools by `registerAppDataTools` in the same file.
+
+### Addressing
+
+Every data-plane tool addresses files with an **app-relative path** —
+never an absolute one. How a relative path `p` resolves is the contract
+app UIs and agents rely on, and a second host MUST reproduce all four
+rules (this is `app-data.ts`'s `locateAppDataPath`, `:79-113`):
+
+1. **Primary root is the app's persisted `dataDir`.** The installed-app
+   record carries `dataDir`, defaulted to `<dir>/data` for records that
+   predate the field. A custom root is set explicitly at install time
+   (`app_install { dataDir }`, `agentproto app install --data-dir`) or
+   hinted by `APP.md`'s `data: { dir }` (relative to the app dir). The
+   resolved absolute path is persisted on the installed-app record.
+2. **Legacy `data/` spelling collapses under the default layout.** When
+   `dataDir` IS `<dir>/data` (the default layout), a leading `data/`
+   segment is redundant and dropped for reads and writes alike:
+   `data/trips/x.json` and `trips/x.json` name the same file. A custom
+   `dataDir` is a fresh, intentional layout — **no collapse**. The
+   traversal guard still runs on the collapsed result, so
+   `data/../../x` is rejected exactly as `../x` would be.
+3. **Legacy root fallback.** If `p` — or its top-level folder — does not
+   exist under `dataDir` but does under the app's source `dir`, it
+   resolves under `dir`: reads find files written by pre-`dataDir`
+   installs, writes update them in place (or land next to their
+   siblings). Move the folder into `dataDir` and the fallback stops
+   applying. Brand-new paths always land under `dataDir`.
+4. **Listing merges both roots.** When the same directory also exists
+   under the source dir, `app_data_list` merges the two views, with
+   data-dir entries winning on name clashes; listing `.` yields the
+   data dir only (or the source dir while no data dir exists yet).
+
+A conforming host MUST surface which root a path resolved under in its
+diagnostics (`legacy: true` vs the data root), so an author can tell a
+pre-`dataDir` file from a durable one.
+
+### The traversal guard
+
+Both roots get the same defence, and it is the only path-escape defence
+that matters. A conforming host MUST reject, with a named
+traversal error (reference: `AppPathTraversalError`, code
+`APP_PATH_TRAVERSAL`), any app-relative path that:
+
+- is absolute (starts with `/` or a drive root);
+- carries a Windows drive-letter prefix (`C:…`), so a drive-based host
+  can never misread it as a relative segment;
+- after `resolve` collapses `.`/`..` segments, does not land **on the
+  root itself or strictly below it** — a relative `../../secret` or a
+  nested `a/../../b` climbs out of the app dir into unrelated host
+  files, and containment-by-prefix comparison against
+  `root + separator` is the reliable check.
+
+Additionally, for an **existing** target the host MUST realpath the
+resolved path and assert it still lands inside the root — so a symlink
+planted inside the data dir cannot point the plane outside it
+(`assertRealInside`). Without that check the string-level guard above is
+defeated by a single symlink. Both checks run on every tool call —
+read, write, and list alike — there is no once-per-session grant.
+
+The reference implementation rejects the offending call with the
+original relative path named in the error; a bare "invalid path" is not
+sufficient diagnostic detail (mirroring the loader rule above).
+
+### The atomic-write guarantee
+
+`app_data_write` MUST write atomically: create parent directories
+(`mkdir -p`), write the payload to a temporary sibling of the target
+(`<target>.tmp.<pid>` in the reference implementation), then `rename`
+it over the target. A reader therefore observes either the previous
+contents or the complete new contents — never a partial write, even
+under concurrent readers. There is no non-atomic write path to the data
+plane. A missing data directory is created lazily by the write path, not
+an error.
+
+`.json` paths are a convention, not a separate store: reads of paths
+ending in `.json` return the parsed value (falling back to raw text when
+the bytes do not parse); writes JSON-serialize pretty-printed. Every
+other path carries raw string content verbatim.
+
+### The state ledger (carve-out)
+
+The reference implementation ships three additional tools rooted in the
+same data dir — `app_state_append`, `app_state_get`, `app_state_list` —
+implementing an append-only, ULID-ordered event ledger folded to
+snapshots (`app-state.ts`). One access rule is normative here:
+**`app_state_append` MUST NOT be granted to spawned agent sessions and
+MUST NOT be added to a UI's `ui.tools[]` allowlist by default** — a UI
+that needs to append (e.g. recording a human approval) must explicitly
+list it. The other two are read-only and follow the normal allowlist
+rules.
+
+`app_data_migrate` (importing legacy `ranked-jobs.json` + `dossiers/*`
+files into the durable shape) is reference behaviour, informative here —
+a conforming host MAY ship its own migration story or none.
+
+A future `app_data_query` tool over a `store.sqlite` inside the data dir
+is reserved, not specified — one reason the data dir is separable from
+the source tree.
+
 ## Reference tooling (informative)
 
 The reference implementation exposes an app's lifecycle through five CLI
@@ -681,13 +851,35 @@ UI-mode table and the dev-bridge route above assume their existence:
 | `build` | Builds a `ui/` source project into `.agentproto/ui/` (no-op success when there's nothing to build) |
 | `dev` | Runs a `ui/` source project's own dev server plus a bridge-only server for live `window.McpApp` calls |
 
-The daemon-side install/run surface (`app_install`, `app_run`,
-`app_status`, `app_stop`, `app_apply` / `app_unapply`, `app_tool_call`,
-`app_catalog`, `app_artifact_get`, `app_skill_get`) is likewise
-reference behavior built on top of the file contract this AIP fixes,
-not itself part of the normative surface — a conforming alternative host
-MAY expose a different install/run API as long as it honors the
-allowlist enforcement and bridge contract above for any UI it renders.
+The daemon-side MCP tool surface is likewise reference behavior built on
+top of the file contract this AIP fixes, not itself part of the
+normative surface — a conforming alternative host MAY expose a different
+install/run API as long as it honors the allowlist enforcement and
+bridge contract above for any UI it renders. For orientation, the
+reference daemon currently registers 22 `app_*` tools (grep
+`packages/runtime/src/app-tools.ts`, `app-data.ts`, `app-external.ts`,
+`app-state.ts` for the authoritative set):
+
+| Tool | Role |
+|---|---|
+| `app_install` | `loadAppHandle(dir)` → validate → persist an installed-app record |
+| `app_list` | List installed apps, each with a summary of its `app_run` history |
+| `app_list_applied` | List apps applied to a scope |
+| `app_uninstall` | Remove an installed app (refuses while runs are live) |
+| `app_run` | Spawn a session per selected agent |
+| `app_status` | Fan out an `app_run`'s sessions plus the app's workflow runs |
+| `app_stop` | Kill every session in an `app_run` and mark the run ended |
+| `app_apply` / `app_unapply` | Bind / unbind an installed app to a scope |
+| `app_tool_call` | Allowlist-checked tool dispatch for UI-originated calls |
+| `app_catalog` | List catalog apps, including the builtin panels |
+| `app_artifact_get` | Fetch an app's artifact surface |
+| `app_skill_get` | Fetch an app's skill surface |
+| `app_data_read` / `app_data_write` / `app_data_list` / `app_data_migrate` | The data plane (see [The app data plane](#the-app-data-plane-app_data_)) |
+| `app_state_append` / `app_state_get` / `app_state_list` | The app state ledger (see the data-plane carve-out) |
+| `app_external_list` / `app_external_read` | Read-only access to declared `externalReadRoots` outside the app dir |
+
+`agent_output` (agent sessions' structured output) is part of the agent
+toolset, not the `app_*` family, though app UIs commonly allowlist it.
 
 ## Rationale
 
@@ -800,6 +992,13 @@ supersede.
   claimed `id`/`version`/`agentprotoVersion` came from a trusted
   publisher. A registry distributing third-party `.agentapp` files
   SHOULD layer a signing scheme on top; this AIP does not define one.
+
+- **The data plane's traversal guard is a security boundary, not a
+  convenience.** `app_data_*` paths resolve strictly inside the app's
+  data dir (or legacy source dir); hosts MUST enforce the
+  resolve-and-realpath containment checks of
+  [The traversal guard](#the-traversal-guard) on every call — the
+  string-level check alone is defeated by a single symlink.
 
 - **`app_install` validates workflow tool ids, not agent tool ids.** The
   reference install path cross-checks every `WORKFLOW.md` `tool` step's
