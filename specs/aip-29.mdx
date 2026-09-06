@@ -1,6 +1,6 @@
 ---
 title: "AIP-29: CLI.md — agentcli/v1 (CLI integration manifest)"
-description: A markdown + frontmatter format for declaring a command-line tool's surface to an agent — its binary, install paths, version detection, subcommand tree, sandbox needs, auth flows, and output conventions. Lets agents discover, install, and safely operate third-party CLIs (gh, gcloud, kubectl, ffmpeg, …) inside a sandbox, with the standard `defineCli` entry-point signature.
+description: A markdown + frontmatter format for declaring a command-line tool's surface to an agent — its binary, install paths, version detection, subcommand tree, sandbox needs, auth flows, and output conventions. Lets agents discover, install, and safely operate third-party CLIs (gh, gcloud, kubectl, ffmpeg, …) inside a sandbox, with the standard `defineCliDriver` entry-point signature.
 aip: 29
 status: Draft
 type: Schema
@@ -44,7 +44,7 @@ standalone tool duplicates that context across dozens of files; a
 bundle factors it.
 
 The format is paired with a standard entry-point function,
-**`defineCli(...)`**, whose signature any implementation in any
+**`defineCliDriver(...)`**, whose signature any implementation in any
 language exposes so callers, runtimes, and adapters share one
 contract.
 
@@ -610,48 +610,70 @@ binary's version (covered by `version_check.range`). Bumping
 `version_check.range` to support a new gh major SHOULD bump the
 manifest's major, since tools written for the old range may break.
 
-## The `defineCli` standard signature
+## The `defineCliDriver` standard signature
+
+> **Amendment — codifies shipped behaviour.** The canonical entry
+> point ships as **`defineCliDriver`** in
+> [`packages/driver/cli/src/index.ts`](https://github.com/agentproto/ts/tree/main/packages/driver/cli)
+> (`@agentproto/driver-cli`): sugar over [AIP-30](/docs/aip-30)'s
+> `defineDriver` with `kind: "cli"` and an auto-synthesised per-tool
+> `execute` map. No `defineCli` alias is exported; earlier drafts
+> named the entry `defineCli` — the shipped name is normative.
 
 Every implementation that consumes `CLI.md` and ships routing
-helpers MUST expose a function named **`defineCli`** whose signature
-matches the contract below. Many bundles ship a frontmatter-only
-manifest with no entry; this signature is for entries that need
-custom login/output adapters.
+helpers MUST expose a function named **`defineCliDriver`** whose
+signature matches the contract below. Many bundles ship a
+frontmatter-only manifest with no entry; this signature is for
+entries that need custom login/output adapters or non-default
+spawn/output conventions.
 
 ### Signature (TypeScript notation, normative)
 
 ```ts
-defineCli(definition: CliDefinition): CliHandle
+defineCliDriver(definition: CliDriverDefinition): DriverHandle
 
-interface CliDefinition {
-  // Identity — mirrors the manifest fields with the same names.
-  id:           string
-  name:         string
-  description:  string
-  version?:     string
-  bin:          string
+interface CliDriverDefinition extends Omit<DriverDefinition, "kind" | "execute"> {
+  // Identity + lifecycle + adapters — inherited from the AIP-30
+  // DriverDefinition base: id, name, description, version,
+  // implements[], install, versionCheck, network, tags, metadata,
+  // login, refresh, parseOutput, detectExpiry, ...
 
-  // Install + version + sandbox + commands — usually frontmatter-driven.
-  // The entry MAY override or extend.
-  install?:        InstallMethod[]
-  versionCheck?:   VersionCheck
-  sandbox?:        SandboxPolicy
-  commands?:       Record<string, ToolRef | CommandTree>
-
-  // Optional adapters — when frontmatter declarations aren't expressive enough.
-  login?:          (args: LoginArgs) => Promise<LoginResult>
-  refresh?:        (args: RefreshArgs) => Promise<RefreshResult>
-  parseOutput?:    (args: ParseOutputArgs) => ParseOutputResult
-  detectExpiry?:   (args: DetectExpiryArgs) => boolean
-
-  // Bookkeeping
-  tags?:        string[]
-  metadata?:    Record<string, unknown>
+  // CLI-specific surface:
+  kind?: "cli"                 // forced to "cli" by defineCliDriver
+  bin: string                  // binary name on $PATH, or workspace-relative path
+  binArgs?: readonly string[]  // default argv prefix injected before per-tool argv
+  output?: {                   // output parsing convention
+    defaultFormat?: "text" | "json" | "yaml" | "binary"
+    jsonFlag?: string
+    jsonFlagArgs?: readonly string[]
+    exitCodes?: Record<number, string>
+    stream?: "stdout" | "stderr" | "mixed"
+    errorStream?: "stdout" | "stderr" | "mixed"
+  }
+  tty?: { required?: boolean }
+  sandbox?: {                  // declaration only; enforcement is host policy
+    fs?:   { read?: readonly string[]; write?: readonly string[]; deny?: readonly string[] }
+    exec?: { allow?: boolean; spawn?: readonly string[] }
+    env?:  { pass?: readonly string[]; set?: Record<string, string> }
+  }
 }
+```
 
+`defineCliDriver` synthesises the `execute` map: one body per
+`implements[]` entry, built from `bin` / `binArgs` / `output` — argv
+templating with `${input.X}` substitution and filters (`default`,
+`optional`, `flag`), exit-code → semantic-error mapping, and
+text/JSON output parsing.
+
+The login / refresh / parseOutput / detectExpiry adapters and their
+argument shapes are inherited unchanged from AIP-30's
+`DriverDefinition`; the shapes below remain normative for CLI
+implementations:
+
+```ts
 interface LoginArgs {
   /** Per-call context — surface, user, host capabilities. */
-  context: CliContext
+  context: DriverContext
   /** Caller-set abort signal — MUST be honoured. */
   signal:  AbortSignal
 }
@@ -662,7 +684,7 @@ type LoginResult =
 
 interface RefreshArgs {
   /** Same as LoginArgs.context. */
-  context: CliContext
+  context: DriverContext
   signal:  AbortSignal
 }
 
@@ -671,8 +693,8 @@ type RefreshResult =
   | { ok: false; reason: "auth_expired" | "upstream_error"; message?: string }
 
 interface ParseOutputArgs {
-  exitCode: number
-  stdout:   string
+  exitCode?: number
+  stdout:   string | Uint8Array
   stderr:   string
   /** What the manifest declared. */
   expected: { format: "text" | "json" | "yaml" | "binary" }
@@ -687,10 +709,10 @@ interface ParseOutputResult {
 
 ### Conformance rules
 
-1. **One canonical name.** The exported name MUST be `defineCli`.
-   Implementations MAY also re-export under host-specific aliases
-   (`createCli`, `cli`) but the canonical name is what `CLI.md`
-   adapters reference.
+1. **One canonical name.** The exported name MUST be
+   `defineCliDriver`. Implementations MAY also re-export under
+   host-specific aliases (`createCli`, `cli`) but the canonical name
+   is what `CLI.md` adapters reference.
 
 2. **Frontmatter is the source of truth.** When the entry exports
    conflicting values for a field declared in frontmatter, the
@@ -708,17 +730,17 @@ interface ParseOutputResult {
    network or file system; that's the runner's job.
 
 5. **Sandbox enforcement is the host's.** The bundle declares
-   policy; the host enforces it. A `defineCli` implementation MUST
+   policy; the host enforces it. A `defineCliDriver` implementation MUST
    NOT subvert host enforcement (e.g. by spawning child processes
    when `exec.allow: false`).
 
-6. **No I/O at module load.** The module containing `defineCli`
+6. **No I/O at module load.** The module containing `defineCliDriver`
    MUST be safely importable as a side-effect-free unit. All I/O
    happens inside `login` / `refresh` / `parseOutput`.
 
 ### Implementer's guide
 
-For step-by-step guidance on building a `defineCli`-conformant
+For step-by-step guidance on building a `defineCliDriver`-conformant
 implementation in a specific language or framework, see
 [`./resources/aip-29/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-29/draft/ADAPTER.md).
 The AIP only defines the contract; the resource doc walks an
@@ -881,7 +903,7 @@ incrementally:
    `./tools/<name>/`. Re-export the existing body as the
    `defineTool` default export.
 3. Move auth / sandbox / output-parsing logic into the
-   `defineCli` entry so it's reused across subcommands.
+   `defineCliDriver` entry so it's reused across subcommands.
 
 The legacy wrapper stays functional during the migration; CLI.md
 is additive.
