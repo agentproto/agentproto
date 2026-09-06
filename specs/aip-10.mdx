@@ -22,7 +22,7 @@ package: "@agentproto/knowledge"
 | Domain | knowledge.sh |
 | Doctypes | `knowledge.entry/v1` (curated), `knowledge.source/v1` (immutable), `knowledge.workspace/v1` (manifest + view) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
-| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-26](/docs/aip-26) (code-workspace refs), [AIP-27](/docs/aip-27) (typed refs) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-26](/docs/aip-26) (code-workspace refs), [AIP-54](/docs/aip-54) (typed refs) |
 | Reference Impl | [`@agentproto/knowledge`](https://github.com/agentproto/ts/tree/main/packages/knowledge) |
 
 ## Abstract
@@ -144,12 +144,12 @@ title: <human-readable title>
 sources:                              # provenance — refs into sources/
   - sources/2026-04-15-paper.pdf
   - sources/2026-04-20-meeting.md
-refs:                                 # OPTIONAL — AIP-27 Ref[]: what this page
+refs:                                 # OPTIONAL — AIP-54 Ref[]: what this page
                                       #   POINTS AT in other workspaces (a code
                                       #   file/symbol in an AIP-26 workspace, a
                                       #   page in another wiki). Canonical
-                                      #   scalar form is AIP-27 compact. See
-                                      #   "Cross-workspace references (AIP-27)".
+                                      #   scalar form is AIP-54 compact. See
+                                      #   "Cross-workspace references (AIP-54)".
   - github:agentproto/ts:packages/runtime/src/http-server.ts   # code, other workspace
   - wiki:platform/http-server                                   # page, other wiki
 confidence: 0 .. 1                    # OPTIONAL, default 1.0
@@ -189,10 +189,10 @@ Three reference surfaces exist on a page and MUST NOT be conflated:
   page was distilled FROM (Layer 1).
 - **`refs:` frontmatter** — references OUT: what this page is ABOUT / POINTS
   AT in *other* workspaces (see
-  [Cross-workspace references (AIP-27)](#cross-workspace-references-aip-27)).
+  [Cross-workspace references (AIP-54)](#cross-workspace-references-aip-54)).
 
 `refs:` is OPTIONAL and, when present, MUST be an array of
-[AIP-27](/docs/aip-27) `Ref` values in AIP-27 compact form (e.g. `github:…`,
+[AIP-54](/docs/aip-54) `Ref` values in AIP-54 compact form (e.g. `github:…`,
 `local:…`, `git:…`, `url:…`, or the `wiki:<wiki-slug>/<page-slug>` /
 `ws://wikis/…` spelling for cross-wiki pages). It is DISTINCT from both `sources:` (raw-source
 provenance, where the knowledge came *from*) and `[[slug]]` body links
@@ -200,20 +200,20 @@ provenance, where the knowledge came *from*) and `[[slug]]` body links
 about that thing" edge. A runtime MUST NOT treat a `refs:` entry as a
 provenance source, and MUST NOT require its target to exist inside this wiki.
 
-### Cross-workspace references (AIP-27)
+### Cross-workspace references (AIP-54)
 
-The `refs:` page field carries [AIP-27](/docs/aip-27) `Ref` values so a
+The `refs:` page field carries [AIP-54](/docs/aip-54) `Ref` values so a
 knowledge page can point OUT of the wiki: at a code file or symbol in an
 [AIP-26](/docs/aip-26) code-workspace, at a resource on the web, or at a page
 in another wiki. `refs:` is the typed, machine-resolvable answer to "what is
 this page about, elsewhere?" — the edge a graph runtime traverses to walk
 code↔knowledge.
 
-Each `refs:` entry is a **base ref** — an AIP-27 compact form or object form —
+Each `refs:` entry is a **base ref** — an AIP-54 compact form or object form —
 OPTIONALLY carrying an AIP-10-owned `#symbol=<name>` addressing fragment (see
 below). A runtime MUST first strip any `#symbol=` fragment, then parse the
-remaining base ref with an AIP-27-conformant parser, and MUST NOT redefine
-that grammar. Any AIP-27 kind is admissible; the kinds a knowledge page uses
+remaining base ref with an AIP-54-conformant parser, and MUST NOT redefine
+that grammar. Any AIP-54 kind is admissible; the kinds a knowledge page uses
 in practice are `local`, `github`, `git`, `url` (code / documents) and the
 `wiki` kind — compact `wiki:<wiki-slug>/<page-slug>`, URI-spelled
 `ws://wikis/<wiki-slug>/<page-slug>` — for pages in other wikis (see
@@ -222,7 +222,7 @@ in practice are `local`, `github`, `git`, `url` (code / documents) and the
 #### Code references (AIP-26 workspaces)
 
 A page distilled from, or documenting, code addresses that code with a
-`file`-collection ref ([AIP-27](/docs/aip-27) §Base collections). The code
+`file`-collection ref ([AIP-54](/docs/aip-54) §Reference syntax). The code
 lives in a DIFFERENT workspace than the wiki, so `github:` (or a
 `ws://workspaces/<slug>/…` form) that names the other workspace explicitly is
 the primary spelling:
@@ -244,22 +244,22 @@ root (a monorepo); otherwise use `github:` or the `ws://workspaces/<slug>/…`
 form, which name the other workspace explicitly.
 
 **`#symbol=<name>` is an AIP-10-owned addressing fragment, NOT part of
-AIP-27's grammar.** AIP-27 reserves `#` for its `#sha256=` suffix and requires
+AIP-54's grammar.** AIP-54 reserves `#` for its `#sha256=` suffix and requires
 `#` to be percent-encoded inside path bodies, so a `#symbol=` fragment is
-opaque to a strict AIP-27 parser (it would raise `InvalidRefBody`, not
+opaque to a strict AIP-54 parser (it would raise `InvalidRefBody`, not
 silently strip). A runtime MUST therefore STRIP any trailing `#symbol=<name>`
-from the ref string BEFORE handing the remaining, pure-AIP-27-conforming base
+from the ref string BEFORE handing the remaining, pure-AIP-54-conforming base
 body to the parser. A code-aware runtime MAY then resolve the stripped symbol
-name to a span inside the file — only AFTER AIP-27 has resolved the file
+name to a span inside the file — only AFTER AIP-54 has resolved the file
 itself; a runtime that ignores the fragment resolves the whole containing file
 (graceful degradation, never an error). The fragment lives entirely in
-AIP-10's layer and neither extends nor redefines AIP-27.
+AIP-10's layer and neither extends nor redefines AIP-54.
 
 #### Cross-wiki references
 
 AIP-10 today describes a SINGLE wiki, but a `refs:` entry MAY point at a page
-in ANOTHER wiki, via the AIP-27 `wiki` kind (the `wikis` → `wiki` row of
-[AIP-27](/docs/aip-27) §Reference syntax, a multi-segment body). It has two
+in ANOTHER wiki, via the AIP-54 `wiki` kind (the `wikis` → `wiki` row of
+[AIP-54](/docs/aip-54) §Reference syntax, a multi-segment body). It has two
 equivalent spellings — the compact form (canonical for frontmatter scalars)
 and the `ws://` URI form — and a host MUST accept both on input:
 
@@ -276,7 +276,7 @@ refs:
 ```
 
 `<wiki-slug>` names a wiki the host knows; `<page-slug>` is that wiki's
-Layer-2 page `slug`. This ref is tenant-local by the AIP-27 mandate (a host
+Layer-2 page `slug`. This ref is tenant-local by the AIP-54 mandate (a host
 MUST resolve it in the citing wiki's tenant scope and MUST reject
 cross-tenant bindings). It is DISTINCT from `[[slug]]`, which stays
 intra-wiki: `[[slug]]` never crosses a wiki boundary; `wiki:…` always
@@ -583,7 +583,7 @@ the rest of the AIP family:
 | `governance` | [AIP-7](/docs/aip-7) policy / audit ref | Binds the workspace (or view) to a governance policy. Schema-poisoning mitigations and source-mutation audits flow through this ref. |
 | `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator, or a dimension ref (`<dimension>/<value>`) | A view declares which consumers OR dimensions it adapts the workspace for. Hosts MUST refuse a view whose `appliesTo` references a non-existent consumer or a malformed dimension ref (`knowledge_appliesto_unresolvable`). A view bound to a dimension the host does not resolve is inert, not refused. |
 | `extends` | another `KNOWLEDGE.md` | Composition. |
-| `refs` (Layer-2 page field) | [AIP-27](/docs/aip-27) `Ref[]` — `local` / `github` / `git` / `url` / `ws://…` | AIP-10 is a **consumer** of AIP-27: a page's `refs:` field points OUT at code files/symbols in an [AIP-26](/docs/aip-26) workspace and at pages in other wikis (`ws://wikis/<wiki-slug>/<page-slug>`). AIP-10 is also a **producer** in the AIP-27 registry — the `wikis` collection row addresses AIP-10 wikis. See [Cross-workspace references (AIP-27)](#cross-workspace-references-aip-27). |
+| `refs` (Layer-2 page field) | [AIP-54](/docs/aip-54) `Ref[]` — `local` / `github` / `git` / `url` / `ws://…` | AIP-10 is a **consumer** of AIP-54: a page's `refs:` field points OUT at code files/symbols in an [AIP-26](/docs/aip-26) workspace and at pages in other wikis (`ws://wikis/<wiki-slug>/<page-slug>`). AIP-10 is also a **producer** in the AIP-54 registry — the `wikis` collection row addresses AIP-10 wikis. See [Cross-workspace references (AIP-54)](#cross-workspace-references-aip-54). |
 
 `appliesTo` is **not inherited**. A view binds to its own consumers; a
 parent's bindings do not leak into the child. This is the rule that
@@ -706,7 +706,7 @@ A maintenance pass MUST detect:
 The **Broken refs** lint (the `broken-ref` lint kind) applies to intra-wiki
 `[[slug]]` and relative-markdown links ONLY. It MUST NOT flag `refs:`
 frontmatter entries: a `refs:` target is cross-workspace by design and is
-validated by AIP-27 resolution (or left unresolved), NEVER by wiki-local page
+validated by AIP-54 resolution (or left unresolved), NEVER by wiki-local page
 existence. A `refs:` entry whose target does not exist inside this wiki is
 correct, not broken.
 
@@ -752,14 +752,14 @@ distilled *from*; `[[slug]]` is intra-wiki navigation — an edge to another
 page of *this* wiki. Neither can express "this page is *about* that code file
 in another workspace" or "…that page in another wiki". That third relation is
 references OUT, and it wants a typed value, not a string — hence a new field
-holding an [AIP-27](/docs/aip-27) `Ref[]`. The name `refs:` was chosen over
-`related:` deliberately: it maps one-to-one onto AIP-27's own **Ref** term, so
+holding an [AIP-54](/docs/aip-54) `Ref[]`. The name `refs:` was chosen over
+`related:` deliberately: it maps one-to-one onto AIP-54's own **Ref** term, so
 the field reads as exactly what it holds ("the typed refs this page is
 about"), whereas `related:` is a vaguer word that invites overloading with
 `[[slug]]`-style intra-wiki links and blurs the very split this field exists
 to draw. The crisp pairing is `sources:` (provenance IN) vs `refs:`
 (references OUT) vs `[[slug]]` (navigation WITHIN) — three fields, three jobs,
-no ambiguity. Reusing AIP-27 rather than inventing a local encoding also means
+no ambiguity. Reusing AIP-54 rather than inventing a local encoding also means
 the same parser, resolver, and `ws://` spelling the rest of the family already
 uses apply unchanged.
 
@@ -782,7 +782,7 @@ which would have silently eroded conformance had the wiki bent to it.
 **Why the cross-wiki ref syntax is normative but the graph is not.** AIP-10
 is filesystem-first: a wiki must be queryable with file reads alone. So the
 spec pins the one thing that must be portable — the `ws://wikis/<wiki-slug>/<page-slug>`
-SYNTAX for addressing a page across wikis, aligned exactly with AIP-27's
+SYNTAX for addressing a page across wikis, aligned exactly with AIP-54's
 `wikis` collection — and deliberately stops there. Building an index over the
 `refs:` edges and traversing code↔knowledge / wiki↔wiki as a graph is a
 runtime optimization, already permitted by the Query contract's "MAY add
@@ -914,8 +914,8 @@ The wiki is *write surface* for an LLM. Threats:
   `hashAlgo` tells a reader which digest a stored `contentHash` was computed
   with, so verification never silently compares across algorithms.
 - **Cross-workspace ref resolution** — a `refs:` entry (`url:`, `github:`,
-  `ws://…`) is an [AIP-27](/docs/aip-27) `Ref`: an identity, not trusted
-  bytes. A runtime that resolves one MUST apply AIP-27's own safeguards
+  `ws://…`) is an [AIP-54](/docs/aip-54) `Ref`: an identity, not trusted
+  bytes. A runtime that resolves one MUST apply AIP-54's own safeguards
   (path-escape rejection on `local`, `http(s)`-only on `url`, tenant-local
   resolution of `ws://`) and MUST treat fetched bytes as untrusted until
   validated. `refs:` never bypasses source immutability (Layer 1): it points

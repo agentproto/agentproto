@@ -2,7 +2,7 @@
 
 > **Status:** Draft
 > **Schema:** `REF.schema.json`
-> **Reference runtime:** `@agentproto/ref-catalog`
+> **Reference runtime:** `@agentproto/ref`
 
 ## What is a Ref?
 
@@ -25,7 +25,7 @@ registries.
 ## Reference runtime
 
 ```ts
-import { RefCatalog, refFor, refToUri, refFromUri } from "@agentproto/ref-catalog"
+import { RefCatalog, refFor, refToUri, refFromUri } from "@agentproto/ref"
 
 const cat = new RefCatalog()
 cat.registerFamily(42, { family: "app", keyBy: h => h.id! }, appRegistry)
@@ -79,6 +79,17 @@ const uri = refToUri(ref)            // "aip://52/the-agentic-coder@1.0.0"
 | AIP-42 `AnyRef` string form | Unchanged at the string layer; `aip://` URIs are a valid `ref:` value hosts narrow to `ref/v1`. |
 | AIP-52 `$resolver` | A URI rendering of the same coordinates. |
 | AIP-53 draft `target` union | Replaced by `on: ref/v1` (see AIP-53). |
+| AIP-27 (superseded) `ws://` refs + `defineRef` | `ws://` grammar, collection→kind table, and tenant-scope rules are normative in AIP-54 §Reference syntax (see `WS-REF.schema.json`); the `defineRef`/`registerRefKind` surface stays in this package for AIP-7/AIP-10 consumers during migration. |
+
+## ws:// resource refs
+
+AIP-54 carries a second, sibling scheme: `ws://<collection>/<body>`
+for resources in the world (files, URLs, identities, transactions) —
+absorbed whole from superseded AIP-27. The collection→kind table
+(all 21 collections) is normative in the spec, not here; see
+AIP-54 §Reference syntax and `WS-REF.schema.json`. New collections
+land as rows of the spec's table via the AIP-1 process — never as
+runtime-only inventions.
 
 ## What a new AIP needs to be referenceable
 

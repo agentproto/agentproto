@@ -316,7 +316,7 @@ inputs:
   type: object
   properties:
     artifact_ref:
-      $ref: "https://agentproto.sh/docs/aip-27/REF.schema.json"
+      $ref: "https://agentproto.sh/docs/aip-54/REF.schema.json"
     signer_id:    { type: string, pattern: "^operator:[a-z0-9-]+$" }
     reason:       { type: string, maxLength: 500 }
   required: [artifact_ref, signer_id]
@@ -419,7 +419,7 @@ inputs:
   type: object
   properties:
     text:     { type: string, maxLength: 1000000 }
-    file_ref: { $ref: "https://agentproto.sh/docs/aip-27/REF.schema.json" }
+    file_ref: { $ref: "https://agentproto.sh/docs/aip-54/REF.schema.json" }
     style:    { enum: [neutral, executive, technical], default: neutral }
     locale:   { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$", default: "en" }
   oneOf:

@@ -1,15 +1,15 @@
 ---
 title: "AIP-54: REF — ref/v1 (typed cross-AIP artifact reference)"
-description: One typed, cross-AIP reference shape — `{aip, id, version?}`, serialized as an `aip://<aip>/<id>[@version]` URI — that any AIP artifact can use to point at any other AIP artifact, resolved through per-family AIP-43 registries joined by a RefCatalog. Replaces every per-primitive reference mechanism (AIP-18's collection-scoped `refKind`, inline doctype handles, bare id strings) with one discriminated, resolvable, loudly-failing reference.
+description: One typed, cross-AIP reference shape — `{aip, id, version?}`, serialized as an `aip://<aip>/<id>[@version]` URI — that any AIP artifact can use to point at any other AIP artifact, resolved through per-family AIP-43 registries joined by a RefCatalog, plus the `ws://<collection>/<body>` scheme for pointing at resources in the world (files, URLs, identities, transactions) — superseding AIP-27, which owned both jobs separately. Replaces every per-primitive reference mechanism (AIP-18's collection-scoped `refKind`, inline doctype handles, bare id strings) with one discriminated, resolvable, loudly-failing reference.
 aip: 54
 status: Draft
 type: Schema
 created: 2026-09-04
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 43]
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/ref-catalog
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/ref
 layer: primitives
-package: "@agentproto/ref-catalog"
+package: "@agentproto/ref"
 resources: ./resources/aip-54/draft
 ---
 
@@ -20,24 +20,38 @@ resources: ./resources/aip-54/draft
 | Status | Draft |
 | Type | Schema |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-43](/docs/aip-43) (REGISTRY — the resolution substrate) |
-| Reference Impl | [`@agentproto/ref-catalog`](https://github.com/agentproto/ts/tree/main/packages/ref-catalog) |
-| Resources | [`./resources/aip-54`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-54/draft) — [`REF.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-54/draft/REF.schema.json) |
+| Reference Impl | [`@agentproto/ref`](https://github.com/agentproto/ts/tree/main/packages/ref) |
+| Supersedes | [AIP-27](/docs/aip-27) (REF — absorbed whole; see [Backwards Compatibility](#backwards-compatibility)) |
+| Resources | [`./resources/aip-54`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-54/draft) — [`REF.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-54/draft/REF.schema.json), [`WS-REF.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-54/draft/WS-REF.schema.json) |
 
 ## Abstract
 
-This AIP defines **one typed, cross-AIP reference** — the `ref/v1`
-shape: `{aip, id, version?}`, serialized in string contexts as
-`aip://<aip>/<id>[@version]`. A ref names an artifact by its owning
-AIP number and that AIP's registry key, optionally pinned to a
-version. Resolution delegates to per-family [AIP-43
-REGISTRY](/docs/aip-43) instances joined by a `RefCatalog` that owns
-the `aip → (family, registry)` table. Unresolvable refs are loudly
-typed failures — a dangling id string never masquerades as a
-resolution.
+This AIP defines **two sibling reference schemes**:
+
+1. **`aip://`** — the **artifact** scheme. One typed, cross-AIP
+   reference — the `ref/v1` shape: `{aip, id, version?}`, serialized
+   in string contexts as `aip://<aip>/<id>[@version]`. A ref names an
+   artifact by its owning AIP number and that AIP's registry key,
+   optionally pinned to a version. Resolution delegates to per-family
+   [AIP-43 REGISTRY](/docs/aip-43) instances joined by a `RefCatalog`
+   that owns the `aip → (family, registry)` table. Unresolvable refs
+   are loudly typed failures — a dangling id string never masquerades
+   as a resolution.
+2. **`ws://`** — the **resource** scheme. A `ws://<collection>/<body>`
+   URI points at a resource in the world — a workspace file, a URL, an
+   identity, a transaction, a persona — discriminated by the
+   normative collection→kind table (§Reference syntax), with
+   kind-specific body grammars and a tenant-scope mandate.
+
+**Which to use when:** use `aip://` when the target is an AIP
+artifact resolvable through a registry family; use `ws://` when the
+target is a resource in the world that no AIP registry owns. The two
+are siblings, not alternatives — §Reference syntax states each
+scheme's discriminator and resolution rules separately.
 
 A ref IS NOT a handle. It is inert data pointing at one; the registry
-owns the handle. A ref IS NOT resolvable by itself — resolution is the
-host's catalog.
+owns the handle. A ref IS NOT resolvable by itself — resolution is
+the host's catalog.
 
 ## Motivation
 
@@ -56,6 +70,14 @@ mechanism, and none of them interoperate:
 4. **Per-primitive `xRef` fields** are the tell: AIP-55 (pricing)
    needed `appRef` AND `packRef` AND a knowledge-pack string, and every
    future primitive that references anything would add another.
+5. **[AIP-27](/docs/aip-27) (superseded)** solved the *resource*
+   half — `ws://<collection>/<body>` pointers at files, URLs,
+   identities, transactions — with its own kind registry, compact
+   form, and extension mechanism, but named no artifact scheme, and
+   AIP-27's `resources:` pointed at a directory that exists in neither
+   repo. This AIP supersedes it and absorbs the `ws://` scheme whole
+   (§Reference syntax); the `aip://` artifact scheme is the half
+   AIP-27 never had.
 
 The gap is one level below any single primitive: there is no general,
 typed, cross-AIP reference. This AIP fills it with the smallest
@@ -90,9 +112,219 @@ aip://<aip>/<id>[@version]        e.g.  aip://42/book-companion@1.2.0
 The mapping is lossless and total: `refToUri` / `refFromUri` round-trip
 every valid ref and reject malformed input.
 
+### Reference syntax
+
+Three surfaces name things. They look alike and are **not**
+interchangeable:
+
+| Form | What it is | Example |
+|---|---|---|
+| `aip://<aip>/<id>[@version]` | the **artifact** scheme — an AIP artifact resolvable through a registry family (§Resolution) | `aip://42/book-companion@1.2.0` |
+| `ws://<collection>/<body>` | the **resource** scheme — a resource in the world, with `<kind>:<body>` as its compact spelling (this section) | `ws://operators/atlas` |
+| `<type>://<selector>` | a **matcher** — NOT a ref | `role://owner`, `user://current`, `*` |
+
+**Which to use when.** If the target is an AIP artifact — something
+some AIP's `defineX` constructor produced and a family registry keys —
+the ref is `{aip, id, version?}` and the URI spelling is `aip://`. If
+the target is a resource in the world — a file, a URL, an identity, a
+transaction — no registry family owns it, the discriminator is the
+*collection* segment, and the URI spelling is `ws://`. A host MUST
+NOT accept `aip://` forms in `ws://` fields or vice versa: the
+discriminators are disjoint by construction (`aip://`'s first path
+segment is an integer ≥ 1; `ws://`'s is a lowercase-alpha-dash
+collection name).
+
+#### `ws://` — the resource scheme
+
+```
+ws-ref      = "ws://" collection "/" body
+collection  = lowercase-alpha-dash           ; the PLURAL catalog segment
+body        = kind-specific (see Per-kind bodies)
+```
+
+`ws://<collection>/<body>` and `<kind>:<body>` denote the same
+resource ref and MUST round-trip. Implementations MUST accept both on
+input and MUST emit the compact form when serializing to a scalar.
+
+**The collection segment maps to a kind by table, never by string
+manipulation.** Stripping a trailing `s` is not the rule and does not
+work: `agencies`, `assemblies`, `policies`, `identities`, and
+`offices` all break it. The table is authoritative:
+
+| `ws://` collection | kind | Doctype |
+|---|---|---|
+| `operators` | `operator` | [AIP-9](/docs/aip-9) |
+| `personas` | `persona` | [AIP-25](/docs/aip-25) |
+| `users` | `user` | host user registry |
+| `companies` | `company` | [AIP-6](/docs/aip-6) |
+| `collections` | `collection_doc` | [AIP-18](/docs/aip-18) — see §Seams |
+| `wikis` | `wiki` | [AIP-10](/docs/aip-10) |
+| `workspaces` | `workspace` | [AIP-34](/docs/aip-34) — see §Seams |
+| `skills` | `skill` | [AIP-3](/docs/aip-3) |
+| `identities` | `identity_workspace` | [AIP-23](/docs/aip-23) — see §Seams |
+| `playbooks` | `playbook` | [AIP-12](/docs/aip-12) |
+| `agencies` | `agency` | [AIP-21](/docs/aip-21) |
+| `tools` | `tool` | [AIP-14](/docs/aip-14) |
+| `roles` | `role` | [AIP-47](/docs/aip-47) — see §Seams |
+| `assemblies` | `assembly` | [AIP-24](/docs/aip-24) |
+| `actions` | `action` | [AIP-39](/docs/aip-39) |
+| `policies` | `policy` | [AIP-38](/docs/aip-38) |
+| `workflows` | `workflow` | [AIP-15](/docs/aip-15) |
+| `offices` | `office` | [AIP-22](/docs/aip-22) |
+| `avatars` | `avatar` | [AIP-25](/docs/aip-25) asset |
+| `orgs` | `org` | host org registry |
+| `guilds` | `guild` | host guild registry |
+
+Kinds above beyond the compact-grammar base set are registered by
+their owning AIP; this table is the reservation record. A consumer
+MUST NOT invent a collection — add a row here first (PR against this
+spec, per the AIP-1 process).
+
+##### Per-kind bodies
+
+Each kind's body is a slug or a multi-segment path per the owning
+AIP's naming rules. The compact-grammar base set (a `ws://` ref's
+body reuses these grammars verbatim, and any `<kind>:<body>` form
+MUST round-trip with its `ws://` spelling):
+
+```
+local-body    = path                        ; workspace-relative, no leading /, no .. escape
+url-body      = href                        ; http / https only
+git-body      = pct-encoded-url "@" ref [ ":" path ]
+github-body   = owner "/" repo [ "@" ref ] [ ":" path ]
+ipfs-body     = cid [ ":" path ]
+email-body    = address
+operator-body = slug [ "@" workspace ]      ; @workspace = cross-workspace disambiguator
+user-body     = id [ "@" workspace ]
+persona-body  = id
+eth_tx-body   = chainId ":" txHash          ; EIP-155 chainId; 0x-prefixed lowercase hex
+ots-body      = inner-compact-ref           ; e.g. ots:local:engagements/.../247.ots
+```
+
+Reserved characters in path/url bodies (`@`, `:`, `#`, `%`) MUST be
+percent-encoded. Kinds MAY carry an optional `sha256` content binding
+as a `#sha256=<64-hex>` suffix on the compact form, MUST be ignored
+during `ws://`↔compact round-tripping beyond that suffix, and paths
+MUST be workspace-relative with escape attempts rejected at parse
+time.
+
+##### Base collections
+
+Every kind belongs to one or more **collections** — the
+cross-cutting categorization axis that lets manifests constrain a
+field to "any kind of `<category>`" without enumerating kinds. The
+base set is normative; new collection names SHOULD be agreed via the
+AIP-1 process when widely shared. Membership is defined at the kind,
+not the value, and is open: integrations MAY register kinds into new
+collections.
+
+| Collection | Members | Purpose |
+|---|---|---|
+| `file` | `local`, `url`, `git`, `github`, `ipfs` | Resolvable to bytes; the artifact / content axis. |
+| `identity` | `operator`, `user`, `persona`, `email` | Names a principal (human or agent). Used by signer fields, assignees, mentions. |
+| `anchor` | `eth_tx`, `ots` | External tamper-evidence witnesses. |
+| `chain` | `eth_tx` | On-chain anchor subset of `anchor` — verification depends on chain RPC, not just file fetch. |
+
+##### Multi-segment bodies
+
+A body MAY carry more than one segment. This is not an exception: it
+is the kind-specific body grammar `github` and `git` already use for
+`:path`. Forms in use, all normative in consuming AIPs:
+
+```
+ws://wikis/<slug>/KNOWLEDGE.md              ; doc inside a wiki
+ws://workspaces/<slug>/WORK.md              ; doc inside a workspace
+ws://assemblies/<slug>/<member>             ; member inside an assembly
+ws://companies/<slug>/teams/<team>          ; nested collection item
+```
+
+Each kind's body grammar declares its own segment structure.
+Consumers MUST NOT assume `ws://<collection>/<slug>` is exhaustive.
+
+##### ws:// resolution rules
+
+The resource scheme's discriminator is the **collection segment**,
+resolved by table — never by string manipulation:
+
+1. **Table dispatch.** Take the segment up to the first `/` as the
+   collection, map it to a kind via the table above; a collection
+   with no row is a parse-time failure (`UnknownRefCollection`), and
+   the remainder is parsed against the kind's body grammar
+   (`InvalidRefBody` on mismatch).
+2. **Tenant-local by mandate.** Hosts MUST resolve `ws://` refs in
+   the same tenant scope as the citing file and reject cross-tenant
+   bindings ([AIP-23](/docs/aip-23) — `identity_xref_unresolvable`).
+3. **Loud failure.** As with `aip://`, an unresolvable `ws://` ref is
+   a typed failure, never a silent dangling string.
+4. **Source of truth is the target AIP.** The `ws://` ref is only a
+   wire shape; the kind's owning AIP owns what exists (e.g. the
+   AIP-10 wiki decides which pages exist).
+
+**The tenant-scope asymmetry is part of the contract.** This is a
+real asymmetry with the compact form, and the reason the two are not
+blindly substitutable: `operator:<slug>[@<workspace>]` carries an
+OPTIONAL cross-workspace disambiguator; `ws://` has no such
+affordance, and its consumers are required to refuse what that
+disambiguator expresses. **A host MUST NOT introduce an
+`@<workspace>` suffix while rewriting a `ws://` ref into compact
+form** — that silently widens a security envelope the citing spec
+mandates be closed. The rewrite is lossless only when the suffix is
+absent.
+
+##### Matchers are not refs
+
+`role://owner`, `user://current`, `group://<name>`, `*`, and the
+wildcard forms used in `appliesTo` (`ws://orgs/*`, `ws://tools/admin/*`)
+are **matchers**: they select over a set at evaluation time. They are
+NOT refs, MUST NOT be registered as kinds, and MUST NOT be constructed
+as refs by any implementation of this AIP.
+
+The distinction is not stylistic. A ref denotes exactly one thing and
+resolves to it (§Resolution). A matcher denotes a *predicate*,
+evaluated by set intersection against a caller's identity tree.
+`user://current` names nothing until a request exists — it is a
+pronoun. `role://owner` is relative to a resource. `*` has no referent
+by construction. The `ws://` grammar admits no wildcard precisely
+because a wildcard is not an address.
+
+Matcher grammar belongs to the AIP that evaluates it —
+[AIP-38](/docs/aip-38) for policy principals. A field is either a ref
+field or a matcher field; a field accepting both MUST say so and MUST
+dispatch on form rather than guess.
+
+##### Seams
+
+Four places where one word does two jobs. Each is deliberate; none may
+be collapsed.
+
+- **`role`.** `ws://roles/<slug>` is an [AIP-47](/docs/aip-47) job
+  template — a ref. `role://owner|editor|viewer` is an
+  [AIP-38](/docs/aip-38) RBAC tier relative to a resource — a matcher.
+  AIP-47 §Role vs Position vs Access role requires these stay
+  distinct and calls conflating them a collapse of HR into security.
+  They share a word and nothing else: different grammar, different
+  spec, different layer. A host resolving one as the other has made
+  the exact mistake AIP-47 forbids.
+- **`identity`.** §Base collections registers `identity` as a
+  *collection* — the union `operator|user|persona|email`.
+  `ws://identities/<slug>` addresses an AIP-23 identity *workspace*, a
+  different thing. The kind is therefore `identity_workspace`.
+- **`collection`.** "Collections" names kind groupings above
+  (`file`, `identity`, `anchor`, `chain`). `ws://collections/<name>`
+  addresses an [AIP-18](/docs/aip-18) typed collection doctype. The
+  kind is `collection_doc`, for the same reason.
+- **`workspace`.** [AIP-34](/docs/aip-34) ids are globally addressable
+  as `@<owner-slug>/<workspace-slug>` — two segments, not a bare slug.
+  So the body is that whole id (`workspace:@acme/marketing-ops`), and
+  `ws://workspaces/@acme/marketing-ops` is well-formed. Hosts MUST NOT
+  assume a workspace body is a single segment.
+
 ### Resolution
 
-Resolution joins two existing halves:
+This is the `aip://` artifact scheme's resolution. (`ws://` resource
+refs resolve per §ws:// resolution rules — table dispatch plus the
+tenant-scope mandate, not registry joins.) Resolution joins two
+existing halves:
 
 - **Handles** come from every AIP's `defineX` constructor.
 - **Registries** are per-family [AIP-43](/docs/aip-43)
@@ -164,7 +396,7 @@ unreferenceable-handle guard.
 
 ## Reference Implementation
 
-[`@agentproto/ref-catalog`](https://github.com/agentproto/ts/tree/main/packages/ref-catalog)
+[`@agentproto/ref`](https://github.com/agentproto/ts/tree/main/packages/ref)
 — pure TypeScript, zero runtime dependencies beyond the workspace,
 fully unit-tested (12 tests covering resolution to object identity
 across four AIP families, strict/lenient failure modes, keyless-handle
@@ -172,7 +404,27 @@ refusal, URI round-trip, malformed-URI rejection).
 
 ## Backwards Compatibility
 
-Not applicable — new spec, no `replaces`.
+**Supersedes [AIP-27](/docs/aip-27), which is now marked Superseded.**
+AIP-27 defined the resource half of this spec's job — the `ws://`
+scheme, its collection→kind table, per-kind compact body grammars,
+base collections, the matcher boundary, and the tenant-scope mandate —
+as `### Reference syntax`, alongside a separate artifact-shaped
+discriminated union that no consumer adopted and whose `resources:`
+directory never existed. The two were written four months apart and
+never referenced each other; this AIP is the consolidation, not a
+deliberate two-primitive design.
+
+What moved into this AIP unchanged, normatively: the `ws://` grammar,
+the collection→kind table (all 21 rows), the per-kind compact body
+grammars, the base collections, multi-segment bodies, the
+tenant-scope mandate and its `@<workspace>` asymmetry, the matcher
+boundary, and the seams. What did **not** move: AIP-27's runtime
+`registerRefKind` extension hook — new collections now land as rows
+in this spec's table via the AIP-1 process; per-kind implementation
+registration remains an internal concern of `@agentproto/ref`.
+AIP-27's eleven-kind `defineRef` surface remains in the
+implementation package for AIP-7/AIP-10 consumers during migration;
+this spec does not re-specify it.
 
 ## Security Considerations
 

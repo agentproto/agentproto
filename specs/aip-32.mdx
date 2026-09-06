@@ -107,7 +107,7 @@ proliferate. Without a shared MCP-driver format:
 5. **Prompts and resources are first-class.** MCP exposes prompts and
    resources alongside tools. v1 references them via optional
    `prompts` / `resources` blocks; full integration with AIP-3 SKILL
-   and AIP-27 REF is a follow-up.
+   and AIP-54 REF is a follow-up.
 
 6. **Local stdio for self-hosted, HTTP for remote.** Default-recommend
    stdio when the MCP server runs locally (filesystem, sqlite,
@@ -150,7 +150,7 @@ MCP-specific fields below.
 |---|---|---|---|
 | `protocol_version` | string | latest known | MCP protocol version this driver targets. v1 default tracks the latest stable MCP release. |
 | `prompts` | object[] | `[]` | MCP prompts the server exposes. Each `{ name, description, integrate_as }`. v1 supports `integrate_as: "skill_block"` (composes into AIP-3 SKILL.md) or `"raw"` (exposed verbatim). |
-| `resources` | object[] | `[]` | MCP resources the server exposes. Each `{ uri_template, description, integrate_as }`. v1 `integrate_as: "ref_kind"` registers a new AIP-27 REF kind. |
+| `resources` | object[] | `[]` | MCP resources the server exposes. Each `{ uri_template, description, integrate_as }`. v1 `integrate_as: "ref_kind"` registers a new AIP-54 REF kind. |
 | `connection_options` | object | `{}` | Transport-specific connection params: timeout_ms, max_retries, keepalive. |
 
 #### Per-tool `metadata.mcp` (in `implements[N].metadata.mcp`)
@@ -292,7 +292,7 @@ resources:
     ref_kind_id: mcp_filesystem
 ```
 
-`integrate_as: "ref_kind"` registers a new AIP-27 REF kind
+`integrate_as: "ref_kind"` registers a new AIP-54 REF kind
 (`mcp_filesystem:file:///path/to/file`) so other AIPs can reference
 MCP-server-backed resources via the unified REF format. v1 preview.
 
@@ -433,7 +433,7 @@ what `result_extract` produces.
 into named skills. Full integration is on the roadmap; v1 wires the
 prompt as a callable block within the named skill.
 
-### With AIP-27 REF.md (preview)
+### With AIP-54 REF (preview)
 
 `resources[].integrate_as: "ref_kind"` registers MCP-resource URIs
 as new REF kinds. Other AIPs can then reference MCP resources via
@@ -471,7 +471,7 @@ templates the wrapping.
 ## Open questions
 
 1. **Prompts and resources integration depth.** v1 marks both as
-   preview. Full integration with AIP-3 SKILL.md and AIP-27 REF.md
+   preview. Full integration with AIP-3 SKILL.md and AIP-54 REF
    needs more concrete server examples to settle.
 2. **MCP protocol versioning.** Anthropic ships breaking changes via
    protocol version. v1 doesn't yet codify how drivers express

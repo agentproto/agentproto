@@ -6,7 +6,7 @@ status: Draft
 type: Schema
 created: 2026-05-03
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 7, 27]
+requires: [1, 2, 7, 54]
 discussions-to: https://github.com/agentproto/agentproto/discussions/39
 layer: primitives
 package: "@agentproto/action"
@@ -20,7 +20,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/action
 | Status | Draft |
 | Type | Schema |
 | Domain | actions.sh |
-| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-27](/docs/aip-27) (REF) |
+| Requires | [AIP-7](/docs/aip-7) (governance), [AIP-54](/docs/aip-54) (REF) |
 | Implemented by | Any [TOOL.md](/docs/aip-14) declaring `implements: <action-ref>` |
 | Referenced by | [TOOL.md](/docs/aip-14) `implements`, [POLICY.md](/docs/aip-38) `grants[].actions`, [INTENT.md](/docs/aip-28) `maps_to[].action`, [WORKFLOW.md](/docs/aip-15) `steps[].action` |
 
@@ -511,7 +511,7 @@ manifest as untrusted input until verified. Specifically:
 - [AIP-7 — governance](/docs/aip-7) — `requires`, `approval`, `mutates` enforcement
 - [AIP-14 — TOOL.md](/docs/aip-14) — primary implementor (`implements: <action-ref>`)
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — `steps[i].action` consumer
-- [AIP-27 — REF.md](/docs/aip-27) — ref primitive used in `implementations[]`
+- [AIP-54 — REF.md](/docs/aip-54) — ref primitive used in `implementations[]`
 - [AIP-28 — INTENT.md](/docs/aip-28) — `maps_to[].action` consumer
 - [AIP-30 — DRIVER.md](/docs/aip-30) — implementor pattern parallel
 - [AIP-37 — LIFECYCLE.md](/docs/aip-37) — `fires_events` vocabulary

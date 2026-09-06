@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
- * Validate every `ws://` reference in the specs against AIP-27
+ * Validate every `ws://` reference in the specs against AIP-54
  * §Reference syntax's collection→kind table.
  *
- * The spec is the fixture: the table is parsed out of aip-27.mdx, so the
+ * The spec is the fixture: the table is parsed out of aip-54.mdx, so the
  * check can never drift from what the spec says. A `ws://` collection with
  * no row is either a spec gap or a typo — both are failures.
+ *
+ * History: the table lived in AIP-27 §Reference syntax until AIP-54
+ * superseded AIP-27 and absorbed the ws:// scheme whole; this check
+ * moved with it.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 
 const ROOT = process.argv[2] ?? "."
-const AIP27 = join(ROOT, "specs/aip-27.mdx")
+const AIP54 = join(ROOT, "specs/aip-54.mdx")
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {
@@ -24,10 +28,10 @@ function walk(dir, out = []) {
 }
 
 // --- parse the normative table out of the spec itself ---
-const spec = readFileSync(AIP27, "utf8")
+const spec = readFileSync(AIP54, "utf8")
 const section = spec.split("### Reference syntax")[1]
 if (!section) {
-  console.error("FAIL: aip-27.mdx has no '### Reference syntax' section")
+  console.error("FAIL: aip-54.mdx has no '### Reference syntax' section")
   process.exit(1)
 }
 const table = new Map()
@@ -92,14 +96,14 @@ const unused = [...table.keys()].filter((c) => !hits.has(c))
 console.log(`ws:// occurrences scanned : ${total}`)
 console.log(`  naming a collection     : ${total - prose}`)
 console.log(`  prose / placeholder     : ${prose}`)
-console.log(`table rows (aip-27)       : ${table.size}`)
+console.log(`table rows (aip-54)       : ${table.size}`)
 console.log(`collections in use        : ${hits.size}`)
 console.log(`  covered by table        : ${covered.length}`)
 console.log(`  NOT in table            : ${unknown.length}`)
 if (unused.length) console.log(`table rows never used     : ${unused.join(", ")}`)
 
 if (unknown.length) {
-  console.log("\nFAIL — ws:// collections with no row in AIP-27 §Reference syntax:")
+  console.log("\nFAIL — ws:// collections with no row in AIP-54 §Reference syntax:")
   for (const [coll, where] of unknown) {
     console.log(`  ws://${coll}/  (${where.length}x)  e.g. ${where[0]}`)
   }
