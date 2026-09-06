@@ -29,11 +29,46 @@ function walk(dir, out = []) {
 
 // --- parse the normative table out of the spec itself ---
 const spec = readFileSync(AIP54, "utf8")
-const section = spec.split("### Reference syntax")[1]
-if (!section) {
-  console.error("FAIL: aip-54.mdx has no '### Reference syntax' section")
+
+/**
+ * Take §Reference syntax as a real SECTION, not as "everything after the
+ * first time that string happens to appear".
+ *
+ * The heading text also occurs quoted mid-sentence in aip-54.mdx, so the
+ * earlier `split("### Reference syntax")[1]` window ran from the heading to
+ * that sentence. It spanned the table only because the sentence happens to
+ * sit after it — an ordering accident, not a property.
+ *
+ * An empty window was already caught downstream (`table.size === 0`), so
+ * this is not about a green run on zero rows. It is about two weaker things
+ * that guard does not cover:
+ *   - the diagnostic points at the wrong thing. A second heading makes the
+ *     window land somewhere arbitrary, and the failure reads "could not
+ *     parse the collection→kind table" — sending you to inspect a table
+ *     that is perfectly well-formed.
+ *   - a decoy section carrying a table with the same collection names would
+ *     be accepted as the fixture, because this check only tests that a row
+ *     EXISTS, never that its kind matches.
+ *
+ * So: anchor on the heading at line start, stop at the next heading of the
+ * same or higher level (`####` subsections stay inside), and refuse to guess
+ * if two real headings exist.
+ */
+const headings = [...spec.matchAll(/^###[ \t]+Reference syntax[ \t]*$/gm)]
+if (headings.length === 0) {
+  console.error("FAIL: aip-54.mdx has no '### Reference syntax' heading")
   process.exit(1)
 }
+if (headings.length > 1) {
+  console.error(
+    `FAIL: aip-54.mdx has ${headings.length} '### Reference syntax' headings — ` +
+      "ambiguous fixture, refusing to pick one",
+  )
+  process.exit(1)
+}
+const afterHeading = spec.slice(headings[0].index + headings[0][0].length)
+const nextHeading = afterHeading.search(/^#{1,3}[ \t]/m)
+const section = nextHeading === -1 ? afterHeading : afterHeading.slice(0, nextHeading)
 const table = new Map()
 for (const m of section.matchAll(/^\|\s*`([a-z_]+)`\s*\|\s*`([a-z_]+)`\s*\|/gm)) {
   table.set(m[1], m[2])
