@@ -642,9 +642,12 @@ for conformance:
    enumerated status set and a well-defined terminal subset, and MUST
    validate every transition against it (mirroring [AIP-18](/docs/aip-18)'s
    status state machine and this AIP's transition-validation posture).
-3. The runtime MUST expose the three scope axes — containment,
-   applicability, ownership — as independently queryable dimensions,
-   per the decomposition in "The three axes" below.
+3. The runtime MUST expose containment and ownership as independently
+   queryable dimensions — the reference ledger already does, via
+   `boardId` and `owner` respectively. The runtime SHOULD additionally
+   expose applicability as a dimension separable from containment, per
+   the decomposition in "The three axes" below; the reference ledger
+   does not separate the two today.
 4. The runtime MUST provide a concurrency-safe write path, per
    "Concurrency" below.
 
@@ -731,29 +734,32 @@ session caller may reach any board within its own lineage but never a
 sibling lineage's). That is precisely the single-field conflation
 AIP-13 and AIP-20 (see "Scope axes" above) exist to avoid.
 
-A runtime-backed workspace MUST decompose this into two separately
+A runtime-backed workspace SHOULD decompose this into two separately
 addressable fields at its API boundary, even if the underlying store
-still keeps one physical value:
+still keeps one physical value. This is a SHOULD, not a MUST: the only
+reference implementation does not do it today, and no second runtime
+has validated the split against a differently-shaped grouping model.
 
 - **`parent` (containment).** Identifies the unit of work the item
   belongs to. For a lineage-scoped runtime, the natural value is the
   same grouping the runtime already computes (e.g. `tree:<rootId>`).
 - **`scope` (applicability).** Governs *visibility* independently of
-  containment. Its DEFAULT MUST inherit from the item's `parent` — an
-  item contained in tree X is by default visible only within tree X —
-  which reproduces the ledger's current access behavior exactly and
-  satisfies AIP-13's inheritance rule. A runtime MAY allow `scope` to
-  be set independently of `parent` (narrowed to a single operator
-  within the tree, or widened to a whole company); the point of
-  splitting the fields is that this becomes *possible* without
-  redesigning the grouping primitive itself.
+  containment. Where a runtime implements this split, its DEFAULT MUST
+  inherit from the item's `parent` — an item contained in tree X is by
+  default visible only within tree X — which reproduces the ledger's
+  current access behavior exactly and satisfies AIP-13's inheritance
+  rule. A runtime MAY allow `scope` to be set independently of `parent`
+  (narrowed to a single operator within the tree, or widened to a
+  whole company); the point of splitting the fields is that this
+  becomes *possible* without redesigning the grouping primitive
+  itself.
 
-This is a conformance requirement for `agentwork/v2`, not a
+This is a RECOMMENDED decomposition for `agentwork/v2`, not a
 description of `task-ledger.ts` as it stands today — the reference
-ledger's `boardId` is a single field. It is the minimal decomposition:
-default-inherit keeps existing callers' visibility unchanged while
-making containment and applicability independently settable going
-forward.
+ledger's `boardId` remains a single field. It is the minimal
+decomposition: default-inherit keeps existing callers' visibility
+unchanged while making applicability independently settable for a
+runtime that chooses to adopt it.
 
 ### Ownership
 
@@ -869,12 +875,11 @@ implement it explicitly.
 - Whether the third ownership kind proposed above (`session`) belongs
   in the base spec or should stay a runtime-backed-workspace-only
   extension is undecided.
-- Whether the `parent` / `scope` decomposition proposed above should
-  be normatively REQUIRED for every runtime-backed workspace, or only
-  RECOMMENDED, is open. The reference ledger does not implement the
-  split today, and no second runtime implementation yet exists to
-  validate the decomposition against a differently-shaped grouping
-  model.
+- Whether the `parent` / `scope` decomposition should be RAISED from
+  SHOULD to MUST once a second runtime implementation validates it
+  against a differently-shaped grouping model is open — this section
+  currently recommends rather than requires the split precisely
+  because that validation doesn't exist yet.
 
 ## Rationale
 
