@@ -268,7 +268,7 @@ load-bearing for host-mint). This field is **reserved and NOT yet
 enforced**: the reference convert path (`packages/wallet/src/convert.ts`)
 reads only `to`, `rate`, and `addsRestriction`. (The `cap` the authorize
 engine bounds is a different field — `envelope.operating.cap`.) Tracked
-code gap: <https://github.com/agentproto/ts/issues/1203>. Until that gap
+code gap: https://github.com/agentproto/ts/issues/1203. Until that gap
 closes, hosts MUST NOT rely on `cap` being enforced and MUST apply their
 own throughput limiting on convert volume.
 
