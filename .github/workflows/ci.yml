@@ -25,6 +25,21 @@ jobs:
         # (Lived in AIP-27 until #29 superseded it and moved the scheme.)
         run: node scripts/check-refs.mjs .
 
+  check-mdx-safe:
+    name: Specs are MDX-parseable
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: No HTML comments or autolinks in specs/*.mdx
+        # agentproto.sh mirrors specs/*.mdx and compiles it with
+        # fumadocs-mdx, which is stricter than CommonMark about `<`. A
+        # single `<https://…>` autolink in aip-49.mdx broke that site's
+        # production build for five weeks with nothing red over here.
+        run: node scripts/check-mdx-safe.mjs .
+
   check-aip-refs:
     name: Validate inter-AIP references
     runs-on: ubuntu-latest
