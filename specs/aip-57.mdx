@@ -1,0 +1,312 @@
+---
+title: "AIP-57: MODEL-ROUTING — modelrouting/v1 (model resolution primitive)"
+description: A runtime primitive for resolving an AIP-42 ModelRef to a concrete served model — packs keyed over a declared keyspace, ordered layers that report which one won, null as a non-overridable capability gate, and deterministic sticky selection over a chain. Pure: no I/O, no clock, no randomness.
+aip: 57
+status: Draft
+type: Standards Track
+created: 2026-09-13
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 42, 43]
+discussions-to: https://github.com/agentproto/agentproto/discussions/57
+layer: primitives
+package: "@agentproto/model-routing"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 57 |
+| Title | MODEL-ROUTING — modelrouting/v1 (model resolution primitive) |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Standards Track |
+| Requires | [AIP-42](/docs/aip-42), [AIP-43](/docs/aip-43) |
+| Created | 2026-09-13 |
+| Package | `@agentproto/model-routing` |
+
+## Abstract
+
+`modelrouting/v1` is a **runtime primitive** for one question: given a
+[AIP-42](/docs/aip-42) `ModelRef` that is not a literal provider/model pair,
+**which model actually serves this request?**
+
+It defines four things and nothing else:
+
+1. a **Pack** — a named map from a declared keyspace to a route,
+2. an ordered **layer stack** whose resolution reports *which layer won*,
+3. `null` as a **capability gate** that a catch-all cannot silently re-enable,
+4. deterministic **sticky selection** over a chain of candidate routes.
+
+Resolution is **pure** — no I/O, no clock, no randomness. The same request and
+the same configuration always yield the same served model.
+
+This AIP deliberately does not define what a model *is* (that is the AIP-43
+catalog), how an agent *names* one (that is AIP-42 `ModelRef`), or how a
+request is *transformed* on the way (that is [AIP-51](/docs/aip-51)
+`Processor`).
+
+## Motivation
+
+The same primitive has now been implemented **three times in three codebases**,
+each one partial, and each one missing what the others have. All three even
+named their core type `ModelRoute` — with three different shapes.
+
+| Implementation | Keyspace | Has | Lacks |
+|---|---|---|---|
+| `llm-endpoint` `src/packs.ts` (`ModelPack` / `PACK_REGISTRY`) | model name | packs, per-pack tool policy, verified context/output limits | layers, gates, chains |
+| `@agstudio/agent-framework` `model-routing.ts` (`defineRoutingPack` / `overlayPack` / `resolveRoute`) | role | layers + `source` reporting, `null` gate, failover rungs, typed keyspace | chains, sticky selection |
+| openagentik router `routing/virtual-resolve.ts` (`resolveStickyServedModel`) | virtual model id | chains, deterministic sticky selection | packs, layers, gates |
+
+The third was explicitly modelled on the first — by copying, not by depending
+on it, because the first lives in an unpublished package. The cost is already
+visible: a routing table can be correct in one codebase and structurally
+unexpressible in another.
+
+The union of the three is small, coherent, and is what this AIP specifies.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as
+described in [AIP-1](/docs/aip-1).
+
+### 1. Route
+
+A **Route** is a resolution target.
+
+```ts
+interface Route {
+  model:     string            // provider-native model id
+  provider?: string            // omitted ⇒ inferred from `model` or the layer
+  version?:  string
+  options?:  Record<string, unknown>   // temperature, max_tokens, …
+  note?:     string            // human rationale; never consumed by resolution
+}
+
+type RouteOrGate = Route | null
+```
+
+A Route MUST be expressible as a valid AIP-42 `ModelRef`. Implementations MAY
+carry verified capability metadata alongside a Route (context window, max
+output tokens); when they do, such fields MUST be absent rather than guessed
+when unverified.
+
+### 2. Pack
+
+A **Pack** is a named, complete map over a declared **keyspace**.
+
+```ts
+interface Pack<Key extends string = string> {
+  id:           string
+  label:        string
+  description?: string
+  keyspace:     "model" | "role" | string
+  routes:       Readonly<Record<Key, RouteOrGate>>
+}
+```
+
+- `keyspace` names what the keys *mean*. `"model"` (keys are model names, as in
+  a compatibility pack) and `"role"` (keys are logical roles such as
+  `classify`, `summarize`) are reserved; others MAY be declared.
+- A Pack MUST be total over its keyspace: every declared key has a `Route` or
+  an explicit `null`. Absence and `null` are **not** synonyms — see §4.
+- Implementations SHOULD infer the key type from the literal so that an unknown
+  key is a compile-time error, not a runtime lookup miss.
+
+Packs compose by **overlay**: `overlay(base, patch)` returns a Pack where
+`patch`'s keys replace `base`'s. Overlay is the provider-outage lever — one
+declaration re-routes a set of keys without touching the base.
+
+### 3. Layers and precedence
+
+Resolution walks an ordered stack of layers. The reserved order, highest
+precedence first:
+
+| Layer | Source |
+|---|---|
+| `override` | explicit per-call argument |
+| `env` | environment, conventionally `<PREFIX>_<KEY>_MODEL` |
+| `pack` | the Pack itself |
+
+A resolver MUST return which layer produced the answer:
+
+```ts
+interface ResolvedRoute extends Route {
+  key:    string
+  source: "override" | "env" | "pack"
+}
+```
+
+The `source` field is **normative, not diagnostic**. A routing decision that
+cannot say which layer won is not auditable, and every non-trivial routing bug
+observed to date has been a precedence question rather than a table question.
+
+Implementations MAY define additional layers; they MUST place them in a total
+order and MUST extend `source` accordingly.
+
+### 4. `null` is a capability gate
+
+A `null` route means **this key is disabled here** — not "unset".
+
+> A catch-all MUST NOT re-enable a key that a higher-or-equal-precedence layer
+> set to `null`. Only a layer naming that key **explicitly** may.
+
+So where a pack declares `deepThink: null`, neither a `default` pack entry nor
+a `<PREFIX>_DEFAULT_MODEL` environment variable may switch it back on; only
+`deepThink: {…}` or `<PREFIX>_DEEPTHINK_MODEL` may.
+
+This makes a gate safe to use for entitlement (a plan tier that does not
+include a capability) without the gate depending on the *absence* of a
+catch-all somewhere else in the stack.
+
+### 5. Chains and sticky selection
+
+A key MAY resolve to an ordered **chain** of candidate refs rather than a
+single Route. A chain distributes a population of conversations across
+candidates; it is **not** a failover list (see §6).
+
+```ts
+interface ChainRoute {
+  id:    string                    // the virtual key clients address
+  chain: readonly string[]         // ≥2 refs into the same routing space
+}
+```
+
+Selection MUST be deterministic and sticky per conversation:
+
+```
+served = chain'[ H(stablePrefix(request)) mod |chain'| ]
+```
+
+where:
+
+- `chain'` is `chain` filtered to refs that resolve to a real Route. Chain
+  entries MUST NOT resolve to another chain — implementations MUST enforce
+  this by construction, and MUST fail at configuration load, not at request
+  time. An empty `chain'` MUST resolve to no candidate rather than to an
+  arbitrary one.
+- `stablePrefix(request)` is a stable serialization of **every system message
+  plus the first user message**, and nothing else. Appending later turns MUST
+  NOT change it — that is what makes one conversation stick to one served model
+  across turns and across hosts.
+- `H` is a stable non-cryptographic 32-bit hash. Only the hash may influence
+  the outcome; the prefix content MUST NOT be retained.
+
+Resolution MUST NOT consult a clock, a random source, or request-ordering
+state. Two hosts with the same configuration MUST select the same served model
+for the same conversation, with no shared storage between them.
+
+When a chain resolves, the served model identity MUST be reattached **once**,
+immutably, so that metrics, pricing, and outbound request bodies all observe
+the served model rather than the virtual key. Implementations SHOULD surface
+the served identity to the client (e.g. an `x-served-model` response header).
+
+### 6. Failover rungs
+
+Distinct from a chain, a Route MAY carry ordered fallbacks:
+
+```ts
+interface Route {
+  // …
+  fallbacks?: readonly Route[]
+}
+```
+
+A chain answers *which candidate serves this conversation*; a rung answers
+*what to do when the chosen one errors*. A rung MUST only be taken on a failure
+of the preceding entry, and taking one MUST NOT change the sticky selection for
+subsequent turns of the same conversation.
+
+### 7. Purity
+
+`resolve` MUST be a pure function of (request-shape, configuration). It MUST
+NOT perform I/O, read a clock, or consume randomness. Credential resolution,
+health checking, and upstream dispatch are explicitly **out of scope** — a host
+composes them around `resolve`, never inside it.
+
+## Rationale
+
+**Why not extend AIP-42.** AIP-42 defines `ModelRef` — how an agent *names* its
+model. Resolution is a different concern with a different lifetime: the same
+`ModelRef` resolves differently per host, per tier, and per conversation. Adding
+a resolution policy to the agent manifest would put deployment-time concerns
+into an authoring-time document.
+
+**Why not extend AIP-43.** A model catalog is an AIP-43 handle catalog, and
+`capabilities` is the right place for "what can this model do". But a catalog
+answers *what exists*; this AIP answers *which one serves*. Selection policy in
+the catalog would make the catalog host-specific.
+
+**Why not a new AIP for transforms.** There is deliberately none. The transform
+pipelines observed in practice (cache optimisation, tool-list trimming,
+progressive context compression) are [AIP-51](/docs/aip-51) `Processor`s —
+pure `(value, ctx) → value` mounted at seams. Routers implementing those
+SHOULD implement AIP-51 rather than define a parallel contract.
+
+**Why `source` is normative.** See §3. Making it optional would make it the
+first thing an implementation drops and the first thing an operator needs.
+
+**Why the stable prefix is system + first user message.** Any suffix-sensitive
+key would re-select a model mid-conversation, defeating both prompt-cache
+locality and conversational coherence. Any narrower key (e.g. a session id)
+would require shared state across hosts. System-plus-first-user is the widest
+prefix guaranteed stable for the life of a conversation.
+
+**Why the name is MODEL-ROUTING and not ROUTING.** "Routing" in an agent
+protocol is ambiguous across message routing, agent-to-agent delegation, and
+request routing — and [AIP-41](/docs/aip-41) is already `ROUTINE`, one letter
+away in every file listing and grep.
+
+## Backward Compatibility
+
+This AIP introduces a new primitive; nothing existing changes meaning.
+
+The three implementations in §Motivation are each a strict subset, so each can
+adopt incrementally:
+
+- a Pack with `keyspace: "model"` and no gates, chains, or layers is exactly
+  today's `ModelPack`;
+- `defineRoutingPack` already matches §2–§4 and needs only `keyspace` declared
+  and `fallbacks` aligned with §6;
+- `resolveStickyServedModel` already matches §5, including the empty-chain and
+  no-virtual-to-virtual rules.
+
+Hosts that resolve a literal `ModelRef` today are conformant with zero changes:
+a literal ref never enters the layer stack.
+
+## Security Considerations
+
+- **Gates are entitlement boundaries.** §4 exists so a disabled capability
+  cannot be re-enabled by a catch-all added elsewhere later. Implementations
+  that treat `null` as "unset" silently grant capability and MUST be considered
+  non-conformant.
+- **The sticky key must not retain content.** §5 permits only the hash to
+  influence selection. Retaining the serialized prefix would turn a routing
+  component into a conversation store and place user content in a subsystem
+  with no retention contract.
+- **Chain configuration is validated at load, not at request time.** A chain
+  referencing an unknown or virtual entry MUST fail configuration loading;
+  deferring it makes a typo a production routing failure under load.
+- **`resolve` handles no credentials.** §7 keeps secret material outside the
+  routing surface entirely, so a routing bug cannot become a credential
+  disclosure.
+- **Reported identity must match the served model.** If metrics or pricing
+  observe the virtual key while the request is served by a chain member, cost
+  attribution and rate accounting are wrong in a way that is invisible to the
+  operator.
+
+## Reference Implementation
+
+`@agentproto/model-routing` — extraction of the three implementations listed in
+§Motivation into one pure, published package.
+
+Prior art, all pure and all partial:
+
+- [`packages/llm-endpoint/src/packs.ts`](https://github.com/agentproto/ts/tree/main/packages/llm-endpoint) — `ModelPack`, `ModelRoute`, `PACK_REGISTRY`
+- `@agstudio/agent-framework` `mastra/model-provider/model-routing.ts` — `defineRoutingPack`, `overlayPack`, `resolveRoute`, `RouteSource`
+- openagentik router `packages/core/src/routing/virtual-resolve.ts` — `resolveStickyServedModel`
+
+## See also
+
+- [AIP-42 AGENT](/docs/aip-42) — `ModelRef`, the input to resolution
+- [AIP-43 REGISTRY](/docs/aip-43) — the catalog a Route resolves against
+- [AIP-51 PROCESSOR](/docs/aip-51) — request transforms, deliberately not in scope here
+- [AIP-55 PRODUCT](/docs/aip-55) — pricing attached to a served model
