@@ -231,7 +231,7 @@ model: "anthropic/claude-opus-4-7"
 
 # Or structured ref to model catalog
 model:
-  ref: "@agstudio/model-catalog/claude-opus-4-7"
+  ref: "@agentproto/model-catalog/claude-opus-4-7"
   temperature: 0.7
   max_tokens: 4096
 
@@ -436,7 +436,7 @@ persona:  { ref: "@acme/personas/analyst-direct" }
 runner:   { ref: "@agentik/runners-standard/mastra-default" }
 
 model:
-  ref: "@agstudio/model-catalog/claude-opus-4-7"
+  ref: "@agentproto/model-catalog/claude-opus-4-7"
   temperature: 0.3      # tighter — analyst should be precise
 
 tools:
