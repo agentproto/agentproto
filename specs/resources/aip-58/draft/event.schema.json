@@ -15,6 +15,7 @@
         "run.succeeded",
         "run.failed",
         "run.cancelled",
+        "run.published",
         "step.started",
         "step.output",
         "step.artifact",

@@ -22,7 +22,9 @@ outputs:
   required: [briefPath]
 outputsFiles:
   brief:
-    path: "./briefs/<runId>.md"
+    path: "./briefs/<runId>.md"   # under AIP-58, this is the DEFAULT PUBLISH
+                                   # destination, not an immediate sync target
+                                   # — see "Publishing the result" below.
     required: true          # AIP-16 amendment — see specs/aip-16.mdx
 steps:
   - id: fetch
@@ -115,6 +117,13 @@ required `brief` artifact:
 }
 ```
 
+`output.briefPath` names the manifest's declared
+`outputsFiles.brief.path` (interpolated) — the destination a
+`run.publish` would write to, **not** a claim that the file already
+lives there. Right now, the only copy that exists is
+`artifacts/brief`, inside this run's own workspace; see [Publishing
+the result](#publishing-the-result) for what moves it further.
+
 ## The event log that produced it
 
 ```json
@@ -143,18 +152,56 @@ exactly seq 9 onward — it never re-fetches the whole run to see what
 changed, and the terminal `Run` resource shown above is nothing more
 than this log folded to its final state.
 
-## A variant: the agent asks a question instead
+## Publishing the result
 
-If `draft`'s session's final message had been "What tone should the
-brief use — formal or casual?" instead of the brief text, the same
-step resolves differently per §3 Outcome rule:
+The run above is `succeeded`, but `./briefs/run_01J8Z3F9K2Q7.md` does
+not exist yet — only `<runsRoot>/run_01J8Z3F9K2Q7/artifacts/brief`
+does. A caller (or a host auto-publish policy, §4) makes it visible
+outside the run's own workspace:
+
+```
+run.publish { runId: "run_01J8Z3F9K2Q7", artifactKey: "brief" }
+→ { ok: true, publishedPath: "briefs/run_01J8Z3F9K2Q7.md" }
+```
+
+Because `to` was omitted, the host used the artifact's declared
+`outputsFiles.brief.path` (already interpolated at run time) as the
+default. The event log gains one more entry:
 
 ```json
-{ "seq": 10, "ts": "…T10:00:14Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.suspended", "data": { "reason": "input-required", "prompt": "What tone should the brief use — formal or casual?" } },
+{ "seq": 17, "ts": "…T10:05:00Z", "runId": "run_01J8Z3F9K2Q7", "type": "run.published", "data": { "artifactKey": "brief", "to": "briefs/run_01J8Z3F9K2Q7.md" } }
+```
+
+Had the run been `running`, `suspended`, or `failed` at the time of
+this call, the host would have refused it outright — `run.publish`
+only ever succeeds against an already-`succeeded` run (§4).
+
+## A variant: the agent asks a question instead
+
+Suppose `draft`'s session, instead of writing the brief, calls
+`run.requestInput { stepId: "draft", prompt: "What tone should the
+brief use — formal or casual?", schema: { type: "object", properties:
+{ tone: { enum: ["formal", "casual"] } }, required: ["tone"] } }` and
+ends its turn there. Because this is one of the two explicit signals
+§3 names, the step resolves differently:
+
+```json
+{ "seq": 10, "ts": "…T10:00:14Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.suspended", "data": { "reason": "input-required", "prompt": "What tone should the brief use — formal or casual?", "schema": { "type": "object", "properties": { "tone": { "enum": ["formal", "casual"] } }, "required": ["tone"] } } },
 { "seq": 11, "ts": "…T10:00:14Z", "runId": "run_01J8Z3F9K2Q7", "type": "run.suspended", "data": { "stepId": "draft" } }
 ```
 
 and `Run.status` is `"suspended"`, not `"succeeded"` — the run never
 silently reported `done` for a question it never got an answer to. A
 caller resolves it with `run.resume { runId, stepId: "draft", payload:
-{ tone: "formal" } }`, which re-enters `draft` and continues.
+{ tone: "formal" } }` (validated against `stepSuspend.schema` before
+it's accepted), which re-enters `draft` and continues.
+
+**Contrast** — if `draft`'s session had instead just *said* "What tone
+should the brief use — formal or casual?" as its final message,
+without calling `run.requestInput` and with no AIP-46 awaiting-input
+protocol event, the outcome is `failed { code: "missing-output" }`,
+`StepRecord.hint: "possible-input-request"`, and `Run.status` is
+`"failed"` — **not** `"suspended"`. Identical words, different call
+shape, different outcome: that is the point of requiring an explicit
+signal (§3). See `vectors/v8-heuristic-not-suspend.json` for the full
+case.

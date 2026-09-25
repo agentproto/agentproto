@@ -28,7 +28,7 @@
         "events": [],
         "notes": [
           "The run's durable suspend record survives the restart untouched -- no run.failed event is emitted, and the run stays exactly as it was.",
-          "A subsequent run.resume against the re-registered pending entry still resolves; per specs/aip-58.mdx's note on AIP-15 rule 7, this MUST hold regardless of which step kind produced the suspension, unlike the reference implementation's current approval-only carve-out."
+          "A subsequent run.resume against the re-registered pending entry still resolves. This MUST hold regardless of which step kind (kind: \"approval\" or kind: \"suspend\") produced the suspension -- AIP-15 rule 7, as amended 2026-09-25, requires durable persistence for both identically; the reference runner already persists and re-registers both (awaitingApproval / awaitingSuspend)."
         ]
       }
     }

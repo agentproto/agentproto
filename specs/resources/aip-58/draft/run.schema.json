@@ -92,7 +92,25 @@
         "startedAt": { "type": "string", "format": "date-time" },
         "endedAt": { "type": "string", "format": "date-time" },
         "output": {},
+        "suspend": {
+          "description": "Present when status is 'suspended' — set from the explicit signal (run.requestInput's arguments, or the AIP-46 awaiting-input event's payload) that produced it. See spec section 3 Outcome rule.",
+          "type": "object",
+          "required": ["reason"],
+          "additionalProperties": false,
+          "properties": {
+            "reason": { "type": "string", "minLength": 1 },
+            "prompt": { "type": "string" },
+            "schema": {
+              "description": "JSON Schema the eventual resume payload must validate against.",
+              "type": "object"
+            }
+          }
+        },
         "error": { "$ref": "#/$defs/runError" },
+        "hint": {
+          "description": "Advisory only, never load-bearing — a host's heuristic read of a FAILED step's final message (e.g. 'possible-input-request'). MUST NOT influence status; see spec section 3 Outcome rule.",
+          "type": "string"
+        },
         "spend": { "$ref": "#/$defs/spend" }
       }
     },
