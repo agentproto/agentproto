@@ -5,6 +5,7 @@ aip: 58
 status: Draft
 type: Schema
 created: 2026-09-25
+updated: 2026-09-25
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 15, 16, 37, 46]
 resources: ./resources/aip-58/draft
@@ -295,12 +296,27 @@ A step **succeeds** only when its contract is satisfied:
 1. its output validates against its declared output schema, **AND**
 2. every artifact it declares required exists (§Run workspace).
 
-Ending a turn, exiting a process, or a timer firing is **never**, by
-itself, success. This is the rule closing the Motivation's first
-failure: an agent-backed step whose turn ends without satisfying its
-contract resolves `suspended { reason: "input-required" }` **only** on
-an explicit signal — never by reading the turn's final message as
-prose. There are exactly two explicit signals:
+**A step declaring neither an output schema nor a required artifact has
+a vacuous contract** (amended 2026-09-25 — see below): trivially
+satisfied, so its turn ending IS success — unchanged from AIP-15 alone,
+before this AIP existed. This is deliberate backward compatibility, not
+an oversight: requiring every already-authored agent step to retrofit
+an `outputSchema` before this AIP's determinism rule could apply to it
+would break every workflow written against AIP-15 alone. It is also the
+one case this AIP's determinism guarantee does NOT reach — a vacuous
+contract cannot distinguish a genuine result from a missing one, because
+it declares nothing to check the turn's output against. A host SHOULD
+warn at load time (once per such step, not once per run) that it cannot
+detect a missing output for that step, so the gap is visible to whoever
+authored the workflow rather than silently accepted.
+
+For a step that DOES declare a contract, ending a turn, exiting a
+process, or a timer firing is **never**, by itself, success. This is
+the rule closing the Motivation's first failure: an agent-backed step
+whose turn ends without satisfying its contract resolves `suspended {
+reason: "input-required" }` **only** on an explicit signal — never by
+reading the turn's final message as prose. There are exactly two
+explicit signals:
 
 (a) the step's session invoked the host-provided `run.requestInput
     { stepId, prompt, schema? }` operation (§9) before the turn ended, or
