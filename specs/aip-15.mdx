@@ -11,9 +11,9 @@ aip: 15
 status: Draft
 type: Schema
 created: 2026-04-28
-updated: 2026-06-12
+updated: 2026-09-25
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 7, 14, 16, 30]
+requires: [1, 2, 7, 14, 16, 30, 58]
 resources: ./resources/aip-15/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/15
 layer: capabilities
@@ -28,7 +28,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/workflow
 | Status | Draft |
 | Type | Schema |
 | Domain | workflows.sh |
-| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER) |
+| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER), [AIP-58](/docs/aip-58) (RUN — agent step outcome) |
 | Resources | [`./resources/aip-15`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-15/draft) — [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-15/draft/skills/author-workflow/SKILL.md), `ADAPTER.md`, `WORKFLOW.schema.json`, `EXAMPLES.md` |
 
 ## Abstract
@@ -518,6 +518,18 @@ and its runtime projection in `@agentproto/workflow-runtime`
   outputSchema: { type: object, properties: { findings: { type: array, items: { type: string } } } }
 ```
 
+**Outcome (added 2026-09-25, per AIP-58).** Whether an agent step's
+turn ending counts as `succeeded`, `suspended`, or `failed` is defined
+by [AIP-58](/docs/aip-58) §3, not by this AIP: a turn ending is never
+success by itself — the step's `outputSchema` MUST validate (or its
+declared required artifacts MUST exist, per AIP-16/AIP-58) before it
+counts as `succeeded`. A turn that ends by legibly asking for missing
+input resolves `suspended { reason: "input-required" }`; any other
+turn-end that doesn't satisfy the contract resolves
+`failed { code: "missing-output" }`. This AIP's own `maxRetries` /
+`outputSchema` re-prompt behaviour is unchanged — AIP-58 governs what
+happens once retries are exhausted, not the retry loop itself.
+
 ##### `kind: "gate"`
 
 Run a shell command through the host's subprocess runner (AIP-17) as
@@ -803,25 +815,36 @@ interface WorkflowHandle {
    containing `defineWorkflow(...)` MUST be safely importable without
    side effects. All I/O happens inside step bodies.
 
-7. **Suspend points persist.** When a step has `kind: "approval"`,
-   the implementation MUST persist enough run state to resume from
-   that step on a human decision after process restart. This
-   requirement is normative for `kind: "approval"` only — it is NOT
-   yet required for `kind: "suspend"`. In-memory-only implementations
-   MUST refuse to register suspendable workflows or document the
-   limitation explicitly.
+7. **Suspend points persist.** When a step has `kind: "approval"` OR
+   `kind: "suspend"`, the implementation MUST persist enough run state
+   to resume from that step after a process restart. This requirement
+   is normative for **both** step kinds (amended 2026-09-25 — see
+   below). In-memory-only implementations MUST refuse to register
+   suspendable workflows or document the limitation explicitly.
 
-   This narrowing codifies the shipped daemon runner's behaviour:
-   on reload, a run parked awaiting a human approval is deliberately
-   exempt from being failed and its `awaitingApproval` record is
-   durable, while any other in-flight run (`running` /
-   `awaiting-input`) is marked `failed` with "interrupted by daemon
-   restart" — `packages/runtime/src/workflow-runner.ts:335-343`. The
-   shipped runner's current behaviour of silently failing a run
-   suspended at `kind: "suspend"` on reload is a known defect,
-   tracked at https://github.com/agentproto/ts/issues/1195; this
-   amendment records what is true today rather than blessing that
-   behaviour.
+   This codifies the shipped daemon runner's behaviour: on reload, a
+   run parked awaiting either a human approval or an external suspend
+   event is exempt from being failed — both its `awaitingApproval` and
+   its `awaitingSuspend` record are durable and re-registered so a
+   subsequent decision or resume still lands, while any other in-flight
+   run (`running`, or `awaiting-input` with neither record) is marked
+   `failed` with "interrupted by daemon restart" (see
+   `packages/runtime/src/workflow-runner.ts`'s module doc comment and
+   its `loadRuns` / reload re-registration logic). A decision or resume
+   delivered after a restart still lands for either kind — the event
+   fires, any ledger write happens — but the run's own execution cannot
+   resume mid-workflow, so it settles `failed` with a message naming
+   that cause, identically for both kinds.
+
+   **2026-09-25 — the `kind: "suspend"` carve-out is closed.** This
+   rule previously required durable persistence for `kind: "approval"`
+   only, carrying `kind: "suspend"` as an explicit, tracked exception
+   (a shipped defect, not a design choice). That exception is removed:
+   the reference runner already persists and re-registers
+   `awaitingSuspend` the same way it does `awaitingApproval` — the two
+   step kinds get identical restart treatment today, so the earlier
+   carve-out no longer describes shipped behaviour and this rule stops
+   pretending otherwise.
 
 ### Implementer's guide
 
@@ -925,6 +948,29 @@ declarative input projection for the child workflow, equivalent to
 bindings). Steps that use neither `with:` nor `inputs` are unchanged
 and pass the parent's input verbatim. Fully backward-compatible — see
 [§ `kind: "subworkflow"](#kind-subworkflow)`.
+
+### Suspend persistence extended to `kind: "suspend"` (2026-09-25 revision)
+
+Conformance rule 7's carve-out — durable restart persistence required
+for `kind: "approval"` only, `kind: "suspend"` explicitly not-yet-covered
+— is removed. Both step kinds now carry the same normative requirement,
+matching the reference runner's actual behaviour (it already persists
+and re-registers `awaitingSuspend` the same way as `awaitingApproval`;
+see [§ rule 7](#conformance-rules)). No field or wire change; this is a
+strengthening of an existing MUST, not a new capability. An
+implementation that previously relied on the carve-out to leave
+`kind: "suspend"` in-memory-only is non-conforming as of this revision.
+
+### Agent step outcome deferred to AIP-58 (2026-09-25 revision)
+
+Adds [AIP-58](/docs/aip-58) to `requires` and defers a `kind: "agent"`
+step's success/suspend/fail determination to AIP-58 §3 rather than
+leaving "the turn ended" as an implicit success signal — see
+[§ `kind: "agent"`](#kind-agent)'s Outcome note. No field changes; this
+is a clarification of existing behaviour's intended outcome semantics,
+not a new step field. Hosts whose current implementation treats a
+turn ending as success by default are non-conforming as of this
+revision and should adopt AIP-58's outcome rule.
 
 ### With pre-AIP runtime-specific workflow definitions
 

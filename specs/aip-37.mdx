@@ -5,6 +5,7 @@ aip: 37
 status: Draft
 type: Meta
 created: 2026-05-03
+updated: 2026-09-25
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
 discussions-to: https://github.com/agentproto/agentproto/discussions/37
@@ -117,6 +118,37 @@ for host namespaces).
 | `write` | Any successful file write through a tracked filesystem provider. |
 | `delete` | Any successful file delete. |
 
+#### Run / step lifecycle (added 2026-09-25, per AIP-58)
+
+[AIP-58](/docs/aip-58) RUN's event log is host-written and per-run — it
+does not itself broadcast to this vocabulary's cross-cutting listeners
+the way `turn-end` or `write` do. The names below are registered here
+so that a `sync.commit.on:`-style consumer (STORAGE.md, SANDBOX.md, …)
+MAY reference a run/step transition using the same shared vocabulary
+this AIP already provides for every other lifecycle phase, exactly as
+design principle 1 intends. AIP-58 §5 is the normative source for when
+each of these actually fires and what `data` it carries; this table
+only registers the names.
+
+| Event | Fires when |
+|---|---|
+| `run.created` | An [AIP-58](/docs/aip-58) run is created (input validated, workspace allocated). |
+| `run.started` | A run transitions `pending → running`. |
+| `run.suspended` | A run transitions into `suspended`. |
+| `run.resumed` | A run transitions `suspended → running` via `run.resume`. |
+| `run.succeeded` | A run reaches the terminal `succeeded` state. |
+| `run.failed` | A run reaches the terminal `failed` state. |
+| `run.cancelled` | A run reaches the terminal `cancelled` state. |
+| `run.published` | A run's artifact is published outside its own workspace via `run.publish` (AIP-58 §4). |
+| `step.started` | A step within a run begins. |
+| `step.output` | A step produces structured output. |
+| `step.artifact` | A step records an artifact into the run workspace. |
+| `step.suspended` | A step suspends (e.g. `input-required`). |
+| `step.resumed` | A suspended step resumes. |
+| `step.succeeded` | A step satisfies its outcome contract (AIP-58 §3). |
+| `step.failed` | A step fails its outcome contract. |
+| `step.spend` | A step reports spend. |
+
 #### Idle hooks
 
 | Event | Fires when |
@@ -182,6 +214,11 @@ This AIP is purely additive. Existing AIPs (STORAGE.md, SANDBOX.md,
 CODE.md, etc.) MAY reference these event names without changing their
 own schemas — the references are bare strings interpreted at runtime.
 
+**2026-09-25** — added the `run.*` / `step.*` names
+([Run / step lifecycle](#run--step-lifecycle-added-2026-09-25-per-aip-58))
+registered by [AIP-58](/docs/aip-58) RUN. Purely additive, same as
+every prior addition to this table.
+
 ## Security considerations
 
 Event names are not security-sensitive. Hosts MUST NOT include
@@ -193,3 +230,4 @@ payloads, which this AIP does not specify.
 - [AIP-35 STORAGE.md](/docs/aip-35) — `sync.{pull,commit,push}.on` consumes events
 - [AIP-36 SANDBOX.md](/docs/aip-36) — `lifecycle.{destroy_on,pause_on}` consumes events
 - [AIP-26 CODE.md](/docs/aip-26) — `identity.refresh_on` consumes events
+- [AIP-58 RUN](/docs/aip-58) — registers the `run.*` / `step.*` names

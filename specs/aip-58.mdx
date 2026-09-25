@@ -1,0 +1,895 @@
+---
+title: "AIP-58: RUN — agentrun/v1 (run resource, state machine, workspace, event log, journal)"
+description: Names "the run" as a first-class resource shared by every AIP that executes something — a workflow step, an app run, a routine fire, a bare tool call. Fixes the run's fields, a state machine that always reaches a terminal state or a durable suspend, a deterministic outcome rule (an explicit request-input signal, never a text heuristic, is what suspends a step), a dedicated per-run workspace with an explicit publish step (never an implicit sync to a path two runs could share), an append-only event log as the one true status interface, a per-step journal enabling crash-resume and replay, and the transport-agnostic operations (run.create/get/list/events/cancel/resume/replay/requestInput/publish) a host exposes over MCP and HTTP.
+aip: 58
+status: Draft
+type: Schema
+created: 2026-09-25
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 15, 16, 37, 46]
+resources: ./resources/aip-58/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions/58
+layer: runtime
+package: "@agentproto/runtime"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+---
+
+| Field | Value |
+|---|---|
+| AIP | 58 |
+| Title | RUN — agentrun/v1 (run resource, state machine, workspace, event log, journal) |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Domain | runs.sh |
+| Requires | [AIP-15](/docs/aip-15) (WORKFLOW — the primary producer of runs), [AIP-16](/docs/aip-16) (IO — the file contract the run workspace fulfils), [AIP-37](/docs/aip-37) (LIFECYCLE — the event vocabulary this AIP extends), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — a step's driver may be a session) |
+| Composes with | [AIP-53](/docs/aip-53) (APP — an app run is a run whose children are workflow runs), [AIP-41](/docs/aip-41) (ROUTINE — a routine fire is a run), [AIP-7](/docs/aip-7) (GOVERNANCE — audit consumes the event log), [AIP-35](/docs/aip-35) (STORAGE — where a run's artifacts may sync to) |
+| Resources | [`./resources/aip-58`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-58/draft) — `run.schema.json`, `event.schema.json`, `journal-entry.schema.json`, `EXAMPLES.md`, `vectors/` |
+| Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
+
+## Abstract
+
+This AIP names **the run** as a first-class resource: the single object
+every AIP that executes something — a [WORKFLOW.md](/docs/aip-15) step
+graph, an [APP.md](/docs/aip-53) app invocation, a [ROUTINE.md](/docs/aip-41)
+fire, or a bare tool call — produces one instance of. It fixes the run's
+fields, a state machine every run and every step obeys, a deterministic
+outcome rule that says when a step actually succeeded (never merely
+"the agent's turn ended", and never merely "the agent's words read like
+a question"), a dedicated per-run workspace whose outputs stay inside
+it until an explicit publish, an append-only event log that is the one
+true interface for status and observation, a per-step journal enabling
+crash-resume and replay, and the transport-agnostic operations
+(`run.create`, `run.get`, `run.list`, `run.events`, `run.cancel`,
+`run.resume`, `run.replay`, `run.requestInput`, `run.publish`) a
+conforming host exposes over MCP and HTTP.
+
+## Motivation
+
+Dogfooding an agent app on the reference daemon — a workflow of tool and
+agent steps producing a deliverable — surfaced the same root cause behind
+a cluster of unrelated-looking failures: **nothing in the AIP series
+specifies what "a run" is.** [AIP-15](/docs/aip-15) specifies the step
+graph a workflow declares; [AIP-46](/docs/aip-46) specifies the session
+lifecycle of one agent process; [AIP-53](/docs/aip-53) specifies the
+bundle an app ships. None of the three specifies the thing a human
+actually asks about — "did it work, what did it produce, where did it
+put it, and can I watch it happen" — and the gap between them is where
+every observed failure lived:
+
+- A workflow reported `done` after its agent step only asked "what is
+  the URL?" — a required input was missing, a placeholder was left in
+  the prompt, and the host treated the agent's turn ending as the step
+  succeeding. Ending a turn and succeeding are different events; nothing
+  said so.
+- Dozens of app runs sat `running` for weeks, several with zero live
+  sessions behind them — an app run never reaches a terminal state once
+  its agent's turn ends, because nothing owns the run past that point,
+  and nothing checks whether its owner is still alive.
+- Two ledgers described the same run — the host's own run store, and
+  whatever files the agent happened to write on its own initiative —
+  with no link between them, so a consumer reconciling the two had to
+  guess which one was authoritative.
+- Declared outputs landed wherever the prompt happened to say, because
+  no per-run workspace was mandatory; two concurrent runs of the same
+  workflow overwrote each other's files.
+- [AIP-16](/docs/aip-16) already specifies a per-run scratch root
+  (`_workflowFsRoot`) and `outputsFiles`, but a declared output that
+  isn't produced is only a warning today — there is no way to say "this
+  output is required" and have its absence fail the step.
+- A UI polling for run status paid for a payload tens of kilobytes wide
+  on every poll and still couldn't tell, mid-run, what had actually
+  happened — because there was no incremental event stream to follow,
+  only a snapshot to re-fetch and diff by hand.
+
+Comparable runtimes converged on the same answer independently: Mastra
+workflows and Temporal both make the run an object with an explicit
+state machine, a stream of step-level events, and a replay primitive.
+This AIP adopts that shape as an AIP-series primitive — composable with,
+not a replacement for, the step-graph ([AIP-15](/docs/aip-15)), file
+([AIP-16](/docs/aip-16)), session ([AIP-46](/docs/aip-46)), and bundle
+([AIP-53](/docs/aip-53)) specs that already exist. A non-normative
+mapping to Mastra and Temporal's own vocabulary closes this document
+(see [Mapping to other runtimes](#mapping-to-other-runtimes-informative)).
+
+## Design principles
+
+1. **The run is the unit of truth, the event log is its interface.**
+   A consumer that wants to know what happened watches the event log.
+   `run.get` is a computed projection of it, not a second store — the
+   two-ledger problem in the Motivation is a structural impossibility
+   once there is only one append-only log per run.
+
+2. **A step succeeds only when its contract is satisfied.** Never
+   because a turn ended, a process exited, or a timer fired. This is
+   the single rule that closes the "reported `done`, actually asked a
+   question" failure class.
+
+3. **Every run has exactly one workspace, and the host owns it.**
+   Two runs sharing a directory is a host defect, not an authoring
+   mistake — the workspace is allocated by the host, not named by the
+   manifest.
+
+4. **A `running` run has a live owner, checked, not assumed.** Absence
+   of a check is how runs sit `running` forever after their owner dies.
+   This AIP requires the check exist; it does not mandate a specific
+   heartbeat transport (see [Open questions](#open-questions)).
+
+5. **Terminal runs are immutable; replay makes a new run.** History is
+   append-only the same way [AIP-7](/docs/aip-7)'s audit log is —
+   rerunning from a point never rewrites what already happened, it
+   creates a new run that reuses the old one's completed work.
+
+6. **Transport-agnostic, projected twice.** The operations are named
+   verbs (`run.create`, …), not routes or tool names — a conforming
+   host projects them onto MCP tools and HTTP routes the same way
+   [AIP-46](/docs/aip-46) projects its session lifecycle onto both.
+
+7. **Names stay neutral.** No field or verb is named after Mastra or
+   Temporal's own vocabulary, per the naming discipline
+   [AIP-15](/docs/aip-15) design principle 7 already set for this
+   series. The mapping to those runtimes is informative, not normative.
+
+## Specification
+
+### 1. The Run resource
+
+```ts
+type RunKind = "workflow" | "app" | "routine" | "tool"
+
+/** What runs, pinned to exact content so a replay is unambiguous. */
+interface RunRef {
+  id:         string
+  /** Semver of the referenced manifest, when it has one. */
+  version?:   string
+  /** sha256 of the referenced manifest's content, when the host loaded
+   *  it from a file. Absent only for refs with no on-disk content
+   *  (e.g. an inline routine target). */
+  contentSha?: string
+}
+
+type RunStatus =
+  | "pending"    // created, input validated, not yet dispatched
+  | "running"
+  | "succeeded"  // terminal
+  | "failed"     // terminal
+  | "suspended"  // NOT terminal — see §State machine
+  | "cancelled"  // terminal
+
+interface RunError {
+  code:     string        // see §Error codes
+  message:  string
+  stepId?:  string
+  cause?:   unknown
+}
+
+interface Spend {
+  amount:    number
+  currency:  string
+  unit?:     string        // e.g. "tokens", "seconds" — informative
+}
+
+interface ArtifactEntry {
+  key:          string
+  /** Path relative to the run workspace root (§Run workspace). */
+  path:         string
+  sha256:       string
+  size:         number
+  contentType?: string
+  stepId:       string
+}
+
+interface StepRecord {
+  stepId:     string
+  status:     RunStatus              // pending|running|succeeded|failed|suspended|cancelled
+  driver?: {
+    kind:       string               // e.g. "tool", "agent", "gate"
+    adapter?:   string                // AIP-45 adapter slug, when agent-backed
+    model?:     string
+    sessionId?: string                // AIP-46 session id, when agent-backed
+  }
+  startedAt?: string
+  endedAt?:   string
+  output?:    unknown
+  /** Present when status is "suspended" — set from the explicit signal
+   *  (run.requestInput's arguments, or the AIP-46 awaiting-input event's
+   *  payload) that produced it. See §3 Outcome rule. */
+  suspend?: {
+    reason:   string          // e.g. "input-required"
+    prompt?:  string
+    schema?:  unknown          // JSON Schema the eventual resume payload must validate against
+  }
+  error?:     RunError
+  /** Advisory only, never load-bearing — a host's heuristic read of a
+   *  FAILED step's final message (e.g. "possible-input-request"). MUST
+   *  NOT influence `status`; see §3 Outcome rule. */
+  hint?:      string
+  spend?:     Spend
+}
+
+interface Run {
+  runId:         string
+  kind:          RunKind
+  ref:           RunRef
+  /** The validated input snapshot — post-validation, pre-execution. */
+  input:         unknown
+  parentRunId?:  string
+  /** Self when this run has no parent. */
+  rootRunId:     string
+  status:        RunStatus
+  steps:         StepRecord[]
+  createdAt:     string
+  startedAt?:    string
+  endedAt?:      string
+  runner: {
+    /** The host process/instance that owns this run. */
+    hostId: string
+  }
+  spend?:        Spend               // run-level total; see §Spend
+  output?:       unknown
+  artifacts:     ArtifactEntry[]
+  error?:        RunError
+}
+```
+
+Runs are **immutable once terminal** (`succeeded` | `failed` |
+`cancelled`). A host MUST NOT mutate any field of a terminal run except
+through the append-only event log that produced it — `run.get` on a
+terminal run always returns the same value. Re-running the same work
+after a terminal state is a new run (`run.replay`, §Journal).
+
+The full field-level JSON Schema is
+[`run.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-58/draft).
+
+### 2. State machine
+
+Both the run and every step in it obey the same machine:
+
+```
+pending → running → succeeded | failed | cancelled
+             │  ╲
+             │   ╲──→ suspended ──(resume only)──→ running
+             ╰────────────────────────────────────────╯
+```
+
+- **Terminal** = `succeeded` | `failed` | `cancelled`. `suspended` is
+  deliberately excluded — a suspended run is resting, not finished, and
+  MAY remain suspended indefinitely.
+- `suspended → running` happens **only** via `run.resume` (§Operations).
+  No other transition leaves `suspended`.
+- **MUST: every run reaches a terminal state, or `suspended`.** A run
+  that is neither is a host defect — this is the rule that closes the
+  "stuck `running` for weeks" failure class. A conforming host's own
+  liveness mechanism (below) is what makes this an enforceable
+  guarantee rather than a hope.
+- **A `running` run MUST have a live owner** — a lease with a heartbeat.
+  A host MUST mark a run `failed { code: "orphaned" }` once it detects
+  the owning process is gone and the lease has expired. This AIP fixes
+  the requirement, not the transport: lease renewal interval, TTL, and
+  the wire mechanism are host choices (see
+  [Open questions](#open-questions)).
+- **Host restart**: a `running` run MUST become
+  `failed { code: "host-interrupted" }` on reload, UNLESS it is
+  *durably* suspended — i.e. the host persisted enough state to
+  re-park it at the same suspend point. This mirrors
+  [AIP-15](/docs/aip-15) conformance rule 7's restart handling for
+  `kind: "approval"` **and** `kind: "suspend"` steps exactly (both
+  carry the same requirement as of AIP-15's 2026-09-25 revision), and
+  generalizes it to every run kind this AIP covers — not merely
+  workflow steps.
+
+  > **Note on AIP-15 rule 7.** This was previously an open tension:
+  > AIP-15's rule 7 once made durable suspend persistence normative for
+  > `kind: "approval"` only, carrying `kind: "suspend"` as a documented,
+  > tracked exception. That exception has been closed (AIP-15, same
+  > date as this AIP) — the reference runner already persists and
+  > re-registers both `awaitingApproval` and `awaitingSuspend` the same
+  > way (`packages/runtime/src/workflow-runner.ts`), so the two
+  > documents now agree exactly: this AIP's rule above is that same
+  > requirement, generalized across every run kind.
+
+### 3. Outcome rule
+
+A step **succeeds** only when its contract is satisfied:
+
+1. its output validates against its declared output schema, **AND**
+2. every artifact it declares required exists (§Run workspace).
+
+Ending a turn, exiting a process, or a timer firing is **never**, by
+itself, success. This is the rule closing the Motivation's first
+failure: an agent-backed step whose turn ends without satisfying its
+contract resolves `suspended { reason: "input-required" }` **only** on
+an explicit signal — never by reading the turn's final message as
+prose. There are exactly two explicit signals:
+
+(a) the step's session invoked the host-provided `run.requestInput
+    { stepId, prompt, schema? }` operation (§9) before the turn ended, or
+(b) the harness reported a protocol-level awaiting-input event per
+    [AIP-46](/docs/aip-46) (its session `awaiting-input` state, or the
+    underlying ACP `agent-prompt` event) at the point the turn ended.
+
+On either signal, the host records `StepRecord.suspend = { reason:
+"input-required", prompt, schema? }` from the signal's own payload —
+`run.requestInput`'s arguments, or the harness event's payload — and
+transitions the step (and the run) to `suspended` immediately. **Absent
+either signal, the step is `failed { code: "missing-output" }`**,
+regardless of what the turn's final message says — a turn that reads,
+to a human, exactly like a question is still `missing-output` if it
+never produced one of the two signals above.
+
+A host MAY run its own heuristics against a failed step's final message
+(a trailing question mark, an interrogative opening) to help a human
+triage the failure, but a heuristic match MUST NOT itself change the
+outcome — it MAY only annotate the failed step with
+`StepRecord.hint = "possible-input-request"`. This is deliberate:
+"the agent's prose sounded like a question" is exactly the unreliable
+signal the Motivation's first failure ran on, and a host that upgrades
+a hint into a `suspended` outcome has reintroduced the same
+non-determinism this rule exists to remove. Two conforming hosts
+observing the identical transcript MUST reach the identical outcome —
+that is only possible when the rule keys on a structured signal, never
+on reading the model's own words.
+
+**Invalid or missing required input** is checked before any step runs:
+a host MUST reject the run at `run.create` before dispatching a single
+step. A host MAY instead choose to persist the rejected attempt as a
+terminal run — `failed { code: "invalid-input" }` — for audit
+continuity; either response is conforming, but no step MUST have
+executed in either case.
+
+### 4. Run workspace
+
+A host allocates exactly one workspace per run, at a fixed layout:
+
+```
+<runsRoot>/<runId>/
+  inputs/     — the validated input snapshot's file-shaped parts
+  artifacts/  — copies of every entry in Run.artifacts[]
+  scratch/    — ephemeral working directory; discardable at terminal state
+```
+
+`scratch/` **is** the [AIP-16](/docs/aip-16) fsRoot: a host that
+implements this AIP sets `_workflowFsRoot` to
+`<runsRoot>/<runId>/scratch/`, and `inputsFiles` stages into it exactly
+as AIP-16 specifies (unchanged). `outputsFiles` does **not**: see below.
+
+#### `outputsFiles` sync target is the run workspace, not the outer path
+
+Plain AIP-16's file-contract lifecycle step 6 syncs a produced
+`outputsFiles.<key>` from `<fsRoot>/<key>` to the *outer* workspace path
+named by `entry.path` — a single path the manifest declares once, that
+every run of that manifest shares. That sharing is exactly the
+Motivation's "two concurrent runs of the same workflow overwrote each
+other's files" failure: nothing about AIP-16 alone stops it, because
+the declared `path` is a fixed destination and the sync happens
+unconditionally at run end.
+
+**A host implementing this AIP overrides that one step.** For every
+`outputsFiles.<key>` a step produces, the sync target is
+`<runsRoot>/<runId>/artifacts/<key>` — never `entry.path` directly. The
+host records the result into `Run.artifacts[]` as `{ key, path:
+"artifacts/<key>", sha256, size, contentType, stepId }` and goes no
+further on its own. `entry.path` (with its `<runId>` / `<isoDate>`
+interpolation intact) becomes the **default `to` destination** for an
+explicit publish (below) rather than an immediate sync target — no new
+manifest field is needed; the "declared publish mapping" a host might
+otherwise invent is the `outputsFiles.<key>.path` the manifest already
+carries.
+
+Each `Run.artifacts[]` entry names one such run-scoped copy; `path` is
+relative to the run workspace root. **A required artifact that is
+missing when its step finishes is `failed { code: "missing-artifact"
+}`** — this is the other half of the outcome rule (§3) for
+artifact-shaped contracts, and it is what makes AIP-16's
+`outputsFiles.<key>.required` (§Amendments) load-bearing rather than
+advisory.
+
+#### Publish is a separate, explicit, post-success operation
+
+Moving an artifact anywhere outside the run's own workspace — onto the
+shared outer path `outputsFiles.<key>.path` names, into
+[AIP-35](/docs/aip-35) STORAGE, wherever — is `run.publish {
+runId, artifactKey, to? }` (§9), never an implicit side effect of the
+run finishing:
+
+- `to`, when omitted, defaults to the artifact's `outputsFiles.<key>.path`
+  (interpolated). An explicit `to` overrides it.
+- **A host MUST refuse `run.publish` unless the run's `status` is
+  already `succeeded`.** Publishing mid-run, or publishing a run that
+  went on to fail or get cancelled, would resurrect exactly the race
+  this section exists to close — a partially-produced or since-invalid
+  artifact visible at the shared path.
+- A successful publish fires `run.published` (§5), naming the artifact
+  key and the resolved destination.
+- Publish is **not** implicit at `succeeded` — a run that never gets
+  published leaves its output sitting in its own `artifacts/`, visible
+  to any caller that reads the `Run` resource directly, and reaching no
+  further. Whether a host chooses to auto-publish everything on success
+  is a host policy this AIP does not mandate either way.
+
+**Two runs MUST NEVER share a workspace.** This is a host invariant,
+not a manifest-level concern — the workspace is allocated *by* the
+host from `runId`, which is itself host-generated and unique, and it
+now covers `outputsFiles` outputs too, not merely `scratch/`. `scratch/`
+MAY be discarded once the run reaches a terminal state; `inputs/` and
+`artifacts/` SHOULD be retained per the host's own retention policy
+(this AIP specifies no retention rule, the same posture AIP-46 §State
+partitioning takes for transcripts).
+
+### 5. Event log
+
+One append-only, host-written log per run. Every envelope:
+
+```ts
+interface RunEvent {
+  seq:      number    // monotonic within this run, starting at 1
+  ts:       string     // ISO-8601
+  runId:    string
+  stepId?:  string
+  type:     string      // see the vocabulary below
+  data:     unknown
+}
+```
+
+**Types** (added to the [AIP-37](/docs/aip-37) vocabulary — see
+§Amendments):
+
+| Run-level | Step-level |
+|---|---|
+| `run.created` | `step.started` |
+| `run.started` | `step.output` |
+| `run.suspended` | `step.artifact` |
+| `run.resumed` | `step.suspended` |
+| `run.succeeded` | `step.resumed` |
+| `run.failed` | `step.succeeded` |
+| `run.cancelled` | `step.failed` |
+| `run.published` | `step.spend` |
+
+A reader resumes an in-progress stream from any `seq` it already has —
+the HTTP projection's SSE `Last-Event-ID` header carries exactly this
+value (§Operations). **The event log is the only interface a UI or
+supervisor needs.** `run.get`, `run.list`, and any host-specific status
+dashboard are projections computed FROM the log, never a second
+source that could disagree with it — this is the structural fix for
+the Motivation's two-ledger problem: there is exactly one ledger, and
+everything else reads it.
+
+The full envelope schema is
+[`event.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-58/draft).
+
+### 6. Journal
+
+Per step **attempt** (a step MAY be attempted more than once under
+retry):
+
+```ts
+interface JournalEntry {
+  stepId:     string
+  attempt:    number      // 1-based
+  inputHash:  string       // hash of the resolved step input
+  input:      unknown
+  output:     unknown
+  status:     RunStatus
+  startedAt:  string
+  endedAt?:   string
+  spend?:     Spend
+}
+```
+
+The journal is what makes three things possible:
+
+1. **Resume after crash** — a host restarting an interrupted run (that
+   survives per §State machine's suspend carve-out) re-enters at the
+   last completed step, not step 1.
+2. **`run.replay({ of: runId, fromStep })`** — creates a **new** run.
+   Steps before `fromStep` are not re-executed; their journaled
+   `output` (and any journaled artifacts) are copied forward into the
+   new run's own journal and workspace, stamped as reused rather than
+   freshly attempted. Execution begins fresh at `fromStep`. The new run
+   gets its own `runId`; it is a sibling of the original, not a mutation
+   of it (§Design principle 5) — the fact that it originated as a replay
+   is recorded in its `run.created` event's `data`, not as a field on
+   the `Run` resource itself.
+3. **Cache hits for pure/idempotent contracts** — a step whose contract
+   declares itself pure or idempotent may look up a prior journal entry
+   keyed by `(contract id, contract version, driver, inputHash)` and
+   reuse its `output` without re-executing, independent of replay.
+
+The full entry schema is
+[`journal-entry.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-58/draft).
+
+### 7. Nesting
+
+An [AIP-53](/docs/aip-53) app run **contains** one or more
+[AIP-15](/docs/aip-15) workflow runs; a workflow step MAY itself start a
+child run (`Run.parentRunId`). `Run.rootRunId` is the run itself for a
+root run, and the top of the chain for every descendant — a consumer
+walking a run tree never has to walk `parentRunId` links to find the
+root.
+
+A step backed by an agent session (`kind: "agent"`, per
+[AIP-15](/docs/aip-15)) records that session's id at
+`StepRecord.driver.sessionId` (the [AIP-46](/docs/aip-46) session id).
+**The session outliving the step does not keep the run open** — a step
+succeeds, fails, or suspends per §Outcome rule regardless of whether its
+underlying session is still alive; AIP-46 session lifecycle and AIP-58
+run/step lifecycle are two different axes that happen to share a
+pointer, not one lifecycle wearing two names.
+
+### 8. Spend
+
+Each step MAY report `{ amount, currency, unit? }` (`step.spend`
+events accumulate into `StepRecord.spend`). A run MAY carry a
+`budget` at creation time (same shape as `Spend`); once the run's
+summed spend reaches or exceeds it, **the next step is refused before
+it starts**, and the run resolves `failed { code: "budget-exceeded" }`.
+A step already in flight when the budget is crossed is allowed to
+finish — the refusal gate is at step *start*, not a mid-step abort.
+
+### 9. Operations
+
+Transport-agnostic verbs. Every conforming host exposes all nine,
+projected onto both an MCP tool surface and an HTTP route table (a host
+MAY expose only one transport, but MUST NOT define a verb differently
+across the two it does expose — same rule [AIP-46](/docs/aip-46) holds
+for its session surface). Seven are consumer-facing — called by
+whatever created or is watching the run. Two, `run.requestInput` and
+`run.publish`, have a narrower caller: `run.requestInput` is invoked
+by the *executing step itself* (typically exposed to an agent-backed
+step as a host tool/MCP call inside its own session, the same way
+[AIP-46](/docs/aip-46)'s `agent_start`/`agent_prompt` are reachable
+from inside a session), and `run.publish` is invoked by whatever
+consumer decides a succeeded run's output is ready to leave the run
+workspace.
+
+| Verb | Input | Output | Notes |
+|---|---|---|---|
+| `run.create` | `{ kind, ref, input, parentRunId?, budget? }` | `Run` | Validates `input` before returning; MUST NOT dispatch a step on a rejected input (§Outcome rule). |
+| `run.get` | `{ runId, full?: boolean }` | `Run` | **Compact by default** — omits per-step `input`/`output` bodies and full `artifacts[]` detail, returning only status/timestamps/error/spend totals/step labels+statuses. `full: true` returns every field. This is the fix for the Motivation's 59 KB poll payload. |
+| `run.list` | `{ kind?, status?, parentRunId?, rootRunId?, limit?, cursor? }` | `{ runs: Run[], nextCursor? }` | Entries are always compact form. |
+| `run.events` | `{ runId, sinceSeq?: number }` | stream of `RunEvent` | Resumable from any prior `seq`. |
+| `run.cancel` | `{ runId }` | `{ ok: true, run: Run }` | Valid from `pending`, `running`, or `suspended`. **Idempotent**: calling it on an already-terminal run MUST succeed as a no-op, not error (mirrors AIP-46's `interrupt` idempotence). |
+| `run.resume` | `{ runId, stepId, payload }` | `Run` | Only valid while the run is `suspended` at exactly `stepId`; `payload` MUST validate against that step's `StepRecord.suspend.schema` (when present) before the transition happens. |
+| `run.replay` | `{ of: runId, fromStep: string }` | `Run` (new) | See §Journal. `of` MUST resolve to an existing run and `fromStep` MUST name a step that run actually journaled; either failing is `{ code: "invalid-input" }`. |
+| `run.requestInput` | `{ stepId, prompt, schema? }` | `{ ok: true }` | Called by the executing step, not an external consumer (see above). This — together with an AIP-46 awaiting-input protocol event — is the ONLY explicit signal that produces a `suspended { reason: "input-required" }` outcome per §3; a heuristic read of the turn's final text MUST NOT. The payload becomes `StepRecord.suspend`. |
+| `run.publish` | `{ runId, artifactKey, to? }` | `{ ok: true, publishedPath }` | See §4. MUST be refused unless `run.status === "succeeded"`. `to` defaults to the artifact's `outputsFiles.<key>.path` (interpolated). Fires `run.published`. |
+
+#### HTTP projection (example)
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `POST` | `/runs` | `run.create` input | `Run` (201) |
+| `GET` | `/runs/:runId` | — (`?full=true` optional) | `Run` |
+| `GET` | `/runs` | — (query params) | `{ runs: Run[], nextCursor? }` |
+| `GET` | `/runs/:runId/events` | — (`?sinceSeq=`, or `Last-Event-ID` header) | SSE stream of `RunEvent` |
+| `POST` | `/runs/:runId/cancel` | — | `{ ok, run }` |
+| `POST` | `/runs/:runId/resume` | `{ stepId, payload }` | `Run` |
+| `POST` | `/runs/:runId/replay` | `{ fromStep }` | `Run` (201) |
+| `POST` | `/runs/:runId/steps/:stepId/request-input` | `{ prompt, schema? }` | `{ ok: true }` — called from inside the step's own session context, not a typical external client. |
+| `POST` | `/runs/:runId/publish` | `{ artifactKey, to? }` | `{ ok, publishedPath }` |
+
+#### MCP projection (example)
+
+| Tool | Inputs | Notes |
+|---|---|---|
+| `run_create` | `{kind, ref, input, parentRunId?, budget?}` | Returns the `Run` JSON. |
+| `run_get` | `{runId, full?}` | |
+| `run_list` | `{kind?, status?, parentRunId?, rootRunId?, limit?, cursor?}` | |
+| `run_events` | `{runId, sinceSeq?}` | MCP tool calls are request/response, not streams — this projection returns one page of events since `sinceSeq`; a host MAY additionally expose a push-streaming transport where its MCP surface supports one. |
+| `run_cancel` | `{runId}` | |
+| `run_resume` | `{runId, stepId, payload}` | |
+| `run_replay` | `{of, fromStep}` | |
+| `run_request_input` | `{stepId, prompt, schema?}` | Registered for a step's own session to call — the harness surfaces it to an agent-backed step as an ordinary callable tool, the same way AIP-46's `agent_*` tools are reachable from inside a session. |
+| `run_publish` | `{runId, artifactKey, to?}` | |
+
+Resolving a rejected `run.resume` or `run.replay` uses stable,
+machine-readable errors — `run_not_found`, `not_suspended`,
+`step_mismatch` — distinct from the run-level error codes below, the
+same way [AIP-46](/docs/aip-46)'s delegation errors are distinct from
+its session-lifecycle ones.
+
+### 10. Error codes
+
+A closed initial set; hosts MAY add their own, namespaced, following
+the same posture [AIP-37](/docs/aip-37) takes for event names.
+
+| Code | Meaning |
+|---|---|
+| `invalid-input` | Input failed validation before any step ran, or a `run.replay` request named an unresolvable run/step. |
+| `missing-output` | A step's turn/attempt ended without producing output that validates against its declared schema. |
+| `missing-artifact` | A step declared a required artifact that did not exist when the step finished. |
+| `orphaned` | A `running` run's owner lease expired with no live owner detected. |
+| `host-interrupted` | The owning host restarted while the run was `running` and the run was not durably suspended. |
+| `budget-exceeded` | The run's summed spend reached its declared budget; the next step was refused. |
+| `driver-error` | The underlying driver (tool implementation, agent adapter) itself failed. MUST carry the driver's own message as `RunError.message`. |
+| `cancelled` | The run was cancelled via `run.cancel` (or a parent run's cancellation cascaded). |
+| `timeout` | A step or the run exceeded its declared wall-clock limit. |
+
+## Mapping to other runtimes (informative)
+
+Non-normative. Semantics aligned where they genuinely match; names stay
+neutral per design principle 7 — no field or verb below is adopted
+verbatim from either runtime.
+
+| This AIP | Mastra workflows | Temporal |
+|---|---|---|
+| `Run.status` | `WorkflowRun` status values (`running`, `success`, `failed`, `suspended`) | Workflow Execution status |
+| `run.resume` + step resume schema | `resume()` with a Zod `resumeSchema` | Signal delivered to a workflow awaiting it |
+| `run.events` | `watch()` / `stream()` | Workflow history events |
+| `run.replay` | `timeTravel`-style re-execution from a step | `ResetWorkflowExecution` |
+| a step | a Mastra step | an Activity |
+| Journal entry | step run snapshot | history event / Activity result |
+
+The one place semantics genuinely diverge: `run.replay` always produces
+a **new** run (§Design principle 5), where Temporal's `Reset` mutates
+the same workflow execution's history in place. This AIP's terminal-run
+immutability rule (§1) makes the Temporal shape non-conforming for this
+spec — a host implementing AIP-58 on top of Temporal-like storage MUST
+project `Reset` onto a new `runId`, not expose it as a same-run rewind.
+
+## Rationale
+
+**Why one Run resource across four `kind` values, instead of a
+per-kind schema (`WorkflowRun`, `AppRun`, …)?** The Motivation's
+failures were never specific to workflows or apps — they were failures
+of "the run" having no shared shape at all, so a workflow's event log
+and an app's status view were separately reinvented, separately buggy,
+and separately silent about the same class of problem. One resource,
+one state machine, one event vocabulary means a supervisor, a UI, or an
+audit consumer written once against this AIP works for all four kinds
+without a kind-specific adapter.
+
+**Why is the event log the interface, and `run.get` a mere
+projection, rather than the reverse?** A store that is queried directly
+invites a second store to describe the same thing slightly differently
+— exactly the two-ledger failure this AIP exists to close. Making every
+other view a fold over one append-only log removes the possibility of
+disagreement between "the run's status" and "what actually happened":
+there is only one place the second question is answered, and the first
+is computed from it.
+
+**Why is `suspended` excluded from "terminal" rather than being its own
+kind of ending?** A suspended run is not finished — it is waiting for a
+`run.resume` that may arrive in a minute or never. Treating it as
+terminal would mean a workflow genuinely waiting for human input reads,
+to any consumer, identically to one that is actually done, which is the
+same ambiguity that let "turn ended" masquerade as "succeeded" in the
+first place.
+
+**Why does `suspended { input-required }` require an explicit signal
+instead of reading the agent's final message?** Because "the agent's
+words read like a question" is precisely the heuristic that produced
+the Motivation's first failure — a workflow reported `done` after an
+agent asked "what is the URL?", which means whatever check was in
+place (if any) missed a plain-text question; a rule built on the same
+kind of text-reading, just tuned differently, is not a fix, it is a
+better-tuned version of the same bug. Requiring `run.requestInput` or
+an AIP-46 protocol event makes the outcome a function of a structured
+call, not of prose two hosts (or two versions of the same host) might
+parse differently. `missing-output` is where every turn-end lands by
+default; `suspended` is the exception a step has to affirmatively
+signal into, never the interpretation a host reaches by reading
+between the lines.
+
+**Why demote the heuristic to a `hint` instead of dropping it
+entirely?** A trailing question mark in a final message is still
+useful information for a human triaging a `failed { missing-output }`
+step — it says "this one probably needed a `run.requestInput` call
+that never happened," which is exactly what an author needs to go fix
+the step body. The hint keeps that diagnostic value while removing it
+from the outcome decision itself, which is the whole point: advisory
+information can be as fuzzy as it likes, because nothing downstream
+treats it as authoritative.
+
+**Why require a lease/heartbeat rather than a simpler "restart marks
+everything failed" rule?** Restart-time marking (what the reference
+implementation does today for workflow runs, see [Reference
+Implementation](#reference-implementation)) only catches the case where
+the *host process itself* restarts. It does nothing for a run whose
+owner died without the host restarting — a crashed worker thread, a
+killed subprocess, a network partition from a remote executor. Those
+are exactly the "~25 runs stuck for weeks" cases the Motivation cites;
+none of them involved the daemon restarting. A liveness check is the
+only mechanism that catches both.
+
+**Why is publish a separate, explicit, post-success step instead of
+letting `outputsFiles` sync to its declared path at run end, as plain
+AIP-16 does?** Because that immediate sync IS the second Motivation
+failure — "two concurrent runs of the same workflow overwrote each
+other's files" happens exactly when the sync target is a single path
+every run of that manifest shares, and AIP-16 alone has no notion of
+"wait until you're sure this run won." Splitting the write into two
+steps — an unconditional, run-scoped copy into `artifacts/<key>` that
+can never collide with another run, and a separate, optional,
+post-success `run.publish` to wherever the manifest (or an override)
+actually wants it — moves the "is this the version that should win"
+decision to exactly the one moment a host can answer it: after the run
+is known to have succeeded. A host that wants AIP-16's old
+always-publish behaviour back can auto-call `run.publish` for every
+declared output the instant a run succeeds; this AIP just refuses to
+make that the only option.
+
+**Why does `run.replay` create a new run instead of resuming or
+rewriting the original?** Terminal-run immutability (§Design principle
+5) is the same posture [AIP-7](/docs/aip-7) takes for its audit chain —
+once a thing is recorded as having happened a certain way, a later
+"actually, redo this part" MUST NOT be indistinguishable from "this is
+what happened the first time." A new `runId` makes the distinction
+free: every consumer that ever looked at the original run's terminal
+state keeps looking at exactly what it always looked at.
+
+## Reference Implementation
+
+The reference daemon's `@agentproto/runtime` package (specifically
+`workflow-runner.ts`, and the compiled step algebra it delegates to in
+`@agentproto/workflow-runtime`'s `types.ts`) already ships several of
+the pieces this AIP formalizes, and is the evidence base this AIP's
+Motivation draws on:
+
+- **A run record with a state machine** — `WorkflowRun` /
+  `WorkflowRunStatus` (`idle | running | awaiting-input |
+  awaiting-approval | done | failed | cancelled`) already exists, with
+  restart handling that marks a `running` run `failed` on reload
+  **unless** it is durably parked at an approval or a suspend step
+  (`awaitingApproval` / `awaitingSuspend`, both re-registered the same
+  way) — the shipped precedent this AIP's host-restart rule (§2)
+  generalizes to every run kind this AIP covers, not merely workflow
+  steps.
+- **Per-step driver/session detail** — every step tracks a
+  `sessionId` once its session spawns, resolved through the same
+  `SessionsRegistryAgentHost` `resolveByLabel` lookup this AIP's
+  `StepRecord.driver.sessionId` formalizes, including on the failure
+  path (`fillStepStates` runs on both success and failure so a failed
+  step still reports which session it was).
+  ([`AgentStep`](https://github.com/agentproto/ts/tree/main/packages/workflow-runtime)
+  carries the same `adapter` / `model` / `sessionRef` shape
+  `StepRecord.driver` names.)
+- **A run-scoped cache/journal** — `StepCache` (`get`/`set` keyed by a
+  namespaced `stepCacheKey`) is exactly the lookup §Journal's "cache
+  hits for pure/idempotent contracts" describes, already wired for
+  steps marked `cacheable`.
+- **A run-level cost ceiling** — `RunWorkflowArgs.maxTotalCostUsd`
+  already refuses the next agent spawn once a run's summed session
+  cost reaches it, the direct precedent for §Spend's `budget` /
+  `budget-exceeded`.
+
+What this AIP specifies that the reference implementation does **not**
+yet ship: the unified `Run` resource across all four `kind` values (the
+reference implementation's run record is workflow-specific); a
+monotonic, resumable, append-only **event log** as the status interface
+(today's status is the polled `WorkflowRun` record itself — the 59 KB
+payload the Motivation cites); a lease/heartbeat-based **owner
+liveness** check (today's restart handling only catches a host-process
+restart, not an owner dying without one); `run.replay` (no replay verb
+exists today — `cacheable` steps are the closest existing mechanism,
+and they are opt-in per step, not a `fromStep` cutover); a
+**deterministic, signal-based outcome rule** (the reference runner has
+no `run.requestInput`-equivalent call and no distinction between "the
+turn asked a question" and "the turn just ended" — whatever the
+compiled step returns is taken as its output); and the **deferred
+publish model** of §4 (today's `outputsFiles` sync, per plain AIP-16,
+still writes to its declared workspace path unconditionally at run
+end — there is no run-scoped `artifacts/<key>` staging step and no
+`run.publish` gate in front of it). Closing that gap is tracked in the
+reference implementation's own issues, not here.
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec. It amends three
+existing AIPs additively; see [Amendments to existing
+AIPs](#amendments-to-existing-aips) in each amended document's own
+Compatibility section for what changed and why nothing existing breaks.
+
+## Security Considerations
+
+- **The journal and event log are host-written, never step-written.**
+  A step body that could append to its own journal entry or emit its
+  own events could fabricate a `succeeded` outcome or forge spend
+  figures — the same "host stages, bodies use plain paths" boundary
+  [AIP-16](/docs/aip-16) draws for the file contract applies here:
+  a conforming host is the only writer of `RunEvent` and
+  `JournalEntry` records.
+- **`run.replay` trusts the journal's integrity.** Reusing a prior
+  step's journaled `output` without re-execution is only safe if that
+  journal entry could not have been tampered with between the original
+  run and the replay. A host whose journal storage is writable by
+  anything other than itself has handed a replay a tampering surface
+  equivalent to rewriting audit history.
+- **Run input/output and journal entries may carry secrets**, the same
+  caveat [AIP-46](/docs/aip-46) states for its session ring buffer — a
+  step's resolved input or an agent's final message routinely contains
+  whatever the caller or a prior step handed it. Consumers of `run.get
+  { full: true }`, `run.events`, or the journal MUST treat the payload
+  as potentially sensitive; hosts MAY redact known secret patterns but
+  this AIP does not require it.
+- **The run workspace is a filesystem surface with the same escape
+  risk [AIP-53](/docs/aip-53)'s data plane names for app data.** A host
+  MUST apply the equivalent resolve-and-realpath containment check to
+  every path under `<runsRoot>/<runId>/` — an `ArtifactEntry.path` or
+  an `inputsFiles`/`outputsFiles` key that a step body influences MUST
+  NOT be able to resolve outside the run's own workspace.
+- **Spend figures are declarative unless a host sources them from the
+  driver.** A `step.spend` event self-reported by an untrusted step
+  body could under-report to evade `budget-exceeded`. Hosts SHOULD
+  derive `Spend` from the driver/adapter's own accounting (as the
+  reference implementation's `maxTotalCostUsd` does from session cost)
+  rather than from a value the step body supplies, wherever the driver
+  can report it independently.
+- **`run.publish` is the first point a run's data leaves its own
+  isolated workspace.** Everything before it (§4) stays inside
+  `<runsRoot>/<runId>/`, where the containment check above already
+  applies; a publish crosses back out to a path other runs, other
+  callers, or other tooling may read. Hosts MUST apply the same
+  containment discipline to the resolved `to` destination as to any
+  other workspace-escaping write, and MUST enforce the `status ===
+  "succeeded"` precondition server-side — a client-supplied claim that
+  a run succeeded is not the check; the host's own `Run.status` is.
+- **`run.requestInput`'s caller is the step itself, which is exactly
+  the thing whose output the outcome rule is being deterministic
+  about.** A host MUST treat the call as trusted evidence of intent to
+  suspend (that is its entire purpose — see §3), but MUST NOT let the
+  *content* of `prompt` or `schema` bypass any validation that would
+  otherwise apply to step output; a malicious or compromised step
+  cannot use `run.requestInput` as a side channel to smuggle an
+  unvalidated value into `Run.output` — `StepRecord.suspend` and
+  `StepRecord.output` are different fields, and only `resume`'s later,
+  independently-validated payload can produce the latter.
+- **Owner liveness is an availability control, not a confidentiality
+  one.** A lease that a host expires too aggressively risks marking a
+  slow-but-alive owner `orphaned` and duplicating work if two owners
+  briefly believe they hold the same run; too lenient a lease reopens
+  the "stuck running for weeks" failure this AIP exists to close. This
+  AIP does not pin a TTL (see [Open questions](#open-questions)); hosts
+  MUST choose one deliberately rather than defaulting to "never
+  expires."
+
+## Open questions
+
+1. **Lease/heartbeat transport and timing.** §2 requires a live-owner
+   check exist; it does not pin a renewal interval, a TTL, or a wire
+   mechanism (in-process timer, external lock service, a heartbeat
+   event on the same event log). A future revision may need to pin a
+   default so two independent hosts' `orphaned` detection windows are
+   comparable.
+2. **Compact vs. full `run.get` boundary, per kind.** §9 names which
+   fields compact form omits in general terms ("per-step input/output
+   bodies, full artifact detail") but does not pin an exhaustive
+   per-`kind` field list. Whether that needs pinning, or whether "the
+   host's own judgment of what's expensive to include" is sufficient,
+   is open.
+3. **Journal storage format.** Like [AIP-16](/docs/aip-16)'s file
+   contract, this AIP specifies the journal's shape, not its backend
+   (file, database, object store). Whether a future revision should
+   name a portable on-disk format (so a journal is itself a portable
+   artifact, the way `.agentapp` is for AIP-53) is open.
+4. **Multi-node ownership.** The lease model in §2 assumes a single
+   host process contending with itself over time (a restart), not
+   multiple host processes racing to own the same run concurrently. A
+   real clustered scheduler likely needs a fencing-token-style
+   extension; this AIP does not attempt one.
+5. **Auto-publish policy.** §4 deliberately leaves "does a host publish
+   every declared output automatically the instant a run succeeds, or
+   require an explicit `run.publish` call every time" as a host choice.
+   Whether that default itself needs pinning — e.g. an `outputsFiles.
+   <key>.autoPublish` flag — or stays a host policy indefinitely is
+   open.
+
+## See also
+
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — the primary producer of runs;
+  its `kind: "agent"` step outcome now defers to this AIP's rule 3
+- [AIP-16 — IO.md](/docs/aip-16) — the file contract this AIP's run
+  workspace fulfils; amended to add `outputsFiles.<key>.required`
+- [AIP-37 — LIFECYCLE.md](/docs/aip-37) — the event vocabulary this AIP
+  extends with `run.*` / `step.*` names
+- [AIP-46 — AGENT-SESSIONS](/docs/aip-46) — a step's driver may be a
+  session; the session id a step records is AIP-46's
+- [AIP-53 — APP.md](/docs/aip-53) — an app run's `app_run` /
+  `app_status` / `app_stop` verbs are the app-level view of the runs
+  this AIP formalizes underneath
+- [AIP-41 — ROUTINE.md](/docs/aip-41) — a routine fire is a run of
+  `kind: "routine"`
+- [AIP-7 — GOVERNANCE.md](/docs/aip-7) — the audit posture this AIP's
+  terminal-run immutability and host-only journal writes mirror
+- [AIP-35 — STORAGE.md](/docs/aip-35) — where a run's durable
+  `artifacts/` may sync onward to
