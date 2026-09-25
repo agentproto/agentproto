@@ -5,6 +5,7 @@ aip: 16
 status: Draft
 type: Schema
 created: 2026-04-29
+updated: 2026-09-25
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
 resources: ./resources/aip-16/draft
@@ -123,6 +124,7 @@ outputsFiles:
     path: "<workspace-path>"   # required — supports interpolation
     mode: "ro" | "rw"          # optional
     contentType: "<mime>"      # optional
+    required: true | false     # optional, default false — see Error handling
 ```
 
 ### File contract lifecycle
@@ -170,6 +172,16 @@ across importing manifests; even a TOOL.md tool that declares
 historical and stays for compatibility with the first
 implementations.
 
+**Relationship to the AIP-58 run workspace (added 2026-09-25).** A
+host implementing [AIP-58](/docs/aip-58) sets `_workflowFsRoot` to
+that run's dedicated `scratch/` directory
+(`<runsRoot>/<runId>/scratch/`, AIP-58 §4) rather than an arbitrary
+temp directory — the per-run scratch root this section already
+requires and the AIP-58 run workspace's `scratch/` subdirectory are
+the same path, not two separate allocations. A host that has not
+implemented AIP-58 is unaffected: this section's "a fresh temp dir,
+unique per runId" requirement stands on its own regardless.
+
 ### Path interpolation
 
 `outputsFiles.<key>.path` accepts these tokens, replaced by the host
@@ -201,9 +213,19 @@ cross-run state MUST use a tool, not file state.
   run starts. The audit log records the failure; no run kicks off.
 - **Output declared but not produced.** If `outputsFiles.<key>` is
   declared but `<fsRoot>/<key>` does not exist when the body
-  finishes, the host MUST log a warning and continue. The body's
-  structured `outputs` is the source of truth for what's mandatory;
-  `outputsFiles` is "nice to have" by default.
+  finishes, the default (`required` absent or `false`) is unchanged:
+  the host MUST log a warning and continue. The body's structured
+  `outputs` is the source of truth for what's mandatory; `outputsFiles`
+  is "nice to have" by default.
+- **`outputsFiles.<key>.required: true` (added 2026-09-25).** When a
+  declared output is marked `required` and `<fsRoot>/<key>` does not
+  exist when the body finishes, a warning is not enough — a host
+  implementing [AIP-58](/docs/aip-58) MUST fail the step
+  (`missing-artifact`, per AIP-58 §4). A host that has not implemented
+  AIP-58 MAY still honour `required` by failing the run itself through
+  its own error model; either way, `required: true` upgrades the
+  prior bullet's warning into a hard failure for that key. Absent or
+  `false` preserves the original, warning-only behaviour exactly.
 - **Sync failure.** If the workspace write fails (permission, disk
   full, etc.), the host MUST log but MUST NOT fail the run — by the
   time sync runs, the body has already returned. Importing manifests
@@ -317,6 +339,19 @@ canonically. The migration:
 No author-facing change: the four field names, the file contract
 lifecycle, the `_workflowFsRoot` reserved key, and the path
 interpolation tokens are unchanged from their AIP-15 origin.
+
+### 2026-09-25 — `outputsFiles.<key>.required` (AIP-58)
+
+Adds the optional `required` boolean to an `outputsFiles` entry
+(default `false`, preserving today's warning-only behaviour exactly).
+`required: true` upgrades a missing declared output at body-completion
+time into a hard failure — see [Error handling](#error-handling) and
+[AIP-58](/docs/aip-58) §4, which is what actually enforces it
+(`missing-artifact`). Also notes that a host implementing AIP-58 sets
+`_workflowFsRoot` to that run's AIP-58 workspace `scratch/` directory
+rather than an unrelated temp path — see
+[Reserved input field](#reserved-input-field-_workflowfsroot). Both
+changes are additive; no existing manifest's behaviour changes.
 
 ## Security considerations
 

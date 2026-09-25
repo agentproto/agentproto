@@ -1,0 +1,38 @@
+{
+  "id": "V2",
+  "title": "Agent turn ends asking a question -> suspended input-required",
+  "rule": "specs/aip-58.mdx section 3 Outcome rule",
+  "manifestExcerpt": {
+    "kind": "workflow",
+    "id": "pricing-brief",
+    "steps": [
+      { "id": "draft", "kind": "agent", "prompt": "Write a one-page pricing brief for these tiers: $steps.parse.tiers" }
+    ]
+  },
+  "runCreate": {
+    "kind": "workflow",
+    "ref": { "id": "pricing-brief", "version": "1.0.0" },
+    "input": { "productUrl": "https://example.com/pricing" }
+  },
+  "agentTurnResult": {
+    "finalMessage": "What tone should the brief use -- formal or casual?"
+  },
+  "expected": {
+    "terminalState": "suspended",
+    "stepId": "draft",
+    "stepStatus": "suspended",
+    "suspendReason": "input-required",
+    "prompt": "What tone should the brief use -- formal or casual?",
+    "events": [
+      "run.created",
+      "run.started",
+      "step.started",
+      "step.suspended",
+      "run.suspended"
+    ],
+    "notes": [
+      "run.status MUST be 'suspended', never 'succeeded' -- the turn ending is not itself success.",
+      "A subsequent run.resume { runId, stepId: 'draft', payload } re-enters the step and may still reach 'succeeded'."
+    ]
+  }
+}

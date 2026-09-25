@@ -11,9 +11,9 @@ aip: 15
 status: Draft
 type: Schema
 created: 2026-04-28
-updated: 2026-06-12
+updated: 2026-09-25
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 7, 14, 16, 30]
+requires: [1, 2, 7, 14, 16, 30, 58]
 resources: ./resources/aip-15/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/15
 layer: capabilities
@@ -28,7 +28,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/workflow
 | Status | Draft |
 | Type | Schema |
 | Domain | workflows.sh |
-| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER) |
+| Requires | [AIP-7](/docs/aip-7), [AIP-14](/docs/aip-14) (TOOL), [AIP-16](/docs/aip-16) (IO), [AIP-30](/docs/aip-30) (DRIVER), [AIP-58](/docs/aip-58) (RUN — agent step outcome) |
 | Resources | [`./resources/aip-15`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-15/draft) — [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-15/draft/skills/author-workflow/SKILL.md), `ADAPTER.md`, `WORKFLOW.schema.json`, `EXAMPLES.md` |
 
 ## Abstract
@@ -518,6 +518,18 @@ and its runtime projection in `@agentproto/workflow-runtime`
   outputSchema: { type: object, properties: { findings: { type: array, items: { type: string } } } }
 ```
 
+**Outcome (added 2026-09-25, per AIP-58).** Whether an agent step's
+turn ending counts as `succeeded`, `suspended`, or `failed` is defined
+by [AIP-58](/docs/aip-58) §3, not by this AIP: a turn ending is never
+success by itself — the step's `outputSchema` MUST validate (or its
+declared required artifacts MUST exist, per AIP-16/AIP-58) before it
+counts as `succeeded`. A turn that ends by legibly asking for missing
+input resolves `suspended { reason: "input-required" }`; any other
+turn-end that doesn't satisfy the contract resolves
+`failed { code: "missing-output" }`. This AIP's own `maxRetries` /
+`outputSchema` re-prompt behaviour is unchanged — AIP-58 governs what
+happens once retries are exhausted, not the retry loop itself.
+
 ##### `kind: "gate"`
 
 Run a shell command through the host's subprocess runner (AIP-17) as
@@ -925,6 +937,17 @@ declarative input projection for the child workflow, equivalent to
 bindings). Steps that use neither `with:` nor `inputs` are unchanged
 and pass the parent's input verbatim. Fully backward-compatible — see
 [§ `kind: "subworkflow"](#kind-subworkflow)`.
+
+### Agent step outcome deferred to AIP-58 (2026-09-25 revision)
+
+Adds [AIP-58](/docs/aip-58) to `requires` and defers a `kind: "agent"`
+step's success/suspend/fail determination to AIP-58 §3 rather than
+leaving "the turn ended" as an implicit success signal — see
+[§ `kind: "agent"`](#kind-agent)'s Outcome note. No field changes; this
+is a clarification of existing behaviour's intended outcome semantics,
+not a new step field. Hosts whose current implementation treats a
+turn ending as success by default are non-conforming as of this
+revision and should adopt AIP-58's outcome rule.
 
 ### With pre-AIP runtime-specific workflow definitions
 

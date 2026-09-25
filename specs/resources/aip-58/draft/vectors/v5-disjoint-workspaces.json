@@ -1,0 +1,34 @@
+{
+  "id": "V5",
+  "title": "Two concurrent runs of the same workflow -> disjoint workspaces",
+  "rule": "specs/aip-58.mdx section 4 Run workspace -- \"Two runs MUST NEVER share a workspace\"",
+  "manifestExcerpt": {
+    "kind": "workflow",
+    "id": "pricing-brief",
+    "outputsFiles": { "brief": { "path": "./briefs/<runId>.md", "required": true } }
+  },
+  "runCreate": [
+    {
+      "kind": "workflow",
+      "ref": { "id": "pricing-brief", "version": "1.0.0" },
+      "input": { "productUrl": "https://example.com/pricing-a" }
+    },
+    {
+      "kind": "workflow",
+      "ref": { "id": "pricing-brief", "version": "1.0.0" },
+      "input": { "productUrl": "https://example.com/pricing-b" }
+    }
+  ],
+  "expected": {
+    "runIds": ["run_A", "run_B"],
+    "workspaces": {
+      "run_A": "<runsRoot>/run_A/",
+      "run_B": "<runsRoot>/run_B/"
+    },
+    "invariant": "run_A's scratch/, inputs/, and artifacts/ directories share no path with run_B's -- writing outputsFiles.brief for run_A never touches, overwrites, or is visible from run_B's workspace, even though both runs share the same workflow ref and outputsFiles.brief.path template.",
+    "terminalStates": { "run_A": "succeeded", "run_B": "succeeded" },
+    "notes": [
+      "This is the exact failure the Motivation cites: two runs overwriting each other's files. The <runId> path-interpolation token (AIP-16) is what keeps the two concrete paths distinct even though the template is identical."
+    ]
+  }
+}
