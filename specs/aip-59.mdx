@@ -1,0 +1,407 @@
+---
+title: "AIP-59: MOBILE PAIRING — browser clients over an E2E rendezvous"
+description: How a plain browser (a phone scanning a QR code) pairs with an agentproto daemon and then reaches its HTTP surface end-to-end encrypted through an untrusted rendezvous broker. Fixes the offer URL carried in a URL fragment, the pair/v2 handshake over WebCrypto, the route/auth token split that keeps every secret off the broker, credential storage, the service-worker proxy model with bounded, chunked, cancellable frames, authenticated revocation, and the threat model.
+aip: 59
+status: Draft
+type: Core
+created: 2026-09-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1]
+discussions-to: https://github.com/agentproto/agentproto/discussions/59
+layer: identity
+package: "@agentproto/pair-client"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/pair-client
+---
+
+| Field | Value |
+|---|---|
+| AIP | 59 (provisional — editors assign the final number) |
+| Title | MOBILE PAIRING — browser clients over an E2E rendezvous |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Core |
+| Requires | [AIP-1](/docs/aip-1) |
+| Created | 2026-09-26 |
+| Package | `@agentproto/pair-client` (client), `@agentproto/secrets` (handshake, derivations, offer codec) |
+
+## Abstract
+
+A daemon that only dials outbound can be reached by a **paired client**
+through a rendezvous broker that splices two WebSockets and relays
+ciphertext. This AIP specifies that relationship for a **browser client**: a
+phone scans a QR code, the pair page runs the `pair/v2` handshake with
+WebCrypto, stores a credential, and a service worker then proxies the
+daemon's own UI and API through the end-to-end encrypted tunnel, including
+streamed responses. The broker never sees plaintext or any secret that
+authenticates.
+
+## Motivation
+
+The existing remote paths into a daemon (a public quick tunnel, a reverse
+tunnel through a host) terminate TLS at an intermediary, which then sees
+everything; the only protection is a bearer token. Quick tunnels also break
+server-sent events, so live updates degrade to polling.
+
+A native CLI can already pair over a rendezvous. A phone has no CLI, only a
+camera and a browser. Without a spec, each browser client would have to guess
+how to carry the offer, where to keep the long-term secret, how to fit an
+HTTP stream into a size-limited byte pipe, and how to tell "unpaired" from
+"offline". Each wrong guess leaks a secret or loops forever.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
+interpreted as described in [AIP-1](/docs/aip-1) (RFC 2119).
+
+**Roles.** The *daemon* holds a static identity: an X25519 key pair and an
+Ed25519 key pair. Its *fingerprint* is the first 16 lowercase hex characters
+of `SHA-256(X25519 public key, SPKI DER)`. The *client* is a browser. The
+*broker* is a rendezvous WebSocket server that pairs two sockets presenting
+the same route (`?side=daemon|client&t=<route>`) and relays messages
+unmodified. The *pair page* is the web page that opens the offer and holds
+the credential. All HKDF is HKDF-SHA256, and all strings are UTF-8.
+
+### 1. Offer URL
+
+1.1. The daemon mints an offer with these parameters:
+
+| Param | Value |
+|---|---|
+| `v` | offer version, `2` |
+| `rv` | broker URL, `ws:` or `wss:` |
+| `id` | daemon fingerprint (16 hex) |
+| `pk` | daemon X25519 public key, SPKI DER, base64url without padding |
+| `sk` | daemon Ed25519 public key, SPKI DER, base64url without padding |
+| `s` | one-time offer secret, base64url; the daemon MUST generate at least 128 bits from a CSPRNG |
+| `exp` | expiry, unix seconds |
+
+1.2. The canonical form is `agentproto://pair?<params>`. The **web form**,
+which a phone camera can open, is the same parameter string placed verbatim
+in the **fragment** of an `https` URL:
+
+```
+https://<pair-page-host>/pair#v=2&rv=…&id=…&pk=…&sk=…&s=…&exp=…
+```
+
+1.3. The offer MUST travel in the fragment, never in the path or query of the
+web form. Browsers send neither the fragment nor the `Referer` header to the
+pair page's server. The pair page MUST read the fragment once and MUST then
+remove it from the address bar and from session history (for example with
+`history.replaceState`) before it does any network I/O.
+
+1.4. A client MUST reject the offer, before it opens any socket, when:
+
+- a parameter is missing or empty, or is not valid for its type;
+- `rv` is not `ws:` or `wss:`;
+- `id` is not equal to `fingerprint(pk)`;
+- `exp` has passed.
+
+A `v` other than `2` MUST be rejected. `v=1` MUST be rejected with the code
+`pairing_protocol_outdated` (§7).
+
+1.5. The daemon MUST treat the offer as single-use and SHOULD give it a short
+TTL; the reference daemon uses 10 minutes. A hello with the wrong offer auth
+(§3) MUST NOT spend the offer.
+
+### 2. Route and auth tokens
+
+2.1. Every pairing secret yields two independent HKDF outputs: a **route**
+and an **auth** token. Both are encoded as base64url without padding.
+
+| Token | IKM | salt | info | Length |
+|---|---|---|---|---|
+| offer route | `s` | `agentproto/pair-offer` | `agentproto/rv-route` | 16 B |
+| offer auth | `s` | `agentproto/pair-offer` | `agentproto/rv-auth` | 32 B |
+| epoch route | pair root | `agentproto/rv-route-salt` | `agentproto/rv-route` ‖ u64be(epoch) | 16 B |
+| epoch auth | pair root | `agentproto/rv-auth-salt` | `agentproto/rv-auth` ‖ u64be(epoch) | 32 B |
+
+For the offer tokens, the IKM is the UTF-8 bytes of the `s` string as it
+appears in the URL. For the epoch tokens, the IKM is the raw 32-byte pair
+root (§3.4). The epoch is the UTC day number, `floor(unix_ms / 86 400 000)`.
+
+2.2. **Only route tokens reach the broker**, as the `t` parameter of the
+upgrade URL. The offer secret `s`, the pair root and every auth token MUST
+NOT appear in any URL, header or unencrypted message. They MUST travel only
+inside the sealed hello (§3.1).
+
+2.3. The daemon MUST verify the auth token in constant time. It MUST refuse a
+hello whose auth token is wrong, and MUST NOT treat knowledge of a route as
+proof of anything.
+
+2.4. On reconnect, the daemon SHOULD park on the routes of both the current
+and the previous epoch. The client SHOULD try the current epoch first, then
+the previous one.
+
+### 3. Handshake (`pair/v2`)
+
+The browser handshake MUST be byte-identical to the native one, so that a
+daemon cannot tell the two clients apart. Browser clients MUST implement it
+with WebCrypto (X25519, Ed25519, HKDF-SHA256, AES-256-GCM) or with a
+constant-time library that produces the same bytes.
+
+3.1. **Hello** (client → daemon). The client generates an ephemeral X25519
+key `e`. It seals `{clientPub: e_pub, clientName, auth}` to the daemon's
+static X25519 key with an ECIES-style seal (X25519, HKDF-SHA256 with info
+`agentproto/secrets/seal v1`, AES-256-GCM), which gives `ct0`. It then sends
+`{v: 2, ePub: e_pub, ct0}`. The `auth` field is the offer auth on first
+contact, or the epoch auth on reconnect.
+
+3.2. **Reply** (daemon → client). The daemon opens `ct0`, checks that
+`clientPub` equals `ePub`, and verifies `auth` (§2.3). It generates an
+ephemeral key `d_e` and replies with `{v: 2, dePub: d_e_pub, sig}`, where
+`sig = Ed25519(daemon_ed25519, transcript)` and
+`transcript = SHA-256(e_pub ‖ utf8(ct0) ‖ d_e_pub)`.
+
+3.3. **Keys.** Both sides compute
+`HKDF(IKM = ECDH(e, d_e) ‖ ECDH(e, daemon_x25519), salt = transcript,
+info = "agentproto/pair/v2", L = 64)`. The first 32 bytes are the
+client-to-daemon key, and the last 32 are the daemon-to-client key. The
+client MUST verify `sig` against the `sk` pinned from the offer or the
+credential, and MUST abort on failure. Any failure MUST close the channel
+without continuing on attacker-chosen material.
+
+3.4. **Pair root.** After a first-contact handshake, both sides derive
+`pairRoot = HKDF(IKM = sort(k_c2d, k_d2c), salt = transcript,
+info = "agentproto/pair-root", L = 32)`. The two keys are sorted byte-wise
+and concatenated, so both peers get the same value.
+
+3.5. **Channel.** Every tunnel frame after the handshake is sent
+AES-256-GCM-encrypted as an `e2e` envelope `{t: "e2e", n, d}`. `n` is a
+64-bit counter per direction, starting at 0. The nonce is 4 zero bytes
+followed by `u64be(n)`, and the AAD is `u64be(n)`. A receiver MUST require
+exactly the next `n`, and MUST close the channel on replay, reorder, tag
+failure, or any frame that is not an `e2e` envelope. A sender MUST stop
+before `n` reaches 2³² and rekey by reconnecting.
+
+3.6. **Confirmation.** Before the first network I/O, the pair page MUST
+display the offer's fingerprint. After the handshake, it MUST display the
+daemon's name (from the tunnel `hello` frame) next to that fingerprint. It
+MUST then obtain an explicit user confirmation before it persists any
+credential. If the user declines, the page MUST discard the pair root. The
+client MUST abort if the authenticated peer fingerprint differs from `id`.
+
+### 4. Credential storage
+
+4.1. A credential contains the fingerprint, the pinned `pk` and `sk`, the
+`rv`, the pair root, the `clientName`, and timestamps. It MUST be keyed by
+the daemon fingerprint, one credential per daemon per origin.
+
+4.2. Credentials MUST be stored in IndexedDB or an equivalent origin-scoped
+store that is readable from both the page and its service worker.
+Credentials MUST NOT be written to `localStorage`, to `sessionStorage` or to
+cookies, and MUST NOT be sent to any server.
+
+4.3. The pair root SHOULD be imported as a **non-extractable** WebCrypto HKDF
+`CryptoKey` before it is stored, so that script can derive the epoch tokens
+but cannot read the secret back. A client MUST NOT keep an extractable copy
+after import.
+
+4.4. The credential is bound to the pair page's origin. A different origin
+(including a self-hosted pair page) has its own, separate credentials.
+
+### 5. Service-worker proxy
+
+5.1. **Scope.** The pair page MUST register one service worker per pairing,
+scoped to `/d/<fingerprint>/`. The worker MUST answer only requests under its
+scope. It forwards the path that follows the scope prefix (with its query) to
+the daemon.
+
+5.2. **Origin of UI code.** Any daemon-served UI (for example the Control
+Center) MUST be loaded through the tunnel from the daemon, under the worker's
+scope. The pair page's server MUST NOT host or serve daemon UI code. The pair
+page ships only the pairing flow, the worker and the status pages.
+
+5.3. **One connection per credential.** The worker MUST hold at most one
+tunnel client per credential, shared by all fetch events, and MUST multiplex
+requests over it by `reqId`. Documents under the scope MUST NOT open their own
+channel. The broker allows one live socket per route, and the daemon parks a
+bounded number of channels per pairing.
+
+5.4. **Requests.** A request is sent as `http_request`. A response arrives
+either as one `http_response`, or as `http_response_head` followed by
+`http_response_chunk` frames, the last of which is marked `end`. The worker
+MUST return a `Response` whose body is a `ReadableStream` fed chunk by chunk.
+It MUST NOT buffer a streamed response (`text/event-stream`, NDJSON) to its
+end. A daemon SHOULD send long-lived streams such as SSE as head and chunks,
+and SHOULD emit periodic keep-alive data on them.
+
+5.5. **Frame bound.** The broker MAY close any WebSocket message above its
+limit; the reference broker's default is 1 MiB. Each sender MUST keep every
+envelope under that limit. The raw bytes in one frame's `body` or `data` MUST
+NOT exceed 256 KiB, and larger bodies MUST be split:
+
+- responses as `http_response_head` and `http_response_chunk`;
+- request bodies as `http_request` with `bodyChunked: true`, then
+  `http_request_chunk` frames ending with `end: true`;
+- WebSocket messages as `ws_message` fragments with `more: true`.
+
+A client MUST send a request body in chunks only to a daemon whose `hello`
+advertises `capabilities.httpRequestChunks`. It MUST fragment WebSocket
+messages only when `ws_open.fragments` or `capabilities.wsFragments` has
+been negotiated.
+
+5.6. **Cancellation.** When a fetch is aborted (its `AbortSignal`, a
+cancelled body stream, a closed page), the worker MUST send
+`http_cancel{reqId}`. The daemon MUST then abort the upstream request and
+stop sending frames for that `reqId`. Any frames that are still in flight
+MUST be dropped by the client.
+
+5.7. **Liveness.** The worker SHOULD reconnect with jittered, capped
+exponential backoff. When the channel drops, pending requests MUST fail as
+network errors, and new requests SHOULD wait a bounded time for a
+connection. When a browser stops an idle worker, the next fetch event MUST
+build a new client from the stored credential.
+
+### 6. Revocation
+
+6.1. When a pairing is revoked, the daemon MUST stop serving it at once. It
+MUST send one E2E `error` frame with `code: "pairing_revoked"` on any live
+channel for that pairing, and then close.
+
+6.2. The daemon SHOULD keep a **tombstone** for a grace window (the
+reference default is 14 days). During that window it keeps parking on the
+pairing's epoch routes. The tombstone:
+
+- MUST NOT keep the pair root;
+- MUST keep only the per-epoch `{route, auth}` pairs covering the grace
+  window, derived when the pairing is revoked;
+- MUST verify the sealed auth token (§2.3) against that epoch's stored auth
+  before it answers. Only then does it complete the daemon-signed handshake
+  and send `error{code: "pairing_revoked"}` as the first and only frame. It
+  never sends `hello` and serves nothing;
+- on an auth failure, MUST behave exactly as for any bad auth (§2.3): refuse
+  the hello and send no `pairing_revoked`.
+
+So a party that knows only the route (the broker) cannot get a signed
+`pairing_revoked`.
+
+6.3. A client MUST treat `pairing_revoked` as terminal only if it arrives as
+an authenticated frame inside the E2E channel, after a handshake that
+verified against the pinned `sk`. The client MUST then stop all reconnect
+attempts, with **no retry loop**. It MUST delete or mark the credential, and
+MUST tell the user that the device was unpaired and must be paired again
+from a new offer. Broker closes, timeouts and failed handshakes MUST be
+treated as "offline" (retry with backoff), never as revoked.
+
+6.4. When the grace window ends, a revoked client can no longer tell the two
+cases apart and sees the daemon as offline.
+
+### 7. Versioning and legacy
+
+7.1. The offer version (`v` in the URL), the handshake version (`v` in the
+hello and reply) and the HKDF info label `agentproto/pair/v2` MUST all
+change together whenever the handshake or the token schedule changes.
+
+7.2. `pair/v1` used one token as both route and proof, which let a broker
+authenticate as a client. It MUST NOT be accepted:
+
+- A client given a `v=1` offer MUST fail with `pairing_protocol_outdated`
+  and tell the user to mint a new offer.
+- A daemon MUST NOT serve a `pair/v1` pairing. When a v1 client reconnects
+  (the epoch route is unchanged from v1), the daemon MAY complete the v1
+  handshake only to send a re-pair notice inside the encrypted channel, and
+  MUST then close. It MUST NOT check a token, and MUST NOT serve anything.
+- Stored v1 credentials MUST be treated as legacy: never dialed, never
+  served, never upgraded in place. The only remedy is to pair again.
+
+## Threat model
+
+| Adversary | Capability | Outcome |
+|---|---|---|
+| Broker operator (or anyone logging its upgrade URLs) | reads, drops, delays, reorders and replays messages; learns every route; can dial any route and seal a hello to `pk` | Learns route tokens, both peers' IP addresses, message sizes and timing, and when a pairing is in use. Cannot read, inject or alter frames (§3.5), cannot pair or reconnect (it holds no auth token, §2), and can neither forge nor elicit `pairing_revoked` (§6.2, §6.3). Can deny service. Epoch routes rotate daily, which limits linking a pairing's sessions across days. |
+| Network attacker (between a peer and the broker) | the same as the broker, over TLS-stripped or `ws:` links | The same as the broker. `wss:` SHOULD be used. |
+| Offer-URL thief, before expiry and first use | pairs as a new client | Mitigated by the short TTL, the single use, the fingerprint and name shown to the operator, and `pair revoke`. After the legitimate client has paired, the offer is spent. |
+| Swapped QR (evil daemon) | substitutes its own `pk`/`sk`/`id` | The user confirms a fingerprint they have never seen; the keys are pinned after the first pair. `id` = `fingerprint(pk)` catches a partial swap. |
+| Malicious or compromised pair-page origin | serves script to the pair page and the service worker | **Trusted:** it can read the fragment, the credential and all plaintext, and can act as the client. The origin is a trust anchor equal to the device. Self-hosting the pair page removes the third party (§4.4). |
+| XSS on the pair origin | runs script in the origin | The same as a malicious origin for as long as the XSS lasts. A non-extractable pair root (§4.3) prevents exfiltrating the secret, but not using it while the XSS lasts. Keeping daemon UI off this origin (§5.2) keeps daemon UI bugs out of the credential's origin. |
+| Stolen or unlocked device | uses the stored credential | Acts as the client until `pair revoke`. Revocation then reaches the device authenticated (§6). |
+
+Out of scope: post-compromise security, multi-device credential sync, and
+broker federation.
+
+## Rationale
+
+- **Fragment, not query.** A query reaches the pair page's server and its
+  logs. A fragment never does. §1.3 removes it from history so that tab
+  restore or a shared screenshot cannot reveal it.
+- **Route/auth split.** A single token used both as the meeting point and as
+  the proof (pair/v1) is a bearer credential that the broker sees in the
+  clear. HKDF is one-way, so a published route reveals nothing about its
+  auth token.
+- **Service worker on the pair origin, UI from the daemon.** The daemon UI's
+  REST, `/mcp` and SSE calls are same-origin relative fetches. A service
+  worker lets the UI run unchanged, and it always matches the daemon's
+  version. Serving that UI from the pair site would make the pair site a
+  code-supply point for every daemon.
+- **One connection per credential.** The broker allows one live socket per
+  route (`token in use`), and the daemon parks a fixed number of channels per
+  pairing. Per-tab channels would fight over them.
+- **Authenticated revocation.** Without it, a revoked client cannot
+  distinguish "unpaired" from "offline" and retries forever. Accepting an
+  unauthenticated signal would let the broker unpair anyone.
+- **Alternatives rejected.** A public tunnel (with TLS terminated at the
+  intermediary, and no SSE on quick tunnels). WebRTC data channels (these
+  need TURN, which is another relay, and a larger stack). Storing
+  credentials in cookies (these are sent to a server).
+
+## Backwards Compatibility
+
+This AIP has no `replaces`. It introduces `pair/v2`, which is deliberately
+incompatible with `pair/v1` (§7): v1 offers and credentials are refused and
+must be re-paired. The tunnel frame additions (`http_cancel`,
+`http_request_chunk`, `bodyChunked`, `ws_message.more`) are gated by
+capabilities that the daemon advertises in `hello`. A peer that lacks them
+receives whole frames and keeps working within the frame bound.
+
+## Security Considerations
+
+- The pair page origin is a trust anchor (see the threat model). It SHOULD
+  serve a strict Content-Security-Policy, SHOULD NOT load third-party
+  script, and SHOULD be served over HTTPS with HSTS. Operators who do not
+  trust the default pair page SHOULD self-host it.
+- The pair page MUST NOT log, persist or post the fragment, and MUST clear it
+  before it does any network I/O (§1.3).
+- Every token comparison on the daemon MUST be constant-time.
+- A client MUST NOT reuse an `(n, key)` pair. Keys are per-connection, so
+  every reconnect runs a fresh handshake.
+- Size limits are a correctness issue as well as a denial-of-service
+  surface. A sender that ignores §5.5 gets its channel closed by the broker,
+  and every multiplexed request fails.
+- A tombstone (§6.2) holds per-epoch auth tokens for the grace window. They
+  let a thief answer only as that revoked pairing, and only until the window
+  ends. They cannot derive later epochs or serve anything, and the
+  tombstone is dropped once the window ends.
+- `pairFromOffer` finishes the handshake, and so creates the daemon-side
+  pairing record, before the user confirms. If the user declines at §3.6,
+  the daemon still holds a record, which the operator must revoke.
+
+## Open issues
+
+1. **Service-worker lifetime.** Browsers may stop a service worker while it
+   serves a long SSE response (Safari limits a worker's lifetime), which
+   drops the stream and the shared tunnel. Clients recover by reconnecting
+   (§5.7), but events emitted during the gap are lost unless the daemon's
+   stream supports resumption (`Last-Event-ID`).
+2. **No post-compromise security.** There is no ratchet. A stolen pair root
+   lets its holder derive future epoch tokens until revocation, and a
+   stolen session key exposes that connection.
+3. **Declined confirmation leaves a daemon record** (see Security
+   Considerations). A future revision may add an in-channel `pair_confirm`
+   step before the daemon persists the pairing.
+4. **Traffic analysis.** Frame sizes and timing are visible to the broker.
+   Padding is not specified.
+
+## Reference Implementation
+
+- `@agentproto/secrets` (`packages/secrets/src/pairing/`): `handshake.ts`
+  (pair/v2), `derive.ts` (the route/auth split and the pair root), and
+  `offer-url.ts` (the offer codec). See agentproto/ts#1448.
+- `@agentproto/pair-client`: `inspectOffer`, `pairFromOffer`,
+  `connect` → `TunnelClient.fetch`, and `createIndexedDbCredentialStore`. See
+  agentproto/ts#1447.
+- `@agentproto/acp` (`packages/acp/src/tunnel/`): `wrapE2E` and the tunnel
+  frame codec, with `MAX_FRAME_PAYLOAD_BYTES` = 256 KiB.
+- `@agentproto/rendezvous`: the broker, with a default `maxMessageBytes` of
+  1 MiB.
+- The pair page and service worker live in agentproto/cli-site (`/pair`,
+  `/d/<id>/`).
