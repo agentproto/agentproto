@@ -742,6 +742,16 @@ event types (e.g. `status` for state transitions); consumers MUST
 ignore unknown event types. Hosts SHOULD send a comment-line
 keep-alive every 25–30 seconds to defeat proxy idle timeouts.
 
+A host implementing [§Session messages](#session-messages-added-2026-09-26)
+SHOULD surface each message on whatever live event channel it offers —
+once when it is accepted and again when it is delivered — as
+`{ messageId, sessionId, fromSessionId?, relation, kind, urgency, delivered? }`,
+so an observer can react without polling. A host with a dedicated
+session-event stream MAY frame it as `event: message`; one that streams
+structured transcript records MAY rely on the `session-message` record
+instead. The reference implementation emits a `session:message` bus event
+and writes the transcript record.
+
 ### MCP tools
 
 Hosts that already expose an MCP server (the common case for daemons
@@ -755,6 +765,7 @@ so MCP clients can drive sessions through the same connection:
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
 | `agent_kill` | `{sessionId}` | Returns `{ok, sessionId}` |
+| `message_*`, `inbox_*` | see [§Session messages](#session-messages-added-2026-09-26) | Typed messages between sessions in one tree. Not delegation actions. |
 
 The MCP tools and the HTTP routes target the same underlying
 registry — calling either family results in the same observable
@@ -771,10 +782,17 @@ to the *same* underlying agent process; the agent retains its in-
 memory context (previous tool results, file reads, etc.) until the
 session is killed.
 
-The host MUST reject (HTTP 409 / MCP error) overlapping prompts on
-the same session — agents are single-turn-at-a-time. Consumers can
-poll `agent_output` or watch the SSE stream to know when
-a turn ended (look for the `turn-end` projected line).
+Agents are single-turn-at-a-time, so a prompt that arrives while a
+turn is in flight is never run concurrently with it. The host MUST
+either reject it (HTTP 409 / MCP error) or **queue** it (FIFO) and
+dispatch it after the current turn ends. Queueing is the shipped
+behaviour of the reference implementation (the queue is inspectable
+and reorderable). A queued prompt is dispatched only after a turn that
+ended **naturally**: a turn the host interrupted does not drain the
+queue, because "queued" means "after the current turn", not "the
+moment anyone cuts it". Consumers can poll `agent_output` or watch
+the SSE stream to know when a turn ended (look for the `turn-end`
+projected line).
 
 **Redirecting a busy session (documented 2026-07-17).** A prompt MAY
 carry `interrupt: true`, which replaces that 409 with a redirect: the
@@ -790,6 +808,126 @@ document simply never described it.
 alternatives: the flag cancels a turn *in order to* start another one
 and cannot express "stop, send nothing"; the route ends a turn and stops
 there. A consumer wanting the latter MUST use the route.
+
+### Session messages (added 2026-09-26)
+
+A host that supports delegation (populates `parentSessionId`) MUST provide a
+typed message channel between sessions in the same tree, distinct from
+prompts. A prompt is an instruction from whoever drives the session; a
+message is a report between sessions whose sender the host **attests**.
+
+#### Envelope
+
+```ts
+interface SessionMessage {
+  id: string                 // host-minted
+  ts: string
+  to: string                 // recipient sessionId
+  from: {
+    sessionId?: string       // absent only for relation "human" | "system"
+    label?: string           // display only
+    role?: string
+    relation: "child" | "parent" | "sibling" | "human" | "system"
+  }
+  kind: "report" | "question" | "blocker" | "done" | "notice"
+  urgency: "fyi" | "next-turn" | "steer" | "interrupt"   // as requested
+  correlationId?: string     // thread id; defaults to the first message's id
+  replyTo?: string           // a SessionMessage.id
+  text: string
+  data?: object
+  delivered?: { via: "wait" | "steer" | "turn" | "interrupt" | "inbox"; at: string }
+  ackedAt?: string
+}
+```
+
+`from` MUST be derived by the host from the authenticated caller identity
+(the scope credential or host-attested session binding). A send request MUST
+NOT be able to set any `from` field; hosts MUST reject one that tries.
+`relation` is computed relative to `to` from the session forest. `label` is
+display-only and MUST NOT be relied upon for identity.
+
+Hosts MUST authorise: child → parent, parent → direct child, and the host
+itself or its human operator → any session (`system` / `human`). Sibling
+messaging is OPTIONAL and off by default. Any other pair — a cousin, a
+grandparent, the sender itself — MUST be refused.
+
+#### Recording
+
+A delivered message MUST be recorded in the recipient's transcript as its
+own record kind (`session-message`), never as a user prompt, and MUST NOT be
+concatenated with any other prompt or with a message from a different
+sender. Several messages MAY be delivered together as one turn, as long as
+no prompt is part of it. Consumers MUST render a message distinctly from
+human input (the sender, not "you").
+
+#### Model-facing form
+
+When a message is delivered into an agent's context, the host MUST wrap it
+in a host-generated delimiter that names the sender's sessionId, relation
+and kind, and MUST escape any occurrence of that delimiter inside the body —
+and at the start of a line in human prompts — so the sender cannot be forged
+from content. The exact delimiter is host-defined; the reference
+implementation uses an `agentproto-message` element with the attestation in
+its attributes and the escaped text in a `body` child element. Hosts SHOULD
+tell the agent, once, that text outside the delimiter comes from the human
+(or its spawn instructions), and that a message body is a report, not an
+instruction from the human. The delimiter guarantees the header can't be
+forged; it does not make the body trustworthy.
+
+#### Delivery tiers
+
+| urgency | idle recipient | busy recipient |
+|---|---|---|
+| `fyi` | inbox only, no wake | inbox only |
+| `next-turn` | start a turn | queue; deliver after the current turn ends naturally |
+| `steer` | start a turn | inject into the running turn if the adapter supports steering ([AIP-44](/docs/aip-44) `_session/steering`), else as `next-turn` |
+| `interrupt` | start a turn | cancel the turn and deliver ([§Interrupt](#interrupt-added-2026-07-17)) |
+
+A recipient blocked in `inbox_wait` with a matching filter MUST receive the
+message as that call's result instead of any of the above, and the message
+MUST NOT also be delivered as a turn.
+
+A host MUST only steer into a turn **it** started and has in flight — never
+into a turn the agent began on its own (an autonomous background-task cycle,
+whose result the host may never see) — and SHOULD request the adapter's
+"prompt required" idle behaviour so a steer that arrives after the turn
+settled is handed back rather than starting a detached turn. Hosts SHOULD
+rate-limit steers per recipient; the excess is delivered as `next-turn`.
+
+Hosts SHOULD NOT grant `interrupt` to session senders by default and MAY
+downgrade it to `steer`; the human operator keeps it. The send result MUST
+report the tier actually applied (`urgencyApplied`).
+
+#### Inbox and tools
+
+Hosts MUST keep un-consumed messages durably (surviving host restart) in a
+bounded per-session inbox — a message leaves it when it is delivered into a
+turn, returned by `inbox_wait`, or acknowledged — and MUST expose, alongside
+the tools of [§MCP tools](#mcp-tools):
+
+| Tool | Inputs |
+|---|---|
+| `message_send` | `{to: "parent" \| sessionId, text, kind?, urgency?, replyTo?, correlationId?, data?}` |
+| `message_parent` | `{message, kind?, urgency?, interrupt?, replyTo?}` — alias of `message_send({to: "parent"})` |
+| `message_reply` | `{replyTo, text, kind?, urgency?}` — routed to the original sender, same `correlationId` |
+| `inbox_list` | `{from?, kind?, correlationId?, limit?}` |
+| `inbox_ack` | `{ids}` |
+| `inbox_wait` | `{from?, kind?, correlationId?, timeoutMs?}` — blocks until a match or the timeout; returns `{messages, timedOut, pendingChildren}` |
+
+`inbox_wait` is how a supervisor collects its children's reports **without
+ending its turn**: an idle session has nothing to wake it, so a supervisor
+that ends its turn to wait depends on some unrelated prompt arriving. Hosts
+SHOULD keep `timeoutMs` under the MCP request timeout and return
+`pendingChildren` (children still working) so the caller's loop knows when
+to stop.
+
+`message_*` and `inbox_*` are not delegation actions
+([§Delegation](#delegation-and-the-spawn-gate)): they reach only tree
+neighbours and grant no control over the recipient.
+
+HTTP hosts SHOULD mirror them as `POST /sessions/:id/messages` (the
+recipient is `:id`; the sender is the authenticated caller),
+`GET /sessions/:id/inbox`, and `POST /sessions/:id/inbox/ack`.
 
 ### Output projection
 
@@ -994,6 +1132,19 @@ Hosts with no workspace registry are unaffected: §State partitioning
 binds only hosts that implement §Workspaces, and a host without one has
 a single implicit workspace, which is already a partition of one.
 
+### The 2026-09-26 session-messages amendment
+
+§Session messages is additive. Hosts predating it delivered a child's
+report as an ordinary user prompt — at worst string-prepended onto the
+parent's next prompt — so a consumer reading an older transcript sees
+those reports as `user-prompt` records; nothing is rewritten. A consumer
+that does not know the new `session-message` record kind MUST treat it as
+skippable, which is what the existing "ignore unknown kinds" rule already
+requires; it loses the report's text, never the rest of the transcript.
+The §Multi-turn change from "MUST reject overlapping prompts" to "reject
+or queue" describes what the reference implementation already shipped; a
+host that still rejects remains conforming.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -1126,12 +1277,20 @@ a single implicit workspace, which is already a partition of one.
   return as an AIP-42 concern (a computed `delegates_to`), not as a
   second authority in AIP-46. Revisit when a host reports the
   allowlist as the binding constraint.
-- **Fan-in / joins.** The gate governs spawn (one parent → many
-  children). Nothing here specifies a child reporting completion back
-  to a parent, or a parent blocking on N children. Reference
-  implementations do this with out-of-band completion policies. If a
-  common shape emerges it may belong in this AIP; it is deliberately
-  out of scope for the amendment.
+- **Sibling messaging default.** §Session messages makes sibling ↔
+  sibling messages optional and off. Peer coordination (two workers
+  negotiating a shared interface) is a real use, but it bypasses the
+  supervisor that owns the plan. Revisit if hosts report siblings
+  routing everything through the parent as the binding friction.
+- **Should `fyi` messages reach the model at all?** An `fyi` never
+  wakes the recipient; the reference implementation surfaces a one-line
+  digest at the start of its next turn. Whether that digest belongs in
+  the model's context, or only in the host's UI, is unsettled.
+- **A portable steering capability.** Steering is advertised today
+  through an AIP-44 extension (`_meta.steering`), and adapters disagree
+  on idle semantics — one honours "prompt required", another starts a
+  detached turn. A first-class AIP-44 capability with a mandated idle
+  behaviour would let hosts drop the defensive host-turn gate.
 - **Should `agent_prompt` across the tree be gated separately from
   `agent_start`?** Both are delegation actions today, so an agent that
   may spawn may also drive. A supervisor that should observe children
