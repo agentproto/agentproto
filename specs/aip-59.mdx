@@ -54,8 +54,9 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
 interpreted as described in [AIP-1](/docs/aip-1) (RFC 2119).
 
 **Roles.** The *daemon* holds a static identity: an X25519 key pair and an
-Ed25519 key pair. Its *fingerprint* is the first 16 lowercase hex characters
-of `SHA-256(X25519 public key, SPKI DER)`. The *client* is a browser. The
+Ed25519 key pair. Its *fingerprint* is the first 32 lowercase hex characters
+(128 bits) of `SHA-256(X25519 public key, SPKI DER)`, matching
+`^[0-9a-f]{32}$`. The *client* is a browser. The
 *broker* is a rendezvous WebSocket server that pairs two sockets presenting
 the same route (`?side=daemon|client&t=<route>`) and relays messages
 unmodified. The *pair page* is the web page that opens the offer and holds
@@ -69,7 +70,7 @@ the credential. All HKDF is HKDF-SHA256, and all strings are UTF-8.
 |---|---|
 | `v` | offer version, `2` |
 | `rv` | broker URL, `ws:` or `wss:` |
-| `id` | daemon fingerprint (16 hex) |
+| `id` | daemon fingerprint, 32 lowercase hex (`^[0-9a-f]{32}$`) |
 | `pk` | daemon X25519 public key, SPKI DER, base64url without padding |
 | `sk` | daemon Ed25519 public key, SPKI DER, base64url without padding |
 | `s` | one-time offer secret, base64url; the daemon MUST generate at least 128 bits from a CSPRNG |
@@ -282,8 +283,10 @@ the fingerprint, so the daemon can build the link when it mints the offer
 (§1.2). A browser holds at most one credential per daemon (§4.1), so on that
 device one daemon's origin holds exactly one credential. In this mode:
 
+- the origin's first label MUST match `^[0-9a-f]{32}$`. A deployment MUST
+  NOT serve the pair page on the apex or on any other host;
 - the pair page MUST refuse an offer whose `id` does not equal its origin's
-  first label (compared case-insensitively), before any network I/O;
+  first label, before any network I/O;
 - the origin's credential store MUST hold only that daemon's credential. The
   page and its worker MUST NOT store or use a credential for any other
   fingerprint;
@@ -418,6 +421,9 @@ receives whole frames and keeps working within the frame bound.
   credential. A shared-origin deployment MUST document the exposure (§5.8).
 - The pair page MUST NOT log, persist or post the fragment, and MUST clear it
   before it does any network I/O (§1.3).
+- The fingerprint is 128 bits because it selects the browser origin (§5.8).
+  At 64 bits, a well-resourced attacker could grind a daemon key whose
+  fingerprint collides with a victim's, and so get onto that daemon's origin.
 - Every token comparison on the daemon MUST be constant-time.
 - A client MUST NOT reuse an `(n, key)` pair. Keys are per-connection, so
   every reconnect runs a fresh handshake.
@@ -447,9 +453,19 @@ receives whole frames and keeps working within the frame bound.
    step before the daemon persists the pairing.
 4. **Traffic analysis.** Frame sizes and timing are visible to the broker.
    Padding is not specified.
-5. **Reference deployment pending.** The reference deployment is moving to
+5. **Reference deployment.** The reference deployment is moving to
    per-daemon origins on `agentproto.cloud` (§5.8). Until it ships,
-   cli.agentproto.sh serves as the documented shared-origin fallback.
+   cli.agentproto.sh remains the documented shared-origin fallback. The
+   decided design:
+   - A Cloudflare Worker (route `*.agentproto.cloud/*`, proxied wildcard
+     DNS) serves one static bundle, identical on every `<fp>.agentproto.cloud`.
+   - The Worker MUST answer 404 on the apex and on any first label that does
+     not match `^[0-9a-f]{32}$`.
+   - Its responses MUST carry a strict Content-Security-Policy and
+     `Cross-Origin-Opener-Policy: same-origin`, and MUST load no third-party
+     script.
+   - These headers cover only the static bundle. Daemon UI proxied by the
+     service worker carries the daemon's own response headers.
 
 ## Reference Implementation
 
