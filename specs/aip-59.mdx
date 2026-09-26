@@ -83,6 +83,12 @@ in the **fragment** of an `https` URL:
 https://<pair-page-host>/pair#v=2&rv=…&id=…&pk=…&sk=…&s=…&exp=…
 ```
 
+The daemon MUST let its operator configure the pair-page URL as a template in
+which `{fp}` is replaced by the daemon fingerprint (for example
+`https://{fp}.agentproto.cloud/pair`). This lets users self-host the static
+pair page. Since the offer carries the fingerprint, the link is fully known
+when the offer is minted.
+
 1.3. The offer MUST travel in the fragment, never in the path or query of the
 web form. Browsers send neither the fragment nor the `Referer` header to the
 pair page's server. The pair page MUST read the fragment once and MUST then
@@ -196,8 +202,10 @@ cookies, and MUST NOT be sent to any server.
 but cannot read the secret back. A client MUST NOT keep an extractable copy
 after import.
 
-4.4. The credential is bound to the pair page's origin. A different origin
-(including a self-hosted pair page) has its own, separate credentials.
+4.4. The credential is bound to the origin that stores it. A different
+origin (including a self-hosted pair page) has its own, separate
+credentials. Any script running on that origin can use every credential
+stored there, including daemon UI loaded under a worker's scope (§5.8).
 
 ### 5. Service-worker proxy
 
@@ -209,7 +217,9 @@ the daemon.
 5.2. **Origin of UI code.** Any daemon-served UI (for example the Control
 Center) MUST be loaded through the tunnel from the daemon, under the worker's
 scope. The pair page's server MUST NOT host or serve daemon UI code. The pair
-page ships only the pairing flow, the worker and the status pages.
+page ships only the pairing flow, the worker and the status pages. The daemon
+UI still runs on the origin of the worker's scope, with that origin's full
+privileges (§5.8).
 
 5.3. **One connection per credential.** The worker MUST hold at most one
 tunnel client per credential, shared by all fetch events, and MUST multiplex
@@ -251,6 +261,43 @@ exponential backoff. When the channel drops, pending requests MUST fail as
 network errors, and new requests SHOULD wait a bounded time for a
 connection. When a browser stops an idle worker, the next fetch event MUST
 build a new client from the stored credential.
+
+5.8. **Origin isolation.** Script in a daemon's UI runs on the origin of its
+worker's scope. On a single origin (for example
+`https://cli.agentproto.sh/d/<id>/…`), that origin also holds the pair page
+and every other pairing's credential. Script in any paired daemon's UI (an
+XSS in rendered agent output, or a malicious daemon) can then open IndexedDB
+and use the non-extractable pair roots of **other** pairings to connect to
+those daemons. It cannot export the keys, but it does not need to.
+
+**Per-daemon origin (SHOULD).** Implementations SHOULD serve each daemon from
+its own origin, whose first DNS label is the daemon fingerprint:
+
+```
+https://<daemon-fingerprint>.agentproto.cloud/pair#<offer>
+```
+
+The origin is chosen per daemon, not per pairing. The offer already carries
+the fingerprint, so the daemon can build the link when it mints the offer
+(§1.2). A browser holds at most one credential per daemon (§4.1), so on that
+device one daemon's origin holds exactly one credential. In this mode:
+
+- the pair page MUST refuse an offer whose `id` does not equal its origin's
+  first label (compared case-insensitively), before any network I/O;
+- the origin's credential store MUST hold only that daemon's credential. The
+  page and its worker MUST NOT store or use a credential for any other
+  fingerprint;
+- the pair-page domain SHOULD be a dedicated registrable domain (an eTLD+1
+  such as `agentproto.cloud`) that hosts nothing else. It then shares no
+  cookie scope and no site with other services.
+
+Daemon UI then never shares an origin with another daemon's credential. An
+XSS in one daemon's UI reaches only that daemon, as it would without
+pairing.
+
+**Shared origin (fallback).** A deployment MAY serve every daemon from one
+origin under `/d/<fingerprint>/`. A shared-origin deployment MUST document
+the cross-pairing exposure to its users.
 
 ### 6. Revocation
 
@@ -313,7 +360,8 @@ authenticate as a client. It MUST NOT be accepted:
 | Offer-URL thief, before expiry and first use | pairs as a new client | Mitigated by the short TTL, the single use, the fingerprint and name shown to the operator, and `pair revoke`. After the legitimate client has paired, the offer is spent. |
 | Swapped QR (evil daemon) | substitutes its own `pk`/`sk`/`id` | The user confirms a fingerprint they have never seen; the keys are pinned after the first pair. `id` = `fingerprint(pk)` catches a partial swap. |
 | Malicious or compromised pair-page origin | serves script to the pair page and the service worker | **Trusted:** it can read the fragment, the credential and all plaintext, and can act as the client. The origin is a trust anchor equal to the device. Self-hosting the pair page removes the third party (§4.4). |
-| XSS on the pair origin | runs script in the origin | The same as a malicious origin for as long as the XSS lasts. A non-extractable pair root (§4.3) prevents exfiltrating the secret, but not using it while the XSS lasts. Keeping daemon UI off this origin (§5.2) keeps daemon UI bugs out of the credential's origin. |
+| XSS on the pair origin | runs script in the origin | The same as a malicious origin for as long as the XSS lasts. A non-extractable pair root (§4.3) prevents exfiltrating the secret, but not using it while the XSS lasts. |
+| Script in a paired daemon's UI (an XSS in rendered agent output, or a malicious daemon) | runs script on the origin of its worker's scope | On a shared-origin deployment, this origin also holds the pair page and every pairing's credential. The script can use other pairings' non-extractable pair roots to connect to **other** paired daemons: a UI bug no longer reaches only the daemon that served it. Mitigated by per-daemon origins (§5.8, SHOULD), which confine it to the daemon that served it. A shared-origin deployment MUST document the exposure. |
 | Stolen or unlocked device | uses the stored credential | Acts as the client until `pair revoke`. Revocation then reaches the device authenticated (§6). |
 
 Out of scope: post-compromise security, multi-device credential sync, and
@@ -332,7 +380,8 @@ broker federation.
   REST, `/mcp` and SSE calls are same-origin relative fetches. A service
   worker lets the UI run unchanged, and it always matches the daemon's
   version. Serving that UI from the pair site would make the pair site a
-  code-supply point for every daemon.
+  code-supply point for every daemon. The cost is that the UI runs on the
+  credential's origin, hence §5.8's per-daemon origins.
 - **One connection per credential.** The broker allows one live socket per
   route (`token in use`), and the daemon parks a fixed number of channels per
   pairing. Per-tab channels would fight over them.
@@ -359,6 +408,14 @@ receives whole frames and keeps working within the frame bound.
   serve a strict Content-Security-Policy, SHOULD NOT load third-party
   script, and SHOULD be served over HTTPS with HSTS. Operators who do not
   trust the default pair page SHOULD self-host it.
+- **Cross-pairing exposure.** Under the service-worker model, the daemon UI
+  runs on the same origin as its worker's credential store. On a single
+  origin, script in any paired daemon's UI can use every other pairing's
+  credential to reach those daemons. Before, an XSS in the daemon UI reached
+  only the daemon that served it. Implementations SHOULD give each daemon
+  its own origin on a dedicated registrable domain. That origin MUST refuse
+  offers for other fingerprints and MUST hold only its own daemon's
+  credential. A shared-origin deployment MUST document the exposure (§5.8).
 - The pair page MUST NOT log, persist or post the fragment, and MUST clear it
   before it does any network I/O (§1.3).
 - Every token comparison on the daemon MUST be constant-time.
@@ -390,6 +447,9 @@ receives whole frames and keeps working within the frame bound.
    step before the daemon persists the pairing.
 4. **Traffic analysis.** Frame sizes and timing are visible to the broker.
    Padding is not specified.
+5. **Reference deployment pending.** The reference deployment is moving to
+   per-daemon origins on `agentproto.cloud` (§5.8). Until it ships,
+   cli.agentproto.sh serves as the documented shared-origin fallback.
 
 ## Reference Implementation
 
