@@ -260,11 +260,20 @@ channel for that pairing, and then close.
 
 6.2. The daemon SHOULD keep a **tombstone** for a grace window (the
 reference default is 14 days). During that window it keeps parking on the
-pairing's epoch routes, completes the daemon-signed handshake, and sends
-`error{code: "pairing_revoked"}` as the first and only frame. It never
-sends `hello` and serves nothing. A tombstone MUST NOT retain the pair root.
-It MAY retain the per-epoch auth tokens for the window, so that it can
-refuse a hello that does not carry them.
+pairing's epoch routes. The tombstone:
+
+- MUST NOT keep the pair root;
+- MUST keep only the per-epoch `{route, auth}` pairs covering the grace
+  window, derived when the pairing is revoked;
+- MUST verify the sealed auth token (§2.3) against that epoch's stored auth
+  before it answers. Only then does it complete the daemon-signed handshake
+  and send `error{code: "pairing_revoked"}` as the first and only frame. It
+  never sends `hello` and serves nothing;
+- on an auth failure, MUST behave exactly as for any bad auth (§2.3): refuse
+  the hello and send no `pairing_revoked`.
+
+So a party that knows only the route (the broker) cannot get a signed
+`pairing_revoked`.
 
 6.3. A client MUST treat `pairing_revoked` as terminal only if it arrives as
 an authenticated frame inside the E2E channel, after a handshake that
@@ -299,7 +308,7 @@ authenticate as a client. It MUST NOT be accepted:
 
 | Adversary | Capability | Outcome |
 |---|---|---|
-| Broker operator (or anyone logging its upgrade URLs) | reads, drops, delays, reorders and replays messages; learns every route; can dial any route and seal a hello to `pk` | Learns route tokens, both peers' IP addresses, message sizes and timing, and when a pairing is in use. Cannot read, inject or alter frames (§3.5), cannot pair or reconnect (it holds no auth token, §2), and cannot forge `pairing_revoked` (§6.3). Can deny service. Epoch routes rotate daily, which limits linking a pairing's sessions across days. |
+| Broker operator (or anyone logging its upgrade URLs) | reads, drops, delays, reorders and replays messages; learns every route; can dial any route and seal a hello to `pk` | Learns route tokens, both peers' IP addresses, message sizes and timing, and when a pairing is in use. Cannot read, inject or alter frames (§3.5), cannot pair or reconnect (it holds no auth token, §2), and can neither forge nor elicit `pairing_revoked` (§6.2, §6.3). Can deny service. Epoch routes rotate daily, which limits linking a pairing's sessions across days. |
 | Network attacker (between a peer and the broker) | the same as the broker, over TLS-stripped or `ws:` links | The same as the broker. `wss:` SHOULD be used. |
 | Offer-URL thief, before expiry and first use | pairs as a new client | Mitigated by the short TTL, the single use, the fingerprint and name shown to the operator, and `pair revoke`. After the legitimate client has paired, the offer is spent. |
 | Swapped QR (evil daemon) | substitutes its own `pk`/`sk`/`id` | The user confirms a fingerprint they have never seen; the keys are pinned after the first pair. `id` = `fingerprint(pk)` catches a partial swap. |
@@ -358,9 +367,10 @@ receives whole frames and keeps working within the frame bound.
 - Size limits are a correctness issue as well as a denial-of-service
   surface. A sender that ignores §5.5 gets its channel closed by the broker,
   and every multiplexed request fails.
-- The tombstone (§6.2) lets anyone who holds a revoked pairing's route (the
-  broker) learn, through the signed handshake, that the pairing was revoked.
-  A tombstone that retains the epoch auth tokens closes this gap.
+- A tombstone (§6.2) holds per-epoch auth tokens for the grace window. They
+  let a thief answer only as that revoked pairing, and only until the window
+  ends. They cannot derive later epochs or serve anything, and the
+  tombstone is dropped once the window ends.
 - `pairFromOffer` finishes the handshake, and so creates the daemon-side
   pairing record, before the user confirms. If the user declines at §3.6,
   the daemon still holds a record, which the operator must revoke.
@@ -380,7 +390,6 @@ receives whole frames and keeps working within the frame bound.
    step before the daemon persists the pairing.
 4. **Traffic analysis.** Frame sizes and timing are visible to the broker.
    Padding is not specified.
-5. **Tombstone auth.** Whether §6.2's MAY becomes a MUST.
 
 ## Reference Implementation
 
