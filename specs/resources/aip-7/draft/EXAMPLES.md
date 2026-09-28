@@ -17,6 +17,7 @@ pattern and edit fields rather than draft from scratch.
 9. [Per-operator view — junior engineer lens](#9-per-operator-view--junior-engineer-lens)
 10. [Per-company composition — Acme tenancy](#10-per-company-composition--acme-tenancy)
 11. [Multi-level chain — org → team → operator](#11-multi-level-chain--org--team--operator)
+12. [Approval request: pinned payload, human channel, consume](#12-approval-request-pinned-payload-human-channel-consume)
 
 ---
 
@@ -911,6 +912,166 @@ immediate parent.
 
 ---
 
+## 12. Approval request: pinned payload, human channel, consume
+
+An agent session asks a human to approve a production release. The request pins
+the exact payload by hash, a human approves on a declared channel, and the
+session consumes the approval once. This pattern is the `approval-request`
+doctype defined in [AIP-7](/docs/aip-7).
+
+Layout (all under one scope):
+
+```
+approvals/apr_7f3a9c21d04b8e6512aa/
+  request.json
+  payload.json
+  signatures/user-local-2026-09-28T09-14-07Z.signature.json
+audit/audit-log.jsonl
+```
+
+### The pinned payload
+
+`payload.json` holds the canonical JSON string, UTF-8, no trailing newline.
+Keys are sorted at every depth; arrays keep their order:
+
+```json
+{"action":"deploy.release","commit":"a1b2c3d","environment":"production","services":["api","web"]}
+```
+
+Its SHA-256 is
+`53dd521908df11db6568342cd669d3190b617ff4c47ad819ae8620bd3ef40b2a`. A verifier
+reproduces it by canonicalising the payload the requester originally supplied
+(in any key order) and hashing the result, or by hashing the file directly.
+
+### The request, while pending
+
+`approvals/apr_7f3a9c21d04b8e6512aa/request.json`:
+
+```json
+{
+  "$schema": "agentgovernance/v1",
+  "doctype": "approval-request",
+  "id": "apr_7f3a9c21d04b8e6512aa",
+  "kind": "deploy",
+  "title": "Release a1b2c3d to production",
+  "preview": { "environment": "production", "commit": "a1b2c3d", "services": "api, web" },
+  "payloadSha256": "53dd521908df11db6568342cd669d3190b617ff4c47ad819ae8620bd3ef40b2a",
+  "status": "pending",
+  "requestedBy": { "sessionId": "ses_4c19e0" },
+  "channels": ["web_click", "ui_card"],
+  "requestedAt": "2026-09-28T09:10:00.000Z",
+  "expiresAt": "2026-09-28T10:10:00.000Z"
+}
+```
+
+`preview` is what the human sees. It is display-only and not covered by
+`payloadSha256`: a misleading preview cannot make the approval cover any
+payload other than the pinned one, but it can mislead the human, so hosts
+SHOULD show the preview next to the payload's own fields.
+
+### The approve
+
+The human clicks Approve on the `ui_card` channel. The host verifies the
+one-time ticket, flips the status, writes a signature over the payload file,
+and appends to the audit chain.
+
+`approvals/apr_7f3a9c21d04b8e6512aa/signatures/user-local-2026-09-28T09-14-07Z.signature.json`:
+
+```json
+{
+  "$schema": "agentgovernance/v1",
+  "doctype": "signature",
+  "artifact": "approvals/apr_7f3a9c21d04b8e6512aa/payload.json",
+  "documentHash": "53dd521908df11db6568342cd669d3190b617ff4c47ad819ae8620bd3ef40b2a",
+  "decision": "approve",
+  "signer": { "id": "user:local", "role": "operator" },
+  "signerKind": "user",
+  "method": "click_through",
+  "evidence": {
+    "kind": "click_through",
+    "ipAddress": "mcp-app",
+    "userAgent": "mcp-app",
+    "signedUrlToken": "9b1e...sha256-of-the-one-time-ticket...c4"
+  },
+  "signedAt": "2026-09-28T09:14:07.000Z",
+  "metadata": {}
+}
+```
+
+`documentHash` equals the request's `payloadSha256`. `signedUrlToken` is the
+hash of the ticket, never the ticket. The request then reads:
+
+```json
+{
+  "status": "approved",
+  "decision": {
+    "decision": "approved",
+    "channel": "ui_card",
+    "decidedAt": "2026-09-28T09:14:07.000Z",
+    "signaturePath": "approvals/apr_7f3a9c21d04b8e6512aa/signatures/user-local-2026-09-28T09-14-07Z.signature.json"
+  }
+}
+```
+
+(Shown as the changed fields only; the rest of the record is as above.)
+
+### The deny (alternative outcome)
+
+Had the human denied, no signature is written. The chain gets one event:
+
+```jsonl
+{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":12,"ts":"2026-09-28T09:14:07.000Z","actor":{"id":"user:local"},"action":"approval.denied","subject":{"kind":"approval","ref":"apr_7f3a9c21d04b8e6512aa"},"input":{"approvalId":"apr_7f3a9c21d04b8e6512aa","channel":"ui_card"},"prevHash":"5e0c...prior-hash...9d","hash":"a17b...computed...42","hashAlg":"sha256"}
+```
+
+### The consume
+
+The session acts on the approval by calling `consume` with the payload it is
+about to release, in whatever key order it holds it:
+
+```json
+{ "services": ["api", "web"], "commit": "a1b2c3d", "environment": "production", "action": "deploy.release" }
+```
+
+The host canonicalises, hashes, finds it equals `payloadSha256`, and sets
+`status: "consumed"` with `consumedAt`. The outcomes of the other calls:
+
+| Call | Result |
+|---|---|
+| Same payload, second time | `approval_already_consumed` |
+| Payload with `"commit": "ffffff0"` | `payload_mismatch` (the request stays `approved`) |
+| Another session calls `consume` | `not_requester` |
+| Called before anyone decided | `approval_not_approved` |
+| Called after `expiresAt` on a still-`pending` request | `approval_expired` |
+
+### The web_click channel
+
+The same request could be decided from a browser page. The host accepts the
+decision only when the `Origin` header is on its configured allowlist AND the
+host's bearer credential is present:
+
+```
+POST /approvals/apr_7f3a9c21d04b8e6512aa/decision
+Origin: https://console.example.com
+Authorization: Bearer <host credential>
+
+{ "decision": "approve" }
+```
+
+A request from `Origin: https://evil.example` is refused before the
+credential is examined. With an empty allowlist the channel is off and
+`web_click` does not appear in any request's `channels`. The endpoint path
+above is illustrative: the AIP constrains the gates, not the URL.
+
+### What a model must not be able to do
+
+Nothing in this walkthrough is a tool the agent session can call, except
+request, read, wait, and consume. The decide action behind the card, and the
+card resource that carries the ticket, live on a connection that refuses any
+agent session. See the residual risk in AIP-7: anything holding the host's
+local credential can reach that surface.
+
+---
+
 ## Anti-patterns to avoid
 
 - **Mutating an audit entry after write.** The host MUST refuse; authors MUST
@@ -928,6 +1089,13 @@ immediate parent.
   Equal is allowed (sub-millisecond ordering); earlier is not.
 - **Per-host audit fields outside `metadata.<host>.*`.** Vendor extensions go
   under namespaced metadata; everything else stays cross-host comparable.
+- **Exposing the decide action to a model.** Marking it app-only is not
+  enough; serve it and the card resource on a surface agent sessions cannot
+  reach.
+- **Recording an approval whose `documentHash` differs from the request's
+  `payloadSha256`.** The approval would not be of the pinned payload.
+- **Putting the card ticket in a signature, audit event, tool result, or log.**
+  Store its hash only.
 - **Trusting the host's verifier output without an independent re-run.** The
   point of AIP-7 is that _any_ compliant verifier on the same files reaches the
   same conclusion. Run two.

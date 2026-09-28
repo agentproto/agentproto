@@ -21,7 +21,7 @@ package: "@agentproto/governance"
 | Type | Core |
 | Domain | governance.sh |
 | Requires | [AIP-54](/docs/aip-54) |
-| Doctypes | `signature` (approval event), `audit-event` (append-only log line), `policy` (declarative rule), `governance.workspace/v1` (manifest + view) |
+| Doctypes | `signature` (approval event), `audit-event` (append-only log line), `policy` (declarative rule), `approval-request` (pending human decision), `governance.workspace/v1` (manifest + view) |
 | Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-13](/docs/aip-13) (work) |
 | Reference Impl | [`packages/governance/core`](https://github.com/agentproto/ts/tree/main/packages/governance/core) |
 
@@ -31,9 +31,11 @@ package: "@agentproto/governance"
 approvals, audit logs, and autonomy policies as workspace files. It
 provides a vendor-neutral, filesystem-first, third-party-verifiable
 primitive for any system — human, agentic, or hybrid — that needs
-auditable decisions. Three doctypes: `signature` (universal approval
+auditable decisions. Three core doctypes: `signature` (universal approval
 event), `audit-event` (append-only hash-chained log line), `policy`
-(declarative autonomy rule).
+(declarative autonomy rule). A fourth, `approval-request`, records a
+pending human decision over an exact pinned payload and specifies which
+channels may resolve it.
 
 ## Motivation
 
@@ -82,6 +84,7 @@ the governance posture.
 | `signature` | `<artifact>/../signatures/<signer>-<isoDate>.signature.json` | Universal approval primitive (one signature event per file) |
 | `audit-event` | `<scope>/audit/audit-log.jsonl` (one line per event) | Append-only hash-chained event log |
 | `policy` | `<scope>/policies/<slug>/POLICY.md` | Declarative autonomy rule |
+| `approval-request` | `<scope>/approvals/<id>/request.json` | A pending human decision over a pinned payload; its approve outcome is a `signature` (see [Approval requests](#approval-requests-approval-request)) |
 
 Conventions adopted:
 
@@ -344,6 +347,267 @@ The same doctype, the same file name, the same schema. Only the
 location, the presence of `extends:`, and the one-way invariant
 direction distinguish.
 
+## Approval requests (`approval-request`)
+
+The `signature` doctype records that a decision happened. It does not say
+who is allowed to trigger one, and it has no notion of a decision that is
+still outstanding. A host that lets an agent ask a human for permission
+needs both: a durable record of the question, and a rule that only a human
+can answer it. The `approval-request` doctype is that record. It wraps a
+`signature` as its approve outcome and adds nothing to the signature or the
+audit chain that a verifier has to trust.
+
+Normative keywords in this section apply to any host that implements
+approval requests. A host that does not implement them is unaffected.
+
+### Record shape
+
+An `approval-request` is a JSON document with `doctype: "approval-request"`.
+Hosts SHOULD store it at `<scope>/approvals/<id>/request.json`, with the
+pinned payload beside it at `<scope>/approvals/<id>/payload.json`.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | Opaque unique identifier, stable for the life of the request. |
+| `kind` | yes | Free-form class of the thing being approved (for example `deploy` or `send-email`). Consumers key their own handling on it. |
+| `title` | yes | One-line human-readable summary. |
+| `preview` | no | JSON value the requester supplies for a human-facing surface to render. Opaque to the host; it is NOT covered by `payloadSha256` and MUST NOT be treated as what was approved. |
+| `payloadSha256` | yes | Lowercase hex SHA-256 of the canonical JSON of the pinned payload (see below). |
+| `status` | yes | One of `pending`, `approved`, `denied`, `expired`, `consumed`. |
+| `requestedBy` | yes | The requester: `{ "sessionId": "<id>" }` for an agent session, or `{ "operator": true }` for the operator acting directly. |
+| `channels` | yes | The human channels that may decide this request (see Human channels). |
+| `requestedAt` | yes | RFC 3339 timestamp. |
+| `expiresAt` | no | RFC 3339 timestamp after which a `pending` request can no longer be decided. |
+| `decision` | when decided | `{ decision, channel, decidedAt, signaturePath? }`. `decision` is `approved` or `denied`. `signaturePath` is present only on an approve. |
+| `consumedAt` | when consumed | RFC 3339 timestamp of the consume. |
+| `taskId`, `appId` | no | Correlation ids. The host records them verbatim; this AIP gives them no other meaning. |
+
+### Payload pinning and canonicalisation
+
+The payload is the exact thing the human is approving. At request time the
+host MUST compute its canonical JSON string, persist those bytes as the
+payload artifact, and record `payloadSha256`. The artifact holds the
+canonical string itself, UTF-8 encoded, with no trailing newline, so the
+SHA-256 of the artifact file equals `payloadSha256`.
+
+Canonical JSON is defined by this recursive rule, which fixes the bytes
+across implementations:
+
+1. `null`, booleans, numbers, and strings serialise as ECMAScript
+   `JSON.stringify` would: no insignificant whitespace, shortest round-trip
+   number form, and JSON string escaping.
+2. An array serialises as `[` then its elements, canonicalised in order and
+   joined by `,`, then `]`. Array order is preserved.
+3. An object serialises as `{` then its members joined by `,`, then `}`.
+   Members are sorted by key in ascending order of UTF-16 code units. Each
+   member is the JSON string form of the key, then `:`, then the canonical
+   form of the value. The sort applies at every depth.
+4. A value that is `undefined` serialises as `null`, including as an object
+   member (the key is kept, with value `null`).
+
+For inputs that are pure JSON values this produces the same bytes as RFC 8785
+(JSON Canonicalization Scheme). Producers SHOULD restrict payloads to pure
+JSON values (no `undefined`, `NaN`, or infinities) so that hosts in other
+languages compute the same hash without implementing rule 4.
+
+The hash is the lowercase hex SHA-256 of the UTF-8 bytes of the canonical
+string. Two deep-equal payloads always hash equal, which is what makes
+`payloadSha256` a reliable statement of "this exact payload was approved".
+
+### Lifecycle
+
+```
+pending -> approved -> consumed
+        -> denied
+        -> expired
+```
+
+- A request starts `pending`.
+- `pending -> approved` and `pending -> denied` happen only through a human
+  channel (see below). Deciding a request that is not `pending` MUST be
+  rejected, and MUST NOT alter the existing decision.
+- `pending -> expired` happens when `expiresAt` has passed. Hosts MAY expire
+  lazily, flipping the status the next time the record is read or decided,
+  provided no decision is accepted after `expiresAt`. A request with no
+  `expiresAt` never expires.
+- `approved -> consumed` happens once, through `consume`. `denied`,
+  `expired`, and `consumed` are terminal.
+
+Each transition MUST be applied atomically with respect to the others: the
+status check, the status change, and its persistence happen with no
+interleaving, so two concurrent decides cannot both succeed and a consume
+cannot race a second consume. The record MUST be persisted (write to a
+temporary file, then rename) and MUST survive a host restart with its status
+intact; a restart never loses a `pending` request.
+
+### Consume
+
+An approval authorises exactly one use of exactly the approved payload. The
+party that acts on it (the requester, or the host on its behalf) MUST call
+`consume` with the payload it is about to act on. The host MUST:
+
+1. Reject the call unless the caller is the original requester. An operator
+   MAY consume any request that an operator made; a session MAY consume only
+   its own.
+2. Reject the call unless `status` is `approved`.
+3. Recompute the canonical hash of the supplied payload and reject the call
+   if it differs from `payloadSha256`.
+4. Otherwise set `status` to `consumed` and record `consumedAt`.
+
+Rejections use these stable error codes:
+
+| Code | Meaning |
+|---|---|
+| `approval_not_found` | No request with that `id`. |
+| `not_requester` | The caller did not make the request. |
+| `approval_already_consumed` | The request is already `consumed`. |
+| `approval_expired` | The request is `expired`. |
+| `approval_not_approved` | The request is `pending` or `denied`. |
+| `payload_mismatch` | The supplied payload does not hash to `payloadSha256`. |
+
+Hosts SHOULD evaluate the checks in the order listed above, so that a
+consumed or expired request reports that state rather than a mismatch.
+
+### Binding to `signature` and `audit-event`
+
+An approve MUST produce a `signature` (see the `signature` doctype) with:
+
+- `artifact` referring to the payload artifact (the `payload.json` above).
+- `documentHash` equal to the request's `payloadSha256`. Because the
+  signature is taken over the payload artifact's own bytes, the two values
+  are equal by construction, not by convention. A host MUST NOT record an
+  approve whose `documentHash` differs from `payloadSha256`.
+- `decision: "approve"`, `signerKind: "user"`, and `method: "click_through"`.
+  The signer is the deciding human. A `signerKind` of `agent` is never valid
+  for an approval request.
+- `evidence` with `kind: "click_through"`, the deciding client's
+  `ipAddress` and `userAgent` as observed by the host, and a
+  `signedUrlToken` that is unique to this decision. For a card decision
+  (below) `signedUrlToken` holds the hash of the one-time ticket, never the
+  ticket itself.
+
+A deny MUST append an `audit-event` with action `approval.denied` and no
+signature. Its `subject` is `{ "kind": "approval", "ref": "<id>" }` and its
+`input` carries the `approvalId` and the deciding `channel`.
+
+In both cases the decision MUST be appended to the workspace's hash-chained
+audit log, so that a third-party verifier can walk the chain and find, for
+every `approved` request, a signature over exactly `payloadSha256`, and for
+every `denied` request an audit event with no signature. The approve's
+audit event lists the signature path in its `signatures[]`. The request's
+`decision.signaturePath` is written only after the signature exists; a host
+that observes `approved` without a `signaturePath` MUST treat the signature
+as still being written, not as an unsigned approval.
+
+### Human channels
+
+AIP-7 defines signing methods (`typed_name`, `click_through`, and others). It
+does not say who may trigger one. For approval requests it does:
+
+> A decision MUST come from a **declared human channel**, and MUST NOT be
+> reachable through any tool a model can call.
+
+A channel is a closed mechanism that the host itself gates. Each request
+lists, in `channels`, the channels allowed to decide it; a decision arriving
+on any other channel MUST be rejected. A host MAY register further channels
+(for example a phone confirmation or a signed link) without changing the
+state machine, but each channel MUST satisfy the rule above. This AIP
+defines two channels and their conformance requirements.
+
+**`web_click`**: a decision from a browser page a human is looking at.
+
+- The host exposes one decision endpoint, taking `approve` or `deny`.
+- A request MUST be accepted only if BOTH hold: it carries the host's
+  bearer credential, AND its `Origin` header exactly matches an entry in a
+  configured allowlist of web origins. A missing, `null`, or unlisted
+  `Origin` MUST be refused before the credential is even examined.
+- The allowlist defaults to empty. An empty allowlist turns the channel off:
+  the host MUST omit `web_click` from every new request's `channels`, and
+  the endpoint MUST refuse every call.
+- The signature's `signedUrlToken` is a fresh random nonce per decision.
+
+**`ui_card`**: a decision from an interactive card rendered by a
+host application.
+
+- The card is a UI resource whose HTML is produced on every read, not once
+  at registration. Each read mints a fresh one-time ticket: at least 32
+  random bytes, base64url, embedded only in that HTML. The host stores only
+  the ticket's hash, gives it a short TTL (10 minutes RECOMMENDED), and
+  minting a new ticket supersedes any earlier ticket for the same request.
+- The card's buttons call a decide action that takes the request id, the
+  decision, and the ticket. That action MUST be declared app-only (in MCP
+  Apps terms, `_meta.ui.visibility` of `["app"]`), so that a host filtering
+  tool lists for its model does not offer it.
+- The host MUST compare the presented ticket to the stored hash in constant
+  time, and MUST burn the ticket on any attempt, valid or not, before doing
+  anything asynchronous. A wrong guess destroys the real ticket too.
+- The ticket MUST NOT appear in any tool result, tool definition, log,
+  signature, or audit event. The one place it exists in cleartext is the
+  card HTML it was minted for.
+- The card resource and the decide action MUST be served only on a surface
+  that agent sessions cannot reach. A host MUST serve them on a connection
+  dedicated to human-facing clients and MUST refuse that connection when it
+  carries the identity of an agent session. Marking the action app-only is
+  necessary but NOT sufficient: hosts exist that ignore visibility hints and
+  hand their model both a generic resource-read tool and the ability to call
+  any registered tool by name. On a shared surface such a model reads its
+  own approval's card, extracts the ticket, and decides for itself.
+
+### Agents never decide
+
+Every model-callable tool a host ships for approval requests MUST be limited
+to four operations: create a request, read one, wait for one to leave
+`pending`, and consume an approved one once. None of them may move a request
+out of `pending`. In particular, the host MUST NOT mount the governance
+engine's own signing and audit tools (for example `sign_artifact`,
+`request_signatures`, `record_audit_event`) on any surface a session can
+reach. The host calls the equivalent functions directly from inside the code
+path that handles a human decision, never as a tool.
+
+Tool results for these operations MUST NOT contain card tickets, bearer
+credentials, or any other secret that would let a caller decide.
+
+### Threat model and residual risk
+
+The `ui_card` channel rests on one assumption: the ticket never appears
+anywhere a model can read it. The requirements above defend that assumption
+against a model that can call tools on the surface it is connected to,
+including one whose host ignores visibility hints. They do not defend
+against the following, which implementers MUST treat as out of the
+guarantee:
+
+- **A host that is not human-facing.** The card surface is safe only when
+  the connecting host renders UI resources in a sandbox its model never
+  reads, and does not give its model an unfiltered resource-read or
+  tool-call path to that surface. A deployment SHOULD verify this for each
+  host it points at the card surface, and SHOULD NOT rely on the channel for
+  high-stakes approvals until it has.
+- **Anything holding the local host credential.** The dedicated surface
+  carries no credential of its own beyond whatever already gates the host's
+  tool endpoint (loopback trust, or the host bearer token). A process that
+  holds that credential, or that runs on the host's loopback interface when
+  the host runs without one, can open the card surface directly and decide.
+  The surface split stops an agent session's own connection from reaching the
+  card. It does not stop a process that independently has host-level access.
+  This is the same trust boundary the host's other tools already sit behind;
+  approval requests neither widen nor narrow it.
+
+A deployment that needs a stronger guarantee than these bounds allow SHOULD
+add a channel with an independent credential the host does not hold, and
+declare it in `channels`.
+
+### Out of scope
+
+This amendment specifies the primitive only. Migrating other approval-like
+mechanisms onto it (acknowledgement of a policy, held tool permissions,
+workflow approval steps, and similar) is out of scope. Each of those
+currently proves nothing about a human having decided, and routing them
+through approval requests would close that gap, but that is separate work
+for the hosts that carry them. Also out of scope: additional channels,
+multi-user signer identity (a host with one local user MAY use a fixed
+signer such as `user:local`, and a multi-user host MUST carry the real
+identity of the deciding human), and linking requests to a work board.
+
 ## Rationale
 
 *To be authored. Defend: hash-chained append-only over signed snapshots,
@@ -385,10 +649,31 @@ guarantees intact for every consumer, by construction. The one-way
 direction (parent strict → child stricter or equal) is the defining
 property: posture can only ratchet up.
 
+**Why approval requests, and why a human channel rule.** A `signature`
+proves a decision happened; it cannot prove a human made it, because the
+doctype says nothing about who is allowed to trigger signing. The moment an
+agent can request approval and a runtime can sign on approve, the weak point
+is whether the agent can also answer its own question. Making "a decision
+MUST come from a declared human channel and MUST NOT be reachable through a
+model-callable tool" the rule, and stating the two reference channels as
+conformance requirements, turns that from a deployment habit into something a
+host can be checked against. Pinning the payload by hash and re-hashing it at
+consume time closes the other gap: an approval that could be spent on a
+different payload than the one the human saw is not an approval of that
+payload. The surface split for the card channel is normative rather than a
+recommendation because the failure it prevents was observed, not
+hypothesised: agent CLIs that ignore visibility hints can read a card and
+call its decide action themselves when both share a surface. Reusing
+`signature` and `audit-event` as the outcome, instead of inventing a second
+receipt format, keeps every approval verifiable by the same third-party
+verifier as every other AIP-7 artifact.
+
 ## Reference Implementation
 
 [`packages/governance/core`](https://github.com/agentproto/ts/tree/main/packages/governance/core) —
-parser, validator, hash-chain implementation, and policy evaluator.
+parser, validator, hash-chain implementation, and policy evaluator. The
+`approval-request` primitive is implemented in the runtime package of the
+same repository ([agentproto/ts#1553](https://github.com/agentproto/ts/pull/1553)).
 
 ## Backwards Compatibility
 
@@ -402,6 +687,11 @@ A future AIP-7 v2 will deprecate the string form. The transition window
 is at least one minor release of every reference implementation listed
 in the registry, so operators can update producers and consumers
 independently.
+
+The `approval-request` doctype is purely additive. The optional
+`documentHash`, `signerKind`, `method`, and `evidence` fields it relies on
+in `signature` are optional in the schema, so existing signatures remain
+valid. A host that does not implement approval requests is unaffected.
 
 ## Security Considerations
 
@@ -433,6 +723,20 @@ Threats:
   SHOULD route the keyring change itself through the parent's approval
   gate before merging. Hosts MAY upgrade `governance_keyring_drift` to
   a hard refusal in production deployments via runtime policy.
+- **An agent approving its own request**: if any model-callable tool can
+  move an approval request out of `pending`, the approval proves nothing.
+  Mitigation: decisions come only from a declared human channel, and the
+  card channel's ticket and decide action are served only on a surface agent
+  sessions cannot reach (see Approval requests). Residual: anything holding
+  the host's local credential can reach the card surface.
+- **Approving one payload and executing another**: mitigated by pinning the
+  payload with `payloadSha256` and re-hashing at consume time
+  (`payload_mismatch`). The `preview` is display-only and is not covered by
+  the hash.
+- **Approval replay**: an approval is consumed once (`approval_already_consumed`)
+  and only by its requester.
+- **Ticket leakage**: card tickets are one-time, short-lived, stored hashed,
+  burned on any attempt, and never written to a signature or audit event.
 - **Schema poisoning of `GOVERNANCE.md` itself**: an attacker rewrites
   the workspace root to relax policies, narrow the keyring, or unbind
   the audit chain. Mitigation: edits to `GOVERNANCE.md` MUST be subject
