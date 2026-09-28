@@ -109,7 +109,7 @@ billingRail: { rail: autumn, featureId: seo-credits }
 schema: product/v1
 id: bookN-companion
 kind: pricing
-on: aip://42/book-companion
+on: aip://53/book-companion
 price: { model: one-time, amountMinor: 4900, currency: usd }
 billingRail: { rail: tbd }
 ```
@@ -130,10 +130,10 @@ catalog.resolve(ref))` — one list, one shape, any target AIP.
 
 ## Residual risks (from dogfooding)
 
-1. **AIP-52's legacy `pricing` block** (unitless `{ebook?, bundle,
-   step?}`) predates this spec. THIS product's price is authoritative;
-   hosts SHOULD warn when a pack's `pricing` diverges from a pricing
-   capability attached to it.
+1. **The pack manifest's legacy `pricing` block** (unnumbered — not
+   yet an AIP; unitless `{ebook?, bundle, step?}`) predates this spec.
+   THIS product's price is authoritative; hosts SHOULD warn when a
+   pack's `pricing` diverges from a pricing capability attached to it.
 2. **Stripe prepaid-pool leak is inherent**: Stripe has no credit-pool
    concept; pool state lives host-side on every rail. The schema says
    so rather than implying a clean projection.

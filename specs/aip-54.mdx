@@ -65,8 +65,9 @@ mechanism, and none of them interoperate:
    whole referenced bundle, carry no reliable discriminator field, and
    cannot be rehydrated — nothing downstream resolves an id back to a
    handle.
-3. **Bare strings** (AIP-42's `AnyRef`, AIP-52's `$resolver`) are wire
-   formats, not types; validity is call-site convention.
+3. **Bare strings** (AIP-42's `AnyRef`, a pending harness manifest's
+   `$resolver`) are wire formats, not types; validity is call-site
+   convention.
 4. **Per-primitive `xRef` fields** are the tell: AIP-55 (pricing)
    needed `appRef` AND `packRef` AND a knowledge-pack string, and every
    future primitive that references anything would add another.
@@ -89,12 +90,12 @@ URI form, and a catalog/registry resolution rule.
 ### The ref shape
 
 ```json
-{ "aip": 42, "id": "book-companion", "version": "1.2.0" }
+{ "aip": 53, "id": "book-companion", "version": "1.2.0" }
 ```
 
 | Field | Type | Req | Notes |
 |---|---|---|---|
-| `aip` | integer ≥ 1 | yes | The referenced artifact's owning AIP number — the type discriminator that names the registry family (42 = app, 52 = pack, 14 = tool, …). |
+| `aip` | integer ≥ 1 | yes | The referenced artifact's owning AIP number — the type discriminator that names the registry family (53 = app, 52 = adapter, 14 = tool, …). |
 | `id` | string 1..512 | yes | The artifact's registry key in its family — the same key the family's `keyBy` derives. Hosts MUST use the family's `keyBy`; a ref id and its registry key MUST NOT be allowed to drift. |
 | `version` | semver | no | Advisory pin recording what was meant at authoring time. Absent = floating. AIP-43 registries do not version; pins are metadata for hosts. |
 
@@ -106,7 +107,7 @@ In string-typed contexts (YAML frontmatter, query strings, prose) a
 ref serializes as:
 
 ```
-aip://<aip>/<id>[@version]        e.g.  aip://42/book-companion@1.2.0
+aip://<aip>/<id>[@version]        e.g.  aip://53/book-companion@1.2.0
 ```
 
 The mapping is lossless and total: `refToUri` / `refFromUri` round-trip
@@ -119,7 +120,7 @@ interchangeable:
 
 | Form | What it is | Example |
 |---|---|---|
-| `aip://<aip>/<id>[@version]` | the **artifact** scheme — an AIP artifact resolvable through a registry family (§Resolution) | `aip://42/book-companion@1.2.0` |
+| `aip://<aip>/<id>[@version]` | the **artifact** scheme — an AIP artifact resolvable through a registry family (§Resolution) | `aip://53/book-companion@1.2.0` |
 | `ws://<collection>/<body>` | the **resource** scheme — a resource in the world, with `<kind>:<body>` as its compact spelling (this section) | `ws://operators/atlas` |
 | `<type>://<selector>` | a **matcher** — NOT a ref | `role://owner`, `user://current`, `*` |
 

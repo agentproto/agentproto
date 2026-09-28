@@ -139,6 +139,22 @@ AIP numbers are assigned by editors at PR-open time, monotonically. Numbers
 1–10 are reserved for **Meta** AIPs. There are no "drafts without a number" —
 opening a PR gets a number.
 
+"Monotonically" means past the highest number with a **claim on it**, not
+just the highest number with a merged file — a number can be claimed by
+shipped reference-implementation code or an open PR before any spec file
+exists for it. Editors MUST check both before assigning the next number.
+Currently claimed, not yet drafted here:
+
+| Number | Claimant | Status |
+|---|---|---|
+| 60 | SENTINEL | Spec pending (separate PR). Shipped code in `@agentproto/runtime` already cites AIP-60 for this, including agent-facing tool text. |
+| 61 | INFERENCE | Proposed — [PR #44](https://github.com/agentproto/agentproto/pull/44). Moved here from an earlier draft at 60 once the SENTINEL conflict surfaced. |
+| 62 | REVIEW | Reserved for the review-primitive spec, to be written in a separate PR. |
+
+This table is a holding note, not a registry entry — each row is removed
+once its AIP lands with a real `specs/aip-<n>.mdx` file, at which point
+that file's own frontmatter is authoritative.
+
 ## Submission
 
 To propose a new AIP:

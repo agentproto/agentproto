@@ -153,8 +153,9 @@ catalog](/docs/aip-54): filter by `kind === "pricing"`, resolve each
   test: it priced 3 hand-picked kinds and needed a new field for each
   next one. The capability design prices any registry citizen with
   zero per-kind plumbing — verified by driving one identical
-  constructor against four different AIP families (AIP-42 app, AIP-52
-  pack, AIP-14 tool, hypothetical AIP-61 sandbox).
+  constructor against four different registry families (AIP-53 app,
+  an unnumbered pack family, AIP-14 tool, a hypothetical sandbox
+  family).
 - **`on` via AIP-54, not a bespoke union.** The reference problem is
   solved exactly once, one level below this spec. Duplicating it here
   would reintroduce the drift AIP-54 exists to kill.
@@ -170,11 +171,11 @@ catalog](/docs/aip-54): filter by `kind === "pricing"`, resolve each
   the name inside the same ecosystem would collide. The Stripe
   Product/Price model is the deliberate mental model: a product
   *contains* assets, it is not one.
-- **AIP-52's legacy `pricing` block** (`{ebook?, bundle, step?}`) is
-  unitless and predates this spec. THIS product's price is
-  authoritative; hosts SHOULD warn when a pack's `pricing` diverges
-  from a pricing capability attached to it. Deprecation path is
-  tracked in the ref-impl repo.
+- **The pack manifest's legacy `pricing` block** (`{ebook?, bundle,
+  step?}`, unnumbered — not yet an AIP) is unitless and predates this
+  spec. THIS product's price is authoritative; hosts SHOULD warn when
+  a pack's `pricing` diverges from a pricing capability attached to
+  it. Deprecation path is tracked in the ref-impl repo.
 
 ## Reference Implementation
 
