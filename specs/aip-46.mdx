@@ -949,6 +949,67 @@ The exact wire format is non-normative; the goal is that a CLI
 observer (`agentproto sessions --attach <id>`) sees a coherent
 transcript without parsing per-event JSON.
 
+### Session artifacts (added 2026-09-28)
+
+A session MAY hold a **durable artifact store**, separate from and
+outliving the ring buffer / transcript: a document, image, pdf, html
+page, presentation, or `site` (a directory with an `index.html`,
+served read-only) a session produces or is handed, kept across
+restarts and browsable independently of any one chat turn. This is
+deliberately a *different* thing from the plain chat attachment a
+composer sends inline with a prompt (materialized read-only,
+transcript-scoped) — an artifact is promoted, versioned, labelled, and
+pinnable.
+
+An artifact record reuses [AIP-58](/docs/aip-58) §1's `ArtifactEntry`
+shape (`key`, `path`, `sha256`, `size`, `contentType`) field-for-field
+— `path` here is relative to the SESSION's own directory the same way
+`ArtifactEntry.path` is relative to a run's workspace — plus the
+session-artifact envelope AIP-58 has no notion of: `kind` (`image` |
+`document` | `pdf` | `html` | `presentation` | `site` | `file`),
+`label`, `pinned`, `createdBy` (`agent` | `user`), and `sourceRef`
+(free-form provenance — e.g. a promoted attachment, an
+[AIP-58](/docs/aip-58) run artifact, a canvakit export). Re-adding the
+same `key` with different content accrues a new version under it;
+re-adding identical bytes is a no-op. No new AIP was warranted: the
+concept is session-scoped state, exactly this AIP's domain, over a
+shape AIP-58 already fixed.
+
+A conforming host that implements this section MUST expose:
+
+| Tool | Inputs | Notes |
+|---|---|---|
+| `session_artifact_add` | `{sessionId, key?, kind?, label?, createdBy, sourceRef?, bytes? \| sourcePath?, name?, mimeType?}` | `bytes` (base64) or `sourcePath` (an existing file, or a directory for `kind: "site"`), mutually exclusive. Returns the record. |
+| `session_artifact_list` | `{sessionId}` | Every key's current label/kind/pin plus its full version history. |
+| `session_artifact_get` | `{sessionId, key, version?, maxBytes?}` | Metadata plus bounded content (single-file kinds); a `site` version returns metadata only. |
+| `session_artifact_pin` | `{sessionId, key, pinned}` | Toggles the pin surfaced in [§Session outcome](#session-outcome-added-2026-09-28) below. |
+
+HTTP hosts SHOULD mirror them as `POST`/`GET /sessions/:id/artifacts`,
+`GET /sessions/:id/artifacts/:key`, `POST /sessions/:id/artifacts/:key/pin`,
+and a read-only raw-serve route (`GET /sessions/:id/artifacts/:key/raw[/...]`,
+the `/...` browsing a `site` version's directory, defaulting to
+`index.html`) that a viewer embeds directly — an `html`/`site` artifact
+renders sandboxed behind a strict `Content-Security-Policy` (no
+`connect-src`, no `form-action`) so the rendered page can reach neither
+the host's own tool-call surface nor any other origin, the same
+no-bridge posture [AIP-53](/docs/aip-53)'s app-UI iframe takes.
+
+A host SHOULD fire a `session:artifact-added` / `session:artifact-
+pinned-changed` lifecycle event (this AIP's own namespaced vocabulary,
+per [AIP-37](/docs/aip-37) rule 4) on each mutation, so a live UI
+updates without polling.
+
+#### Session outcome (added 2026-09-28)
+
+A session's derived outcome (a host-computed "what did this session
+produce", out of this AIP's scope to fully specify but referenced here
+because artifacts feed it) MAY carry `type: "file"` refs alongside any
+`pr`/`commit`/`url` ones it already supports — one per **pinned**
+session artifact, `ref` set to the artifact's `key`. An unpinned
+artifact still lists via `session_artifact_list`; pinning is what
+promotes it into the terse "ended" summary a supervisor or UI reads
+without a separate call.
+
 ## Rationale
 
 **Why buckets under the host's state root, and not inside the workspace
@@ -1145,6 +1206,19 @@ The §Multi-turn change from "MUST reject overlapping prompts" to "reject
 or queue" describes what the reference implementation already shipped; a
 host that still rejects remains conforming.
 
+### The 2026-09-28 session-artifacts amendment
+
+§Session artifacts is additive: a host predating it simply has no
+artifact store, `session_artifact_*` calls are absent, and nothing
+about an existing session's ring buffer, transcript, or outcome
+changes shape — the new `type: "file"` outcome-artifact variant is an
+addition to a union a consumer already treats as open (the same
+posture the 2026-09-26 amendment above takes for an unknown record
+kind). A host implementing it reuses [AIP-58](/docs/aip-58)'s
+`ArtifactEntry` shape rather than inventing a parallel one, so a future
+consumer that already speaks AIP-58 artifacts needs no new parsing
+code, only the extra envelope fields this section adds.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -1224,6 +1298,16 @@ host that still rejects remains conforming.
   repository is one missed `.gitignore` from a public remote. Hosts
   adding their own stores under a bucket SHOULD apply the same test —
   the directory must exist to hold state, not to be published.
+- **The artifact raw-serve route renders untrusted content, not just
+  transfers it.** An `html`/`site` artifact's bytes may originate from
+  an agent turn a host does not fully trust; the route MUST send a
+  `Content-Security-Policy` with no `connect-src` and no `form-action`
+  so the rendered page can neither call back into the host's own
+  tool-call surface nor exfiltrate to a third party, and MUST resolve
+  a `site` version's sub-path containment-checked against that
+  version's own directory — the same escape risk [AIP-53](/docs/aip-53)
+  names for its app-UI data plane, reapplied here because both serve a
+  directory of files a session (not the host) populated.
 
 ## Open Questions
 
