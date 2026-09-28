@@ -1,0 +1,751 @@
+---
+title: "AIP-61: INFERENCE — inference-endpoint/v1 (spawnable model-serving resource, provider interface, session binding, local-only privacy)"
+description: Names the inference endpoint — a locally-run, device-hosted, or operator-hosted model server — as a spawnable, supervised resource with the same shape as an AIP-46 session. Fixes the InferenceEndpoint resource and its capabilities (loaded vs max context, device, cost, ttl); a normative connector notion (`{connector, baseUrl, auth?}`, identical for a local and a remote custom endpoint, with a detection-filled `local` preconfig and declared per-runtime request quirks); an InferenceProvider interface mirroring AIP-36's SandboxProvider across four provider classes (attach, local-managed, device, operator-hosted — split into shared and private offerings); static and dynamic gateway registration with `<endpoint>/<model>` and `<model>@<device>` addressing; the `inference` field on agent_start with a fit check that MUST run before spawn; and the `local-only` privacy profile that refuses any non-local upstream.
+aip: 61
+status: Draft
+type: Schema
+created: 2026-09-27
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 36, 45, 46]
+discussions-to: https://github.com/agentproto/agentproto/discussions/61
+layer: primitives
+package: "@agentproto/llm-endpoint"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/llm-endpoint
+---
+
+| Field | Value |
+|---|---|
+| AIP | 61 (provisional — editors assign the final number) |
+| Title | INFERENCE — inference-endpoint/v1 |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX — the `SandboxProvider` shape this AIP mirrors, and the `network.egress` block §5 constrains), [AIP-45](/docs/aip-45) (AGENT-CLI — the harness manifest the fit check reads a first-request weight from), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — `agent_start`, the field this AIP extends) |
+| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE — the audit log `local-only` per-request records land in), [AIP-58](/docs/aip-58) (RUN — `Spend` is the natural shape for billing an endpoint's `costPerHour`), [AIP-59](/docs/aip-59) (MOBILE PAIRING — one candidate control channel for an `operator-hosted`/`private` endpoint or a paired `device`) |
+| Created | 2026-09-27 |
+| Package | `@agentproto/llm-endpoint` (gateway, addressing, static registration); `@agentproto/runtime` ([AIP-46](/docs/aip-46)'s `agent_start`, extended here) |
+
+## Abstract
+
+Today a **session** is a spawnable, supervised resource: start it, list it,
+kill it, reap it when idle, meter its cost. A model server is not — it is
+either a hand-run process a config file happens to point at, or an opaque
+vendor API. This AIP gives an inference endpoint the same shape a session
+already has. It fixes the **`InferenceEndpoint`** resource and a registry of
+them; a normative **connector** notion — `{connector, baseUrl, auth?}`,
+identical whether the endpoint is this machine or a remote custom URL, with
+a detection-filled `local` preconfig and declared per-runtime request
+quirks; an **`InferenceProvider`** interface, mirroring
+[AIP-36](/docs/aip-36)'s `SandboxProvider`, across four provider classes
+(`attach`, `local-managed`, `device`, `operator-hosted` — the last split
+into `shared` and `private` offerings); static and dynamic **gateway
+registration**, with `<endpoint>/<model>` and `<model>@<device>` addressing;
+an **`inference`** field on `agent_start` whose binding runs a **fit
+check** — harness first-request size against the endpoint's loaded
+context — before a session spawns, never after; and a **`local-only`**
+privacy profile that refuses any non-local upstream rather than silently
+falling back to one.
+
+## Motivation
+
+A local-model proof landed end to end — LM Studio serving a 27B model on a
+Mac, and again on a Windows box reached over LM Link — but only by hand: the
+gateway that fronted it is not something `daemon install` ships, each session
+needed `route` + `access` + `deferredTools` threaded through by the caller, pi
+needed its own generated `models.json`, and opencode refused the profile
+outright. None of that is a spec gap in any one AIP — it is that no AIP names
+"a model server you can start, list, health-check, stop, and bind a session
+to" as a thing at all. `llm-endpoint` already proxies to named endpoints from
+a JSON file (see [Reference Implementation](#reference-implementation)); this
+AIP is about what has to exist *above* that file for a model server to be a
+first-class, lifecycle-managed resource rather than a static line in a
+config.
+
+Two measurements from that proof motivate the normative rules directly:
+
+- **Harness weight vs. loaded context.** The same 27B model, loaded with an
+  86k-token context split across parallel slots, received a first request of
+  35.9k tokens from claude-code's full preamble, 18.2k from the claude SDK,
+  and 2k from pi — all before the model produced a single output token.
+  Overflow only surfaced *after* spawn, as an opaque runtime error, because
+  nothing compared the harness's first-request weight to the endpoint's
+  loaded context before committing to the spawn. §4's fit check exists to
+  turn that post-spawn failure into a pre-spawn refusal.
+- **Addressing collapses under device fan-out.** LM Link exposes the same
+  model id from two machines at once; a caller wanting *this* device's copy,
+  not whichever one answers first, has no way to say so. §3's `<model>@<device>`
+  form exists because `<endpoint>/<model>` alone — already shipped, see
+  [Reference Implementation](#reference-implementation) — cannot express "this
+  model, but specifically on that box."
+- **A follow-up spike measured the fit check across three loaded-context
+  sizes on a real device endpoint (32768, then 82944, then 62976 tokens),
+  and it also exposed the check's limit.** At 32768 — below claude-code's
+  ~35,925-token first request — the fit check correctly refused the spawn
+  blind, avoiding a guaranteed overflow. Reloaded to 82944, comfortably
+  above that threshold, the same spawn was attempted for real and failed
+  anyway, in about 17 seconds, with `Jinja Exception: System message must
+  be at the beginning` — a chat-template incompatibility the fit check has
+  no way to see, because it is a **request-shaping** property of the
+  runtime, not a **context-size** one. Fit alone is necessary but not
+  sufficient; §Connectors' declared request quirks exist to close exactly
+  this gap.
+
+A third, non-measured motivation drives §5. A model server that never leaves
+your own hardware is a materially different privacy claim than a model server
+you rent from a vendor by the token, and today nothing prevents a session
+configured for the former from silently falling back to the latter the
+moment its local endpoint is slow, paused, or unreachable. A privacy
+guarantee that can silently degrade is not a guarantee.
+
+## Design principles
+
+1. **An endpoint is a resource, not a config line.** The same discipline
+   [AIP-58](/docs/aip-58) applied to runs applies here: `id`, `state`,
+   declared `capabilities`, a lifecycle a provider drives. A static
+   `llm-endpoints.json` entry and a freshly booted `llama-server` process are
+   both `InferenceEndpoint` values; they differ in `source`, not in shape.
+
+2. **Mirror AIP-36, don't duplicate it.** [AIP-36](/docs/aip-36) already
+   solved "a backend-agnostic provider interface with a `boot`/`connect`/
+   `probe` provider and a `stop`/`pause` handle" for sandboxes. This AIP
+   reuses that exact shape for inference providers rather than re-deriving
+   provider-interface conventions from scratch (see §2).
+
+3. **Registration is provider-driven, never a second source of truth.** A
+   caller boots an endpoint; the endpoint registers itself with the gateway
+   as a side effect of existing, and unregisters as a side effect of stopping.
+   Nothing edits a routing table by hand once a provider is wired — the same
+   "one ledger" posture [AIP-58](/docs/aip-58) design principle 1 states for
+   runs.
+
+4. **The fit check is a gate, not a warning.** A harness whose first request
+   cannot fit a loaded context is not a session that starts slow — it is a
+   session that never should have started. §4 makes that a MUST-refuse, not
+   an advisory log line, for the same reason [AIP-58](/docs/aip-58)'s outcome
+   rule refuses to treat a heuristic as authoritative: a warning a caller can
+   ignore is not a gate.
+
+5. **`local-only` is a claim about who sees the data, not about network
+   topology.** A rented single-tenant GPU box is physically remote, yet no
+   model vendor sees what is sent to it — the same claim a LAN box makes. The
+   dividing line this AIP draws is "backed by a registered `InferenceEndpoint`
+   under this AIP" vs. "a hosted model vendor's API," never physical distance
+   (see §5).
+
+6. **Registration doesn't care where the endpoint is.** A localhost LM
+   Studio and a remote custom URL are the same shape, `{connector, baseUrl,
+   auth?}` — "local" is a preconfigured value of `connector`, filled by
+   detection, not a separate registration path (see Connectors, below).
+
+7. **A connector's quirks are part of its contract, not tribal knowledge.**
+   Whether a runtime's chat template tolerates a non-leading system message
+   is exactly the kind of fact that otherwise lives in someone's memory of a
+   failed spike. Declaring it on the connector lets the session-binding
+   layer act on it instead of rediscovering it per incident.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
+interpreted as described in [AIP-1](/docs/aip-1) (RFC 2119).
+
+### 1. The `InferenceEndpoint` resource
+
+```ts
+type InferenceProviderClass = "attach" | "local-managed" | "device" | "operator-hosted"
+
+type InferenceEndpointState =
+  | "starting"
+  | "running"
+  | "paused"
+  | "stopping"
+  | "stopped"
+  | "error"
+
+interface InferenceEndpointCapabilities {
+  /** Whether the runtime accepts and honours tool/function-calling requests. */
+  toolUse: boolean
+  /** The model's architectural context window. */
+  maxContext: number
+  /** The context ACTUALLY allocated at boot — may be less than `maxContext`
+   *  when the runtime splits it across `parallel` slots. This, not
+   *  `maxContext`, is what §4's fit check compares a harness's first
+   *  request against. */
+  loadedContext: number
+  /** Concurrent request slots `loadedContext` is divided across, when the
+   *  runtime supports parallelism. Absent means 1. */
+  parallel?: number
+}
+
+interface InferenceEndpointHealth {
+  ok: boolean
+  checkedAt: string   // ISO-8601
+  latencyMs?: number
+}
+
+interface InferenceEndpoint {
+  /** Registry-unique. Also the gateway route segment — see §3. */
+  id: string
+  providerClass: InferenceProviderClass
+  /** Registered provider id, when more than one provider of the same class
+   *  is configured (e.g. two `operator-hosted` GPU vendors). */
+  provider?: string
+  /** Model identifier as the runtime itself names it. */
+  model: string
+  /** The wire-protocol adapter this endpoint speaks — see §Connectors.
+   *  Resolved to a concrete slug even when registration used the `"local"`
+   *  preconfig; never left as `"local"` on a resolved resource. */
+  connector: string
+  /** Device identity backing this endpoint. REQUIRED when
+   *  `providerClass` is `"device"` — see §3's `<model>@<device>` form. */
+  device?: string
+  /** REQUIRED when `providerClass` is `"operator-hosted"` — see §2. */
+  offering?: "shared" | "private"
+  /** OpenAI-compatible base URL the gateway proxies requests to. */
+  baseUrl: string
+  state: InferenceEndpointState
+  health?: InferenceEndpointHealth
+  capabilities: InferenceEndpointCapabilities
+  /** Declarative — see Security Considerations. */
+  costPerHour?: number
+  startedAt?: string
+  /** Seconds of idle time before the host MAY stop this endpoint on its
+   *  own. Absent = no idle-stop. */
+  ttl?: number
+  /** `"static"` — read from a config file at gateway boot, no lifecycle
+   *  verbs apply (§3.1). `"spawned"` — booted by an `InferenceProvider`,
+   *  full lifecycle applies. */
+  source: "static" | "spawned"
+}
+```
+
+### Connectors
+
+A **connector** is the declared wire-protocol adapter for a runtime — what
+request shape it accepts, how to probe it, and what it cannot tolerate. It
+is orthogonal to *where* the endpoint runs: the same connector slug can back
+an `attach` endpoint on this machine or a custom remote URL.
+
+```ts
+interface ConnectorAuth {
+  scheme: "bearer" | "none"
+  /** A reference to a secret (an env-var name, a keychain slug) — never
+   *  the secret's value inline, the same discipline AIP-36 §Design
+   *  principle 5 requires for sandbox env credentials. */
+  tokenRef?: string
+}
+
+/** What a caller registers to reach an endpoint. Identical whether the
+ *  target is this machine or a remote custom URL — see Design principle 6. */
+interface EndpointRegistration {
+  connector: string    // "lmstudio" | "ollama" | "vllm" | "llama-server" |
+                        // "openai-compatible" | "local" | ...
+  baseUrl: string
+  auth?: ConnectorAuth
+}
+
+interface ConnectorQuirks {
+  /** The runtime's chat template rejects a system message that is not
+   *  first and alone — the session-binding layer MUST coalesce or reorder
+   *  messages accordingly rather than send one verbatim. Measured against
+   *  a real runtime — see Motivation. */
+  singleLeadingSystemMessage?: boolean
+  /** Open set: implementations MAY declare additional named quirks. A
+   *  quirk absent from this interface is not thereby "not a quirk" — it is
+   *  simply not yet named here (see Open questions). */
+  [k: string]: unknown
+}
+
+/** Declared behavior for one wire-protocol adapter. Not a running
+ *  instance — `EndpointRegistration` plus a resolved `Connector` together
+ *  describe one. */
+interface Connector {
+  slug: string
+  probe(reg: EndpointRegistration): Promise<{ ok: boolean; latencyMs?: number }>
+  listModels(reg: EndpointRegistration): Promise<Array<{
+    model: string
+    maxContext: number
+    loadedContext: number
+    parallel?: number
+    device?: string
+  }>>
+  quirks?: ConnectorQuirks
+}
+```
+
+**The `local` preconfig.** `connector: "local"` on an `EndpointRegistration`
+is caller-facing sugar, never a connector an implementation actually speaks.
+A host resolving it MUST probe the well-known local ports/paths of the
+registered real connectors (LM Studio, Ollama, …) in turn and register the
+result under whichever one answers — `baseUrl` need not be supplied by the
+caller in this case. The `InferenceEndpoint.connector` field on the
+resolved resource MUST name the real connector detection found, never the
+literal string `"local"`.
+
+A caller MAY omit `baseUrl` only when `connector` is `"local"`; every other
+connector value REQUIRES an explicit `baseUrl`. `listModels`'s per-model
+`loadedContext`/`maxContext` are what §1's `InferenceEndpoint.capabilities`
+is populated from once a specific model is bound.
+
+### 2. The `InferenceProvider` interface
+
+This mirrors [AIP-36](/docs/aip-36)'s `SandboxProvider` exactly in shape —
+lifecycle split between a provider (`boot`/`connect`/`probe`) and the booted
+handle (`stop`/`pause`) — substituting an `InferenceEndpoint` for a
+`BootedSandbox`:
+
+```ts
+interface InferenceEndpointSpec {
+  model: string
+  /** REQUIRED for `attach`; the underlying real connector, e.g. `"lmstudio"`
+   *  once `"local"` is resolved (see §Connectors). For `local-managed` /
+   *  `device` / `operator-hosted`, the provider chooses its own connector
+   *  and MAY leave this unset. */
+  connector?: string
+  /** REQUIRED for `attach` unless `connector` is `"local"`. */
+  baseUrl?: string
+  auth?: ConnectorAuth
+  device?: string
+  ctx?: number
+  parallel?: number
+  /** REQUIRED when targeting an `operator-hosted` provider — see §2's
+   *  provider class table. */
+  offering?: "shared" | "private"
+}
+
+interface InferenceProvider {
+  class: InferenceProviderClass
+  /** Boots (or, for `attach`, discovers) an endpoint matching `spec` and
+   *  registers it (§3.2). */
+  start(spec: InferenceEndpointSpec): Promise<InferenceEndpoint>
+  /** Reconnect to an already-running endpoint instead of starting a fresh
+   *  one. Optional: a provider that cannot reconnect omits it. */
+  connect?(endpointId: string, spec: InferenceEndpointSpec): Promise<InferenceEndpoint>
+  /** Liveness probe against the PROVIDER, not the runtime's own health
+   *  route — answers whether the endpoint still exists at all. A THROWN
+   *  error means the check itself failed, never "the endpoint is gone". */
+  probe(endpointId: string): Promise<{ alive: boolean; state?: InferenceEndpointState }>
+  /** Stops the endpoint and unregisters it (§3.2). */
+  stop(endpointId: string): Promise<void>
+  /** Pauses rather than kills — optional, provider-dependent. */
+  pause?(endpointId: string): Promise<void>
+}
+```
+
+Four provider classes, in order of effort:
+
+| Class | Who starts the runtime | `start()` semantics | `stop()` semantics |
+|---|---|---|---|
+| `attach` | Something else, already running (LM Studio, Ollama, a hand-launched `llama-server`) — anywhere an `EndpointRegistration` can reach, local or remote | Health- and capability-probe only, via the registered connector's `probe`/`listModels`; MUST NOT launch a process | MUST NOT terminate the underlying process — it unregisters the endpoint, nothing more |
+| `local-managed` | This daemon, on its own host | Spawns and owns the runtime process with the requested `ctx`/`parallel` | Real process lifecycle: terminates the process it started |
+| `device` | This daemon, on a paired host device, reached over device pairing / rendezvous | Same as `local-managed`, dispatched over the daemon's own device channel | Real process lifecycle on the remote device |
+| `operator-hosted` | The **operator** (the entity running the reference gateway), never the end user — two offerings, below | See offerings | See offerings |
+
+**`operator-hosted` offerings.** `spec.offering` selects one of two,
+distinguished by tenancy and lifecycle, not by a separate provider class:
+
+| Offering | Tenancy | `start()` semantics | Counts as `local-only`? |
+|---|---|---|---|
+| `shared` | Multi-tenant — open models served through the operator's own upstream hosted-model providers, behind the same gateway routing that already carries vendor traffic; the operator adds cost + margin, owns no GPU of its own | Effectively instantaneous — there is no box to boot; `state` is always `"running"`, `ttl` does not apply | **No** — the request still reaches a hosted model vendor via the upstream provider; see §5 |
+| `private` | Single-tenant — a GPU box the operator spawns on demand, backed by an operator-chosen GPU vendor, with a weights cache to bound cold start | Provisions the rented instance, restores or pulls the weights volume, starts the runtime, exposes it only to this daemon (e.g. over a rendezvous channel, per [AIP-59](/docs/aip-59)) | **Yes** — no model vendor sees the request; the operator and its GPU vendor are the trusted parties (§5) |
+
+**Out of scope: the end user's own cloud account.** `operator-hosted`
+endpoints — `shared` or `private` — are provisioned in the *operator's* own
+infrastructure account, never the end user's. Spawning a GPU box inside a
+user-supplied cloud account (which would require the operator to hold a
+connection into that account) is explicitly out of scope for this AIP; a
+future AIP MAY specify it.
+
+An `attach` provider's `start()` MUST be idempotent and side-effect-free
+beyond the probe — calling it twice against the same already-running server
+MUST NOT spawn a second process, because there is no process for it to own.
+A provider MUST declare its class truthfully; a host MUST NOT infer
+`local-managed` behaviour (process ownership on `stop()`) from an `attach`
+provider or vice versa.
+
+`local-managed`, `device`, and `operator-hosted` provider implementations,
+the mechanism by which a `device` provider reaches a paired host, and the
+GPU vendor(s) an `operator-hosted`/`private` provider uses, are out of scope
+for this AIP — see [Open questions](#open-questions).
+
+### 3. Gateway registration and addressing
+
+#### 3.1 Static registration
+
+A gateway MAY load `InferenceEndpoint` entries from a config file at boot —
+today's `~/.agentproto/llm-endpoints.json` (see
+[Reference Implementation](#reference-implementation)). Every such entry
+MUST be surfaced as an `InferenceEndpoint` with `source: "static"` and
+`providerClass: "attach"`, and its file-declared connection fields MUST
+resolve to a valid `EndpointRegistration` (§Connectors) — a static entry is
+an `attach` registration a human wrote into a file instead of one a caller
+sent at runtime, not a different shape. Its `state` MUST be derived from an
+ordinary health probe, never assumed `"running"`. A static entry has no
+`stop()` or `pause()` — a caller invoking either against a static-source
+endpoint MUST get a typed error (`inference_endpoint_static`), never a
+silent no-op.
+
+#### 3.2 Dynamic registration
+
+When an `InferenceProvider.start()` resolves, the host MUST register the
+resulting `InferenceEndpoint` with the gateway's routing table as part of
+that same operation — no file edit, no gateway restart. `<endpoint-id>/<model>`
+(below) MUST be routable the instant `start()` resolves. Symmetrically, a
+successful `stop()`, or the provider's own `probe()` reporting `alive: false`,
+MUST unregister the endpoint before the call that observed it returns. The
+`InferenceEndpoint` registry is authoritative; the gateway's routing table is
+a projection of it, never a second store a caller could observe disagreeing
+with the registry — the same posture [AIP-58](/docs/aip-58) §5 takes for its
+event log versus `run.get`.
+
+#### 3.3 Addressing
+
+Two forms, both resolved by the gateway to exactly one `InferenceEndpoint`:
+
+- **`<endpoint>/<model>`** — `endpoint` is an `InferenceEndpoint.id`. This is
+  today's shipped transparent-routing form (see
+  [Reference Implementation](#reference-implementation)), unchanged.
+- **`<model>@<device>`** — an alias for the case §3.3's addressing alone
+  cannot express: the same `model` id exposed by more than one `device`-class
+  endpoint. The gateway MUST resolve it to the unique registered endpoint
+  whose `model` and `device` fields both match. Zero matches MUST fail with
+  `inference_endpoint_not_found`; more than one match (a provider registered
+  two endpoints with the same `model`+`device` pair) MUST fail with
+  `inference_endpoint_ambiguous` rather than picking one — a silent pick is
+  exactly the "the API can't target one" failure this form exists to close.
+
+### 4. Session binding
+
+`agent_start` gains an `inference` field:
+
+```ts
+inference?: string | {
+  /** An existing InferenceEndpoint id — reuse it as-is. */
+  endpoint?: string
+  /** Start (or reuse a matching running) endpoint of this provider class. */
+  provider?: InferenceProviderClass
+  model?: string
+  ctx?: number
+}
+```
+
+A bare string is shorthand for `{ endpoint: <string> }`. When `endpoint` is
+absent, the host SHOULD look for an already-running endpoint whose
+`provider`/`model`/`ctx` already match before starting a new one, and MUST
+start one via the matching `InferenceProvider.start()` otherwise.
+
+**Harness wiring.** Once an endpoint is resolved, the host derives how the
+chosen harness reaches it:
+
+- For a harness reachable through the gateway (an ACP or HTTP adapter that
+  accepts an explicit base URL, e.g. claude-code / the Claude SDK), the host
+  MUST derive [AIP-46](/docs/aip-46)'s existing `route` and `model` fields —
+  `route.gateway` pointed at the local gateway, `model` set to
+  `<endpoint>/<model>` or `<model>@<device>` — rather than requiring the
+  caller to compute them. `inference` and an explicit, conflicting `route`/
+  `model` on the same call is a caller error (`inference_route_conflict`).
+- For a harness with its own static provider-config surface and no
+  gateway-routing support (pi, opencode today), the host MUST generate or
+  update that harness's own config to point at the endpoint's `baseUrl`
+  before spawn.
+- A harness with neither mechanism MUST fail the spawn with
+  `inference_harness_unsupported` — `inference` MUST NOT be silently
+  dropped.
+
+**Fit check.** Before the adapter process spawns, the host MUST compare the
+harness's estimated first-request token weight (in whatever tool-visibility
+mode the spawn will actually run in — see lean-tools default, below) against
+`capabilities.loadedContext`, plus a host-chosen non-zero response margin. If
+the request would not fit, the host MUST refuse the spawn with
+`inference_fit_check_failed` and MUST NOT spawn the adapter process at all.
+This is what turns §Motivation's post-spawn overflow into a rejected `Session`
+before any process exists; where the per-harness first-request weight comes
+from (a declared manifest field, a measured baseline, or something else) is
+open — see [Open questions](#open-questions).
+
+**Lean tools by default.** When `inference` is set, the host MUST default
+[AIP-46](/docs/aip-46)'s existing `deferredTools` to `true` unless the caller
+explicitly passes `deferredTools: false` — the same override the field
+already supports for any other spawn. This applies regardless of
+`providerClass`: an `operator-hosted`/`private` endpoint has the identical
+loaded-context arithmetic problem a laptop-local one does.
+
+### 5. The `local-only` privacy profile
+
+`agent_start` gains a `privacy` field:
+
+```ts
+privacy?: "local-only"
+```
+
+**Definition.** An upstream is *local* under this AIP if and only if it is a
+registered `InferenceEndpoint` whose serving path never reaches a hosted
+model vendor. Concretely: `attach`, `local-managed`, `device`, and
+`operator-hosted`/`private` endpoints qualify; `operator-hosted`/`shared`
+does **not** — by its own definition (§2) it is the gateway's ordinary
+`provider/model` transparent routing to a hosted model vendor (Moonshot,
+OpenRouter, direct Anthropic/OpenAI, etc.), merely resold by the operator,
+and sees exactly the same vendor exposure that routing already has. An
+`InferenceEndpoint` being registered under this AIP is necessary for
+`local-only` eligibility but not sufficient — `offering` still has to be
+checked for `operator-hosted`. Physical distance is not the test: a rented
+single-tenant GPU box (`operator-hosted`/`private`) is remote, but no model
+vendor sees what is sent to it, which is the property this profile protects.
+
+Normative rules:
+
+1. The gateway MUST refuse any request from a `privacy: "local-only"`
+   session whose resolved upstream is not local, per the definition above.
+   The refusal MUST be a hard failure (`privacy_upstream_refused`) enforced
+   server-side at request time — never a silent fallback to a reachable
+   vendor model, and never a client-supplied claim the gateway merely trusts.
+2. When the session also carries an [AIP-36](/docs/aip-36) `sandbox` block,
+   its `network.egress` MUST be restricted to the control channel (e.g. the
+   daemon's own rendezvous, per [AIP-59](/docs/aip-59)) plus the bound
+   endpoint's own host when the endpoint is not co-located (`device` or
+   `operator-hosted`); telemetry egress MUST be off. When no `sandbox` is set (a
+   host-direct spawn), `commandSandbox` MUST be at least `"workspace"`,
+   never `"off"`.
+3. The host MUST append one audit record per request naming the serving
+   `InferenceEndpoint.id` to the session's audit trail (surfaced via
+   [AIP-7](/docs/aip-7) GOVERNANCE or an equivalent host-owned log, never
+   writable by the spawned process itself — the same "host writes, bodies
+   don't" boundary [AIP-58](/docs/aip-58)'s Security Considerations draws
+   for its own event log). This is what makes "nothing left the box"
+   checkable after the fact rather than merely asserted.
+
+**What each tier guarantees — stated, not implied.** Implementations MUST
+document the guarantee at the granularity of *who sees the request*, not a
+single undifferentiated "private" label:
+
+| Tier | Where the endpoint runs | Who can see the request content | Cost |
+|---|---|---|---|
+| 1 | This host (`local-managed` / `attach`) | Nobody but this machine | Free, bounded by local hardware |
+| 2 | A paired device (`device`) | Nobody but the paired devices | Free |
+| 3 | A single-tenant box the operator rents on your behalf (`operator-hosted`/`private`) | The operator and its GPU vendor (not a model vendor) | Metered, plus cold-start latency |
+
+`operator-hosted`/`shared` is deliberately absent from this table — it is
+not a `local-only`-eligible tier at all (see Definition, above); it is the
+same hosted-model-vendor exposure as any other vendor route, just billed
+through the operator.
+
+Implementations MUST NOT describe tier 3 as guaranteeing that nobody sees the
+request — the accurate claim is that no *model vendor* sees it; the operator
+running the box, and the GPU vendor it rents from, still can. `local-only`
+is a claim about the model-vendor boundary, not a zero-trust guarantee.
+
+### Conformance rules
+
+1. **Endpoint identity is unique across sources.** A `source: "static"` and a
+   `source: "spawned"` endpoint MUST NOT share an `id`; a dynamic
+   registration that collides with a static one MUST be rejected, not
+   silently shadow it.
+2. **`attach` never owns a process.** Per §2 — `stop()` on an `attach`
+   provider unregisters only.
+3. **Registration and the routing table never disagree.** Per §3.2 — a
+   caller MUST NOT be able to observe an endpoint as `"running"` in the
+   registry while `<id>/<model>` 404s at the gateway, or vice versa.
+4. **The fit check runs before spawn, unconditionally, whenever `inference`
+   is set.** A host MAY skip it only when no `inference` field is present —
+   an explicit gap this AIP does not attempt to close (see Security
+   Considerations).
+5. **`local-only` refusal is enforced at the gateway, not merely at spawn
+   time.** A session that starts compliant but whose bound endpoint later
+   becomes unreachable MUST NOT be rerouted to a non-local upstream to keep
+   the session alive.
+
+## Composition: the private box (informative)
+
+A **box** — one machine running the daemon, a harness, and an inference
+runtime, reached only through a control channel such as
+[AIP-59](/docs/aip-59)'s rendezvous, with no cloud secrets configured because
+none are needed — composes cleanly from this AIP's primitives without a new
+resource type:
+
+```
+session  = harness + placement (host | sandbox | device)          — AIP-46 / AIP-36
+endpoint = model + connector + placement (host | device | operator-hosted/private) — this AIP
+box      = a placement running BOTH, with privacy: "local-only"
+```
+
+Nothing in this AIP names "a box" as a resource; it is simply a session and
+an endpoint that happen to share a placement, with the `local-only` profile
+applied. The three trust tiers of §5's table describe the three placements a
+box's endpoint can occupy.
+
+## Rationale
+
+**Why mirror AIP-36's `SandboxProvider` shape instead of a simpler
+`start`/`stop` pair?** Because "who owns the process" is not uniform across
+the four provider classes — `attach` deliberately owns nothing, the other
+three do — and `SandboxProvider`'s `boot`/`connect`/`probe` split already
+encodes exactly that distinction (probe answers "does it still exist",
+independent of whether *this* provider instance booted it). Re-deriving a
+weaker interface here would diverge from a pattern this codebase has already
+proven out.
+
+**Why is `local-only` defined by registry membership rather than a network
+check (private IP range, no public route)?** A network check cannot express
+"this rented GPU is remote but no model vendor sees the prompt" — the
+dividing claim §5 exists to make. Registry membership can, because every
+`InferenceProvider` class — `operator-hosted`/`private` included —
+terminates at a runtime this AIP's provider interface controls, never at a
+vendor's own hosted API surface. (`operator-hosted`/`shared` is the
+exception that proves the rule: it registers as an `InferenceEndpoint` too,
+but its serving path still terminates at a vendor's API, which is exactly
+why §5's Definition excludes it by `offering`, not by provider class.)
+
+**Why must the fit check block the spawn rather than warn?** The Motivation's
+failure was silent: overflow surfaced as an opaque runtime error minutes into
+a session, not as a clear refusal at the moment enough information existed to
+predict it. A warning a caller can spawn past reproduces exactly that gap
+with extra logging.
+
+**Why extend `agent_start` rather than define a separate `inference_start`
+delegation verb?** [AIP-46](/docs/aip-46)'s `route`/`access`/`model`/
+`deferredTools`/`sandbox` fields already carry everything a spawn needs to
+know about *how* to reach a model and *what* to sandbox; `inference` supplies
+the one missing piece — *which* endpoint — and derives the rest from fields
+that already exist, rather than inventing a parallel spawn path a caller
+would have to keep in sync with the real one.
+
+**Why does `<model>@<device>` win over always requiring an explicit
+`endpoint` id?** An endpoint id is stable only once you already know it. A
+caller reasoning about "the model I want, on the device I want" — the LM Link
+scenario — should not first have to enumerate the registry to find which
+generated id currently backs that pair.
+
+## Reference Implementation
+
+**Shipped today**, and what this AIP builds on rather than re-specifies:
+
+- `@agentproto/llm-endpoint` already implements §3.1's static registration
+  (`~/.agentproto/llm-endpoints.json`) and §3.3's `<endpoint>/<model>`
+  transparent-routing form — every named entry becomes a routable
+  `<id>/<model>` provider through the same dispatch path as its `forge`/
+  `nebius` upstreams, with `GET /v1/endpoints` reporting live health per
+  entry. This is the concrete shape §3.1 requires `source: "static"`
+  endpoints to project.
+- `@agentproto/sandbox`'s `SandboxProvider` (`packages/sandbox/src/
+  agent-session-host.ts`) — `boot`/`connect?`/`probe?` on the provider,
+  `stop`/`pause?` on the booted handle — is the exact interface §2 mirrors.
+- `@agentproto/runtime`'s `agent-start-schema.ts` already ships `route:
+  {gateway, baseUrl?}`, `access: {profileRef?}`, `model`, `deferredTools`,
+  and the AIP-36 `sandbox` field that §4 and §5 wire the new fields against;
+  none of that surface needs to change shape, only to gain `inference` and
+  `privacy` as siblings.
+
+**Not yet shipped** — the gap this AIP specifies against:
+
+- The `InferenceEndpoint` registry and resource itself; today a named
+  endpoint is a config-file row with no `state`, no `capabilities`, and no
+  lifecycle beyond what a health probe infers.
+- Every `InferenceProvider` implementation except the `attach`-shaped manual
+  config `llm-endpoints.json` already gives you — no `local-managed`,
+  `device`, or `operator-hosted` provider exists. Nor does the `Connector`
+  interface itself (§Connectors) — today's `llm-endpoints.json` has a `kind`
+  field that plays a similar role informally (see its README), but declares
+  no `probe`/`listModels`/`quirks` contract, and there is no `"local"`
+  detection preconfig.
+- Dynamic registration (§3.2): today's file is read once at gateway boot: no
+  live register/unregister, no restart-free `start()`.
+- The fit check (§4): no such gate runs today — this is precisely the "overflow
+  errors only surface after spawn" finding in the Motivation.
+- The `local-only` privacy profile and its per-request audit record (§5).
+
+## Backwards Compatibility
+
+Not applicable — this AIP introduces a new spec. It additively extends
+[AIP-46](/docs/aip-46)'s `agent_start` input shape with `inference?` and
+`privacy?`. A caller that sets neither sees no change in behaviour; a host
+that has not implemented this AIP simply has no such fields to set.
+
+## Security Considerations
+
+- **`baseUrl` is attacker-influenceable for `attach` and `operator-hosted`
+  endpoints.** A malicious or misconfigured `EndpointRegistration` could
+  point an `attach` provider's `baseUrl` — or an `operator-hosted` provider's
+  rented instance address — somewhere the operator did not intend. Hosts
+  MUST validate or allowlist reachable hosts per provider, the same
+  discipline [AIP-36](/docs/aip-36)'s Security Considerations requires for
+  sandbox `network.egress`. The `"local"` preconfig's detection step (§1
+  Connectors) is a narrower instance of the same risk: it MUST only probe
+  well-known local ports, never an operator-configurable or
+  caller-supplied host.
+- **`auth.tokenRef` is a reference, never a literal secret.** A connector
+  registration that accepted a literal credential in `EndpointRegistration`
+  would put it in whatever transport or store carries the registration —
+  the same reasoning [AIP-36](/docs/aip-36) §Design principle 5 gives for
+  sandbox env credentials.
+- **`costPerHour` is declarative, not metered.** Nothing in this AIP ties it
+  to an authoritative billing source; a provider under-reporting it degrades
+  cost visibility, not correctness. See [Open questions](#open-questions) on
+  a future [AIP-58](/docs/aip-58) `Spend` binding.
+- **The fit check is opt-in via `inference`.** A caller that hand-configures
+  a harness's base URL outside this AIP's `inference` field bypasses §4
+  entirely; this AIP closes the gap only for spawns that go through it.
+- **The `local-only` audit record MUST be host-written.** A record the
+  spawned process itself could append to could fabricate "served locally"
+  for a request that was not — the same boundary [AIP-58](/docs/aip-58)
+  draws for its own event log and journal.
+- **A `device`-class endpoint inherits the trust boundary of whatever
+  mechanism pairs the two devices.** This AIP names the provider class and
+  assumes such a channel exists; it does not itself authenticate or encrypt
+  it (see [Open questions](#open-questions)).
+- **`local-only` degrading silently is the exact failure this profile
+  exists to prevent** (§5, Design principle 5) — implementations MUST treat
+  §5 rule 1's hard-fail as non-negotiable even under operational pressure to
+  keep a session alive (a paused local endpoint, a rate-limited device link).
+  A host that reroutes to a vendor model "just this once" has broken the
+  guarantee retroactively for every request the session already made under
+  it, in the user's understanding if not in fact.
+
+## Open questions
+
+1. **Fit-check data source.** §4 requires comparing a harness's first-request
+   weight to loaded context but does not pin where that weight comes from —
+   a declared [AIP-45](/docs/aip-45) manifest field, an empirically measured
+   baseline the host maintains, or something else. Left open.
+2. **Weights distribution.** A `local-managed` or `device` provider pulling a
+   5–20 GB model, and an `operator-hosted`/`private` provider cold-starting
+   without a cached volume, both face minutes of setup this AIP does not
+   address. Whether a portable on-disk weights format or a caching contract
+   belongs in a future revision is open.
+3. **Tool-calling quality eval gate.** Small or aggressively quantized models
+   vary widely in tool-calling reliability. Whether a host should refuse (or
+   merely warn on) binding a `mode`/harness combination to a model that has
+   not passed some eval gate — and where that gate would live — is open.
+4. **Billing.** `costPerHour` (§1) is declarative only. Whether spawned
+   endpoints should report [AIP-58](/docs/aip-58)-shaped `Spend` the way a
+   session's own driver does is open.
+5. **Lease/heartbeat for spawned endpoints.** [AIP-58](/docs/aip-58) §2
+   requires a live-owner check for a `running` run but leaves the transport
+   open; a `local-managed`/`device`/`operator-hosted` `InferenceEndpoint` has
+   the same "orphaned process" failure mode and the same open question.
+6. **Device pairing.** The `device` provider class assumes a channel to a
+   paired host already exists. This AIP does not specify how two devices
+   pair, authenticate, or discover each other's capabilities — that is a
+   future AIP's scope.
+7. **Connector quirks vocabulary.** §Connectors' `ConnectorQuirks` names
+   exactly one quirk (`singleLeadingSystemMessage`) because it is the one
+   this AIP has direct measured evidence for (see Motivation). Whether this
+   grows into a closed, versioned vocabulary or stays an open string-keyed
+   bag is left open.
+8. **GPU vendor selection for `operator-hosted`/`private`.** Which vendor(s)
+   back this offering, and how cold-start/€-per-hour tradeoffs are compared,
+   is an operational decision this AIP does not make.
+
+## See also
+
+- [AIP-1](/docs/aip-1) — process, RFC 2119
+- [AIP-36](/docs/aip-36) — SANDBOX.md; `SandboxProvider` is the interface §2
+  mirrors, `network.egress` is what §5 constrains
+- [AIP-45](/docs/aip-45) — AGENT-CLI.md; the harness manifest the fit check
+  reads from
+- [AIP-46](/docs/aip-46) — AGENT-SESSIONS; `agent_start` is the surface this
+  AIP extends with `inference` and `privacy`
+- [AIP-7](/docs/aip-7) — GOVERNANCE; the audit log §5's per-request records
+  target
+- [AIP-58](/docs/aip-58) — RUN; `Spend` and the lease/heartbeat pattern both
+  referenced in [Open questions](#open-questions)
+- [AIP-59](/docs/aip-59) — MOBILE PAIRING; one candidate control channel for
+  an `operator-hosted`/`private` or `device` endpoint
