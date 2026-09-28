@@ -451,6 +451,121 @@ The prompt UI is out of scope. Hosts SHOULD pass the resolved policy slug, the
 matched action + subject, and the canonical signing payload to the prompt so the
 user makes an informed decision.
 
+## Approval requests
+
+A host that lets an agent ask a human for permission implements the
+`approval-request` doctype defined in [AIP-7](/docs/aip-7). A host that does
+not is unaffected and skips this section. It is normative for the parts
+marked MUST.
+
+### Engine surface
+
+The host exposes these operations to the code that owns approvals. Names are
+illustrative; the behaviour is normative.
+
+| Operation | Who may call it | Effect |
+|---|---|---|
+| `request(input, requester)` | model-callable | Compute the canonical payload, persist `payload.json`, record `payloadHash`, create the request as `pending`. |
+| `get(id)` / `list(filter)` | model-callable | Read. Applies lazy expiry. |
+| `wait(id, timeout)` | model-callable | Resolve when the request leaves `pending`, or at the timeout with the current record. Resolve immediately if already decided. |
+| `consume(id, requester, payload)` | model-callable | One-shot, re-hashing. See below. |
+| `decide(id, decision, channel-proof)` | human channels only | `pending -> approved \| denied`. NOT model-callable. |
+| `mintTicket(id)` | card producer only | Mint a one-time card ticket. NOT model-callable. |
+
+The four model-callable operations are the complete set a host may expose as
+tools. `decide` and `mintTicket` MUST be reachable only from a declared human
+channel.
+
+### Request
+
+1. Canonicalise the payload with the rule in AIP-7 (sorted keys at every
+   depth by UTF-16 code unit, arrays in order, `undefined` as `null`,
+   `JSON.stringify` scalars). Write those bytes to `payload.json` with owner
+   read/write permission only, then hash them.
+2. Set `channels` to the requested subset of the channels the host has
+   enabled, or to every enabled channel when none was requested. A channel
+   that is not enabled MUST NOT appear.
+3. Persist `request.json` (temporary file, then rename) and reload every
+   request from disk at boot. A restart MUST NOT lose a pending request or
+   change a decided one.
+
+### Decide
+
+Before any state change, and with no asynchronous step between the checks and
+the change:
+
+1. Apply lazy expiry. Reject a request that is not `pending`.
+2. Reject a decision whose channel is not in the request's `channels`.
+3. Set `status` and `decision`, and persist.
+
+Only then do the asynchronous work: on approve, write the `signature` over
+`payload.json` (`signerKind: "user"`, `method: "click_through"`,
+`documentHash` equal to `payloadHash`) and append to the audit chain; on
+deny, append the `approval.denied` audit event. Then patch
+`decision.signaturePath` (approve only), emit any `approved`/`denied` event,
+and release waiters. A waiter can therefore observe `approved` slightly
+before the signature file exists; consumers that need the signature MUST wait
+for `signaturePath`.
+
+### Consume
+
+Check in this order, stopping at the first failure: request exists
+(`approval_not_found`); caller is the requester (`not_requester`); status is
+not `consumed` (`approval_already_consumed`) or `expired`
+(`approval_expired`); status is `approved` (`approval_not_approved`); the
+supplied payload's canonical hash equals `payloadHash`
+(`payload_mismatch`). Then set `consumed` and `consumedAt` in one atomic
+step, so a second concurrent consume observes the first.
+
+### Channel conformance
+
+A `web_click` implementation MUST refuse, in this order: a request with no
+`Origin`, a `null` `Origin`, or an `Origin` not exactly present in the
+configured allowlist; then a request without the host bearer credential. With
+an empty allowlist the channel is off. Use a fresh random nonce per decision
+as `signedUrlToken`.
+
+A `ui_card` implementation MUST satisfy every one of:
+
+- The card HTML is produced on each read, and each read mints a new ticket
+  that supersedes the previous one.
+- The ticket is at least 32 random bytes, base64url, with a short TTL (10
+  minutes RECOMMENDED). Only its SHA-256 is stored.
+- The presented ticket is compared to the stored hash in constant time.
+- The ticket is burned on every attempt, valid or not, before any
+  asynchronous work.
+- The decide action is declared app-only and is registered, together with
+  the card resource, only on a surface dedicated to human-facing clients.
+  That surface MUST refuse any connection that carries the identity of an
+  agent session. Do not mount the decide action or the card on the general
+  tool surface.
+- The ticket appears in no tool result, tool definition, log, signature, or
+  audit event, and `signedUrlToken` holds its hash.
+
+Do not mount the governance engine's own signing and audit tools on any
+surface a session can reach. Call the underlying functions directly from the
+decide path.
+
+### Verifying a host
+
+A conformance suite SHOULD include at least: a model-callable tool listing
+that contains none of `decide`, `mintTicket`, or the governance engine's
+signing tools; a `resources/read` from an agent-session connection that
+cannot reach a card; a card ticket that never appears in any model-visible
+result; a wrong ticket that burns the real one; a decide on a non-`pending`
+request that leaves the existing decision unchanged; and a consume that
+rejects a payload differing in any value, and a consume that accepts a
+payload differing only in key order (key order is not part of the canonical
+form).
+
+### Known limits
+
+The limits stated in AIP-7's threat model apply. In particular, `ui_card` is
+safe only with a host that renders cards in a sandbox its model cannot read,
+and anything holding the host's local credential can reach the card surface.
+Verify the first per host, and add an independent-credential channel when
+neither is acceptable.
+
 ## Autonomy levels
 
 The host MUST recognise the 0–4 ladder:
@@ -614,6 +729,8 @@ This is the standard "is this workspace conformant?" handshake.
 - Quota and rate-limiting outside the policy `budget` field.
 - Multi-tenant isolation; key custody; HSM integration.
 - The on-the-wire format of approval-needed events.
+- Migrating other approval-like mechanisms (policy acknowledgements, held tool
+  permissions, workflow approval steps) onto approval requests.
 
 These are runtime-policy concerns and stay out of the spec on purpose.
 
