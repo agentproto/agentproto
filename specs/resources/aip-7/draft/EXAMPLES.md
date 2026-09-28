@@ -955,7 +955,7 @@ reproduces it by canonicalising the payload the requester originally supplied
   "kind": "deploy",
   "title": "Release a1b2c3d to production",
   "preview": { "environment": "production", "commit": "a1b2c3d", "services": "api, web" },
-  "payloadSha256": "53dd521908df11db6568342cd669d3190b617ff4c47ad819ae8620bd3ef40b2a",
+  "payloadHash": "53dd521908df11db6568342cd669d3190b617ff4c47ad819ae8620bd3ef40b2a",
   "status": "pending",
   "requestedBy": { "sessionId": "ses_4c19e0" },
   "channels": ["web_click", "ui_card"],
@@ -965,7 +965,7 @@ reproduces it by canonicalising the payload the requester originally supplied
 ```
 
 `preview` is what the human sees. It is display-only and not covered by
-`payloadSha256`: a misleading preview cannot make the approval cover any
+`payloadHash`: a misleading preview cannot make the approval cover any
 payload other than the pinned one, but it can mislead the human, so hosts
 SHOULD show the preview next to the payload's own fields.
 
@@ -998,7 +998,7 @@ and appends to the audit chain.
 }
 ```
 
-`documentHash` equals the request's `payloadSha256`. `signedUrlToken` is the
+`documentHash` equals the request's `payloadHash`. `signedUrlToken` is the
 hash of the ticket, never the ticket. The request then reads:
 
 ```json
@@ -1032,7 +1032,7 @@ about to release, in whatever key order it holds it:
 { "services": ["api", "web"], "commit": "a1b2c3d", "environment": "production", "action": "deploy.release" }
 ```
 
-The host canonicalises, hashes, finds it equals `payloadSha256`, and sets
+The host canonicalises, hashes, finds it equals `payloadHash`, and sets
 `status: "consumed"` with `consumedAt`. The outcomes of the other calls:
 
 | Call | Result |
@@ -1093,7 +1093,7 @@ local credential can reach that surface.
   enough; serve it and the card resource on a surface agent sessions cannot
   reach.
 - **Recording an approval whose `documentHash` differs from the request's
-  `payloadSha256`.** The approval would not be of the pinned payload.
+  `payloadHash`.** The approval would not be of the pinned payload.
 - **Putting the card ticket in a signature, audit event, tool result, or log.**
   Store its hash only.
 - **Trusting the host's verifier output without an independent re-run.** The

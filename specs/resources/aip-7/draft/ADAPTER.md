@@ -465,7 +465,7 @@ illustrative; the behaviour is normative.
 
 | Operation | Who may call it | Effect |
 |---|---|---|
-| `request(input, requester)` | model-callable | Compute the canonical payload, persist `payload.json`, record `payloadSha256`, create the request as `pending`. |
+| `request(input, requester)` | model-callable | Compute the canonical payload, persist `payload.json`, record `payloadHash`, create the request as `pending`. |
 | `get(id)` / `list(filter)` | model-callable | Read. Applies lazy expiry. |
 | `wait(id, timeout)` | model-callable | Resolve when the request leaves `pending`, or at the timeout with the current record. Resolve immediately if already decided. |
 | `consume(id, requester, payload)` | model-callable | One-shot, re-hashing. See below. |
@@ -500,7 +500,7 @@ the change:
 
 Only then do the asynchronous work: on approve, write the `signature` over
 `payload.json` (`signerKind: "user"`, `method: "click_through"`,
-`documentHash` equal to `payloadSha256`) and append to the audit chain; on
+`documentHash` equal to `payloadHash`) and append to the audit chain; on
 deny, append the `approval.denied` audit event. Then patch
 `decision.signaturePath` (approve only), emit any `approved`/`denied` event,
 and release waiters. A waiter can therefore observe `approved` slightly
@@ -513,7 +513,7 @@ Check in this order, stopping at the first failure: request exists
 (`approval_not_found`); caller is the requester (`not_requester`); status is
 not `consumed` (`approval_already_consumed`) or `expired`
 (`approval_expired`); status is `approved` (`approval_not_approved`); the
-supplied payload's canonical hash equals `payloadSha256`
+supplied payload's canonical hash equals `payloadHash`
 (`payload_mismatch`). Then set `consumed` and `consumedAt` in one atomic
 step, so a second concurrent consume observes the first.
 

@@ -116,7 +116,7 @@
         "documentHash": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
-          "description": "Lowercase hex SHA-256 of the artifact's bytes at signing time. For a signature that resolves an approval-request, MUST equal that request's payloadSha256."
+          "description": "Lowercase hex SHA-256 of the artifact's bytes at signing time. For a signature that resolves an approval-request, MUST equal that request's payloadHash."
         },
         "signer": { "$ref": "#/$defs/signer" },
         "signerKind": {
@@ -170,7 +170,7 @@
         "id",
         "kind",
         "title",
-        "payloadSha256",
+        "payloadHash",
         "status",
         "requestedBy",
         "channels",
@@ -195,9 +195,9 @@
         },
         "title": { "type": "string", "minLength": 1, "maxLength": 256 },
         "preview": {
-          "description": "JSON value supplied by the requester for a human-facing surface to render. Opaque to the host and NOT covered by payloadSha256."
+          "description": "JSON value supplied by the requester for a human-facing surface to render. Opaque to the host and NOT covered by payloadHash."
         },
-        "payloadSha256": {
+        "payloadHash": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
           "description": "Lowercase hex SHA-256 of the UTF-8 bytes of the canonical JSON of the pinned payload (keys sorted recursively by UTF-16 code unit, arrays in order, undefined as null)."
