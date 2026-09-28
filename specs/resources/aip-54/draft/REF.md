@@ -28,14 +28,14 @@ registries.
 import { RefCatalog, refFor, refToUri, refFromUri } from "@agentproto/ref"
 
 const cat = new RefCatalog()
-cat.registerFamily(42, { family: "app", keyBy: h => h.id! }, appRegistry)
-cat.registerFamily(52, { family: "pack", keyBy: h => h.name }, packRegistry)
+cat.registerFamily(53, { family: "app", keyBy: h => h.id! }, appRegistry)
+cat.registerFamily(14, { family: "tool", keyBy: h => h.id! }, toolRegistry)
 
-const ref = refFor({ aip: 52, keyBy: h => h.name }, packHandle, "1.0.0")
-// { aip: 52, id: "the-agentic-coder", version: "1.0.0" }
+const ref = refFor({ aip: 53, keyBy: h => h.id! }, appHandle, "1.0.0")
+// { aip: 53, id: "the-agentic-coder", version: "1.0.0" }
 
 const hit = cat.resolveStrict(ref)   // { handle, family } — throws if dangling
-const uri = refToUri(ref)            // "aip://52/the-agentic-coder@1.0.0"
+const uri = refToUri(ref)            // "aip://53/the-agentic-coder@1.0.0"
 ```
 
 ### Normative rules
@@ -66,9 +66,10 @@ const uri = refToUri(ref)            // "aip://52/the-agentic-coder@1.0.0"
   ref. New doctypes SHOULD include it in `createDoctype`'s default
   `build()`.
 - **Family keys are the family's choice.** Most families key on `id`
-  (or `provider`/`slug` per AIP-43's default), but packs (AIP-52) key
-  on `name`. The `RefCatalog` owns the `aip -> family + keyBy` table;
-  `refFor` MUST be given the same `keyBy` the family's registry uses.
+  (or `provider`/`slug` per AIP-43's default); a future pack family
+  (no AIP number assigned yet) is expected to key on `name` instead.
+  The `RefCatalog` owns the `aip -> family + keyBy` table; `refFor`
+  MUST be given the same `keyBy` the family's registry uses.
 
 ## Migration notes for existing mechanisms
 
@@ -77,7 +78,7 @@ const uri = refToUri(ref)            // "aip://52/the-agentic-coder@1.0.0"
 | AIP-18 `ref` field + `refKind` | Validate ref values as `aip://` URIs; `refKind` narrows the accepted `aip`(s). |
 | app-kit `attach` (DoctypeHandle) | Carry `ArtifactRef`s; the host resolves through its catalog. Fixes the inline-the-whole-bundle flaw. |
 | AIP-42 `AnyRef` string form | Unchanged at the string layer; `aip://` URIs are a valid `ref:` value hosts narrow to `ref/v1`. |
-| AIP-52 `$resolver` | A URI rendering of the same coordinates. |
+| The pending harness manifest's `$resolver` (no AIP number assigned yet) | A URI rendering of the same coordinates. |
 | AIP-53 draft `target` union | Replaced by `on: ref/v1` (see AIP-53). |
 | AIP-27 (superseded) `ws://` refs + `defineRef` | `ws://` grammar, collection→kind table, and tenant-scope rules are normative in AIP-54 §Reference syntax (see `WS-REF.schema.json`); the `defineRef`/`registerRefKind` surface stays in this package for AIP-7/AIP-10 consumers during migration. |
 
