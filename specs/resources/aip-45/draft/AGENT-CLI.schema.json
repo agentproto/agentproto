@@ -36,6 +36,11 @@
       "items": { "type": "string" },
       "description": "Default argv prefix (e.g. ['acp'] for `hermes acp`)."
     },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Static environment variables always merged into the spawn env, before any mode/option env patch (so those can override). Always-on counterpart to modes[].env / options[].env. Primary user is a generic ACP agent whose whole config surface is bin + args + env."
+    },
     "install": {
       "type": "array",
       "minItems": 1,
@@ -103,6 +108,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/option" },
       "description": "Independent typed knobs the CLI accepts. The host picks any subset per turn via OPERATOR.runtime.config.options. Patches apply in declaration order, AFTER mode patches."
+    },
+    "presets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/preset" },
+      "description": "AIP-45 gateway presets this adapter can drive (Anthropic/OpenAI-compatible backends). Merged into the provider-preset catalog (agentproto presets list / list_provider_presets) alongside the built-in registry, deduped by id (built-in wins on collision). Lets an external adapter surface a gateway the built-in registry doesn't know about."
     },
     "continuation": { "$ref": "#/$defs/continuation" },
     "requires": { "$ref": "https://agentproto.sh/docs/aip-29/CLI.schema.json#/properties/requires" },
@@ -223,8 +233,23 @@
         "default": { "type": "string", "description": "Default model id passed to the agent." },
         "allowed": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "Model ids the host MAY route to."
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id"],
+                "description": "A model id annotated with who serves/bills it and how this adapter reaches it. A bare string (still legal) leaves provider unstated — the projector MUST NOT guess one.",
+                "properties": {
+                  "id": { "type": "string", "description": "Model id, unchanged on the wire — this is annotation, not renaming." },
+                  "provider": { "type": "string", "description": "ProviderPreset id (or direct provider, e.g. \"anthropic\") — who serves and bills this model. Omit when unstated." },
+                  "mode": { "type": "string", "description": "This adapter's mode id that routes to `provider` (e.g. \"moonshot\"). Omit when the adapter routes on its own (e.g. a model-id prefix) or needs no mode switch." }
+                }
+              }
+            ]
+          },
+          "description": "Model ids the host MAY route to. Each entry is either a bare id (provider unstated, adapter default) or a { id, provider?, mode? } binding declaring who serves it and which adapter mode reaches it."
         },
         "env": {
           "type": "object",
@@ -259,6 +284,15 @@
           "description": "Stable id. The operator config references this id."
         },
         "description": { "type": "string" },
+        "kind": {
+          "enum": ["context"],
+          "description": "Which orthogonal session-config axis this mode expresses. Narrowed to the single value 'context' (what enters context) — the only concern with no ACP-protocol home. Route is derived from the model catalog (@route route-identity), not a manifest mode; posture comes from the harness's own ACP mode registry (SessionModeState.availableModes). Omitted ⇒ inferred from the id. The legacy 'posture'/'route' back-compat classification lives in the daemon's decomposeMode shim, not this manifest surface."
+        },
+        "bin_args_prepend": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra argv prepended before the manifest's bin_args when this mode is active."
+        },
         "bin_args_append": {
           "type": "array",
           "items": { "type": "string" },
@@ -268,6 +302,19 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "Extra env vars merged into the spawn env when this mode is active."
+        },
+        "env_unset": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Env keys to DELETE from the spawn env when this mode is active. Applied at the runtime's env-merge point after ambient process.env + mode/option env are combined, so a mode can scrub a credential that must never reach a non-native endpoint (e.g. a gateway mode scrubbing ANTHROPIC_API_KEY so it can't leak to a third-party Anthropic-compatible host). Unlike `env`, deletion is the only safe semantics for scrubbing."
+        },
+        "status": {
+          "enum": ["active", "noop", "planned"],
+          "description": "Honest support status surfaced to clients. active = does what its description claims; noop = declared and accepted but measured to have no effect; planned = declared surface not wired yet. Absent ⇒ treated as active."
+        },
+        "status_note": {
+          "type": "string",
+          "description": "Human-readable reason backing `status` (e.g. what was measured)."
         }
       }
     },
@@ -303,6 +350,11 @@
           "type": "integer",
           "description": "Upper bound when type=integer."
         },
+        "bin_args_prepend": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Argv template prepended before the manifest's bin_args when the option has a non-default value. The literal token `{value}` is replaced with the option's value (stringified)."
+        },
         "bin_args_template": {
           "type": "array",
           "items": { "type": "string" },
@@ -317,6 +369,11 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "Env vars to merge when the option has a non-default value. Values may contain `{value}` for templating."
+        },
+        "env_unset": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Env keys to DELETE from the spawn env when the option has a non-default value. Symmetric with mode.env_unset and applied at the same runtime env-merge point. Lets a value-bearing option (e.g. base_url pointing at a third-party Anthropic-compatible gateway) scrub the ambient credential (ANTHROPIC_API_KEY) it must displace, without forcing the operator to also pick a preset mode."
         }
       },
       "allOf": [
@@ -325,6 +382,35 @@
           "then": { "required": ["enum"] }
         }
       ]
+    },
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "schemaFlavor", "baseUrl", "keyEnv"],
+      "description": "A gateway preset this adapter can drive — a backend an Anthropic/OpenAI-compatible client can front. Declared in the manifest so the catalog surfaces adapter-contributed presets alongside the built-in registry. No adapter projection (env/env_unset/bin_args) here; that stays in modes/options.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable preset id. SHOULD equal the mode id if the adapter projects this preset as a mode. Catalog dedupes built-in vs adapter-declared by id; an adapter-declared id colliding with a built-in is ignored in favor of the built-in (registry is source of truth for canonical providers)."
+        },
+        "label": { "type": "string", "minLength": 1, "description": "Human label for the catalog UI." },
+        "description": { "type": "string" },
+        "schemaFlavor": { "enum": ["anthropic", "openai"], "description": "API schema flavor — selects which adapter family can consume the preset." },
+        "baseUrl": { "type": "string", "minLength": 1, "description": "Base URL the client hits." },
+        "keyEnv": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Conventional env var holding this provider's API key. Catalog status is derived from its presence in the daemon's environment (ready vs available)."
+        },
+        "scrubEnv": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Env vars to scrub when this preset is active. Optional — an adapter that scrubs in code may omit it. Not surfaced to catalog clients."
+        },
+        "defaultModel": { "type": "string", "description": "Conventional default model id for this provider, if any." },
+        "homepage": { "type": "string", "description": "Optional homepage/docs URL for the catalog UI." }
+      }
     },
     "continuation": {
       "type": "object",

@@ -55,7 +55,12 @@ Recommended additions:
 
 - `auth:` — AIP-29 auth block referencing an AIP-19 SECRETS.md
 - `session:` — declare session policy explicitly even at defaults
-- `models:` — let hosts route between models the agent supports
+- `models:` — let hosts route between models the agent supports; annotate an
+  `allowed` entry as `{ id, provider?, mode? }` when the adapter knows who
+  serves it and which mode reaches it
+- `env:` — static always-on env, merged before any mode/option env
+- `presets:` — gateway presets the adapter can drive, merged into the
+  provider-preset catalog (built-in wins on `id` collision)
 - `capabilities:` — pre-flight visibility for routing decisions
 - `examples:` — a handful of canonical prompts the agent handles well
 
