@@ -144,6 +144,10 @@ sandbox:
       ref: ./SECRETS.md                # AIP-19 — credentials live there
       state: { env: ["OPENAI_API_KEY", "STRIPE_SECRET"] }
     passthrough: ["NODE_ENV", "DEBUG"] # static host vars to forward
+    autoPassthrough: true              # opt-in: forward the resolved billing-credential var NAME
+  join:
+    tokenEnv: AGENTPROTO_JOIN          # host var holding a join-token URL, forwarded by the same name
+  extraPorts: [3000, 5173]             # app ports to expose at boot
   network:
     egress: ["api.openai.com", "*.anthropic.com"]
   mounts:                              # AIP-36 mounts (see below) — optional
@@ -208,7 +212,9 @@ sandbox:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `limits` | object | `{ timeout_ms: 30000 }` | Resource caps per command. |
-| `env` | object | `{}` | `{ auth: { ref, state }, passthrough: [...] }`. |
+| `env` | object | `{}` | `{ auth: { ref, state }, passthrough: [...], autoPassthrough?: boolean }`. `autoPassthrough` is opt-in (default off): forward the spawn's resolved billing-credential env-var NAME (e.g. `ANTHROPIC_API_KEY`) into `passthrough`, so a fresh box inherits host auth without the caller naming vars. Only the name is injected — the value travels via the normal passthrough mechanism. |
+| `join` | object | (none) | Auto-join wiring: `{ tokenEnv: string }` names a host env var whose value (a join-token URL) is forwarded into the sandbox under the SAME name at boot, so the box can auto-register with the daemon that minted the token. Equivalent to adding that name to `env.passthrough`, kept as a distinct field because its purpose differs from an arbitrary forwarded secret. A no-op when the named host var is not set — it MUST NOT fail the boot. |
+| `extraPorts` | integer[] | `[]` | App ports to expose at boot. Resolved into `BootedSandbox.ports` (port → public URL) by providers that support port exposure. |
 | `network` | object | `{ egress: [] }` | `{ egress: string[] }` — host allowlist. Empty = no egress. |
 | `mounts` | array | `[]` | Filesystems mounted inside the sandbox. See "Mounts" section below. |
 | `identity` | object \| array | (none) | AIP-23 identity-ref block — owner of the sandbox processes. See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
@@ -252,6 +258,12 @@ sandboxes for the canonical path, custom adapters for cases
 Mastra doesn't yet cover.
 
 ### Provider config shapes
+
+Every provider's `config` also accepts `installAdapters` (string[]): semantic
+harness slugs to pre-install in the box at boot (e.g. `["hermes", "claude-code"]`).
+Each expands to `@agentproto/adapter-<slug>@latest` plus that adapter's
+declared boot extras; a `config.installPackages` pin for the same package
+always wins. Additive — absent means no extra install.
 
 ```yaml
 # local
@@ -301,9 +313,12 @@ interface SandboxDefinition {
     cpuMs?:      number
   }
   env?: {
-    auth?:        { ref?: string; state?: { env?: string[] } }
-    passthrough?: string[]
+    auth?:            { ref?: string; state?: { env?: string[] } }
+    passthrough?:     string[]
+    autoPassthrough?: boolean
   }
+  join?:       { tokenEnv: string }
+  extraPorts?: number[]
   network?: {
     egress: string[]
   }

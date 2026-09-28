@@ -96,6 +96,13 @@ variables:
 Hello {{user.name}}, you have {{reports.count}} reports.
 ```
 
+`file` and `query` sources MAY carry an optional `workspace` (non-empty
+string) naming a workspace to resolve `path` (respectively the glob)
+against, instead of the render filesystem. The host's workspace resolver
+supplies that filesystem and enforces access; a `workspace` the host has
+not configured surfaces as `status: "error"` on that source rather than
+silently reading the wrong scope.
+
 ## Rationale
 
 *To be authored. Defend: declarative `kind: tool` references over imperative

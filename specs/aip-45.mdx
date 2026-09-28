@@ -120,6 +120,7 @@ Top-level fields (informative summary):
 | `version` | Yes | Semver of this manifest |
 | `bin` | Yes | Path to the binary |
 | `bin_args` | No | Default argv (e.g. `["acp"]` for `hermes acp`) |
+| `env` | No | Static, always-on environment variables (string → string) merged into the spawn env before any mode/option env patch, so those can override. The always-on counterpart to `modes[].env` / `options[].env`; the main user is a generic ACP agent whose whole config surface is `bin` + `args` + `env`. |
 | `install` | Yes | Array of install methods (AIP-29 `$ref`) |
 | `version_check` | Yes | Version detection (AIP-29 `$ref`) |
 | `setup` | No | Post-install configuration steps (AIP-29 `$ref`) — daemons, bind-time prompts, OAuth, external pickers |
@@ -131,7 +132,8 @@ Top-level fields (informative summary):
 | `adapter` | When `protocol=proprietary` | NPM package implementing `AgentCliClient` |
 | `print` | When `protocol=print` | Inline print surface config (optional — Claude Code defaults when omitted) |
 | `session` | No | Session policy: mode, idle_timeout_ms, max_turns |
-| `models` | No | Model routing: default, allowed, env-mapped |
+| `models` | No | Model routing: default, allowed, env-mapped. Each `allowed` entry is a bare id string (provider unstated — the projector MUST NOT guess one) or `{ id, provider?, mode? }`: `id` is unchanged on the wire, `provider` is the ProviderPreset id (or direct provider) that serves and bills the model, `mode` is this adapter's mode id that routes to `provider`. |
+| `presets` | No | Gateway presets (Anthropic/OpenAI-compatible backends) this adapter can drive. See [Presets](#presets). |
 | `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |
 | `modes` | No | Mutually-exclusive operation modes (e.g. claude-code's `plan` / `accept-edits` / `bypass-permissions`). One active per turn. |
 | `options` | No | Independent typed knobs (model, max-turns, auto, ...). Multiple may be active per turn. |
@@ -312,6 +314,16 @@ Mode ids MUST be unique. The default mode (when the operator omits
 verbatim. Hosts MUST reject an `OPERATOR.runtime.config.mode` value
 that is not in the manifest's `modes[].id` list.
 
+Besides `bin_args_append` and `env`, a mode MAY declare:
+
+| Field | Type | Description |
+|---|---|---|
+| `bin_args_prepend` | string[] | Extra argv prepended before the manifest's `bin_args` when the mode is active. |
+| `env_unset` | string[] | Env keys to DELETE from the spawn env when the mode is active. Applied at the runtime's env-merge point, after ambient `process.env` and mode/option env are combined, so a mode can scrub a credential that must never reach a non-native endpoint (e.g. a gateway mode scrubbing `ANTHROPIC_API_KEY`). Deletion is the only safe semantics for scrubbing; `env` cannot express it. |
+| `kind` | `"context"` | Which session-config axis the mode expresses. Narrowed to `context` (what enters context) — the only concern with no ACP-protocol home. Route is derived from the model catalog; posture comes from the harness's own ACP mode registry. Omitted ⇒ inferred from the id. |
+| `status` | `active` \| `noop` \| `planned` | Honest support status surfaced to clients. `active` does what its description claims; `noop` is declared and accepted but measured to have no effect; `planned` is declared but not wired yet. Absent ⇒ `active`. |
+| `status_note` | string | Human-readable reason backing `status` (e.g. what was measured). |
+
 ### Options
 
 `options` is OPTIONAL. When present, it declares typed knobs the CLI
@@ -343,11 +355,42 @@ Patch semantics:
   (stringified). Use for value-bearing flags.
 - `bin_args_append_when_true` — applies only to `type: boolean`. Value
   must be `true`. Use for bare flags.
+- `bin_args_prepend` — argv template prepended before the manifest's
+  `bin_args` when the value is non-default; `{value}` is replaced as in
+  `bin_args_template`.
 - `env` — merged into the spawn env. Values may contain `{value}`.
+- `env_unset` — env keys to DELETE from the spawn env when the value is
+  non-default. Symmetric with `modes[].env_unset` and applied at the same
+  env-merge point, so a value-bearing option (e.g. a `base_url` pointing at
+  a third-party Anthropic-compatible gateway) can scrub the ambient
+  credential it displaces without also selecting a preset mode.
 
 Hosts MUST validate `OPERATOR.runtime.config.options.<id>` against the
 matching option's type / enum / bounds before spawn. Unknown ids are a
 hard load-time error.
+
+### Presets
+
+`presets` is OPTIONAL. Each entry declares a gateway preset — a backend an
+Anthropic/OpenAI-compatible client can front — so the provider-preset
+catalog surfaces adapter-contributed presets alongside the built-in
+registry. The catalog dedupes by `id`; an adapter-declared `id` that
+collides with a built-in is ignored in favour of the built-in.
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | Yes | Stable preset id. SHOULD equal the mode id when the adapter projects this preset as a mode. |
+| `label` | Yes | Human label for the catalog UI. |
+| `schemaFlavor` | Yes | `anthropic` \| `openai` — selects which adapter family can consume the preset. |
+| `baseUrl` | Yes | Base URL the client hits. |
+| `keyEnv` | Yes | Conventional env var holding the provider's API key. Catalog status is derived from its presence in the daemon's environment (`ready` vs `available`). |
+| `description` | No | Free text. |
+| `scrubEnv` | No | Env vars to scrub when the preset is active. Not surfaced to catalog clients. |
+| `defaultModel` | No | Conventional default model id for this provider. |
+| `homepage` | No | Homepage/docs URL for the catalog UI. |
+
+A preset carries no adapter projection (`env` / `env_unset` / `bin_args`);
+that stays in `modes` / `options`.
 
 ### Continuation
 

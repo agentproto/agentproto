@@ -160,6 +160,12 @@ Hosts that lack filesystem sugar SHOULD register `readFile` and `query` as tools
 and let `kind: file` / `kind: query` rewrite through the same code path. The
 observed value in the context is identical either way.
 
+`file` and `query` sources MAY declare `workspace` (non-empty string): resolve
+`path` (for `query`, the glob) against that named workspace instead of the
+render filesystem. The host's workspace resolver supplies the filesystem and
+enforces access. A `workspace` the host has not configured MUST surface as
+`status: "error"` for that source — never a silent read from the wrong scope.
+
 ## Format contract
 
 `file` and `query` sources parse content by extension into a uniform shape.

@@ -182,7 +182,7 @@ interface ArtifactEntry {
 
 interface StepRecord {
   stepId:     string
-  status:     RunStatus              // pending|running|succeeded|failed|suspended|cancelled
+  status:     RunStatus | "skipped"  // pending|running|succeeded|failed|suspended|cancelled, or "skipped"
   driver?: {
     kind:       string               // e.g. "tool", "agent", "gate"
     adapter?:   string                // AIP-45 adapter slug, when agent-backed
@@ -256,6 +256,11 @@ pending → running → succeeded | failed | cancelled
 - **Terminal** = `succeeded` | `failed` | `cancelled`. `suspended` is
   deliberately excluded — a suspended run is resting, not finished, and
   MAY remain suspended indefinitely.
+- **`skipped` is a step-only status**, never a run status: the step sits
+  in an untaken [AIP-15](/docs/aip-15) `kind: "branch"` arm and will not
+  run in this run. It is terminal for that step, entered directly from
+  `pending` (the step never starts), and is announced by a
+  `step.skipped` event (§5).
 - `suspended → running` happens **only** via `run.resume` (§Operations).
   No other transition leaves `suspended`.
 - **MUST: every run reaches a terminal state, or `suspended`.** A run
@@ -459,7 +464,12 @@ interface RunEvent {
 | `run.succeeded` | `step.resumed` |
 | `run.failed` | `step.succeeded` |
 | `run.cancelled` | `step.failed` |
-| `run.published` | `step.spend` |
+| `run.published` | `step.skipped` |
+| | `step.spend` |
+
+`step.skipped` marks a step in an untaken AIP-15 branch arm. It is
+terminal — the step never starts in this run — and its `data` carries
+`{ reason: "branch-not-taken", branchId }`.
 
 A reader resumes an in-progress stream from any `seq` it already has —
 the HTTP projection's SSE `Last-Event-ID` header carries exactly this

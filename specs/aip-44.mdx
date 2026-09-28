@@ -218,6 +218,7 @@ Top-level fields (informative summary):
 | `metadata.aip44.governance` | No | Ref to AIP-7 GOVERNANCE.md |
 | `metadata.aip44.sandbox` | When tier `≥ sandboxed` | Ref to AIP-36 SANDBOX.md |
 | `metadata.aip44.audit` | No | Audit log target (defaults to operator's governance binding) |
+| `metadata.aip44.mcp_servers` | No | MCP servers the runtime mounts via `session/new.mcpServers`. Each entry: `name`, `transport` (`stdio` \| `http` \| `sse`), `ref`, and — `stdio` only — `args` (argv passed to the `ref` command) and `env` (extra environment for the launched server), both carried through to `session/new`. |
 
 ### Lifecycle (server-side)
 

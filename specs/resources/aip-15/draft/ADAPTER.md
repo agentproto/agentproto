@@ -123,12 +123,21 @@ MUST refuse.
 - Run the tool through the host's normal tool-call path; the workflow step is
   just a structured caller. Tool-level `mutates` / `requires` / `approval` apply
   ON TOP of step-level policies; the **stricter** wins.
+- When `cacheable: true`, cache the step's output under the run's `cacheKey`,
+  hashing only the resolved `inputs` (never `context` or secrets).
 
 ### `kind: "branch"`
 
 - Evaluate each branch's `when` expression in declaration order.
 - First true branch wins; subsequent branches are skipped.
 - If no branch matches, take `default` (defaults to `$end`).
+- Branches are exclusive: after the chosen arm, resume at `join` (which MUST
+  come after every arm target), or at the step right after the last arm's
+  target when `join` is omitted. Steps in an untaken arm never start; emit
+  `step.skipped` for each (AIP-58).
+- `fallthrough: true` is the legacy non-exclusive mode: run the chosen target
+  and every later sibling in document order. Discouraged — kept for back-compat
+  during the exclusive-branch migration — and incompatible with `join`.
 - Hosts MUST support the [minimum expression grammar](/docs/aip-15#expressions);
   hosts MAY extend.
 

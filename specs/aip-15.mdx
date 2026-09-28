@@ -278,6 +278,10 @@ happens at step-execution time per AIP-30's resolver.
 
 Exactly one of `tool:` or `action:` MUST be set per step.
 
+A tool step MAY set `cacheable: true` to cache its output under the run's
+`cacheKey`. Only the step's resolved `inputs` are hashed — never `context`
+or secrets. Default `false`.
+
 ```yaml
 # Form A — pin a specific TOOL (locks implementation)
 - id: fetch-page
@@ -343,6 +347,15 @@ Conditionally route to one of N successors.
 Adapters MUST support equality, ordering on numbers and strings,
 boolean `&&` / `||` / `!`, and `null` checks. Adapters MAY support
 more; spec-strict workflows stay within the minimum.
+
+| Field | Type | Description |
+|---|---|---|
+| `join` | step id | Later sibling where execution resumes after the chosen arm. It MUST come after every arm target. Omitted ⇒ the step right after the last arm's target, so the last arm's body is exactly its target step; declare `join` to give the last arm several steps. |
+| `fallthrough` | boolean | Legacy, discouraged. Default `false`. `true` restores the pre-exclusive semantics: the chosen target runs AND every sibling after it in document order, and a no-match without `default` continues at the next sibling. Incompatible with `join`. |
+
+Branches are **exclusive**: only the chosen arm runs. Steps in an untaken
+arm never start; the host records each as `skipped` — a `step.skipped`
+event and `StepRecord.status: "skipped"`, see [AIP-58](/docs/aip-58) §5.
 
 ##### `kind: "parallel"`
 
