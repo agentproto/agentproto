@@ -1,13 +1,13 @@
 ---
-title: "AIP-60: INFERENCE — inference-endpoint/v1 (spawnable model-serving resource, provider interface, session binding, local-only privacy)"
+title: "AIP-61: INFERENCE — inference-endpoint/v1 (spawnable model-serving resource, provider interface, session binding, local-only privacy)"
 description: Names the inference endpoint — a locally-run, device-hosted, or operator-hosted model server — as a spawnable, supervised resource with the same shape as an AIP-46 session. Fixes the InferenceEndpoint resource and its capabilities (loaded vs max context, device, cost, ttl); a normative connector notion (`{connector, baseUrl, auth?}`, identical for a local and a remote custom endpoint, with a detection-filled `local` preconfig and declared per-runtime request quirks); an InferenceProvider interface mirroring AIP-36's SandboxProvider across four provider classes (attach, local-managed, device, operator-hosted — split into shared and private offerings); static and dynamic gateway registration with `<endpoint>/<model>` and `<model>@<device>` addressing; the `inference` field on agent_start with a fit check that MUST run before spawn; and the `local-only` privacy profile that refuses any non-local upstream.
-aip: 60
+aip: 61
 status: Draft
 type: Schema
 created: 2026-09-27
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 36, 45, 46]
-discussions-to: https://github.com/agentproto/agentproto/discussions/60
+discussions-to: https://github.com/agentproto/agentproto/discussions/61
 layer: primitives
 package: "@agentproto/llm-endpoint"
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/llm-endpoint
@@ -15,7 +15,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/llm-endpoint
 
 | Field | Value |
 |---|---|
-| AIP | 60 (provisional — editors assign the final number) |
+| AIP | 61 (provisional — editors assign the final number) |
 | Title | INFERENCE — inference-endpoint/v1 |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
