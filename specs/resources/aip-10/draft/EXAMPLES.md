@@ -32,7 +32,7 @@ schema: knowledge.entry/v1
 slug: alex-park
 kind: entity
 title: Alex Park
-updated_at: 2026-04-27T15:00:00Z
+updated_at: "2026-04-27T15:00:00Z"
 ---
 
 # Alex Park
@@ -64,7 +64,7 @@ sources:
   - 2026-04-15-board-deck
   - 2026-04-27-investor-call
 confidence: 0.9
-updated_at: 2026-04-27T15:30:00Z
+updated_at: "2026-04-27T15:30:00Z"
 tags: [finance, runway]
 ---
 
@@ -108,7 +108,7 @@ sources:
   - 2026-04-27-investor-call
   - 2026-03-10-fundraising-strategy
 confidence: 0.75
-updated_at: 2026-04-27T16:00:00Z
+updated_at: "2026-04-27T16:00:00Z"
 links:
   - lead-investor
   - alex-park
@@ -162,13 +162,13 @@ sources:
   - 2025-10-01-board-meeting
   - 2025-11-15-revenue-forecast
 confidence: 0.4
-updated_at: 2026-04-27T16:15:00Z
+updated_at: "2026-04-27T16:15:00Z"
 contradicts: []
 tags: [finance, targets, stale]
 metadata:
   lint:
     stale: true
-    stale_since: 2026-01-29
+    stale_since: "2026-01-29"
     stale_reason:
       "All sources older than 90-day threshold; no Q1 2026 source confirms or
       denies."
@@ -205,7 +205,7 @@ schema: knowledge.source/v1
 id: 2026-04-27-investor-call
 path: sources/2026-04-27-investor-call.md
 title: Lead investor weekly sync, 2026-04-27
-captured_at: 2026-04-27T15:00:00Z
+captured_at: "2026-04-27T15:00:00Z"
 captured_by: jeremy@agentik.net
 content_hash: sha256:9f1b3c7e4d2a8f6b1c0e9d5a3f7b2c8e1d4a6f9b3c7e0d2a5f8b1c4e7d9a3f6b
 authority: primary
@@ -245,15 +245,15 @@ sources:
   - 2026-04-27-investor-call
   - 2026-04-27-ops-headcount-plan
 confidence: 0.85
-updated_at: 2026-04-27T17:00:00Z
+updated_at: "2026-04-27T17:00:00Z"
 supersedes: []
 contradicts: []
-tags: [finance, runway, fork:ops]
+tags: [finance, runway, fork-ops]
 metadata:
   fork:
     parent_wiki: company-wiki
     parent_slug: runway-extension-q2
-    forked_at: 2026-04-27T17:00:00Z
+    forked_at: "2026-04-27T17:00:00Z"
     forked_reason:
       "Ops team needs entries scoped to headcount; finance team's wiki keeps the
       broader version."
@@ -318,7 +318,7 @@ sources:
   - 2026-04-25-internal-design-doc
   - 2026-04-26-team-discussion-thread
 confidence: 0.95
-updated_at: 2026-04-27T18:00:00Z
+updated_at: "2026-04-27T18:00:00Z"
 supersedes:
   - rag-vs-wiki-comparison
   - knowledge-base-options-2026

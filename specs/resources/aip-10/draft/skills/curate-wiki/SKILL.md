@@ -163,7 +163,7 @@ sources:
   - 2026-04-15-board-deck         # by source id, NOT path
   - 2026-04-27-investor-call
 confidence: 0.9
-updated_at: 2026-04-27T15:30:00Z
+updated_at: "2026-04-27T15:30:00Z"
 supersedes: []
 contradicts: []
 metadata: {}

@@ -167,8 +167,10 @@ metadata:                             # OPTIONAL — vendor extensions
 ```
 
 The **`slug`** is the page's canonical identity: a bare kebab-case token
-(`[a-z0-9-]+`, no `/`), unique within the wiki, equal by convention to the
-page filename without its `.md` extension. It is REQUIRED. A runtime MAY
+(`[a-z0-9-]+`, 2–96 characters, no `/`), unique within the wiki, equal by
+convention to the page filename without its `.md` extension. It is REQUIRED.
+Every identity field in the schema (`slug`, source `id`, workspace `name`) has
+the same 96-character maximum. A runtime MAY
 namespace its *internal* node identifier by the page's containing directory
 (e.g. `<dir>/<slug>`) for retrieval or graph indexing, but that namespacing is
 the runtime's own concern and MUST NOT leak into the frontmatter contract: a
@@ -178,6 +180,12 @@ basename. A runtime that refuses a conformant bare `slug` — or that forces the
 author to omit `slug` or spell it as a non-kebab path — is **non-conforming**;
 the portable wiki keeps its bare slugs and the runtime derives whatever
 internal id it needs from them.
+
+Timestamp fields (`updated_at`, `captured_at`, and any other `format:
+date-time` field) are ISO-8601 **strings** and MUST be written quoted in YAML
+frontmatter (`updated_at: "2026-04-27T15:00:00Z"`). An unquoted ISO-8601 scalar
+is resolved by YAML parsers to a native date object, not a string, and then
+fails schema validation.
 
 Three reference surfaces exist on a page and MUST NOT be conflated:
 
