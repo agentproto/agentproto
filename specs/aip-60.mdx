@@ -1,0 +1,889 @@
+---
+title: "AIP-60: SENTINEL: watch and notify (subjects, events, providers, and the inbox delivery contract)"
+description: "Names the sentinel, a persistent watch over a subject (`github:owner/repo#42`, `github:owner/repo`, a `*`-prefixed prefix match) that delivers matching events into a session's AIP-46 inbox until a stop condition holds, as a first-class daemon primitive. Fixes the SentinelSpec (`match`, `until`, `target`, `provider`, `group`, `label`), the CloudEvents 1.0 SentinelEvent envelope with its subject hierarchy and `terminal` flag, the provider interface (capabilities, create/attach/cancel/status, poll/ack, parseInbound, readiness) and the three shipped providers (`local-gh`, `webhook`, `agentpush`) with their capability declarations and auto-selection order, the poll runtime (15s/60s adaptive cadence, persisted per-sentinel dedup, at-least-once delivery, dead-session resume and parking), the push ingress route `POST /inbound/sentinel-<hookKey>`, the delivery urgencies (`fyi`, `next-turn`, `steer`, `interrupt`), the MCP tool surface (`sentinel_watch`, `sentinel_list`, `sentinel_unwatch`, `sentinel_poll_now`, `list_sentinel_adapters`, `setup_sentinel_provider`), the daemon-HTTP `/sentinels` routes, the `agentproto sentinel` CLI, and PR auto-link."
+aip: 60
+status: Draft
+type: Schema
+created: 2026-09-29
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 46]
+discussions-to: https://github.com/agentproto/agentproto/discussions/60
+layer: runtime
+package: "@agentproto/runtime"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+---
+
+| Field | Value |
+|---|---|
+| AIP | 60 (provisional, editors assign the final number) |
+| Title | SENTINEL: watch and notify |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-46](/docs/aip-46) (AGENT-SESSIONS: the inbox a matched event is delivered into, and the session liveness, resume, and parent semantics delivery relies on) |
+| Composes with | [AIP-41](/docs/aip-41) (SCHEDULE: the `routine` target kind, a frozen shape with no delivery implementation yet), [AIP-62](/docs/aip-62) (REVIEW: the PR auto-linker is the natural companion to a review that opens a pull request) |
+| Created | 2026-09-29 |
+| Package | `@agentproto/runtime` (sentinel store, runtime, providers, tools, ingress, auto-link); `@agentproto/provider-kit` (adapter catalog, list and setup tool plumbing); `@agentproto/cli` (`agentproto sentinel` verbs) |
+
+## Abstract
+
+A **sentinel** is a persistent watch over a **subject** that delivers
+matching events into a session's inbox. "Watch this pull request and tell
+my session when CI finishes, when a review lands, or when the PR merges"
+is something an agent needs to be able to say once, persistently, across
+its own turns and across daemon restarts, without a human polling the web
+UI on its behalf. This AIP fixes:
+
+- the **`SentinelSpec`**: a list of `{subject, types?}` match clauses with
+  OR semantics, a stop condition (`until`: `subject_terminal`, `at`,
+  `count`, `never`), a delivery target (`session` today; `routine` and
+  `webhook` are frozen shapes without delivery), a resolved provider slug,
+  and descriptive `group` and `label`;
+- the **`SentinelEvent`** envelope: CloudEvents 1.0 structured JSON with
+  agentproto extension attributes (`summary`, `subjects`, `terminal`,
+  `consumerref`, `seq`), a subject grammar (`<scheme>:<path>`, e.g.
+  `github:agentproto/ts#1428`), a full subject hierarchy
+  (pull request, then repository, then owner), and a default GitHub PR
+  event-type set;
+- the **provider interface**: declared capabilities (`subjects`, `push`,
+  `poll`, `durable`, `needsPublicUrl`, `requiresAuth`,
+  `typicalLatencyMs`), a create/attach/cancel/status lifecycle,
+  optional `poll`/`ack` and `parseInbound`, a `defaultTypes(subject)`
+  function, an operational `readiness()` probe, and `setupFields`
+  surfaced by `setup_sentinel_provider`; plus the three shipped
+  providers, `local-gh` (poll over the host's `gh` CLI), `webhook`
+  (GitHub repository hooks, push), and `agentpush` (hosted durable
+  subscriptions), and the auto-selection order over them;
+- the **delivery runtime**: an adaptive poll loop (15 s while any
+  sentinel saw an event in the last 10 minutes, 60 s otherwise), a
+  persisted per-sentinel dedup window (last 1000 event ids), the same
+  per-event pipeline for polled and pushed events, at-least-once
+  delivery with post-delivery ack, dead-session resume or parking, and
+  the four inbox urgencies (`fyi`, `next-turn`, `steer`, `interrupt`);
+- the **push ingress**: `POST /inbound/sentinel-<hookKey>`, signature
+  verification per provider, and the reserved `sentinel-` route prefix;
+- the **tool surface**: the MCP tools `sentinel_watch`, `sentinel_list`,
+  `sentinel_unwatch`, and `sentinel_poll_now` plus the family adapter
+  tools `list_sentinel_adapters` and `setup_sentinel_provider`, the
+  daemon-HTTP `/sentinels` routes, the `agentproto sentinel` CLI verbs,
+  and the PR auto-link hook.
+
+## Motivation
+
+An agent session that opens a pull request then ends its turn has exactly
+one way to learn what happened next: someone or something has to look.
+Today that someone is the human. The session's own harness cannot watch;
+the daemon has no primitive for "wake this session when the world
+changes"; and a naive cron poll inside the session dies with the session.
+
+Three properties are missing from any ad-hoc answer:
+
+1. **Persistence across restarts and turns.** A watch that lives in a
+   session's context window dies when the session is compacted or
+   stopped. A watch must be daemon state, stored on disk, re-attached on
+   boot, and independent of whether the target session is alive at the
+   moment an event fires.
+2. **A normalized event, not a provider payload.** The same PR merge
+   arrives as a GitHub webhook delivery, as a diff between two `gh`
+   snapshots, or as a hosted subscription batch. A consumer can only be
+   provider-agnostic if the daemon normalizes all three into one
+   envelope, one subject grammar, and one event-type vocabulary.
+3. **A delivery target that is the inbox, with a chosen urgency.** An
+   event that should wake the session now and an event that should merely
+   be waiting at the next turn are different deliveries. The urgency
+   dimension already exists in [AIP-46](/docs/aip-46)'s inbox; the
+   sentinel needs to fill it in, not invent a parallel channel.
+
+## Design principles
+
+1. **The watch is daemon state, not session state.** A sentinel is
+   persisted under the daemon home, survives restarts, and keeps its
+   provider-side watch alive even when its target session dies: the PR
+   is still real. A dead session is resumed if it can be, routed around
+   if it was closed on purpose, and parked to a journal if neither is
+   possible. It is never silently dropped.
+2. **At-least-once, deduped by the consumer.** Delivery is marked seen
+   only after it is handled (delivered or parked). A crash between
+   delivery and ack redelivers, and the persisted per-sentinel `seen`
+   window turns the redelivery into a no-op. A sentinel that fires
+   exactly once is a sentinel that loses events.
+3. **Providers are pluggable and declaratively different.** Poll versus
+   push, durable versus not, needs-a-public-URL versus not: these are
+   declared capabilities, not behavior the daemon guesses at. The same
+   runtime pipeline runs over whatever events a provider yields.
+4. **No silent fallback.** Auto-selection picks the best ready provider,
+   but an explicitly requested provider is never second-guessed and
+   never downgraded: a not-ready `webhook` fails `sentinel_watch` with
+   its setup error, naming the fix.
+5. **Credentials never travel in the envelope.** Provider secrets live in
+   0600 stores (sentinel creds, the webhook hook store, the sentinel
+   store itself); tool results and `SentinelView`s never echo them.
+6. **Post-mortem noise stays post-mortem.** After a watched PR merges or
+   closes, later non-terminal events for it (a check suite failing after
+   the merge) are journaled, never delivered, and never wake anything.
+7. **Parse loudly, degrade visibly.** An unknown provider slug, a dead
+   target session, a failed push delivery, and an expired watch are all
+   named states (`error`, `orphaned`, `expired`) surfaced by
+   `sentinel_list`, not swallowed log lines.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as in
+RFC 2119. Unless stated otherwise the behavior below is that of the
+reference implementation (`@agentproto/runtime`, `@agentproto/cli`) and
+is normative for conformant hosts.
+
+### The primitive
+
+A **sentinel** is a record:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Required. `sen_<ulid>`, minted by the daemon. Follows the AIP-10 id shape (2 to 96 characters, uppercase alphanumerics and `_` after the `sen_` prefix). |
+| `spec` | `SentinelSpec` | Required. The watch itself. |
+| `provider` | string | Required. The resolved provider slug. Never absent once created, even when the spec left `provider` to auto-selection. |
+| `handle` | `SentinelHandle` | Required. Opaque provider-owned state (`remoteId`, `cursor`, `state`). |
+| `status` | string | Required. One of `active`, `paused`, `expired`, `orphaned`, `error`. |
+| `createdTs` | number | Required. Epoch milliseconds. |
+| `eventCount` | number | Required. Delivered events so far. |
+| `lastEventTs` | number | Optional. Epoch milliseconds of the last delivered event. |
+| `lastError` | string | Optional. The most recent provider error. |
+| `seen` | string[] | Required. The persisted dedup window, capped at the last 1000 event ids. |
+| `terminalSubjects` | string[] | Required. Clause subjects that have seen a terminal event. Used only by `until: subject_terminal`. |
+| `closedSubjects` | string[] | Optional. Concrete subjects known merged or closed; capped at the last 500. |
+
+The store persists the whole set to `<home>/sentinels.json` (mode
+`0600`, atomic write to a temp file followed by a rename, debounced
+async writes with a synchronous flush at shutdown), where `<home>` is
+`AGENTPROTO_HOME` or `~/.agentproto`. A corrupt file is logged and the
+store starts empty. A sentinel's handle can carry a provider secret, so
+the file is 0600.
+
+#### `SentinelSpec`
+
+| Field | Type | Description |
+|---|---|---|
+| `match` | array | Required, at least one clause. See §Match clauses. |
+| `until` | object | Required. `{kind: "subject_terminal"}`, `{kind: "at", ms}`, `{kind: "count", n}`, or `{kind: "never"}`. See §Stop conditions. |
+| `target` | object | Required. `{kind: "session", sessionId, urgency}`. See §Targets. |
+| `provider` | string | Optional. The provider slug. Absent means auto-select (§Provider selection). |
+| `group` | string | Optional. Descriptive fan-out grouping id (for example the session id that spawned several related watches). Purely descriptive: surfaced by `sentinel_list`, read by nothing. |
+| `label` | string | Optional. Human-readable label surfaced by `sentinel_list` and the CLI. |
+
+#### Match clauses
+
+A clause is `{subject, types?}`. `subject` is a routing key in
+`<scheme>:<path>` form, for example `github:agentproto/ts#1428` (a pull
+request), `github:agentproto/ts` (a repository), or
+`github:agentproto` (an owner). A clause subject ending in `*` is a
+prefix match against an event's `subjects` hierarchy; otherwise the
+clause subject must appear exactly in the event's `subjects`.
+
+`types` is a list of event-type globs. `*` is the only wildcard, matching
+any run of characters (the same expressiveness file-glob patterns need).
+Absent or empty `types` means the resolved provider's
+`defaultTypes(subject)`.
+
+Match semantics are **OR across clauses**: an event matches the sentinel
+if any clause matches it (that clause's subject against the event's
+`subjects`, that clause's types, or the provider defaults, against the
+event's `type`).
+
+#### The subject hierarchy
+
+An event carries `subjects`, the full hierarchy most specific first: for
+an event on `agentproto/ts#1428`, `["github:agentproto/ts#1428",
+"github:agentproto/ts", "github:agentproto"]`; for a repository-level
+event, `["github:agentproto/ts", "github:agentproto"]`. Watching
+`github:agentproto/ts*` therefore matches every pull request in the
+repository; watching `github:agentproto*` matches everything under the
+owner. The event's own `subject` (the most specific entry) is always the
+concrete thing that happened, and is what delivery records.
+
+#### Event types
+
+An event `type` follows `<scheme>.<object>.<action>`, for example
+`github.pull_request.closed`.
+
+The **default PR type set** for a `github:` PR subject is:
+
+```
+github.check_suite.completed
+github.workflow_run.completed
+github.pull_request_review.submitted
+github.pull_request.closed
+github.pull_request.synchronize
+github.issue_comment.created
+```
+
+`check_run.*` is deliberately excluded as noise. A provider's
+`defaultTypes(subject)` returns this set for a GitHub PR subject. For a
+`github:` subject that is not a PR, `local-gh` and `webhook` return an
+empty list (they can only watch PRs); `agentpush` returns `["*"]`.
+
+#### `SentinelEvent`
+
+Canonical envelope (CloudEvents 1.0 structured JSON):
+
+| Field | Type | Description |
+|---|---|---|
+| `specversion` | `"1.0"` | Required. |
+| `id` | string | Required. Stable across retries and redeliveries; the idempotency key is `(sentinelId, event.id)`. Push providers fold the provider's own delivery id in (for example `evt_<X-GitHub-Delivery>`); `local-gh` mints `evt_<24 hex>` from the diff inputs that make the event. |
+| `source` | URI string | Required. Names the provider instance (for example `//agentproto.local/sentinel/webhook`). |
+| `type` | string | Required. See §Event types. |
+| `subject` | string | Required. The primary, most specific subject the event is filed under. |
+| `time` | string | Required. ISO-8601. |
+| `datacontenttype` | `"application/json"` | Required. |
+| `data` | object | Required. The normalized projection, at most 32 KiB. Raw provider payloads never appear. |
+| `summary` | string | Required. One line, used verbatim (after a `[<scheme>]` prefix) as the inbox message text. |
+| `subjects` | string[] | Required. The full hierarchy, most specific first. |
+| `terminal` | boolean | Required. Ends the subject's lifecycle when the spec's `until` is `subject_terminal`. |
+| `consumerref` | string | Optional. The opaque consumer reference a provider was asked to stamp. |
+| `seq` | number | Optional. A monotonic sequence, when the provider assigns one. |
+
+#### Stop conditions (`until`)
+
+| Kind | Expires when |
+|---|---|
+| `subject_terminal` | Every clause subject of `spec.match` has recorded a terminal event (the `terminalSubjects` set covers all of them). A single-clause spec expires on that subject's first terminal event. |
+| `at` | `now >= ms`. |
+| `count` | The sentinel's `eventCount` has reached `n`. |
+| `never` | Never; only `sentinel_unwatch` (or expiry by the other kinds) ends the watch. |
+
+On expiry the record's status becomes `expired` and the provider is
+cancelled, best effort.
+
+#### Targets
+
+| Kind | Shape | Status |
+|---|---|---|
+| `session` | `{kind, sessionId, urgency}` | Shipped. The only kind with a delivery implementation. |
+| `routine` | `{kind, routineId}` | Frozen shape only. `SentinelStore.create` rejects it (`SentinelTargetNotImplementedError`, error `not_implemented`) until [AIP-41](/docs/aip-41) `schedule.kind: event` binding wires delivery. |
+| `webhook` | `{kind, url, secret}` | Frozen shape only. Rejected the same way until an external-forwarding target is designed. |
+
+`urgency` is one of the [AIP-46](/docs/aip-46) message urgencies: `fyi`,
+`next-turn`, `steer`, `interrupt`. The default is `next-turn`.
+
+### Provider contract
+
+A **sentinel provider** turns a spec into a stream of
+`SentinelEvent`s. It is a `@agentproto/provider-kit` adapter: the kit
+gives it the generic handle members (`slug`, `name`, `version`,
+`description`, `requiresSetup`, `check`) and the sentinel family adds
+the members below.
+
+| Member | Required | Description |
+|---|---|---|
+| `capabilities` | yes | Declared capabilities, below. |
+| `create(spec, delivery, ctx?)` | yes | Start watching. Returns the provider's `SentinelHandle`. The `ctx.sentinelId` is pre-minted so a provider that stamps the id remotely (agentpush's `consumerRef`) names the same sentinel the daemon records. |
+| `attach(handle, delivery)` | yes | Re-attach after a daemon restart: re-point a callback, resume a cursor. |
+| `cancel(handle)` | yes | Stop watching. |
+| `status(handle)` | yes | `{ok, detail?, pending?}`: is the provider-side watch healthy. |
+| `poll(handle, limit)` | optional | Poll mode: events after `handle.cursor`, oldest first, plus the new cursor. |
+| `ack(handle, cursor)` | optional | Ack a fully handled batch. |
+| `parseInbound(req, handle)` | optional | Push mode: verify and parse one inbound HTTP request into events. |
+| `preferredDelivery(intervalMs)` | optional | A provider supporting both modes declares its default. Absent: poll when `capabilities.poll`, else push. |
+| `defaultTypes(subject)` | yes | Default `types` when the spec leaves them undefined. |
+| `readiness()` | optional | Operational readiness probe. Absent means always ready. Never throws: a probe failure is `{ready: false, reason}`. |
+| `setupFields` | optional | Credential fields accepted via `setup_sentinel_provider`. |
+
+#### Capabilities
+
+| Field | Type | Meaning |
+|---|---|---|
+| `subjects` | string[] | Subject schemes it can watch, e.g. `["github"]`, or `["*"]`. |
+| `push` | boolean | Can deliver by calling back into the daemon (push ingress). |
+| `poll` | boolean | Supports `poll`/`ack`. |
+| `durable` | boolean | Events survive daemon downtime (hosted queue). |
+| `needsPublicUrl` | boolean | Push mode requires a reachable daemon (public URL). |
+| `requiresAuth` | boolean | Needs a provider-managed credential. |
+| `typicalLatencyMs` | number | Documentation only, surfaced by `list_sentinel_adapters`. |
+
+Capabilities are pure metadata. They are surfaced in
+`list_sentinel_adapters` and never carry secrets.
+
+#### Delivery preference
+
+The daemon tells a provider how it wants events: `{mode: "poll",
+intervalMs}` or `{mode: "push", callbackUrl?, secret?}`. The default
+resolution is the provider's `preferredDelivery` when declared, else
+poll at the runtime's active interval when `capabilities.poll` is true,
+else push. The default poll interval handed to `create` is 15000 ms.
+
+#### Readiness
+
+`readiness()` answers "can this provider operate right now", with an
+actionable `reason` when it cannot. It is consulted by
+`list_sentinel_adapters` (a provider that declares readiness and fails
+it is listed as `available`, never a false `ready`, with the reason in
+its info) and by provider auto-selection.
+
+### Shipped providers
+
+Built-in slugs, in catalog order: `local-gh`, `webhook`, `agentpush`.
+Third-party providers are discovered from installed
+`@agentproto/adapter-<slug>` (or `@<scope>/agentproto-adapter-<slug>`)
+packages exporting a factory or a ready handle under
+`<camelSlug>SentinelProvider`, `<camelSlug>`, `default`, or `handle`.
+A package that cannot be imported or fails the duck-type check is
+skipped; partial discovery never fails the whole listing.
+
+| Provider | subjects | push | poll | durable | needsPublicUrl | requiresAuth | typicalLatencyMs |
+|---|---|---|---|---|---|---|---|
+| `local-gh` | `["github"]` | false | true | false | false | false | 30000 |
+| `webhook` | `["github"]` | true | false | false | true | false | 2000 |
+| `agentpush` | `["*"]` | true | true | true | false | true | 15000 |
+
+#### `local-gh`
+
+The zero-infra provider: watching IS polling. It requires no setup and
+uses the host's authenticated `gh` CLI (its `check()` runs
+`gh auth status`).
+
+Exactly one match clause per sentinel, and the clause subject must be
+`github:owner/repo#N` (a PR subject). Each poll fetches the PR's status
+snapshot with the same `fetchPrStatus` the `review_pr` tool uses, and
+diffs it against the previous snapshot. The first poll establishes the
+baseline and emits nothing. The diff yields, in order:
+
+- `github.pull_request.closed` (terminal, `data.merged` true or false)
+  when the state moved to closed or merged;
+- `github.pull_request_review.submitted` for every review past the
+  previous snapshot's position in the append-only reviews history;
+- `github.pull_request.synchronize` (non-terminal, `data.headSha`) when
+  a new head sha appeared; a new head resets the checks baseline to
+  empty, so a same-conclusion rerun on the new head still fires;
+- `github.check_suite.completed` with a worst-of rollup conclusion
+  (`failure` wins over anything, `success` when every completed check is
+  success/skipped/neutral, else `neutral`) for the checks that completed
+  since the last poll, grouped into one event per tick.
+
+`github.issue_comment.created` is in the default type set but is NOT
+produced by this provider: diffing snapshots cannot see comments, and a
+separate comments poll is not wired. A sentinel watching a PR for
+comments needs `webhook` or `agentpush` for that type.
+
+All poll state (the last snapshot, the consecutive-failure counter, the
+last error, and the next-retry timestamp) travels inside the opaque
+`handle.cursor` as a small JSON blob. On a `gh` failure the provider
+backs off exponentially from 30000 ms, capped at 300000 ms, skips
+calling `gh` until the backoff elapses, and reports the failure through
+`status()`.
+
+#### `webhook`
+
+Push-only: watching is one `POST /repos/<owner>/<repo>/hooks` created
+through the host's `gh` CLI, pointing at the daemon's public URL.
+GitHub then calls `POST /inbound/sentinel-<hookKey>` and the provider's
+`parseInbound` verifies and normalizes the delivery.
+
+- **One hook per repository, shared by every sentinel on that repo.**
+  Clause subjects must all resolve to one repository and must be of the
+  forms `github:owner/repo`, `github:owner/repo*`, or
+  `github:owner/repo#N`. A per-repository `holders` set refcounts the
+  sentinels; the hook is deleted from GitHub when the last holder
+  cancels. The hook registry persists to `<home>/sentinel-webhooks.json`
+  (mode `0600`), keyed by a random route key, and is modified under a
+  per-repository lock.
+- **Hook configuration.** Events subscribed:
+  `pull_request`, `pull_request_review`, `check_suite`, `workflow_run`,
+  `issue_comment`; content type `json`; an HMAC secret generated by the
+  provider. The secret is persisted only in the hook store, never in a
+  `SentinelHandle`, never in argv (the hook body goes to `gh` on
+  stdin), and never logged.
+- **Readiness.** Not ready without a public URL (the reason names both
+  fixes: set `AGENTPROTO_PUBLIC_URL`, or start a named tunnel with a
+  stable hostname), when `gh` is missing or unauthenticated, or when the
+  token lacks the `admin:repo_hook`, `write:repo_hook`, or `repo` scope
+  (a token whose scopes cannot be listed, such as fine-grained or App
+  auth, is allowed through and fails at `create` if it lacks access).
+- **No silent fallback.** `create` without a public URL, or against a
+  repository the token cannot manage, throws a setup error naming the
+  fix; that error surfaces as `provider_create_failed` on
+  `sentinel_watch`.
+- **`attach` is the one tolerant path.** On daemon boot the re-attach
+  re-points the hook when the public URL changed, re-creates it when
+  deleted on GitHub behind the daemon's back (keeping the route key and
+  holders), and tolerates a missing public URL by returning the handle
+  unchanged: a named tunnel autostarts after the sentinel runtime, and
+  throwing would mark every webhook sentinel `error` before the tunnel
+  is up. Nothing re-points the hook later on its own; restarting the
+  daemon (or re-creating the sentinel) is the remedy.
+- **Inbound verification.** The GitHub HMAC signature is verified
+  against the hook store's secret; `ping` deliveries are acknowledged
+  with no events; an unsupported event type is acknowledged and dropped,
+  not an error, so GitHub does not show a red delivery for every event
+  outside the watched set.
+
+The event id is `evt_<X-GitHub-Delivery>`, so a GitHub redelivery is a
+no-op through the dedup window and a delivery that failed mid-way is
+still retryable.
+
+#### `agentpush`
+
+The hosted provider: a thin adapter over the agentpush subscription
+API. Watching is one subscription (`POST /subscriptions`) whose
+`consumerRef` is `agentproto:sentinel:<id>`; agentpush queues matching
+events server-side, so they survive daemon downtime.
+
+- **One subject per sentinel.** All match clauses must share one
+  subject, which must look like `<scheme>:<path>`; the subscription's
+  source is the lowercased scheme and its types are the union of the
+  clauses' types (a `*` type is sent as no filter).
+- **Credentials.** A workspace API key stored by
+  `setup_sentinel_provider` (fields: `apiKey`, required and sensitive;
+  `baseUrl`, optional, default `https://api.agentpush.io`; `delivery`,
+  optional, `poll` or `push`), or the bearer of an imported `agentpush`
+  MCP alias. The key is only ever placed in the `Authorization` header.
+  Readiness is offline: a key present means ready, and a wrong or
+  revoked key surfaces on `create`.
+- **Poll delivery (default).** The runtime polls
+  `GET /subscriptions/:id/events?after=<seq>` and acks
+  (`POST .../ack {upToSeq}`) once the whole batch is handled. The seq
+  cursor persists in the sentinel store, so a restart resumes exactly
+  where it stopped and a crash between delivery and ack re-serves the
+  batch into the dedup window.
+- **Push delivery (opt-in).** With the `delivery: push` credential and
+  a public `https://` daemon URL, agentpush POSTs each envelope to
+  `/inbound/sentinel-<hookKey>`; the provider verifies its signature
+  (`X-Agentpush-Timestamp` and `X-Agentpush-Signature: v2=<hex>` over
+  `timestamp.body`, 5-minute skew, constant-time compare) against the
+  per-sentinel callback secret carried in `handle.state`. `poll` is
+  then a no-op; agentpush owns retry and dead-lettering. Without an
+  https public URL, push silently degrades to poll at `create` time.
+- **Envelope.** The agentpush envelope IS the `SentinelEvent`, validated
+  field by field and passed through unchanged; nothing is re-mapped.
+
+### Provider selection
+
+When `sentinel_watch` is called without an explicit `provider`, the
+daemon picks, in order:
+
+1. `agentpush`, when it is set up (its `readiness()` reports ready, i.e.
+   a credential is available);
+2. `webhook`, when a **stable** public URL exists and `webhook` is
+   ready;
+3. `local-gh`, otherwise.
+
+A public URL is stable when it comes from `AGENTPROTO_PUBLIC_URL` or
+`AGENTPROTO_PUBLIC_HTTP_ORIGIN` (normalized to an origin; it must be an
+`http` or `https` URL with no credentials, query, hash, or non-root
+path), or when it comes from an active tunnel forwarding to the daemon's
+port whose provider declares a stable URL capability (a quick tunnel
+gets a fresh hostname per start, so it is usable but not stable, and a
+stable candidate is preferred over an unstable one when both exist).
+
+An explicit `provider` is never routed through selection: it is never
+second-guessed and never silently downgraded. A not-ready explicit
+provider fails `create` with its own setup error.
+
+### The runtime
+
+The runtime is the poll loop and delivery engine. It owns:
+
+- **Re-attach.** On `start()` every sentinel whose status is `active`
+  or `orphaned` is re-attached to its provider. A sentinel whose
+  provider no longer resolves, or whose attach throws, is marked
+  `error` with the reason in `lastError`.
+- **The poll loop.** A self-rescheduling timer (never a fixed interval)
+  runs one tick over every `active` or `orphaned` sentinel backed by a
+  poll-capable provider, in a batch of at most 50 events per sentinel,
+  oldest first. The tick interval is 15000 ms when any pollable
+  sentinel delivered an event within the last 10 minutes (the hot
+  window) and 60000 ms otherwise. A tick is skipped while the previous
+  one is in flight.
+- **The per-event pipeline**, shared by polled and pushed events, per
+  event in order:
+  1. if the sentinel is gone, or its status left the pollable set
+     (`paused`, `expired`, `error`), stop processing the batch;
+  2. if the event id is in the persisted `seen` window, skip;
+  3. update the `closedSubjects` tracking: a terminal event closes its
+     own subject, and a later `.reopened` event reopens it. A
+     non-terminal event on a closed subject is post-mortem noise: it is
+     journaled, marked seen, and never delivered;
+  4. if the event does not match the spec, mark it seen (it is filtered,
+     not failed) and skip;
+  5. deliver (below). If delivery throws, the event is NOT marked seen
+     and the batch halts: a genuinely unhandled failure must stay
+     retryable;
+  6. mark seen, increment `eventCount`, set `lastEventTs`, and apply
+     `until` (§Stop conditions). Poll mode additionally acks the batch
+     cursor and persists the new handle cursor only when the batch
+     completed without a delivery error.
+- **Delivery.** A matched event becomes an [AIP-46](/docs/aip-46) inbox
+  message: `from: {relation: "system"}`, `kind: "notice"`, the spec's
+  urgency, `correlationId: sentinel:<the event's own subject>`, text
+  `[<scheme>] <summary>`, and `data` set to the event envelope trimmed
+  to fit the AIP-46 `data` cap (drop the `data` projection first, then
+  fall back to a bare identity stub with `id`, `type`, `subject`,
+  `summary`, and `truncated: true`).
+- **Dead target session.** `sendMessage` throwing
+  `SessionNotAliveError` triggers, in order: resume the session through
+  the same hooks the inbound router uses and deliver to it (a resumed
+  session that received a new id has the sentinel's target retargeted);
+  if the session ended for a **deliberate** reason (`operator-completed`,
+  `operator-stopped`, `steward-completed`, `steward-abandoned`), never
+  resume it: deliver to its live parent as `fyi` (text prefixed
+  `[for closed session <id>]`), else park and mark `orphaned`; if the
+  session cannot be resumed at all, park and mark `orphaned`. A
+  session that reports alive but rejects delivery is parked and marked
+  `orphaned` rather than spun on.
+- **Parking.** An undeliverable event is appended as one JSON line
+  (`{sentinelId, event, reason, ts}`) to `<home>/sentinels-parked.jsonl`
+  (mode `0600`), where `ts` is a quoted ISO-8601 string. Parking is
+  best effort and never throws.
+- **Push delivery.** A push provider has no `poll()`; the ingress route
+  hands its parsed events to the same pipeline through
+  `deliverPushed`, which serializes deliveries per sentinel (two
+  concurrent deliveries of the same event, a GitHub redelivery racing
+  the original, must not both pass the seen check) and returns
+  `failed: true` when a delivery threw, so the caller can answer 5xx
+  and the sender can redeliver.
+
+The statuses `active` and `orphaned` are the pollable set. A provider
+cancellation is never issued merely because a session died: the
+provider-side watch stays live for `orphaned` sentinels, and a resumed
+sentinel flips back from `orphaned` to `active` on its next successful
+delivery.
+
+### Push ingress
+
+The daemon exposes `POST /inbound/sentinel-<hookKey>` for push
+providers. The `sentinel-` prefix is reserved once sentinel ingress is
+enabled; a request whose `hookKey` matches no known hook is a generic
+404 and echoes nothing about hook keys.
+
+Per provider:
+
+- **`webhook`**: the hook registry resolves the `hookKey`; signature
+  verification failures answer `401`; malformed or unsupported payloads
+  answer `400` (unsupported event types answer `200` with
+  `action: "ignored"`, per §`webhook`); verified events go to every
+  sentinel bound to that hook.
+- **`agentpush`**: each sentinel carries its own hook key and secret in
+  `handle.state`; the bound sentinel's `parseInbound` verifies the
+  signature and the events go to that one sentinel.
+
+A batch in which any delivery threw answers `500 {error:
+"delivery_failed"}` so the sender redelivers; otherwise
+`200 {ok: true, events, sentinels, delivered}`. Verification is always
+the provider's job, never the route bearer token's.
+
+### The watch lifecycle and tool surface
+
+The lifecycle is: watch (create), list, poll on demand, unwatch. Expiry
+by `until` and the dead-session machinery are automatic; nothing else
+removes a sentinel.
+
+#### MCP tools
+
+`sentinel_watch` creates a sentinel.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `subject` | string, optional | Raw subject, e.g. `"github:owner/repo#42"`. Mutually exclusive with `prUrl`; providing neither is `missing_subject`, providing both is `ambiguous_subject`. |
+| `prUrl` | string, optional | `https://github.com/owner/repo/pull/N`. Sugar: subject `github:owner/repo#N`, the default PR type set, and `until: subject_terminal`. An unparseable URL is `invalid_pr_url`. |
+| `sessionId` | string, optional | Target session. Defaults to the calling session (the trusted `callerSessionId` of the connecting client). No identity and no explicit id is `no_caller_identity`. A session that is not alive is `session_not_alive`. |
+| `types` | string[] | Optional. Type globs; default is the provider's `defaultTypes(subject)`. |
+| `urgency` | enum | Optional. `fyi`, `next-turn`, `steer`, `interrupt`. Default `next-turn`. |
+| `until` | enum | Optional. `subject_terminal` or `never`. Default `subject_terminal` for `prUrl`, `never` for a raw subject. |
+| `provider` | string | Optional. `local-gh`, `webhook`, or `agentpush`; default by auto-selection. |
+
+On success the result carries a compact `sentinel` view (below). On
+failure the result carries an error code (`missing_subject`,
+`ambiguous_subject`, `invalid_pr_url`, `no_caller_identity`,
+`session_not_alive`, `unknown_provider`, `provider_create_failed`,
+`create_failed`) and a message. The sentinel id is minted before the
+provider's `create` is called.
+
+`sentinel_list` takes no parameters and returns every sentinel on the
+daemon as a view: `id`, `provider`, `status`, `match`, `until`,
+`target`, optional `group` and `label`, `createdTs`, `eventCount`,
+optional `lastEventTs`, optional `lastError`. The internal fields
+(`handle`, `seen`, `terminalSubjects`) never leave the daemon, and
+credentials are never returned.
+
+`sentinel_unwatch` takes `id`. It cancels the provider-side watch best
+effort (a failed cancel never blocks the record's removal; a stuck
+provider-side resource must not strand the verb) and removes the
+record. An unknown id is the error `not_found`, reported rather than
+thrown.
+
+`sentinel_poll_now` takes an optional `id` and forces one immediate
+poll tick across **every** poll-capable sentinel. There is no targeted
+per-sentinel poll; `id` only selects that sentinel's post-poll state to
+echo in the result, and an unknown id is `not_found`.
+
+`list_sentinel_adapters` (from the provider kit) lists every known
+sentinel provider with its status (`supported`, `available`, or
+`ready`), version, and declared capabilities; a provider that declares
+`readiness()` and fails it is listed as `available` with the reason in
+its info. No credentials are returned.
+
+`setup_sentinel_provider` configures a provider that declares
+`setupFields` (shipped: `agentpush`). Sensitive fields are stored 0600
+under `<home>/sentinel-creds/<slug>.json` and never echoed back. The
+ledger at `<home>/setup/<slug>.json` records the completed setup.
+
+#### Daemon-HTTP routes
+
+The same create, list, view, and remove logic backs `POST /sentinels`,
+`GET /sentinels`, `GET /sentinels/:id`, and `DELETE /sentinels/:id`
+(`404 {error: "sentinel_not_found"}` for an unknown id). An HTTP caller
+has no calling-session identity, so `POST /sentinels` must always pass
+`sessionId` explicitly. The routes are enabled only when the daemon is
+wired with sentinel deps; without that they 404.
+
+#### CLI
+
+`agentproto sentinel` drives the HTTP routes above, with the daemon
+discovery and fallback order of `agentproto sessions`:
+
+```
+agentproto sentinel watch pr <url> [--session <id>] [--urgency <u>]
+                                   [--until closed|never] [--provider <slug>] [--json]
+agentproto sentinel watch <subject> [--types <t1,t2,...>] [--session <id>]
+                                   [--urgency <u>] [--until closed|never]
+                                   [--provider <slug>] [--json]
+agentproto sentinel list   [--json]
+agentproto sentinel rm <id> [--json]      (aliases: delete, unwatch)
+agentproto sentinel status <id> [--json]
+```
+
+`watch pr <url>` is the same sugar as `prUrl` (`--until closed` is the
+alias of `subject_terminal`, and its default). Unlike the MCP tool, a
+CLI invocation has no calling-session identity, so `--session` is
+required unless the daemon has another default wired. `status` reads
+the per-sentinel provider health (for `local-gh`, the backoff state and
+last error; for `webhook`, whether the hook record exists, is active,
+and still points at this daemon).
+
+#### PR auto-link
+
+When a session's opened PR is newly recorded, the daemon creates a
+sentinel watching it for the owning session, unless one already exists
+for the same `(subject, sessionId)`. Gating, in order: the per-spawn
+opt-out (`sentinel: false` on `agent_start`, which forbids auto-link
+for that session regardless of configuration), then the daemon config
+`sentinel.autoWatchPrs` (read fresh on every opened PR, so a config
+change takes effect on the next PR without a restart). The created
+sentinel watches the default PR type set with `until:
+subject_terminal`, urgency `next-turn`, `label: "auto:pr#N"`, and
+`group` set to the session id. Provider selection follows the same
+order as `sentinel_watch`; on any failure it retries once on
+`local-gh`, so a best-effort auto-link never leaves a PR unwatched just
+because the preferred backend is down. Auto-link is strictly best
+effort: any failure is logged and swallowed and must never affect the
+PR recording it hangs off of nor the session's own turn. If the owning
+session later exits for good, the sentinel is NOT cancelled; the
+normal dead-session path applies.
+
+## Example
+
+Watching a pull request, and the delivery it produces:
+
+```
+sentinel_watch {
+  "prUrl": "https://github.com/agentproto/ts/pull/1428",
+  "urgency": "next-turn"
+}
+```
+
+The sugar expands to the spec:
+
+```json
+{
+  "match": [{ "subject": "github:agentproto/ts#1428" }],
+  "until": { "kind": "subject_terminal" },
+  "target": { "kind": "session", "sessionId": "sess_01J9...", "urgency": "next-turn" },
+  "provider": "local-gh"
+}
+```
+
+`sentinel_list` afterwards (with the provider chosen by auto-selection,
+here `local-gh` because `agentpush` is not set up and no stable public
+URL exists):
+
+```json
+{
+  "ok": true,
+  "sentinel": {
+    "id": "sen_01JAB2C3D4E5F6G7H8J9K0L1M2",
+    "provider": "local-gh",
+    "status": "active",
+    "match": [{ "subject": "github:agentproto/ts#1428" }],
+    "until": { "kind": "subject_terminal" },
+    "target": { "kind": "session", "sessionId": "sess_01J9...", "urgency": "next-turn" },
+    "createdTs": 1759142400000,
+    "eventCount": 0
+  }
+}
+```
+
+When CI finishes, the target session's inbox receives a message:
+
+```json
+{
+  "to": "sess_01J9...",
+  "from": { "relation": "system" },
+  "kind": "notice",
+  "urgency": "next-turn",
+  "correlationId": "sentinel:github:agentproto/ts#1428",
+  "text": "[github] Check suite success for agentproto/ts#1428",
+  "data": {
+    "specversion": "1.0",
+    "id": "evt_9f2c4a6b8d0e1f3a5b7c9d1e3f5a7b9c",
+    "source": "//agentproto.local/sentinel/local-gh",
+    "type": "github.check_suite.completed",
+    "subject": "github:agentproto/ts#1428",
+    "time": "2026-09-29T10:15:00.000Z",
+    "datacontenttype": "application/json",
+    "data": { "action": "completed", "conclusion": "success", "repo": "agentproto/ts", "number": 1428, "checks": [] },
+    "summary": "Check suite success for agentproto/ts#1428",
+    "subjects": ["github:agentproto/ts#1428", "github:agentproto/ts", "github:agentproto"],
+    "terminal": false
+  }
+}
+```
+
+When the PR merges, the terminal event is delivered and the sentinel
+expires: its status becomes `expired`, the provider is cancelled, and a
+later `sentinel_list` shows it as `expired`. Post-merge noise (a check
+suite failing after the merge) is journaled to
+`sentinels-parked.jsonl`, not delivered.
+
+## Reference implementation
+
+| Concern | Source (in `agentproto/ts`) |
+|---|---|
+| Spec, event envelope, provider interface | `packages/runtime/src/sentinel-providers/types.ts` |
+| Store (persistence, dedup window, ids) | `packages/runtime/src/sentinel-store.ts` |
+| Runtime (poll loop, delivery, lifetime, parking) | `packages/runtime/src/sentinel-runtime.ts` |
+| Provider registry and third-party discovery | `packages/runtime/src/sentinel-providers/registry.ts` |
+| `local-gh` provider | `packages/runtime/src/sentinel-providers/local-gh.ts` |
+| `webhook` provider | `packages/runtime/src/sentinel-providers/webhook.ts`; hook store in `webhook-hooks.ts` |
+| `agentpush` provider | `packages/runtime/src/sentinel-providers/agentpush.ts` |
+| GitHub webhook normalization | `packages/runtime/src/sentinel-github-normalize.ts` |
+| Provider selection | `packages/runtime/src/sentinel-provider-select.ts`; public URL in `sentinel-public-url.ts` |
+| Push ingress | `packages/runtime/src/sentinel-inbound.ts`; route wiring in `http-server.ts` |
+| MCP tools | `packages/runtime/src/sentinel-tools.ts`; adapter tools in `sentinel-adapters.ts` |
+| PR auto-link | `packages/runtime/src/sentinel-autolink.ts` |
+| CLI verbs (`watch`, `list`, `rm`, `status`) | `packages/cli/src/commands/sentinel.ts` |
+
+## Backward compatibility
+
+This AIP is additive: it introduces a new daemon primitive and tool
+family and adds no field to any existing AIP's schema. A host that does
+not implement it exposes no sentinel tools; a caller that never calls
+them sees no change.
+
+The spec evolves additively within this version: `group` and `label`
+and the multi-clause `match` list generalize the original
+single-clause, single-form shape (a one-clause spec behaves exactly as
+before, and `closedSubjects` is absent on records persisted before that
+field existed). New target kinds and new `until` kinds are additive
+`kind` values; the `routine` and `webhook` targets are reserved shapes
+that conformant hosts MUST reject with `not_implemented` until their
+delivery is defined.
+
+## Security considerations
+
+**Secrets and the persisted store.** A sentinel's `handle` can carry a
+provider secret (the agentpush per-sentinel callback secret, a hook
+key), so `sentinels.json` is mode 0600, written atomically. The webhook
+HMAC secret lives in its own store precisely because handles are echoed
+around the runtime. Views and tool results expose no credential value;
+`setup_sentinel_provider` stores sensitive fields 0600 and never echoes
+them.
+
+**Push ingress is untrusted input.** `POST /inbound/sentinel-<hookKey>`
+carries an attacker-controllable body. Every push provider MUST verify
+a signature before normalizing: the GitHub HMAC over the raw body with
+the hook store's secret, the agentpush signature v2 with a timestamp
+skew bound and constant-time comparison. A `hookKey` that matches
+nothing answers a generic 404, and failures never echo which key or
+which secret was expected. Verification is provider-owned and never
+replaced by the route's bearer token, so a stolen daemon token cannot
+forge sentinel deliveries.
+
+**Public URLs widen the daemon's attack surface.** A `webhook` sentinel
+requires exposing the daemon at a public origin. That origin MUST be
+the one the operator pinned or the tunnel they started; the hook's URL
+is compared on every `status()` check, so a hook silently re-pointed
+elsewhere is reported, not trusted. Auto-selection accepts only stable
+URLs, so a short-lived quick tunnel never becomes the basis of a
+sentinel that must survive restarts.
+
+**Backoff and rate limits.** `local-gh` polls GitHub through the host's
+credentials. Its exponential backoff (base 30000 ms, cap 300000 ms) and
+its `status()` surfacing of consecutive failures are the rate-limit
+courtesy: a host MUST NOT poll a provider more aggressively than its
+declared cadence without an operator's say-so (`sentinel_poll_now`
+exists for a reason, and it polls everything).
+
+**Post-mortem parking.** Events parked to `sentinels-parked.jsonl` are
+delivered-event-shaped and may contain repository content. The journal
+is mode 0600 and is a diagnostic record, not a delivery queue: nothing
+reads it back automatically.
+
+## Connecting to other AIPs
+
+### AIP-46 AGENT-SESSIONS: the delivery surface
+
+Delivery is an [AIP-46](/docs/aip-46) inbox message: `relation:
+"system"`, `kind: "notice"`, an urgency from the AIP-46 set, and a
+`correlationId` a caller can hand to `inbox_wait`. Session liveness,
+resume, end reasons, and parent links are all AIP-46 concepts the
+dead-session path consumes; the sentinel adds no session semantics of
+its own.
+
+### AIP-41 SCHEDULE: the routine target
+
+The `routine` target kind is the frozen shape for "deliver to an
+AIP-41 routine bound to `schedule.kind: event`". The shape exists so
+callers can reference the full union today; creation is rejected until
+that wiring is specified.
+
+### AIP-62 REVIEW: the review's PR watcher
+
+A review that opens a pull request is the canonical auto-link case:
+`recordOpenedPr` fires the auto-link hook for every lane that records a
+PR, and the resulting sentinel keeps the owning session informed of
+reviews, checks, and merges until the PR closes. The AIP-62 `pr`
+annotation and `review_pr` share the PR-URL parsing this AIP's `prUrl`
+sugar uses.
+
+## Open questions
+
+1. **Per-sentinel targeted poll.** `sentinel_poll_now` polls every
+   pollable sentinel; `id` only echoes one back. Whether a targeted
+   per-sentinel poll is worth a second code path is open.
+2. **`until: at` and `until: count` on the watch surface.** The
+   `SentinelUntil` union carries all four kinds and the runtime honors
+   all four, but `sentinel_watch` accepts only `subject_terminal` and
+   `never`. Whether the tool surface should expose the other two, and
+   with what syntax, is open.
+3. **`routine` and `webhook` target delivery.** Both shapes are frozen
+   and both are rejected at creation. The `routine` delivery waits on
+   [AIP-41](/docs/aip-41) event-schedule binding; the external `webhook`
+   target has no design section yet.
+4. **`local-gh` comments.** `github.issue_comment.created` is in the
+   default type set but the provider cannot produce it. Whether it
+   grows a comments poll or the type is split per provider is open.
+5. **Webhook re-pointing.** `attach` re-points a hook whose public URL
+   changed at daemon boot, but nothing re-points it later on its own;
+   the known limitation is documented in the provider. Whether a tunnel
+   URL change should trigger a re-attach automatically is open.
+6. **Auto-link configuration shape.** `sentinel.autoWatchPrs` is a
+   single boolean read fresh per call. Whether per-repo or per-harness
+   opt-in belongs in the same config key is open.
+
+## See also
+
+- [AIP-1](/docs/aip-1): process, RFC 2119
+- [AIP-10](/docs/aip-10): ids and slugs; the `sen_<ulid>` id shape
+- [AIP-41](/docs/aip-41): SCHEDULE; the frozen `routine` target kind
+- [AIP-46](/docs/aip-46): AGENT-SESSIONS; the inbox, urgencies, and
+  session liveness delivery builds on
+- [AIP-62](/docs/aip-62): REVIEW; the PR-URL parsing shared with the
+  `prUrl` sugar and the auto-link case
