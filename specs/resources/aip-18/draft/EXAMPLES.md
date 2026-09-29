@@ -91,7 +91,7 @@ purely additive.
 
 ## Example 2 — Bug-tracker collection — `bugs`
 
-A standard defect-tracking shape: severity enum, repro steps, single assignee,
+A standard defect-tracking shape: severity enum, repro steps, single owner,
 status state machine with three working states plus two terminal outcomes.
 
 ```md
@@ -141,8 +141,8 @@ initialStatus: open
 
 ownership:
   cardinality: single
-  role: assignee
-  required: false # bugs may be filed before they have an assignee
+  role: owner
+  required: false # bugs may be filed before they have an owner
 
 deadline:
   kind: none
@@ -182,9 +182,9 @@ steps drive fix.
 ## Conventions
 
 - File a bug as soon as a reproducible defect is observed; you don't need to
-  know who'll fix it (assignee is optional at creation).
+  know who'll fix it (owner is optional at creation).
 - `repro` is mandatory because a bug without a repro is just a rumour.
-- Critical bugs without an assignee surface a `warn` lint — pager / on-call
+- Critical bugs without an owner surface a `warn` lint — pager / on-call
   owner SHOULD pick them up.
 ```
 
@@ -380,7 +380,7 @@ child):
 | `fields.affectedVersion`       | inherited from parent | string, optional                               |
 | `fields.affectedComponent`     | added by child        | enum [api, web, mobile, infra, docs], required |
 | `statuses.*`                   | inherited from parent | open → triaged → in-progress → fixed/wontfix   |
-| `ownership.*`                  | inherited from parent | single, role: assignee, optional               |
+| `ownership.*`                  | inherited from parent | single, role: owner, optional                  |
 | `lints.missing-owner-critical` | inherited from parent | warn                                           |
 | `lints.stale-30`               | inherited from parent | info                                           |
 | `lints.broken-ref`             | inherited from parent | error                                          |
@@ -517,12 +517,12 @@ collection: bugs
 id: BUG-1042
 title: Login form crashes on Safari 17 with autofill enabled
 
-# Universal-ish fields — collection.ownership says assignee is optional
+# Universal-ish fields — collection.ownership says owner is optional
 status: triaged
-assignee: ws://operators/eng-frontend-lead
+owner: ws://operators/eng-frontend-lead
 tags: [auth, safari, autofill, regression]
-createdAt: 2026-04-26T09:14:00Z
-updatedAt: 2026-04-27T11:02:00Z
+createdAt: "2026-04-26T09:14:00Z"
+updatedAt: "2026-04-27T11:02:00Z"
 attachments:
   - sources/2026-04-26-safari-crash-trace.txt
 
@@ -563,7 +563,7 @@ runs in `useLayoutEffect` synchronously.
 ```
 
 **When to use.** Standard bug-filing flow. Universal fields (`status`,
-`assignee`, `tags`, `attachments`, `createdAt`, `updatedAt`) carry the metadata
+`owner`, `tags`, `attachments`, `createdAt`, `updatedAt`) carry the metadata
 every bug needs; collection-specific fields (`severity`, `affectedVersion`,
 `repro`) carry the domain-specific schema. The body is free-form prose that
 humans read; the frontmatter is what the host validates.
@@ -583,8 +583,8 @@ coLeads:
   - ws://operators/cfo-assistant
   - ws://operators/coo-assistant
 tags: [finance, runway]
-createdAt: 2026-03-15T00:00:00Z
-updatedAt: 2026-04-25T16:00:00Z
+createdAt: "2026-03-15T00:00:00Z"
+updatedAt: "2026-04-25T16:00:00Z"
 
 # Collection-specific fields
 objective: Extend operating runway by 6 months without raising a new round
@@ -596,7 +596,7 @@ metric: runway_months
 target: 18
 current: 12.5
 quarter: 2026-Q2
-targetDate: 2026-06-30
+targetDate: "2026-06-30"
 ---
 
 # Extend operating runway by 6 months without raising
