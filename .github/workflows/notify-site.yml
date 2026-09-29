@@ -1,8 +1,9 @@
-name: Notify site
+name: Notify site and ts
 
 # When specs/ or runtime packages change on main, trigger the site
 # rebuild via repository_dispatch. The site's deploy workflow is
 # subscribed to type: content-changed and rebuilds with fresh content.
+# Also dispatches specs-changed to agentproto/ts, which re-vendors specs/resources.
 #
 # Why a dispatch instead of a Vercel webhook: deploys live in GH
 # Actions for both repos. Single CI/CD surface, single audit trail.
@@ -27,4 +28,24 @@ jobs:
           token: ${{ secrets.SITE_DISPATCH_TOKEN }}
           repository: agentproto/site
           event-type: content-changed
+          client-payload: '{"sha": "${{ github.sha }}", "ref": "${{ github.ref }}"}'
+
+  dispatch-ts:
+    name: Dispatch specs-changed to agentproto/ts
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    # agentproto/ts vendors specs/resources and pins the canonical commit in
+    # specs/canonical.lock.json; its aip-sync workflow listens for this event
+    # and opens the PR that re-syncs + moves the pin. Skipped (not failed)
+    # until the TS_DISPATCH_TOKEN secret exists.
+    env:
+      TS_DISPATCH_TOKEN: ${{ secrets.TS_DISPATCH_TOKEN }}
+    steps:
+      - name: Trigger ts spec sync
+        if: ${{ env.TS_DISPATCH_TOKEN != '' }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TS_DISPATCH_TOKEN }}
+          repository: agentproto/ts
+          event-type: specs-changed
           client-payload: '{"sha": "${{ github.sha }}", "ref": "${{ github.ref }}"}'
