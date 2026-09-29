@@ -175,8 +175,8 @@ fields:                                 # array; merge-by-name vs parent
     description: <prose>                # OPTIONAL
     enum: [<value>, ...]                # required when type=enum
     items:                              # required when type=array
-      type: <inner-type>
-      ...                               # recursive shape
+      type: <inner-type>                # NO `name` here — recursive
+      ...                               # shape of the inner value
     refKind: <collection-name>          # required when type=ref
     pattern: <regex>                    # OPTIONAL, type=string only
     min: <n>                            # OPTIONAL, type=number/array
@@ -238,6 +238,21 @@ Conventional sections:
 
 The body is free-form markdown. The frontmatter is the contract.
 
+Field definitions follow three normative rules that the JSON Schema
+enforces:
+
+- `name` is REQUIRED on every entry of `fields[]` and is meaningful only
+  there. The `items:` shape of an `array` field describes the inner
+  value type and carries **no** `name`; a `name` inside `items:` is
+  invalid.
+- `enum` is REQUIRED when `type: enum`, `items` is REQUIRED when
+  `type: array`, and `refKind` is REQUIRED when `type: ref`. A field
+  definition that declares one of those types without its companion key
+  is invalid.
+- The rules apply recursively: an `array` whose `items` is itself an
+  `array` (or an `enum`, or a `ref`) MUST carry that type's own
+  companion key inside `items:`.
+
 The `appliesTo` field is the binding surface that connects the
 collection to a specific workspace. A collection without `appliesTo` is
 a *generic* schema — installable into any workspace. A collection with
@@ -270,8 +285,8 @@ dueAt: <date-or-datetime>               # OPTIONAL — depends on
 attachments: [<ref>, ...]               # OPTIONAL
 links: [<ref>, ...]                     # OPTIONAL
 tags: [<tag>, ...]                      # OPTIONAL
-createdAt: <datetime>                   # OPTIONAL
-updatedAt: <datetime>                   # OPTIONAL
+createdAt: "<datetime>"                 # OPTIONAL — quote it
+updatedAt: "<datetime>"                 # OPTIONAL — quote it
 
 # Collection-specific fields go HERE, flat at the top level. The
 # collection's resolved schema names every field; the host validates
@@ -296,6 +311,25 @@ at the AIP-18 level. The collection's schema is what determines whether
 `status` is required, whether `owner` is required, whether `dueAt` must
 appear. AIP-18 declares the *namespace* for these fields so that hosts
 know how to read them; the *requirement* is per-collection.
+
+**Timestamps and dates.** `createdAt`, `updatedAt`, and date-valued
+fields such as `dueAt` are strings (ISO 8601). Several YAML parsers
+(YAML 1.1 resolvers such as `js-yaml` under `gray-matter`) turn an
+*unquoted* ISO timestamp into a native timestamp object before any
+schema sees it. Producers SHOULD therefore write these values as quoted
+YAML strings (`createdAt: "2026-04-26T09:14:00Z"`). Consumers MAY accept
+a native timestamp where a string is expected and normalize it to an
+ISO 8601 string before validating; a consumer that does not is
+conforming, and will reject unquoted timestamps.
+
+**Ownership role.** `owner` above is the default ownership field. When a
+collection sets `ownership.role` to another name (e.g. `coLeads`), the
+item carries the owner ref(s) under *that* key, flat at the top level
+like any collection-specific field. The base item schema names only
+`owner`; any other role name validates through the item schema's
+`additionalProperties: true` and is checked by the host against the
+collection's resolved `ownership`. Examples that do not need a custom
+role SHOULD use the default `owner`.
 
 The collection's `fields` are flat at the item's top level. There is no
 `fields:` wrapper inside the item — every collection field is a
@@ -564,7 +598,7 @@ rest of the AIP family:
 |---|---|---|
 | `appliesTo` | [AIP-6](/docs/aip-6) company / [AIP-9](/docs/aip-9) operator / AIP-20 work workspace / [AIP-10](/docs/aip-10) wiki / [AIP-3](/docs/aip-3) skill | A collection declares which workspace consumers it adapts the schema for. Hosts MUST refuse a collection whose `appliesTo` does not resolve. |
 | `extends` | another `COLLECTION.md` | Composition. |
-| `fields[].refKind` | another collection's `name` | Refs across collections — e.g. a `bug` field `assignee` may reference an `engineer` collection. |
+| `fields[].refKind` | another collection's `name` | Refs across collections — e.g. a `bug` field `reviewer` may reference an `engineer` collection. |
 | `lints[].kind: custom` | host-defined check | Hosts MAY register custom lint algorithms keyed by `id`. |
 
 Items reference operators (AIP-9), companies (AIP-6), other items
