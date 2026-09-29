@@ -26,9 +26,9 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/pair-client
 
 ## Abstract
 
-A daemon that only dials outbound can be reached by a **paired client**
-through a rendezvous broker that splices two WebSockets and relays
-ciphertext. This AIP specifies that relationship for a **browser client**: a
+An **AIP-59 host** that only dials outbound can be reached by a **paired
+client** through a rendezvous broker that splices two WebSockets and relays
+ciphertext. The agentproto daemon is one such host, not the only one. This AIP specifies that relationship for a **browser client**: a
 phone scans a QR code, the pair page runs the `pair/v2` handshake with
 WebCrypto, stores a credential, and a service worker then proxies the
 daemon's own UI and API through the end-to-end encrypted tunnel, including
@@ -53,7 +53,10 @@ HTTP stream into a size-limited byte pipe, and how to tell "unpaired" from
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
 interpreted as described in [AIP-1](/docs/aip-1) (RFC 2119).
 
-**Roles.** The *daemon* holds a static identity: an X25519 key pair and an
+**Roles.** The *daemon* is the AIP-59 host: any process that implements the
+host side of this AIP. The agentproto daemon is one host; a non-daemon
+application MAY be another. Everywhere this AIP says "daemon", it means the
+host. The daemon holds a static identity: an X25519 key pair and an
 Ed25519 key pair. Its *fingerprint* is the first 32 lowercase hex characters
 (128 bits) of `SHA-256(X25519 public key, SPKI DER)`, matching
 `^[0-9a-f]{32}$`. The *client* is a browser. The
@@ -395,6 +398,26 @@ broker federation.
   intermediary, and no SSE on quick tunnels). WebRTC data channels (these
   need TURN, which is another relay, and a larger stack). Storing
   credentials in cookies (these are sent to a server).
+
+## Implementation notes
+
+These notes are informative. They describe optional host features and do not
+change what a conforming host or client MUST do.
+
+- **Local-device credential (optional host feature).** A host MAY let a client
+  on the same machine, which has no camera and no browser, authenticate with a
+  **device bearer** minted by the host instead of scanning an offer. The host
+  mints the bearer on request, records the device next to its pairings, and
+  lists it like any pairing. The bearer is opaque to the client. The host
+  MUST verify it in constant time, MUST NOT log it, and MUST store only what
+  it needs to re-derive it, not the bearer itself. Revoking the device MUST
+  make the very next verification fail, exactly as revoking a pairing stops it
+  being served (§6.1). A local-device bearer is accepted only on the host's
+  loopback interface. It never travels through a broker and is not a
+  substitute for the `pair/v2` handshake on any remote path.
+- The reference host library is `@agentproto/pairing-host`. It stores local
+  devices in an optional `localDevices` field of its `pairings.json`, so
+  files written before the feature load unchanged.
 
 ## Backwards Compatibility
 
