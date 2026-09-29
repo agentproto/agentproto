@@ -1,0 +1,684 @@
+---
+title: "AIP-64: PACK.md, pack/v1 (the installable capability bundle: plugin, apps, knowledge, playbook, pricing)"
+description: "Names the pack, the commercial assemblage that ships a plugin (built inline from `./skills/` or merged from published `@agentproto/skill-pack-*` includes) together with zero or more AIP-53 apps, a knowledge workspace selection, an optional playbook to generate, legacy pricing data, and non-technical blockers, as a first-class doctype. Fixes the PACK.md frontmatter (`pack/v1`), every cross-field rule a conformant parser enforces, the two authoring paths (`definePack` and `parsePackManifest`) over one shared zod schema, the frozen `PackHandle` with its derived `status` (`planned | assembling | ready | gated`), the `aip://64/<name>[@version]` artifact-ref grammar and the git pin grammar reused from AIP-62, the `agentproto-pack-digest/v1` content digest over the PACK.md and each declared app's APP.md source, and the installation contract (apps install through AIP-42 `app_install`, the plugin installs through the skill install verb, knowledge resolves at query time, the playbook generates on demand, and re-applying a pack replaces it, never duplicates it)."
+aip: 64
+status: Draft
+type: Schema
+created: 2026-09-30
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 10, 42, 53, 54, 62]
+discussions-to: https://github.com/agentproto/agentproto/discussions/64
+layer: primitives
+package: "@agentproto/pack"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/pack
+---
+
+| Field | Value |
+|---|---|
+| AIP | 64 (provisional, editors assign the final number) |
+| Title | PACK.md, pack/v1 (the installable capability bundle) |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-10](/docs/aip-10) (ids and slugs; the pack `name` shape), [AIP-42](/docs/aip-42) (AGENT-SESSIONS, and the app lifecycle tools the declared apps install through), [AIP-53](/docs/aip-53) (APP: the app bundles a pack assembles), [AIP-54](/docs/aip-54) (REF: the artifact-ref model the pack ref grammar reuses), [AIP-62](/docs/aip-62) (REVIEW: the git pin grammar and the pack digest recipe it already shipped) |
+| Composes with | [AIP-18](/docs/aip-18) (COLLECTION: the item typing primitive a pack's knowledge selection sits on), [AIP-55](/docs/aip-55) (PRODUCT: the pricing mechanism the manifest's legacy `pricing` data is superseded by), [AIP-57](/docs/aip-57) (MODEL-ROUTING: the unrelated RoutingPack whose name collides) |
+| Created | 2026-09-30 |
+| Package | `@agentproto/pack` (manifest schema, `definePack`, `parsePackManifest`, handle construction) |
+
+## Abstract
+
+A **pack** is the distributable bundle that turns a set of capabilities
+into something one person can install and one author can sell. It
+assembles, under one identity and one version:
+
+- a **plugin**: either built inline from the pack's own `./skills/`
+  directory, or merged from a list of published
+  `@agentproto/skill-pack-*` packages;
+- zero or more **apps**: [AIP-53](/docs/aip-53) app directories inside
+  the pack, each installed through the AIP-42 app lifecycle tools;
+- a **knowledge** selection: a workspace name with tag and kind filters
+  that scopes what the pack's agents read;
+- an optional **playbook** directive: the title, root, and chapter
+  target for a book the pack generates on demand;
+- legacy **pricing** data (noted below as superseded by the
+  [AIP-55](/docs/aip-55) product mechanism); and
+- **blockers**: non-technical reasons a pack cannot ship, which force
+  its status to `gated`.
+
+This AIP fixes the `PACK.md` frontmatter (`pack/v1`), every cross-field
+rule a conformant parser enforces, the two authoring paths (a TS
+`definePack` and an md `parsePackManifest`) that run one shared schema,
+the frozen `PackHandle` and its derived `status`, the
+`aip://64/<name>[@version]` artifact-ref grammar, the content digest
+that binds a pack to its own bytes and its apps' bytes, and the
+installation contract a host implements.
+
+## Motivation
+
+A shipping agent product is not one artifact. It is a plugin of skills,
+a handful of app bundles, a slice of a knowledge workspace, a generated
+playbook, and a price. Before this AIP each of those had a format and
+none of them had a wrapper:
+
+1. **No single identity.** The plugin, each app, and the knowledge
+   selection each carried their own name. Nothing said "these belong to
+   `the-agentic-coder` version 1.2.0", so nothing could be installed,
+   replaced, or digest-verified as one unit.
+2. **No derived state.** "Is this pack shippable?" was answered by
+   reading four directories and hoping. The answer has to be derived
+   from the manifest itself: blockers gate it, and otherwise the
+   plugin's resolution shape says whether it is ready or still being
+   assembled.
+3. **No idempotent install.** Applying a pack twice had to be a no-op
+   or an upsert, never a duplicate. That guarantee needs a keyed
+   identity (the pack's `name`, and each app's `id`) and a defined
+   replace rule.
+
+The pack is deliberately the thin assemblage layer. It declares what
+goes together; [AIP-53](/docs/aip-53) still defines what an app is,
+[AIP-42](/docs/aip-42) still owns how an app installs, and
+[AIP-55](/docs/aip-55) owns how anything gets priced.
+
+## The neighborhood: why two bundles?
+
+The word "pack" appears in several AIPs. This section fixes which
+concept each one owns, because the distinctions are load-bearing:
+
+| AIP | Concept | What it is |
+|---|---|---|
+| [AIP-53](/docs/aip-53) APP | One executable product bundle | Agents, workflows, and an optional UI surface, shipped as `.agentproto/APP.md` on disk and `.agentapp` as a packaged distributable. Runnable on its own. |
+| [AIP-18](/docs/aip-18) COLLECTION | Item typing primitive | The on-disk schema system (`COLLECTION.md` + `ITEM.md`) any workspace AIP composes on. Not a bundle at all. |
+| [AIP-62](/docs/aip-62) review-pack | The review specialization | A reusable set of review checks a REVIEW.md imports through `uses`. Its format is private to AIP-62. |
+| **AIP-64 PACK** (this AIP) | The commercial assemblage | Plugin + apps + knowledge + playbook + pricing + blockers, under one name and version, installable as a unit. |
+
+So there are two bundles on purpose: an **APP is one executable
+product**; a **PACK is the thing you sell**, which contains apps among
+other things and is not itself executable. A pack with exactly one app
+and nothing else is still a pack, because its identity, version,
+digest, and price are the pack's, not the app's.
+
+### AIP-57 RoutingPack is a different concept
+
+[AIP-57](/docs/aip-57) MODEL-ROUTING defines a **RoutingPack**: a named,
+total map from a model keyspace to routes. It shares the word and
+nothing else. A RoutingPack resolves model references; a PACK is an
+installable capability bundle. The reference implementation renamed its
+own constructor from `definePack` to `defineRoutingPack` precisely to
+stop that collision; this AIP records the distinction so no future AIP
+re-merges them.
+
+## Design principles
+
+1. **The pack declares; the primitives own.** A pack never redefines
+   what an app, a skill, a knowledge entry, or a price is. It names
+   them and assembles them. Every install behavior is delegated to the
+   AIP that owns the thing being installed.
+2. **Derived, not declared, status.** A pack's `status` is computed
+   from `blockers` and the plugin's resolution shape. An author cannot
+   write `status: ready`; a pack that says it is ready without a
+   resolvable plugin is a parse error, not a lie.
+3. **One schema, two doors.** The TS authoring path and the Markdown
+   authoring path run the same field-level schema, so a malformed
+   definition fails with the same diagnostic either way.
+4. **The handle is frozen.** Once built, a `PackHandle` is a readonly
+   view. Nothing mutates a pack in place; a changed pack is a new
+   handle, and eventually a new digest.
+5. **Idempotence is keyed identity.** Re-applying a pack with the same
+   `name` replaces. Re-applying an app with the same `id` upserts.
+   Neither ever duplicates.
+6. **Blockers are data, not errors.** A blocked pack parses fine. It
+   carries `gated` status and the blocker strings, and a host refuses
+   to install it while surfacing the blockers, rather than failing to
+   parse a pack that is merely not shippable yet.
+7. **Parse loudly.** An unknown frontmatter key, an unresolvable
+   plugin, and a non-positive bundle price are errors at parse time,
+   never silent defaults.
+8. **The digest binds the declared surface.** The content digest covers
+   the PACK.md source and each declared app's APP.md source: exactly
+   the bytes a consumer needs to verify that the assemblage it was
+   promised is the assemblage it received.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as in
+RFC 2119. Unless stated otherwise the behavior below is that of the
+reference implementation (`@agentproto/pack`) and is normative for
+conformant hosts.
+
+### File location
+
+A pack manifest is a Markdown file named `PACK.md` with YAML
+frontmatter, at the root of a directory (the **pack root**). The
+frontmatter is the manifest; the body is human documentation and has no
+semantics. The pack root is also the base every relative path in the
+manifest resolves against.
+
+The schema is strict: an unknown key at the top level or inside any
+object is a parse error.
+
+### Manifest frontmatter (`pack/v1`)
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | `"pack/v1"` | Required. A host MUST reject another value. |
+| `name` | string | Required. Kebab-case pack id, also the pack root's directory name. Matches `^[a-z][a-z0-9-]*[a-z0-9]$` with 2 to 80 characters. This sits inside the [AIP-10](/docs/aip-10) slug envelope (2 to 96 characters): the pack shape is narrower by policy, and a conformant host enforces the narrower shape. |
+| `title` | string | Required. Human-readable title, 1 to 200 characters, for example `"The Agentic Coder"`. |
+| `description` | string | Required. 1 to 2000 characters. |
+| `version` | string | Required. Semantic version of the pack, at least one character. |
+| `plugin` | object | Required. `{ inline?, includes? }`. See §Plugin. |
+| `apps` | array | Optional. Each entry `{ id, path }`. See §Apps. |
+| `knowledge` | object | Optional. `{ workspace, anyOf?, allOf?, kinds? }`. See §Knowledge. |
+| `playbook` | object | Optional. `{ title, root?, targetChapters? }`. See §Playbook. |
+| `pricing` | object | Optional. `{ ebook?, bundle, step? }`. See §Pricing. |
+| `blockers` | array of strings | Optional. Non-technical blockers; their presence forces `gated` status. See §Blockers and status. |
+
+### Plugin
+
+`plugin` is required and has two, mutually compatible, sources:
+
+| Field | Type | Description |
+|---|---|---|
+| `inline` | boolean | Optional. `true` builds the plugin from the pack's own `./skills/` directory (self-contained). |
+| `includes` | string[] | Optional. Published packs to merge, `@agentproto/skill-pack-*` package names. |
+
+**Cross-field rule (plugin resolvable).** A conformant parser MUST
+reject a pack whose plugin has neither `inline: true` nor a non-empty
+`includes` list. A pack that declares no way to produce a plugin has no
+capability surface and cannot be installed.
+
+- With `inline: true` the plugin is built from the pack root's
+  `./skills/`, so the pack is self-contained: its skills travel with
+  its digest.
+- With `includes`, the plugin is the merge of the named published
+  packages. `includes` entries MAY be pinned with the git pin grammar
+  (§Reference grammar and pinning) when the host fetches rather than
+  resolving installed packages.
+- Both MAY be present: an inline base merged with published
+  extensions. The resolution order and merge conflict behavior are
+  host-defined; the reference host treats the inline skills as the
+  pack's own and the includes as additive.
+
+### Apps
+
+`apps` is optional; a pack MAY be plugin-only. Each entry:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Required, at least one character. The app's install identity, used as the upsert key (§Installation contract). |
+| `path` | string | Required, at least one character. The app directory, relative to the pack root. It contains an `APP.md` per [AIP-53](/docs/aip-53). |
+
+The declared apps' `APP.md` sources are the pack digest's other inputs
+(§Content digest). An app id MUST be unique within a pack; a repeated
+id is a parse error.
+
+### Knowledge
+
+`knowledge` selects which slice of a knowledge workspace the pack's
+agents read. It names a workspace and applies filters; it does not
+define what knowledge is ([AIP-10](/docs/aip-10) and
+[AIP-18](/docs/aip-18) do that).
+
+| Field | Type | Description |
+|---|---|---|
+| `workspace` | string | Required, at least one character. The knowledge workspace name. |
+| `anyOf` | string[] | Optional. Tag OR filter. |
+| `allOf` | string[] | Optional. Tag AND filter. |
+| `kinds` | string[] | Optional. Entry kind filter. |
+
+The selection is resolved **at query time**, never at pack install
+time: the workspace contents move, the pack does not (§Installation
+contract).
+
+### Playbook
+
+`playbook` is the generation directive: a pack MAY declare one book it
+is expected to be able to generate.
+
+| Field | Type | Description |
+|---|---|---|
+| `title` | string | Required, at least one character. The book's title. |
+| `root` | string | Optional. The book-factory root path. |
+| `targetChapters` | positive integer | Optional. The chapter count to target. |
+
+The playbook is **generated on demand**, not at install time. Declaring
+a playbook is a promise about capability, not a build step.
+
+### Pricing
+
+`pricing` carries legacy manifest pricing data:
+
+| Field | Type | Description |
+|---|---|---|
+| `ebook` | number, >= 0 | Optional. |
+| `bundle` | number, >= 0 | Required when `pricing` is present. |
+| `step` | number, >= 0 | Optional. |
+
+**Cross-field rule (bundle price).** When `pricing` is present, a
+conformant parser MUST reject `bundle <= 0`: a priced bundle must have
+a positive bundle price.
+
+**Superseded by the product mechanism.** This block is the legacy
+in-manifest form. The [AIP-55](/docs/aip-55) PRODUCT capability,
+attaching an AIP-54 `ArtifactRef` price to any artifact, is the
+pricing mechanism going forward; a pack priced with PRODUCT carries
+`aip://64/<name>` refs in product definitions and its `pricing` block
+is redundant. A conformant host MAY still read `pricing` for backward
+compatibility but MUST treat [AIP-55](/docs/aip-55) as authoritative
+when both exist.
+
+### Blockers and status
+
+`blockers` is an optional list of strings: **non-technical** reasons a
+pack cannot ship yet (legal review pending, brand approval, a launch
+date). Each string is human-readable and surfaced verbatim.
+
+`PackStatus` is the derived lifecycle state, one of:
+
+| Status | Derived when |
+|---|---|
+| `gated` | `blockers` is non-empty. Blockers gate everything else. |
+| `ready` | No blockers, and the plugin resolves inline (`inline: true`). |
+| `assembling` | No blockers, and the plugin resolves from `includes` only: the pack is waiting on published pieces. |
+| `planned` | No blockers and no resolvable plugin. Defensive only: the cross-field plugin rule rejects this at parse time, so a conformant host never stores it. |
+
+**Derivation is mandatory and ordered.** A conformant implementation
+MUST derive `status` exactly this way and MUST NOT accept it from the
+caller: blockers first (they outrank everything), then the plugin
+resolution shape. This mirrors the AIP-62 verdict fold's rule that a
+derived value is never settable independently.
+
+### The PackHandle
+
+`PackHandle` is the readonly view a host works with:
+
+```
+PackHandle = Readonly<PackDefinition> & { readonly status: PackStatus }
+```
+
+- It carries every frontmatter member plus the derived `status`.
+- It is **frozen**: a conformant implementation returns a readonly
+  object and MUST NOT allow in-place mutation. A changed pack is a new
+  handle.
+- Every consumer (install, digest, pricing) takes the handle, never the
+  raw frontmatter, so a handle's `status` is always the derived one.
+
+### Authoring paths
+
+A pack is authored two ways, and both MUST run the same field-level
+schema.
+
+**TS path: `definePack`.** A `createDoctype` registrant (the shared
+cross-AIP doctype machinery), with `readIdentity: def.name` and
+`readDescription: def.description`. It runs, in order:
+
+1. the `createDoctype` invariants (the id pattern, description length,
+   top-level freeze, and the `definePack (...): ...` error prefix);
+2. the schema-derived zod validation against the input;
+3. the cross-field rules (`validate`): the plugin resolvable rule and
+   the pricing.bundle rule.
+
+**MD path: `parsePackManifest`.** Takes the PACK.md source text, parses
+the YAML frontmatter (a missing or empty frontmatter is an error), runs
+the same zod schema over it, and returns `{ frontmatter, body }`. The
+body has no semantics. `packFromManifest` then feeds the validated
+frontmatter into `definePack`, so the md path ends in the same handle
+and the same cross-AIP invariants.
+
+Both paths import one schema module (`packFrontmatterSchema`), so a
+field constraint exists once. Cross-field rules live in `definePack`'s
+`validate`, not in the flat object schema, because they are not
+expressible as per-field constraints.
+
+**Error prefixes.** The TS path's errors are prefixed
+`definePack (AIP-52): ...` and the md path's with
+`parsePackManifest: ...`. The shipped `AIP-52` in the prefix is a known
+placeholder mislabel: AIP-52 is ADAPTER, a code contract that is not a
+`createDoctype` registrant, and PACK.md had no number when the prefix
+was fixed. This AIP assigns 64 (§Open questions); the prefix is
+expected to read `definePack (AIP-64): ...` once the implementation
+renumbers, and the number in the prefix MUST NOT be read as a claim
+about AIP-52.
+
+### Reference grammar and pinning
+
+**Artifact refs.** A pack is referenced with the [AIP-54](/docs/aip-54)
+artifact-ref grammar, under the pack family:
+
+```
+aip://64/<name>[@version]        e.g.  aip://64/the-agentic-coder@1.2.0
+```
+
+The ref is `{aip: 64, id: <name>, version?}` in object form. A version
+pins an exact pack version; an unpinned ref resolves to the host's
+current version. [AIP-55](/docs/aip-55) products price packs through
+exactly this ref.
+
+**Git pins.** Where a pack's plugin `includes` entry (or any future
+pack-fetch field) names a git source, the pin grammar is the one
+[AIP-62](/docs/aip-62) already shipped, reused verbatim:
+
+- only `git+https://` is allowed (`git+ssh`, `file:`, `ext::`, plain
+  `http`: rejected);
+- the reference MUST be pinned to a full 40-hex commit sha; a branch,
+  tag, or abbreviated sha is rejected;
+- the pin starts at the **FIRST `#`**: the `<url>` MUST NOT contain `#`
+  or whitespace, and everything after the first `#` MUST be exactly the
+  40-hex sha (pattern `^git\+https://[^\s#]+#[0-9a-f]{40}$`). A
+  reference such as `git+https://host/a#b/pack.git#<sha>` is rejected,
+  not split at the last `#`.
+
+### Content digest (`agentproto-pack-digest/v1`)
+
+A pack's content digest binds the assemblage to its bytes. The recipe
+name is the literal `agentproto-pack-digest/v1`, **reused from
+[AIP-62](/docs/aip-62)** (which uses it for review packs). The recipe
+here is the pack-scoped variant:
+
+1. Build one **line** per input:
+   - the pack's own `PACK.md` source text, labeled `PACK.md`;
+   - each **declared app's** `APP.md` source text, read from the app's
+     `path` resolved against the pack root, labeled with that `path`
+     exactly as declared.
+   A line is `<label>` followed by a NUL byte (`0x00`) followed by the
+   lowercase hex SHA-256 of that input's raw bytes.
+2. Sort the lines lexicographically.
+3. Join the lines with a single `0x0A`, with no trailing newline.
+4. The digest is the lowercase hex SHA-256 of the UTF-8 encoding of
+   that string.
+
+The digest covers the manifest and each declared app's manifest, which
+is the declared surface of the assemblage. Skill files, knowledge
+entries, and playbook output are deliberately outside it: they change
+independently and are covered by their own AIPs' mechanisms. A pack
+with no declared apps digests its PACK.md alone.
+
+A consumer that records a pack digest MUST also record `alg` (the
+literal `agentproto-pack-digest/v1`). A consumer that does not
+recognize a recorded `alg` MUST refuse to compare and MUST NOT treat
+the pack as verified. A recipe change MUST bump `alg`
+(`agentproto-pack-digest/v2`).
+
+### Installation contract
+
+Installing a pack applies its declared members. The pack never invents
+an install mechanism; it composes the ones its members already have.
+
+**Apps install through [AIP-42](/docs/aip-42)/[AIP-53](/docs/aip-53)
+`app_install`.** For each declared app, the host installs from its
+declared `path` (an emitted app directory). The supported
+`app_install` source modes, as implemented by the reference host, are:
+
+- `{dir}`: an emitted app directory on disk (a pack install resolves
+  each `path` against the pack root to this form);
+- `{url}` naming a git repository, with optional `ref` and `subdir`:
+  shallow-cloned, the installed commit pinned in `source.sha`;
+- `{url}` ending in `.agentapp`: a packed bundle fetched over https or
+  file, digest-verified, pinned in `source.sha256`;
+- `{file}`: a local `.agentapp` bundle.
+
+Installation is an **idempotent upsert keyed by `appId`**: installing
+an app id that is already installed replaces its record and keeps the
+existing data dir; it never duplicates. **`app_resync`** re-checks an
+app installed from git or a `.agentapp` against its source and
+reinstalls only if the source moved (a `git ls-remote` sha comparison
+against the pinned `source.sha`; a re-download against the pinned
+`source.sha256`), keeping the data dir. An app installed from a local
+`dir` has no source to resync.
+
+**The plugin installs through the skill install verb.** The assembled
+plugin (inline skills, the resolved includes, or both) is installed via
+the CLI's skill install verb with `--force` fan-out: each skill is
+copied to its destination, overwriting without prompting, so a
+re-applied pack replaces its skills rather than stopping on an
+overwrite question.
+
+**Knowledge resolves at query time.** Installing a pack records the
+knowledge selection; it resolves `workspace`, tags, and kinds against
+the live workspace whenever a pack agent queries knowledge. The
+workspace moving does not require reinstalling the pack.
+
+**The playbook generates on demand.** Installing a pack records the
+playbook directive; the book is generated only when asked for.
+
+#### Idempotence
+
+Re-applying a pack with the same `name` **replaces, never duplicates**:
+
+- the pack itself is upserted by `name`;
+- each declared app is upserted by its app `id` (above);
+- each skill is overwritten by the `--force` fan-out (above).
+
+A conformant host MUST make every step of a pack application
+idempotent, so applying a pack N times converges to the same state as
+applying it once.
+
+#### Status gates install
+
+`status` gates whether a pack may be applied at all:
+
+- A host **SHOULD refuse** to install a pack whose status is `gated`;
+  the pack is not shippable and its blockers say why.
+- A host **MUST surface the blockers** it refused on: a refusal that
+  does not name the blockers is a bug report waiting to happen. The
+  blocker strings are surfaced verbatim.
+- `ready`, `assembling`, and `planned` packs are installable at the
+  host's discretion; `assembling` is expected and ordinary (a pack
+  whose plugin is still being pulled together installs and gets
+  resynced later), while `planned` should not occur because the parser
+  rejects it.
+
+### Example PACK.md
+
+```md
+---
+schema: pack/v1
+name: the-agentic-coder
+title: "The Agentic Coder"
+description: "Plugin, apps, and knowledge for running an agentic coding practice end to end."
+version: 1.2.0
+plugin:
+  inline: true
+  includes:
+    - "@agentproto/skill-pack-code-review"
+apps:
+  - id: repo-maintenance
+    path: ./apps/repo-maintenance
+  - id: review-panel
+    path: ./apps/review-panel
+knowledge:
+  workspace: engineering
+  anyOf: ["coding", "review"]
+  kinds: ["runbook"]
+playbook:
+  title: "The Agentic Coder"
+  root: ./book
+  targetChapters: 12
+pricing:
+  ebook: 29
+  bundle: 79
+blockers: []
+---
+```
+
+Its artifact ref is `aip://64/the-agentic-coder@1.2.0`. Its status
+derives to `ready` (no blockers, inline plugin). Its content digest
+runs over two lines: this PACK.md source, and each declared app's
+APP.md source at `./apps/repo-maintenance/APP.md` and
+`./apps/review-panel/APP.md`, each labeled by its declared path.
+
+Applying the pack installs the inline plugin from `./skills/` plus the
+merged include, installs both apps through `app_install {dir}` (upserts
+keyed by `repo-maintenance` and `review-panel`), records the knowledge
+selection and the playbook directive, and prices the pack at the legacy
+bundle price until an [AIP-55](/docs/aip-55) product carries the
+authoritative price.
+
+## Reference implementation
+
+| Concern | Source (in `agentproto/ts`) |
+|---|---|
+| Frontmatter zod schema (both paths) | `packages/pack/src/schema.ts` |
+| `definePack` (createDoctype, cross-field rules, status derivation) | `packages/pack/src/define-pack.ts` |
+| `PackDefinition`, `PackHandle`, `PackStatus` | `packages/pack/src/types.ts` |
+| `parsePackManifest`, `packFromManifest` | `packages/pack/src/manifest/index.ts` |
+| App install modes, upsert, `app_resync` | `packages/runtime/src/app-tools.ts` |
+| Skill install verb, `--force` fan-out, pack fetching | `packages/cli/src/commands/skill-install/` |
+| Product pricing over `aip://` refs | `packages/product/src/` |
+| RoutingPack (the name collision this AIP disambiguates) | `packages/model-routing/README.md` |
+
+## Backward compatibility
+
+This AIP is additive: it introduces a new artifact and adds no field to
+any existing AIP's schema. A host that does not implement it never sees
+a PACK.md; a caller that never installs one sees no change.
+
+The manifest is strict: an unknown key is a parse error, so new fields
+require a host that knows them. Within `pack/v1`, optional members
+added later (the same additive evolution every AIP manifest in this
+corpus uses) remain valid for older parsers only if those parsers treat
+unknown keys as errors on read of new documents, which is the point of
+strictness: a pack using a new member is a new pack to an old host.
+
+The `pricing` block is legacy data retained for compatibility and is
+superseded by the [AIP-55](/docs/aip-55) product mechanism. A
+conformant host MUST NOT treat `pricing` as authoritative when a
+product prices the same `aip://64/<name>` ref.
+
+The digest recipe is versioned by `alg`. A recipe change MUST bump
+`agentproto-pack-digest/v2` and a consumer meeting an unknown `alg`
+MUST refuse to compare.
+
+The error prefix carries `AIP-52` today as a placeholder mislabel
+(§Authoring paths). Renumbering it to AIP-64 is a message-text change
+and breaks nothing: no consumer parses the number out of the prefix.
+
+## Security considerations
+
+**Pinned sources.** A pack that pulls from git MUST use the
+`git+https` scheme pinned to a full 40-hex sha (§Reference grammar and
+pinning). A branch is a moving target: whatever resolves it at install
+time is what runs, which is exactly what pinning exists to prevent.
+The first-`#` rule removes the ambiguity a URL fragment could otherwise
+exploit.
+
+**The plugin is code.** A pack's skills are instructions an agent will
+execute. `includes` entries are published packages: a host SHOULD
+resolve them from installed packages and MUST NOT fetch or install
+anything merely to parse a manifest. The `--force` fan-out overwrites
+existing skills by design; a host applying an untrusted pack SHOULD
+scope that overwrite to the pack's own destination so a forced install
+cannot clobber skills it does not own.
+
+**Apps are executable bundles.** Each declared app installs through
+`app_install` and runs agents with the app's own allowlists
+([AIP-53](/docs/aip-53)). Installing a pack is installing its apps; a
+host's app trust rules apply unchanged, and the pack adds none.
+
+**Blockers are surfaced, not executed.** Blocker strings are data. A
+host MUST surface them verbatim and MUST NOT parse them into decisions
+beyond the gate itself.
+
+**The digest is a binding, not a signature.** `agentproto-pack-digest/v1`
+binds the declared surface to bytes; it authenticates nothing. A
+consumer that needs authenticity signs over the digest the way
+[AIP-62](/docs/aip-62) signs over its pack digests. Only the declared
+manifests are covered: skill bytes are covered by the skill install's
+own mechanisms, and a pack digest says nothing about them.
+
+## Connecting to other AIPs
+
+### AIP-53 APP: the contained executable
+
+A pack's `apps[]` are [AIP-53](/docs/aip-53) app directories. The APP
+AIP owns what an app is, how `.agentapp` bundles verify, and what a UI
+surface is. The pack owns only the assemblage: which apps, under which
+ids, at which paths. A pack app installs and runs exactly as a
+standalone app does; nothing about being in a pack changes its
+permissions.
+
+### AIP-42 AGENT-SESSIONS: the install surface
+
+Apps install through the [AIP-42](/docs/aip-42) app lifecycle tools
+(`app_install`, `app_resync`), which own the source modes, the upsert
+keying, the data dir retention, and the sha pinning. The pack's
+installation contract is a delegation to those tools, one `app_install`
+per declared app.
+
+### AIP-54 REF: the artifact grammar
+
+Packs are referenced with the [AIP-54](/docs/aip-54) artifact-ref
+grammar under the pack family (`aip://64/<name>[@version]`), which is
+also what an [AIP-55](/docs/aip-55) product prices a pack through.
+
+### AIP-55 PRODUCT: the pricing mechanism
+
+The manifest's `pricing` block is the legacy form. The product
+mechanism attaches prices to any `aip://` artifact, including
+`aip://64/<name>`, and is authoritative where both exist.
+
+### AIP-18 COLLECTION and AIP-10 KNOWLEDGE: what knowledge is
+
+The `knowledge` block names a workspace and filters it; the entry
+types, tags, and kinds it filters on are defined by
+[AIP-10](/docs/aip-10) and the [AIP-18](/docs/aip-18) collection type
+system. The pack adds no knowledge semantics.
+
+### AIP-62 REVIEW: the shared grammar and digest
+
+The git pin grammar (first-`#` rule, 40-hex sha, `git+https` only) and
+the `agentproto-pack-digest/v1` recipe name are reused from
+[AIP-62](/docs/aip-62), which shipped them for review packs. The two
+AIPs share the recipe name but apply it over different inputs: review
+packs digest their REVIEW.md and selected rubrics; a PACK digests its
+PACK.md and its apps' APP.md sources.
+
+### AIP-57 MODEL-ROUTING: the name disambiguation
+
+[AIP-57](/docs/aip-57)'s RoutingPack is a model-route map and shares
+only the word. It was renamed in the reference implementation to avoid
+the collision; this AIP records the boundary so the two concepts are
+never conflated.
+
+## Open questions
+
+1. **The `AIP-52` error prefix.** The shipped `definePack (AIP-52): ...`
+   prefix predates this AIP and mislabels PACK as AIP-52. Renumbering
+   to `AIP-64` is planned and message-only; whether to do it in the
+   same release as this spec is open.
+2. **Pack-level pinning in the manifest.** The git pin grammar is
+   defined for `includes` entries, but the shipped schema takes plain
+   package names. Whether `includes` grows an inline pin form, or
+   pinning stays a fetch-time concern, is open.
+3. **App source override.** The shipped `apps[]` entry is `{id, path}`.
+   Whether an entry should also accept a direct `app_install` source
+   (a git url or a `.agentapp` reference, bypassing the pack's own
+   copy) is open; today a pack install resolves the path locally.
+4. **Digest coverage for skills.** The digest covers the two manifest
+   surfaces only. Whether a variant should cover the inline
+   `./skills/` bytes (at the cost of coupling the digest to skill
+   churn) is open.
+5. **Removal.** This AIP defines install and replace. Whether a pack
+   uninstall verb exists (removing the plugin, apps, and recorded
+   selections as one transaction, with the apps' data dirs' retention
+   following [AIP-42](/docs/aip-42) rules) is open; today removal is
+   per-member.
+6. **Pricing removal.** Whether the legacy `pricing` block is dropped
+   from `pack/v1` in a future minor once [AIP-55](/docs/aip-55)
+   adoption is universal, or retained indefinitely, is open.
+
+## See also
+
+- [AIP-1](/docs/aip-1): process, RFC 2119
+- [AIP-10](/docs/aip-10): ids and slugs; the envelope the pack `name`
+  shape narrows
+- [AIP-18](/docs/aip-18): COLLECTION; the item typing primitive
+- [AIP-42](/docs/aip-42): AGENT-SESSIONS; the app lifecycle tools the
+  installation contract delegates to
+- [AIP-53](/docs/aip-53): APP; the executable bundle a pack assembles
+- [AIP-54](/docs/aip-54): REF; the `aip://` artifact-ref grammar
+- [AIP-55](/docs/aip-55): PRODUCT; the pricing mechanism superseding
+  the legacy `pricing` block
+- [AIP-57](/docs/aip-57): MODEL-ROUTING; the RoutingPack name
+  distinction
+- [AIP-62](/docs/aip-62): REVIEW; the git pin grammar and the
+  `agentproto-pack-digest/v1` recipe name it shipped first
