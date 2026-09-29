@@ -2,7 +2,7 @@
 title: "AIP-49: WALLET — agentwallet/v1 (principal-owned multi-asset wallet)"
 description: A principal-owned multi-asset wallet primitive. Assets are declared ERC-20-style (ref/symbol/decimals/standard/peg/ruleSet) and partitioned into ERC-1410 tranches; value lives in an append-only event journal whose fold is the balance. A restriction lattice makes laundering structurally impossible and conversions no-arbitrage; an authorize policy engine separates passive (cost-of-existing) from active (chosen) spend and bounds delegation by lineage-min. All settlement rails (Stripe/PawaPay/x402/on-chain) are adapters behind a per-asset SettlementPort.
 aip: 49
-status: Draft
+status: Review
 type: Schema
 created: 2026-06-06
 author: Jeremy André <jeremy@agentik.net>
