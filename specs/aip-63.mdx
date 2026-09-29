@@ -1,0 +1,651 @@
+---
+title: "AIP-63: BROWSER.md, agentbrowser/v1 (browser provider manifest, instance lifecycle, profile consent)"
+description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, and a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state.
+aip: 63
+status: Draft
+type: Schema
+created: 2026-09-29
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 7, 14, 17, 19, 30, 59]
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/driver/browser
+resources: ./resources/aip-63/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions/63
+layer: drivers
+package: "@agentproto/driver-browser"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 63 (provisional, editors assign the final number) |
+| Title | BROWSER.md, agentbrowser/v1 (browser provider manifest, instance lifecycle, profile consent) |
+| Status | Draft |
+| Type | Schema |
+| Domain | drivers.sh |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-14](/docs/aip-14) (TOOL), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER), [AIP-59](/docs/aip-59) (pairing) |
+| Reference Impl | [`@agentproto/driver-browser`](https://github.com/agentproto/ts/tree/main/packages/driver/browser) |
+| Resources | [`./resources/aip-63`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-63/draft): [`BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json) and three example manifests under `examples/` (camofox, chromium, browserbase) |
+
+## Abstract
+
+A browser that an agent drives is a different thing from a tool that an
+agent calls: it is a long-lived process with a lifecycle, it carries
+identity (cookies, storage), and it can be local or someone else's
+machine. `BROWSER.md` declares such a browser as an
+[AIP-30](/docs/aip-30) DRIVER of any `kind`, plus a `browser:` block that
+states where it runs, what it can do, how it starts and stops, which
+profile modes it supports and where session material may go. The tools
+it serves are AIP-14 tools with ids such as `browser.navigate`, gated by
+the declared capabilities: a tool the provider cannot serve fails with a
+typed `unsupported` error that names the missing capability.
+
+The AIP also fixes the instance lifecycle (with supervision rules that
+prevent silent restart loops and orphaned processes) and the consent
+model for seeding a browser from a user's profile: explicit per-domain
+grants, an append-only ledger, and a revoke that deletes derived
+material.
+
+## Motivation
+
+Three parallel models of "a browser for agents" tend to coexist in a
+codebase: a process-lifecycle handle (start it, get a port), a
+page-control driver (navigate, click, evaluate), and per-vendor client
+code for hosted browsers. None of them can say, in one declarative
+place, that a provider has no CDP endpoint, or that a provider is a
+credential sink. The visible failures are ordinary and repeated:
+
+- A network inspection tool fails with an opaque transport error on a
+  provider that never had a CDP endpoint, instead of saying "not
+  supported here, capability `cdp`".
+- A supervisor restarts a browser that dies on every launch, once a
+  minute, with no signal to anyone. Or it kills a slow but progressing
+  launch and starts a second one on top of it.
+- An idle reaper closes the tab in which a human was halfway through a
+  login.
+- A tool that "imports the user's Chrome session" copies every cookie
+  for every domain, with no record of what was taken and no way to take
+  it back.
+- Chrome refuses `--remote-debugging-port` on its default user-data
+  directory, so the obvious way to drive the user's real profile is
+  closed, and the workarounds tend to copy the whole profile.
+
+A shared, declarative profile lets independent providers (a stealth
+Firefox variant behind REST, Playwright-managed Chromium, the user's
+system Chrome, a hosted browser service) be interchangeable behind one
+tool surface, and lets a host enforce the same consent rules whichever
+provider is in use.
+
+## Terminology
+
+| Term | Meaning |
+|---|---|
+| **Provider** | A concrete browser implementation described by one `BROWSER.md` manifest. Not an AIP-52 ADAPTER. |
+| **Instance** | One running browser (process tree, container or remote session) launched from a provider. |
+| **Target** | One tab or page inside an instance. The unit tools act on. Tools take a `target` handle. |
+| **Driver handle** | The object `attach` returns: a page-control interface bound to an instance. |
+| **Context** | An isolated cookie and storage jar inside an instance. |
+| **Profile** | Persistent or seeded browser state (cookies, storage) a context starts from. |
+| **Grant** | A recorded consent, by a human, that lets named session material enter a store or an instance. |
+| **Sink** | Somewhere session material can end up: `local` (this host) or `remote` (a third party's machine). |
+| **Host** | The process that runs providers and exposes the tools: an agentproto daemon, or a standalone browser server. |
+| **Supervisor** | The host component that health-checks, restarts and reaps instances. |
+
+**Provider versus ADAPTER.** In this AIP a provider is the inbound side:
+it implements browser tools. [AIP-52](/docs/aip-52) ADAPTER is the
+outward mirror of DRIVER: it projects a handle into a foreign
+framework. They are unrelated. Reference npm packages are named
+`adapter-browser-*` only by repository layout precedent (AIP-45's
+reference implementations already live under `adapters/`); the name
+carries no AIP-52 meaning.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
+interpreted as described in [AIP-1](/docs/aip-1) (RFC 2119).
+
+Rules are numbered so they can be cited and tested. Every rule in
+§ Manifest, § Tool contracts, § Instance lifecycle and § Profile and
+consent names in parentheses the conformance level that tests it (see
+§ Conformance). Business concerns such as metering, leases and licences
+are out of scope for this AIP.
+
+### 1. Manifest
+
+**Relation to AIP-30.** A browser manifest is AIP-30 DRIVER frontmatter
+of **any** `kind` (`sdk`, `http`, `cli`, `mcp`, `builtin`) plus a
+`browser:` block. `kind` keeps its AIP-30 meaning: it is the
+**transport** axis (how the host reaches the provider), not the
+"what is it" axis. A camofox-style REST service is `kind: http`;
+Playwright in process is `kind: sdk`; a spawned browser binary with a
+wrapper is `kind: cli`. Whatever the kind, that kind's own subtype
+validation still applies unchanged (for `kind: cli`, the AIP-29 schema;
+for `http` and `sdk`, the subtype AIP when it lands), in addition to
+this AIP's block.
+
+This differs from [AIP-45](/docs/aip-45), which layers over exactly one
+subtype (AIP-29 CLI.md) and so can `$ref` that subtype's schema
+directly. A browser profile spans kinds, so `BROWSER.schema.json`
+composes with the AIP-30 supertype schema via `allOf` and adds the
+`browser:` block; it does not replace or restrict `kind`.
+
+**M1** (core). A manifest MUST validate against
+[`BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json)
+(which includes the AIP-30 DRIVER schema) and against the schema of its
+own `kind`.
+
+#### The `browser:` block
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `location` | Yes | `local` \| `remote` | `local`: the browser runs on the host's machine. `remote`: it runs on a third party's machine, so the provider is a credential sink. |
+| `display` | Yes | (`headless` \| `headed`)[] | Display modes the provider can launch. |
+| `instances` | Yes | `single` \| `multi` | Whether more than one instance of this provider can run at once. |
+| `endpoints` | No | object | `rest` and `cdp`, each `{ url?, discovered? }`. `discovered: true` means the URL is only known after launch (for example a remote session's CDP URL). A local provider SHOULD default to a loopback URL. |
+| `capabilities` | Yes | object | See below. Absent boolean means false. |
+| `profiles` | Yes | object | `modes` (`ephemeral`, `persistent`, `import`, `native-login`, `clone`) and optional `storedBy` (`host` or `provider`). |
+| `lifecycle` | No | object | `launch`, `health`, `stop`, `supervision`. See § Instance lifecycle. |
+| `sinks` | Iff `remote` | object[] | `{ id, kind, operator?, region?, ack }`. Every `remote` sink MUST declare `ack: required`. |
+| `conformance` | No | string[] | Levels the provider claims, always including `core`. |
+
+Capabilities:
+
+| Capability | Meaning |
+|---|---|
+| `cdp` | A Chrome DevTools Protocol endpoint is available (`endpoints.cdp`). |
+| `downloads` | File downloads can be captured. |
+| `recording` | `none`, `screencast` or `video`. |
+| `stealth` | The provider is designed to resist bot detection. A design goal, never a promise (see § Security considerations). |
+| `fullPageScreenshot` | Screenshots beyond the viewport. |
+| `trustedInput` | Input is produced at browser or OS level, so page script sees it as user input. |
+| `multiTarget` | More than one target per instance. |
+| `aiActions` | Natural-language actions are served by the provider. |
+| `cookies` | The host can set and read cookies on a context. |
+| `storageState` | A full storage state can be loaded into a context. |
+| `persistentProfile` | A named profile survives instance stop. |
+
+`profiles.storedBy` says who persists session material between runs. A
+provider that keeps its own jar (`provider`) puts that material outside
+the host's store, and outside the host's at-rest protections (C11).
+
+**M2** (core). A provider with `location: remote` MUST declare at least
+one `remote` sink, and every `remote` sink MUST declare `ack: required`.
+
+**M3** (core). `capabilities.cdp: true` and `endpoints.cdp` MUST appear
+together.
+
+**M4** (core). A manifest MUST NOT list in `implements[]` a tool whose
+capability gate is closed: `browser.list_requests`,
+`browser.get_request_body` and `browser.cdp_send` need `cdp`;
+`browser.download` needs `downloads`; `browser.act` needs `aiActions`.
+
+**M5** (core). `profiles.modes` containing `persistent` requires
+`capabilities.persistentProfile`; containing `import` or `clone`
+requires `capabilities.cookies` or `capabilities.storageState`.
+
+**M6** (core). Each claimed `conformance` level needs the capability it
+tests: `network` needs `cdp`, `download` needs `downloads`, `profile`
+needs `cookies` or `storageState`.
+
+Manifest keys and the AIP-30 universal fields cooperate rather than
+duplicate: AIP-30 `health_check` remains the resolver's cheap
+reachability probe, and `browser.lifecycle.health` is the supervisor's
+loop. When `health_check` is absent a host MAY derive the probe from
+`lifecycle.health`.
+
+### 2. Tool contracts
+
+A provider serves browser tools by binding AIP-14 tool ids in
+`implements[]`. The ids below are reserved by this AIP. The contract
+files (`TOOL.md`) are published with the reference implementation;
+this AIP fixes ids, gates and levels.
+
+| Tool id | Gate | Level | Summary |
+|---|---|---|---|
+| `browser.navigate` | none | core | Load a URL in a target. |
+| `browser.evaluate` | none | core | Evaluate an expression in the page. |
+| `browser.get_dom` | none | core | Return the page DOM or a selector's subtree. |
+| `browser.screenshot` | `fullPageScreenshot` for the full-page option | core | Capture a viewport or full-page image. |
+| `browser.click`, `browser.fill` | `trustedInput` for the trusted option | interaction | Pointer and text input. |
+| `browser.act` | `aiActions` | interaction | Natural-language action. |
+| `browser.tabs` | `multiTarget` for more than one target | interaction | List, open, close targets; set `keepAlive`. |
+| `browser.list_requests` | `cdp` | network | List network requests seen by a target. |
+| `browser.get_request_body` | `cdp` | network | Fetch a captured response body. |
+| `browser.cdp_send` | `cdp` | network | Send a raw CDP command. |
+| `browser.download` | `downloads` | download | Capture a download to a host path. |
+| `browser.profile.list` | `cookies` or `storageState` | profile | List grants (never values). |
+| `browser.profile.refresh` | `cookies` or `storageState` | profile | Re-read granted domains from the granted source. |
+| `browser.profile.revoke` | `cookies` or `storageState` | profile | Revoke a grant or some of its domains. |
+
+There is deliberately no tool that creates or widens a grant (C7).
+
+**T1** (core). Tool ids in this table MUST keep their meaning and
+gates. A provider MAY add vendor tools under its own namespace.
+
+**T2** (core). When the AIP-14 resolver picks a provider for a call
+that needs a capability, it MUST consider only providers whose manifest
+declares that capability, and MUST fall back per AIP-30's preference
+order among those.
+
+**T3** (core). A call that reaches a provider lacking the tool (not in
+`implements[]`) or lacking the gate MUST fail with the AIP-14 error
+envelope, `code: "browser:unsupported"`, a `message` naming the
+capability, and `cause: { capability: "<name>" }`. The failure MUST NOT
+be an opaque transport, timeout or 404 error. The canonical example: a
+provider without a CDP endpoint answers `browser.list_requests` with
+`browser:unsupported`, `cause.capability: "cdp"`.
+
+**T4** (core). Browser-specific error codes are `browser:unsupported`,
+`browser:starting` (retryable), `browser:not_ready`,
+`browser:crash_looping`, `browser:target_gone` and
+`browser:consent_required` (names the domain). They follow AIP-14's
+domain-prefix convention.
+
+### 3. Instance lifecycle
+
+An instance is in exactly one state:
+
+```
+absent -> starting -> healthy <-> degraded -> stopping -> stopped
+              |                                  ^           |
+              +-----------> crash-looping        +-----------+  (stopped -> starting on relaunch)
+```
+
+| Transition | Trigger |
+|---|---|
+| `absent` to `starting` | `launch` |
+| `starting` to `healthy` | health probe succeeds |
+| `starting` to `stopped` | launch failed or budget exhausted (counts toward L6 only per L9) |
+| `healthy` to `degraded` | health probe fails or the provider reports partial service |
+| `degraded` to `healthy` | probe recovers |
+| `healthy` or `degraded` to `stopping` | `stop` |
+| `stopping` to `stopped` | process tree gone and orphan sweep done |
+| `stopped` to `starting` | `launch` again |
+| `starting` to `crash-looping` | L6 threshold reached |
+| `crash-looping` to `starting` | operator reset only (L7) |
+
+`crash-looping` is terminal until an operator resets it.
+
+Provider primitives, in TypeScript notation (normative for the shape;
+the reference package is authoritative for the exact types):
+
+```ts
+interface BrowserProvider {
+  manifest: BrowserManifest
+  launch(opts: LaunchOptions, ctx: HostContext): Promise<BrowserInstance>
+}
+interface BrowserInstance {
+  id: string
+  state: InstanceState
+  endpoints: { rest?: string; cdp?: string }
+  pid?: number
+  wasAlreadyRunning: boolean
+  health(): Promise<{ state: InstanceState; reason?: string; checkedAt: string; bootId?: string }>
+  attach(opts?: AttachOptions): Promise<BrowserDriver>
+  stop(opts?: { force?: boolean }): Promise<{ swept: number }>
+}
+```
+
+**L1** (core). `health()` and every host status surface MUST report one
+of the seven states, and transitions MUST follow the table.
+
+**L2** (core). `launch` MUST be idempotent. When a healthy instance
+already exists for the same instance key (provider id plus profile or
+label), `launch` MUST return it with `wasAlreadyRunning: true`, MUST NOT
+spawn a second process, and MUST NOT change its configuration. This
+includes a healthy service on the provider's default endpoint that the
+host did not start.
+
+**L3** (core). `attach` MUST return a driver handle bound to a target.
+On an instance that is not `healthy` or `degraded`, `attach` MUST fail
+with `browser:not_ready` carrying the current state.
+
+**L4** (core). `health()` MUST answer within `lifecycle.health.timeoutMs`
+and MUST NOT create pages or targets as a side effect.
+
+**L5** (core). `stop` MUST be idempotent and best effort: request a
+graceful stop, wait up to `lifecycle.stop.graceMs`, then force. It MUST
+then sweep orphans: terminate every process carrying the instance's
+`supervision.orphanMarker`, and MUST NOT terminate processes without
+the marker. `stop` on an instance the host did not launch (a
+`wasAlreadyRunning` attach) MUST NOT terminate it unless `force: true`.
+
+**L6** (core). The supervisor MUST count consecutive failed launches
+within `crashLoop.windowMs` (defaults: 3 failures, 300000 ms). On
+reaching `crashLoop.maxFailures` it MUST enter `crash-looping`, MUST stop
+spawning, and MUST surface the last failure reason in `health()` and in
+`browser:crash_looping` errors.
+
+**L7** (core). Leaving `crash-looping` MUST require an explicit reset
+from an operator channel (host CLI or UI). Timers, retries and agent
+tool calls MUST NOT clear it.
+
+**L8** (core). On host start, before its first launch, the supervisor
+MUST sweep marker-carrying processes left by a previous host run.
+
+**L9** (core). Launch has one budget, `launch.budgetMs` (default
+120000). The budget is a soft deadline: while progress signals continue
+(process alive and a bound port, or health reporting `starting`, within
+the trailing `launch.progressWindowMs`), the supervisor MUST keep
+waiting, up to `launch.hardCeilingMs` (default three times the budget).
+A slow but progressing launch MUST NOT count toward L6 and MUST NOT be
+killed and replaced by a second launch. Only a launch that exhausts the
+budget with no progress, or reaches the hard ceiling, is a failed launch.
+
+**L10** (core). A call that arrives while the instance is `starting`
+MUST wait up to the remaining budget, then fail with retryable
+`browser:starting`. It MUST NOT surface as an opaque timeout.
+
+**L11** (interaction). A target opened with `keepAlive: true` MUST NOT
+be closed by any idle reaper (host or provider, `idleReapMs` or
+otherwise). It closes only on an explicit close, `stop`, revoke of the
+session's grant (C8), or instance loss.
+
+**L12** (interaction). After an instance restart (`bootId` change, or
+the process was replaced), target handles issued by the previous boot
+MUST fail with `browser:target_gone`. A host MUST NOT silently rebind a
+stale handle to a new target. A provider SHOULD expose `bootId` in
+`health()` so clients can detect the restart.
+
+**L13** (core). A provider that drives a Chrome-family browser over CDP
+MUST launch it on a fresh, non-default user-data directory. Chrome 136
+and later refuse `--remote-debugging-port` on the default user-data
+directory, so this is required, not a preference. Session material
+reaches such an instance only through granted injection (C1), for
+example CDP `Network.setCookies`; a provider MUST NOT satisfy a
+profile request by copying a whole user profile unless a recorded
+full-profile grant covers it (C3).
+
+### 4. Profile and consent
+
+This section applies to a provider or host that can seed a context from
+a user's profile or persist session material: `profiles.modes` includes
+`import`, `native-login` or `clone`, or `capabilities.cookies` or
+`capabilities.storageState` is set. Its rules are tested at the
+`profile` level.
+
+**Session material** is cookies, storage state, profile directories and
+anything derived from them (a decrypted temporary copy, a warm tab or
+context logged in with them, a session created at a remote provider from
+them). **A store** is any persistence of session material or its
+transfer into a remote instance.
+
+Grant and ledger records have the shape of `$defs/grant` and
+`$defs/ledgerRecord` in `BROWSER.schema.json`. A grant's scope is either
+an explicit `domains` list or `fullProfile: true`; a wildcard is not a
+value of `domains`.
+
+**C1** (profile). Session material MUST enter a store only through a
+grant.
+
+**C2** (profile). A grant's `domains` MUST be explicit registrable
+domains or hosts, lowercase, at least two labels. A grant covers the
+named domain and its subdomains. A host MUST reject `*`, `*.example.com`,
+a leading dot, an empty list, a bare TLD and any public suffix (checked
+against the Public Suffix List; the schema pattern is necessary, not
+sufficient).
+
+**C3** (profile). The only exception to C2 is a **recorded full-profile
+grant** (`fullProfile: true`). It MUST be requested by name (a dedicated
+flag or control, never implied by omitting domains), MUST show a warning
+that the entire profile including every domain is exposed, MUST have a
+ledger record, and MUST NOT include a remote sink.
+
+**C4** (profile). A non-interactive request without an explicit domain
+list or the named full-profile request MUST fail. It MUST NOT default to
+"all domains".
+
+**C5** (profile). An interactive import MUST show per-domain cookie
+counts from a presence scan that does not decrypt or read values, and
+MUST ask per domain before any value is read.
+
+**C6** (profile). Before session material is sent to a `remote` sink,
+a human MUST acknowledge that sink (its `id` and `operator`), producing a
+`sink-ack` ledger record. A `location: remote` provider MUST refuse to
+receive material for a grant whose `remote` sink has no such
+acknowledgement (`ackSeq`).
+
+**C7** (profile). An agent-initiated call MUST NOT create a grant, add
+a domain, change the source profile, add a sink, or turn a local
+grant into a remote one. It MAY list grants, refresh material within an
+existing grant (same source profile, same or fewer domains), and revoke.
+A refused attempt SHOULD append a `deny` ledger record. An agent that
+needs more access MAY file an [AIP-7](/docs/aip-7) approval request;
+only a human decision on a human channel counts, and the widening itself
+is then performed through the operator channel, not through a tool.
+
+**C8** (profile). Revoke MUST take effect before it reports success. It
+MUST delete the derived material for the revoked scope (stored cookies
+and storage for those domains, decrypted temporary copies, warm tabs and
+contexts using them). For a `remote` sink it MUST also ask the provider
+to end or delete the remote session and record whether that was
+`confirmed`, `unavailable` or `failed`. It MUST append a `revoke` record
+with both outcomes. A domain-level revoke narrows the grant.
+
+**C9** (profile). Cookie values, storage contents and any secret derived
+from them MUST NOT appear in tool results, error messages, logs, the
+ledger or telemetry. Counts, domain names and (in the ledger) salted
+name hashes are allowed.
+
+**C10** (profile). The consent ledger MUST be append-only: one JSON
+record per line, a monotonic `seq`, records for `grant`, `refresh`,
+`revoke`, `sink-ack` and `deny`. The host MUST NOT rewrite or truncate
+it. Records SHOULD carry `prev`, the SHA-256 of the previous line.
+
+**C11** (profile). On POSIX, files holding session material, the ledger
+and the store directory MUST be created with mode 0600 (files) and 0700
+(directories). Encryption of session material at rest is a SHOULD in
+`agentbrowser/v1` and a MUST in `agentbrowser/v2`. A provider with
+`profiles.storedBy: provider` SHOULD state in its body how its own jar is
+protected; a host cannot promise more than the provider does.
+
+**C12** (profile). A grant MAY carry `deviceId`, the identity of a paired
+device under [AIP-59](/docs/aip-59). When present, calls from any other
+paired device MUST NOT use that grant's material, and MUST see it as
+absent (`browser:consent_required`).
+
+**C13** (profile). When AIP-59 revokes a pairing, the host MUST stop
+honoring grants scoped to that device at once and SHOULD revoke them
+under C8.
+
+### 5. Conformance
+
+Conformance is claimed per level in `browser.conformance`. A claimed
+level MUST pass the suite for it. The reference package ships the suite
+at `@agentproto/driver-browser/conformance`; it runs against any
+provider, including one backed by a fake server, and against a
+deliberately broken fake, which it MUST fail.
+
+| Level | Applies to | Tests |
+|---|---|---|
+| `core` | every provider | manifest rules M1 to M6; tool gate T1 to T4 (including that a provider without `cdp` answers `browser.list_requests` with `browser:unsupported`); lifecycle L1 to L10 and L13; `browser.navigate`, `browser.evaluate`, `browser.get_dom`, `browser.screenshot` |
+| `interaction` | providers serving input tools | `browser.click`, `browser.fill`, `browser.act`, `browser.tabs`; L11, L12 |
+| `network` | providers with `cdp` | `browser.list_requests`, `browser.get_request_body`, `browser.cdp_send` |
+| `download` | providers with `downloads` | `browser.download` |
+| `profile` | providers with `cookies` or `storageState` | C1 to C13; `browser.profile.list`, `.refresh`, `.revoke` |
+
+Rule index (every rule names its level; this table is the fixture):
+
+| Rule | Level | Test hook |
+|---|---|---|
+| M1 | core | `core.manifest.schema` |
+| M2 | core | `core.manifest.remote-sink` |
+| M3 | core | `core.manifest.cdp-endpoint` |
+| M4 | core | `core.manifest.implements-gate` |
+| M5 | core | `core.manifest.profile-modes` |
+| M6 | core | `core.manifest.conformance-claims` |
+| T1 | core | `core.tools.ids` |
+| T2 | core | `core.tools.resolver-filter` |
+| T3 | core | `core.tools.unsupported` |
+| T4 | core | `core.tools.error-codes` |
+| L1 | core | `core.lifecycle.states` |
+| L2 | core | `core.lifecycle.launch-idempotent` |
+| L3 | core | `core.lifecycle.attach-not-ready` |
+| L4 | core | `core.lifecycle.health-pure` |
+| L5 | core | `core.lifecycle.stop-sweep` |
+| L6 | core | `core.supervision.crash-loop` |
+| L7 | core | `core.supervision.reset-operator-only` |
+| L8 | core | `core.supervision.reap-on-start` |
+| L9 | core | `core.supervision.launch-budget` |
+| L10 | core | `core.supervision.starting-wait` |
+| L11 | interaction | `interaction.targets.keepalive` |
+| L12 | interaction | `interaction.targets.stale-handle` |
+| L13 | core | `core.lifecycle.chrome-fresh-userdir` |
+| C1 | profile | `profile.consent.grant-required` |
+| C2 | profile | `profile.consent.domains-explicit` |
+| C3 | profile | `profile.consent.full-profile` |
+| C4 | profile | `profile.consent.no-default-all` |
+| C5 | profile | `profile.consent.presence-scan` |
+| C6 | profile | `profile.consent.sink-ack` |
+| C7 | profile | `profile.consent.agent-cannot-widen` |
+| C8 | profile | `profile.consent.revoke-deletes` |
+| C9 | profile | `profile.consent.never-print` |
+| C10 | profile | `profile.consent.ledger-append-only` |
+| C11 | profile | `profile.consent.perms-and-encryption` |
+| C12 | profile | `profile.consent.device-scope` |
+| C13 | profile | `profile.consent.pairing-revoked` |
+
+The C9 hook plants a canary cookie value and greps tool results, error
+messages, logs and the ledger for it. The C7 hook drives every tool as
+an agent caller and asserts that no call changes the domain set.
+
+## Rationale
+
+**A profile, not a new `kind`.** AIP-30's `kind` is the transport axis
+with a closed enum and a preference order (`builtin`, `sdk`, `http`,
+`mcp`, `cli`). Browser providers span transports, so encoding
+"browser" as a kind would force one transport per provider concept. A
+profile keeps `kind` truthful and lets any transport carry a browser.
+
+**A profile, not an AIP-30 amendment.** A lifecycle and a consent model
+would bloat an abstract supertype and couple their versions to it.
+AIP-45 is the precedent for a domain profile over a driver with its own
+package and resources, and this AIP follows it, with the difference
+stated in § Manifest.
+
+**The capability gate is in the manifest.** A flag plus an absent
+`implements[]` entry is checkable before any call, so the resolver can
+route around a provider and a host can show why a tool is unavailable.
+The typed error covers the remaining case: a call routed to a provider
+that cannot serve it.
+
+**The lifecycle rules are aimed at real failure shapes**: silent restart
+loops, second launches on top of slow first ones, reapers closing human
+logins, and processes left behind after a crash.
+
+**The consent model is per domain by construction.** The dangerous
+default of "take everything" is closed by making a wildcard
+unrepresentable in the grant schema, and by giving the one honest
+exception (full profile) its own name, its own warning and its own
+ledger row. Deriving policy from where material can go (sinks) rather
+than from provider brand keeps remote and local providers under one
+rule.
+
+**Encryption at rest is SHOULD in v1.** Some providers persist their own
+session jar in plaintext and the host cannot change that. A MUST the
+ecosystem cannot yet meet would be ignored; the v2 MUST is a signal.
+
+## Security considerations
+
+**Auth model.** The auth model for reaching a browser host is
+[AIP-59](/docs/aip-59) pairing, and nothing else. A browser host is an
+"AIP-59 host": every client, local ones included, is a paired device and
+presents the device credential. A host MUST NOT invent a static token
+scheme, and a provider MUST NOT be reachable through a provider-specific
+static client token. Upstream credentials a provider needs to call a
+third party (for example an API key for a hosted browser service) are
+[AIP-19](/docs/aip-19) secrets used by the provider; they are not client
+auth. Per-domain grants are scoped per paired device (C12). AIP-59
+describes the daemon side of pairing today; a standalone browser host
+implements the same host side as a library, and the AIP-59 scope
+sentence is amended separately.
+
+**Network exposure.** A host MUST bind loopback by default, and MUST
+refuse a request whose `Host` or `Origin` header is not an expected
+loopback or paired-origin value, so that a web page cannot reach a local
+browser host through DNS rebinding. This is the same check the agentproto
+daemon applies to its HTTP surface. Binding elsewhere MUST be an
+explicit operator choice, and pairing remains required.
+
+**Chrome remote debugging.** A CDP endpoint is full control of the
+browser and every logged-in session in it. Chrome 136 and later refuse
+`--remote-debugging-port` on the default user-data directory. A chrome
+provider MUST therefore use a fresh user-data directory (L13) and MUST
+bind the debugging port to loopback.
+
+**Threat model**
+
+- **Clone leakage.** A full-profile clone exposes every domain, including
+  ones the user never thought about (banking, mail). It exists only as a
+  named, warned, ledgered grant that cannot go to a remote sink (C3), and
+  it is a poor default because localStorage and IndexedDB logins cannot
+  travel by cookie injection anyway.
+- **Agent-driven consent escalation.** An agent that can widen its own
+  access makes consent meaningless. The tool surface has no widening
+  tool, agent callers are refused and logged (C7), and approvals are
+  human decisions (AIP-7, "agents never decide").
+- **Plaintext storageState in providers that persist their own jar.** A
+  provider with `storedBy: provider` may hold cookies in a plaintext
+  file the host cannot protect, and may load them by file path. C11
+  limits what the host controls (permissions, host-side encryption) and
+  asks the provider to disclose the rest. A short-lived plaintext copy
+  handed to such a provider MUST be created 0600 in a 0700 directory and
+  removed as soon as the provider has loaded it.
+- **Trust in remote providers.** A `remote` provider sees everything sent
+  to its browsers, including injected cookies and typed secrets. The sink
+  acknowledgement (C6) makes that visible to the human, revoke asks the
+  provider to delete the session (C8), and the host cannot verify what
+  the provider does afterwards.
+- **Stealth is a capability, not a promise.** `stealth: true` states
+  intent. Detection evolves; a provider that blocks less today may block
+  more tomorrow. Callers SHOULD NOT treat it as an authorization or a
+  safety property, and hosts SHOULD NOT weaken any consent rule because a
+  provider is stealthy.
+- **Host-side secrecy.** Cookie values never appear in results, logs,
+  ledger or telemetry (C9). Error messages from providers SHOULD be
+  scrubbed before they cross the host boundary, since a provider may echo
+  a request that contained a value.
+
+## Reference Implementation
+
+`@agentproto/driver-browser` at
+[`packages/driver/browser`](https://github.com/agentproto/ts/tree/main/packages/driver/browser)
+provides `defineBrowser` (built on the AIP-30 `defineDriver` machinery),
+the manifest schema, the `BrowserDriver` page-control port, the
+supervisor, the conformance suite and tool projection. Providers live in
+`adapters/browser-<id>` packages named `@agentproto/adapter-browser-<id>`
+(a layout precedent only, see § Terminology). A profiles package holds
+the grant, ledger and revoke implementation.
+
+## Compatibility
+
+**With AIP-30.** A browser manifest is a valid DRIVER manifest. A host
+that knows only AIP-30 can resolve and run a provider's tools; it does
+not enforce this AIP's gates, lifecycle or consent until it implements
+them. AIP-30's preference order and the AIP-14 resolver are unchanged;
+this AIP adds the capability filter of T2.
+
+**With AIP-14.** Tool ids are ordinary AIP-14 ids. The error codes of T4
+follow AIP-14's domain-prefix convention.
+
+**With AIP-52.** No relation (see § Terminology).
+
+## Open questions
+
+- Windows and Linux cookie decryption for `import`: the consent rules
+  are platform neutral; the mechanics are not specified here.
+- Video recording semantics across providers (`screencast` versus
+  `video`, where the file lands, retention).
+- The exact form of `deviceId` in AIP-59, which leaves device identity to
+  the host.
+- Whether `browser.record` deserves a tool contract of its own.
+- Whether grants should be able to carry an expiry the host enforces by
+  automatic revoke, rather than only recording `expiresAt`.
+
+## See also
+
+- [AIP-30 DRIVER.md](/docs/aip-30) (the supertype this profiles)
+- [AIP-45 AGENT-CLI.md](/docs/aip-45) (the precedent for a profile over a driver)
+- [AIP-14 TOOL.md](/docs/aip-14) (tool ids, error envelope, capability requirements)
+- [AIP-7 GOVERNANCE.md](/docs/aip-7) (approvals: agents never decide)
+- [AIP-59 MOBILE PAIRING](/docs/aip-59) (the auth model)
+- [AIP-17 RUNNER.md](/docs/aip-17) and [AIP-19 SECRETS.md](/docs/aip-19)
+- [`./resources/aip-63/draft/BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json)
