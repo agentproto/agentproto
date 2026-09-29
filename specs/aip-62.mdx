@@ -1,0 +1,1186 @@
+---
+title: "AIP-62: REVIEW.md: agentreview/v1 (attested verdicts over a content range)"
+description: Names the review — a declared set of command and agent checks run over a frozen git range and folded into a `pass | block | incomplete` verdict — as a first-class primitive, and fixes the attestation that binds that verdict to the exact manifest and content it is about. Specifies the REVIEW.md manifest (`kind: review`; `target`, `checks`, `bindings`, `uses`, `verdict`, and every cross-field rule), reusable review packs (`kind: review-pack`) with their trust rules and the `agentproto-pack-digest/v1` digest, the execution model (prepare before the range freezes, parallel bounded lanes, the trinary fold in which `incomplete` is never a pass), the `agentproto.review.attestation/v1` document, the ledger key and cache rule, ssh-ed25519 signing over canonical JSON, delta composition via `composedFrom`, and the step-by-step verification algorithm.
+aip: 62
+status: Draft
+type: Schema
+created: 2026-09-29
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 15, 46, 54]
+discussions-to: https://github.com/agentproto/agentproto/discussions/62
+layer: primitives
+package: "@agentproto/review"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/review
+---
+
+| Field | Value |
+|---|---|
+| AIP | 62 (provisional — editors assign the final number) |
+| Title | REVIEW.md: agentreview/v1 |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-15](/docs/aip-15) (WORKFLOW — the execution shape a review binding compiles to), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — the reviewer child sessions agent lanes run in), [AIP-54](/docs/aip-54) (REF — the artifact-reference model a future PACK AIP is expected to reuse for review packs) |
+| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE — where an organisation's merge policy consumes an attestation), [AIP-36](/docs/aip-36) (SANDBOX — the confinement a host SHOULD put around command lanes and reviewer sessions) |
+| Created | 2026-09-29 |
+| Package | `@agentproto/review` (manifest, compile, attestation, verdict fold, pack resolution); `@agentproto/runtime` (ledger, signing, composition, reviewer host); `@agentproto/cli` (`review` verbs) |
+
+## Abstract
+
+A review is a workflow with a verdict contract. It runs a declared set of
+**checks** — shell commands and read-only agent reviewers — over a frozen
+git range, folds their outcomes into `pass`, `block`, or `incomplete`, and
+records the result as an **attestation** that names the exact manifest and
+the exact content it is about. This AIP fixes:
+
+- the **`REVIEW.md` manifest** (`kind: review`): the `target`, the `checks`,
+  the `bindings` that select lanes for a situation (pre-push, CI), the
+  `uses` list that imports reusable packs, and every cross-field rule a
+  conformant parser enforces;
+- the **review pack** manifest (`kind: review-pack`), how a pack is
+  resolved and trusted, and the **`agentproto-pack-digest/v1`** digest that
+  travels in a signed attestation;
+- the **execution model**: `prepare` runs before the range freezes, lanes
+  run in parallel and every lane is bounded, and the fold is trinary, so
+  a lane that could not produce a result can never turn into a pass;
+- the **`agentproto.review.attestation/v1`** document, its canonical JSON
+  form, and the **ledger** key `(repoRemote, manifestSha, binding,
+  rangeSha)` under which verdicts are stored and served from cache;
+- **signing** (ssh-ed25519 via `ssh-keygen -Y`, namespace
+  `agentproto-review`) and **composition** (`composedFrom`): an agent lane
+  reusing a prior passing attestation and reviewing only the delta;
+- the **verification algorithm** a CI gate runs to decide whether a range
+  is attested.
+
+A review pack is a separate format here. A future PACK AIP — shared
+fetch, pin, digest, and trust over the [AIP-54](/docs/aip-54)
+artifact-ref model — is expected to subsume the pack loader; this AIP does
+not design it (§Connecting to other AIPs).
+
+## Motivation
+
+"Did this change get reviewed?" is asked at every merge and answered, today,
+by whatever a CI system happens to report. Three things are missing when the
+reviewer is partly or wholly an agent:
+
+1. **A verdict bound to content.** A green check attached to a branch name
+   says nothing about which commits, under which rules, were examined. When
+   the rules are a rubric an agent reads, editing the rubric changes what
+   "passed" means. A verdict is only reusable, cacheable, and auditable if it
+   names the manifest, the rubric bytes, and the immutable range.
+2. **A verdict that cannot silently become a pass.** Agent reviewers time
+   out, fail to spawn, write nothing, or write garbage. A lane that
+   could not produce a result is not a lane that found nothing. The fold
+   must have a third state, and that state must never be a pass.
+3. **A portable, verifiable artifact.** A reviewer runs on a developer's
+   machine or a daemon; a gate runs in CI. The gate needs to check the claim
+   without re-running the review and without trusting a file merely because it
+   sits in the repository. That needs a signature over canonical bytes and a
+   defined verification procedure.
+
+Nothing in [AIP-15](/docs/aip-15) provides these. A workflow reports that
+its steps ran; it does not define what a review's outcome means, what it
+attests, or how to check it later. REVIEW.md is that layer: a manifest a
+human or agent can read, a compile target the workflow engine can execute,
+and an attestation a verifier can check.
+
+## Design principles
+
+1. **Attest content, not branches.** A verdict is about `baseSha..headSha`,
+   under a specific manifest, with specific rubric and pack bytes. Any of
+   those changing makes it a different verdict.
+2. **`incomplete` is never a pass.** A blocking lane that timed out, was
+   skipped, or could not run yields `incomplete`. Consumers MUST treat
+   anything but `pass` as not-passing.
+3. **Every lane is bounded.** Every check has a timeout; a runaway lane is
+   killed and recorded as `timeout`. A review always terminates.
+4. **Code that runs is declared.** A command check names its command in a
+   manifest that is content-hashed into the attestation. Code arriving from
+   a pack is not run unless the consumer opts in or the pack is
+   provably part of the reviewed repository.
+5. **The reviewer is read-only.** An agent lane reads the repository and
+   writes exactly one verdict file. A review that mutates the tree it
+   reviews attests nothing.
+6. **Parse loudly.** Unknown keys, unbound placeholders, dangling
+   references, and unsatisfiable bindings are errors at parse time, never
+   silent defaults.
+7. **Signatures authenticate the host, not the claim.** Only the host
+   that ran the review signs. A signature says "this host produced these
+   bytes"; whether the host's key is trusted is the verifier's decision
+   (`allowed_signers`), not the attestation's.
+8. **The manifest is the review; the attestation is the receipt.** A
+   REVIEW.md is authored and committed. An attestation is generated, stored
+   in a ledger, and optionally exported. They are linked by `manifestSha`.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as in
+RFC 2119. Unless stated otherwise the behavior below is that of the
+reference implementation (`@agentproto/review`, `@agentproto/runtime`,
+`@agentproto/cli`) and is normative for conformant hosts.
+
+### File location
+
+A review manifest is a Markdown file named `REVIEW.md` with YAML
+frontmatter, conventionally at the repository root. The frontmatter is the
+manifest; the body is human documentation and has no semantics. A host
+resolves the manifest for a run from an explicit path or, by default, the
+`REVIEW.md` at the repository root.
+
+A **review pack** is a `REVIEW.md` whose frontmatter has `kind:
+review-pack`, at the root of a directory (the **pack root**). A REVIEW.md
+that is a pack is not itself runnable.
+
+Both schemas are strict: an unknown key at any level is a parse error.
+
+### Manifest frontmatter (`kind: review`)
+
+Canonical schema: [`REVIEW.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW.schema.json).
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `"review"` | Required. |
+| `id` | string | Required. Matches `^[a-z][a-z0-9-]*$`, at most 64 characters. Also the id shape used for check ids, binding names, and pack namespaces. |
+| `name` | string | Optional display name. |
+| `description` | string | Optional. |
+| `target` | string or object | Required. See §Target. |
+| `checks` | array | Required, at least one. See §Checks. |
+| `bindings` | object | Optional. Keys are binding names (id shape). See §Bindings. |
+| `uses` | array | Optional. Review packs to import. See §Review packs. |
+| `verdict` | object | Optional. `{ exportDir?: string }`: a repo-relative directory that attestation exports are written to and that `verify` reads from by default. |
+
+#### Target
+
+v1 supports one target kind, `git-range`. `target` is either the string
+`"git-range"` or the object `{ kind: git-range, base?: string }`; both forms
+mean the same thing and the string form takes the default base. `base`
+defaults to `origin/main`.
+
+The **reviewed range** is `baseSha..headSha`, where `headSha` is the commit
+`HEAD` resolves to when the range freezes (§Execution) and `baseSha` is
+`merge-base(base, HEAD)`. A caller MAY override `base` and `head` per run.
+
+#### Checks
+
+`checks` is a non-empty list. Each check has an `id` (unique within the
+manifest) and a `kind`.
+
+**Command check** (`kind: command`):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `run` | string | required, non-empty | Executed as `sh -c`. See §Placeholders. |
+| `cwd` | string | repo root | Working directory, relative to the repo root. |
+| `blocking` | boolean | `true` | Whether a non-pass outcome can move the verdict. |
+| `timeoutMs` | positive integer | `600000` | Hard limit. |
+| `effects` | boolean | `false` | `true` marks a prepare-only check that mutates the working tree. |
+| `description` | string | none | |
+
+**Agent check** (`kind: agent`):
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `preset` | string | required, non-empty | The host-defined reviewer preset to run under (§Reviewer sessions). |
+| `rubric` | string | required | Path to the rubric Markdown, relative to the directory containing the REVIEW.md that declares the check. |
+| `blockOn` | `high`, `medium`, or `low` | `high` | The lowest finding severity that fails the lane. Severity order is `low` &lt; `medium` &lt; `high`. |
+| `blocking` | boolean | `true` | As for command checks. |
+| `timeoutMs` | positive integer | `900000` | Hard limit. |
+| `effects` | boolean | `false` | MUST be `false` or absent. `effects: true` on an agent check is an error: an agent is always a read-only reviewer. |
+| `description` | string | none | |
+
+A **blocking** check can change the verdict. An **advisory** check
+(`blocking: false`) is run and recorded on the attestation but never moves
+the verdict.
+
+#### Placeholders
+
+Inside a command check's `run`:
+
+- `{name}` is replaced by the bound value of `name`. `name` matches
+  `[A-Za-z][A-Za-z0-9_-]*`. A `{` immediately preceded by `$` is not a
+  placeholder (so shell `${VAR}` expansions pass through).
+- `{{name}}` is an escape and yields the literal text `{name}`.
+- A host supplies a set of **host variables**, bound in both `prepare`
+  checks and lane checks. The reference host supplies `{base}` (the base
+  sha, resolved before prepare runs) and `{changed}` (the string
+  `'[<baseSha>]'`, already shell-quoted, a git-range filter usable as
+  `turbo --filter={changed}` or `--filter=...{changed}`).
+- **`{base}` and `{head}`** are also bound in every lane check from the
+  frozen target. **`{head}` is bound in lane checks only**: using it in a
+  `prepare` check is a compile error, because the head is not resolved until
+  after prepare.
+- A placeholder with no binding is an error at compile time. It MUST NOT
+  be passed through as literal text.
+
+#### Bindings
+
+A binding names one situation's selection of lanes.
+
+| Field | Type | Description |
+|---|---|---|
+| `on` | string | Optional informational label (`pre-push`, `pr`, …). Nothing dispatches on it. |
+| `prepare` | array of check refs | Optional. Ordered `effects: true` command checks, run before the range freezes. |
+| `checks` | array of check refs | Required, at least one. The lanes. |
+| `quorum` | `"all-blocking-pass"` | Optional. The only defined quorum, and the default. |
+
+A **check ref** is a local check id, or `<as>/<id>` for a check imported
+through `uses` (`^[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)?$`, at most 129
+characters).
+
+Binding keys are id-shaped. The **binding to run** is resolved as: the
+binding the caller named; else, if the manifest declares exactly one
+binding, that binding; else the binding named `default`; else an error.
+
+#### Cross-field rules
+
+A conformant parser MUST reject a manifest that violates any of the
+following. The JSON Schemas express field shapes only; these rules are
+normative in addition to them.
+
+1. Check ids are unique. `uses[].as` values are unique.
+2. Within one binding, `prepare` has no repeated ref and `checks` has no
+   repeated ref.
+3. A binding MUST reference only declared checks (or, with `uses`, a
+   namespaced ref whose namespace is a declared `as`; see rule 9).
+4. Every `prepare` entry MUST be an `effects: true` check.
+5. An `effects: true` check MUST NOT appear in a binding's `checks`.
+6. Every binding MUST select at least one **blocking** check in `checks`.
+7. If `bindings` is absent, an **implied `default` binding** is created
+   over every non-effects check, in declaration order. It is an error if
+   there are none. An implied binding has no `prepare`.
+8. If `uses` is present, explicit `bindings` are REQUIRED. There is no
+   implied `default` binding when packs are used, because the pack's
+   checks are not known until resolution.
+9. With `uses`, at parse time a namespaced ref is validated only for the
+   namespace being a declared `as`. Whether `<as>/<id>` exists is checked
+   after pack resolution (§Review packs), when bindings are re-validated
+   against the complete check set.
+10. `effects: true` on an agent check is an error.
+11. A placeholder rule violation (§Placeholders) is an error.
+
+### Review packs
+
+A review pack is a reusable set of checks a manifest imports through `uses`.
+The pack format is defined here and is separate from other AIP artifacts
+(§Connecting to other AIPs).
+
+#### Pack manifest (`kind: review-pack`)
+
+Canonical schema: [`REVIEW-PACK.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW-PACK.schema.json).
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `"review-pack"` | Required. |
+| `id` | string | Required, id shape. |
+| `version` | string | Required, semantic version. |
+| `description` | string | Optional. |
+| `checks` | array | Required, at least one. Same check shapes as a manifest, with the differences below. |
+
+A pack has no `target`, `bindings`, `prepare`, or `verdict`; those keys are
+errors. No pack check may set `effects: true`. Check ids MUST be unique
+within the pack. An agent check's `preset` is optional in a pack: the
+consumer supplies one at resolution time. A pack agent check's `rubric` path
+is relative to the **pack root**.
+
+#### `uses[]`
+
+Each entry of a consumer's `uses`:
+
+| Field | Type | Description |
+|---|---|---|
+| `pack` | string | Required. The pack reference; see below. |
+| `as` | id | Required. The namespace: a pack check `<id>` is imported as `<as>/<id>`. |
+| `checks` | array of ids | Optional. The subset of the pack's check ids to import. Default: all. A name that is not a pack check is an error. |
+| `preset` | string | Optional. The reviewer preset for imported agent checks that do not have an override. |
+| `overrides` | object | Optional. Keyed by the pack's own check id; each value is `{ blockOn?, blocking?, timeoutMs?, preset? }`. |
+| `allowCommands` | boolean | Default `false`. Allows the pack's `command` checks to run (§Pack trust). |
+
+The `pack` reference is one of:
+
+- an npm package name;
+- a relative path beginning `./` or `../`, resolved against the directory of
+  the consumer's REVIEW.md;
+- an absolute path;
+- `git+https://<url>#<40-hex-sha>`.
+
+For a git reference, only the `git+https` scheme is allowed: `git+ssh`,
+`file:`, `ext::`, and plain `http` are rejected. The reference MUST be
+pinned to a full 40-hex commit sha; a branch, tag, or abbreviated sha is
+rejected.
+
+#### Resolution
+
+Resolving a manifest's `uses` produces the manifest that is actually run.
+For each entry, in order:
+
+1. **Load** the pack (§Pack loading). Parse its REVIEW.md as a
+   `review-pack`.
+2. **Select** the check ids: the entry's `checks` list, or all. An unknown
+   id is an error.
+3. For each selected check, compute the imported check with id `<as>/<id>`.
+   If that id collides with an existing check, it is an error.
+   - A **command check** MUST NOT be imported unless `allowCommands` is
+     true **or** the pack loaded as trusted (§Pack trust); otherwise
+     resolution fails. The overrides `blocking` and `timeoutMs` apply.
+   - An **agent check**'s preset is `overrides[id].preset`, else the
+     entry's `preset`, else the pack check's own `preset`. If none is set,
+     resolution fails. The overrides `blockOn`, `blocking`, and `timeoutMs`
+     apply. The imported check's rubric base is the pack root, not the
+     consumer's directory.
+4. Compute the pack digest (§Pack digest).
+
+After all entries are merged, the consumer's bindings are re-validated
+against the complete check set, applying every cross-field rule above.
+
+A conformant host MUST resolve packs on every run, including a run that will
+be served from the ledger cache, so that the pack digests recorded in the
+attestation are current.
+
+Overrides and the resolved presets are not part of the pack digest. They are
+part of the consumer's REVIEW.md, and so of `manifestSha`.
+
+#### Pack loading
+
+A host loads a pack reference as follows:
+
+- **Relative or absolute path.** The pack root is that directory. A
+  relative reference resolves against the consumer manifest's directory.
+- **npm package.** Resolved from the repository root as an installed
+  package (the host resolves `<name>/package.json` from the repo's own
+  `package.json`). The host MUST NOT fetch or install anything to resolve
+  it.
+- **Git.** The host clones the URL and checks out the pinned sha into a
+  per-sha cache directory. The reference implementation caches at
+  `~/.agentproto/review-packs/<sha>/` and treats an existing `REVIEW.md`
+  there as a cache hit without re-verifying the content against the sha
+  (§Security considerations).
+
+Whatever the source, the pack's `REVIEW.md` source text is read, and every
+selected agent check's rubric is read through the **confined reader**.
+
+**Rubric confinement.** For every pack check, the real path of the resolved
+rubric MUST lie inside the real path of the pack root. A rubric that escapes
+the pack root, including through a symlink, fails resolution before any lane
+runs. (A consumer's own, non-pack rubric paths are not confined.)
+
+#### Pack trust
+
+Whether a pack's `command` checks may run is decided by the pack's
+**trusted** flag at load time:
+
+- A **relative** pack is trusted if and only if both hold: its real path is
+  inside the real path of the repository root, **and** its `REVIEW.md` is
+  tracked by git (`git ls-files --error-unmatch`). If either test cannot be
+  established, the pack is not trusted (fail-safe).
+- An **npm** pack is never trusted.
+- A **git** pack is never trusted.
+- An **absolute** path is decided by the same rule as a relative path.
+
+The reason a tracked, in-repo relative pack is trusted is that it is part
+of the reviewed content: its commands are as reviewable as the consumer's
+own `run` strings. An untrusted pack's commands are arbitrary code from
+elsewhere, so the consumer must opt in per entry with `allowCommands: true`.
+Agent checks from an untrusted pack need no opt-in; they execute no
+pack-authored code, but they do read a pack-authored rubric (§Security
+considerations).
+
+#### Pack digest (`agentproto-pack-digest/v1`)
+
+The digest binds a pack's checks to the bytes that define them. Its record
+is `PackDigest = { ref, id, version, alg, sha256 }`:
+
+- `ref` is the `uses[].pack` string as written;
+- `id` and `version` come from the pack's own REVIEW.md;
+- `alg` is the literal `agentproto-pack-digest/v1`. It names the **recipe**
+  the digest was computed under, not the hash function; it exists so a
+  future recipe is never compared against this one as if they were the same;
+- `sha256` is computed as follows.
+
+1. Build one **line** per input:
+   - for the pack's REVIEW.md source: the label `REVIEW.md`;
+   - for each **selected agent check**: the label is that check's own
+     `rubric` path exactly as declared in the pack (relative to the pack
+     root, not namespaced).
+   A line is `<label>` followed by a NUL byte (`0x00`) followed by the
+   lowercase hex SHA-256 of that input's raw bytes.
+2. Sort the lines lexicographically.
+3. Join the lines with a single `0x0A`, with no trailing newline.
+4. `sha256` is the lowercase hex SHA-256 of the UTF-8 encoding of that
+   string.
+
+The digest lists one line per selected agent check, so two selected checks
+naming the same rubric path produce two identical lines. Command checks
+contribute nothing beyond the REVIEW.md source. Only the selected checks'
+rubrics are included, so selecting a different subset yields a different
+digest. Test vectors are in
+[`EXAMPLES.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/EXAMPLES.md).
+
+A verifier that does not recognize a recorded `alg` MUST refuse to compare
+and MUST NOT treat the pack as verified.
+
+### Execution
+
+#### The run
+
+A review run takes a repository, a manifest path, and optionally a
+binding, `base`, `head`, and control flags. A conformant host performs, in
+order:
+
+1. **Resolve the repository**: its root and `repoRemote`. `repoRemote` is
+   the normalized `origin` URL — scheme and credentials removed, the scp
+   form (`git@host:owner/repo`) converted to `host/owner/repo`, and a
+   trailing `.git` and any trailing slashes removed — or
+   `local:<absolute-root>` when there is no origin.
+2. **Read the manifest** and compute `manifestSha`, the SHA-256 of the
+   REVIEW.md source bytes. Parse it (§Manifest frontmatter).
+3. **Resolve packs** (§Resolution). This runs on every run.
+4. **Resolve the binding** (§Bindings).
+5. **Resolve `baseSha` and `headSha`** (the caller's `base` and `head`, or
+   the defaults in §Target). These serve supersede and the cache lookup.
+   Resolution failure is a could-not-run error. The head that is attested
+   is the one the `freeze` step resolves (§Prepare, freeze, and the dirty
+   flag).
+6. **Supersede** (optional): cancel other running runs for the same
+   repository, binding, and base whose head differs, when they are the same
+   checkout or their head is an ancestor of this head.
+7. **Compute rubric digests.** For each agent lane whose rubric is
+   readable, record `{check, path, sha256}` from the resolved rubric path.
+   This happens **before** `prepare` runs. An unreadable rubric is omitted
+   here and makes its lane `skipped` at execution.
+8. **Consult the ledger cache** (§Ledger). Skipped when the caller asked for
+   no cache or the working tree is dirty.
+9. **Execute** the compiled review (below) and build the attestation.
+10. **Sign** (best effort), **record** in the ledger, and return.
+
+If an identical request (same key) is already running and its head has not
+moved, a host SHOULD join that run rather than start a second one.
+
+#### Compilation to a workflow
+
+A binding compiles to an [AIP-15](/docs/aip-15) workflow with id
+`review-<id>-<binding>`, truncated to 64 characters with any trailing `-`
+removed, and this shape:
+
+1. one **gate** step per `prepare` check, named `prepare-<id>`: a shell
+   command (`sh -c`), run **sequentially**, each with its `timeoutMs`, and
+   before anything else;
+2. a **`freeze`** step: resolves the head and records whether the tree is
+   dirty (below);
+3. a **`lanes`** step: a `parallel` step with one branch per check in
+   `binding.checks`;
+4. a **`verdict`** step: folds the lane results.
+
+The workflow's result is the output of the `verdict` step.
+
+The `freeze`, lane, and `verdict` steps use the engine's runtime-only
+`transform` node ([AIP-15](/docs/aip-15) §Runtime-internal node types are
+not authorable). The compiled workflow is therefore an in-memory execution
+handle, not a serializable WORKFLOW.md; it MUST NOT be presented to another
+host as a manifest.
+
+#### Prepare, freeze, and the dirty flag
+
+`prepare` checks run before the range freezes, so a prepare step that
+changes the tree (regenerating changesets, formatting) happens **before** the
+head is read. A `prepare` step that fails fails the whole run: no attestation
+is produced and the run status is `failed`. It is not an `incomplete`
+verdict.
+
+The `freeze` step resolves the head **after** prepare. It evaluates
+**dirty** at that moment and only then: the tree is dirty if it has
+uncommitted changes to **tracked** files (`git status --porcelain
+--untracked-files=no` is non-empty). Untracked files do not count. If dirty,
+the attestation records `dirty: true`, the lanes ran against content the
+range does not contain, and the attestation is never served from the cache
+or used for composition.
+
+#### Lanes
+
+Every check in `binding.checks` is one **lane**, and every lane resolves to
+a **LaneResult**. The lane executor MUST NOT throw out of a lane: any
+unexpected exception becomes a `skipped` lane carrying `error`. Lanes run in
+parallel.
+
+`LaneResult.status` is one of:
+
+- `pass`: ran to completion and found nothing blocking;
+- `fail`: ran to completion and found something blocking;
+- `timeout`: exceeded its `timeoutMs` and was killed;
+- `skipped`: could not run or could not report (spawn failure, preset not
+  resolved, no reviewer host, cancelled, no verdict file, malformed verdict
+  file).
+
+A lane records `id`, `kind`, `status`, `blocking`, `findings`, `durationMs`,
+and, when applicable, `error`, `sessionId`, `preset`, `summary`,
+`exitCode`, `model`, and `composedFrom`. A `skipped` or `timeout` lane
+SHOULD carry an `error` explaining why, so an `incomplete` verdict is always
+explained.
+
+**Command lanes.**
+
+- Run as `sh -c <run>` in their own process group, in `cwd` resolved against
+  the repo root.
+- On timeout or cancel the process group receives SIGTERM, then SIGKILL
+  after 5 seconds.
+- Output is kept bounded (the reference host keeps the last 64 KiB).
+- Exit code 0 is `pass`. Any other exit is `fail` with one `high`
+  finding titled `'<id>' exited with code N`, whose `detail` is the output
+  tail (at most 4000 characters). The exit code is `code`, or 128 when
+  killed by a signal, or 1 otherwise unknown, and is recorded as `exitCode`.
+- A timeout is `timeout`, with `error` and optionally the output tail.
+- A command lane never composes (§Composition).
+
+**Agent lanes.** An agent lane runs a **reviewer session** (§Reviewer
+sessions) and reads a **verdict file** (below). Its status is:
+
+- `fail` if and only if any finding has severity greater than or equal to
+  `blockOn`; otherwise `pass`;
+- `timeout` if the session exceeded `timeoutMs`;
+- `skipped` if there was no way to obtain a valid verdict file.
+
+The reviewer's own `decision` field is accepted and MUST NOT influence
+status: status is derived from findings and `blockOn` alone. `decision` is
+not recorded on the attestation.
+
+#### The agent-lane contract
+
+The prompt a reviewer receives is **pointer-style**: it names the range and
+the rubric path and lets the reviewer read the repository, instead of
+inlining a diff (so there is no diff to truncate). It MUST convey:
+
+- the range `baseSha..headSha`, and that scope is the committed range only;
+- the rubric path, to be read first;
+- that the reviewer is **read-only**: it must not edit, commit, push, or
+  switch branches, and its only permitted write is the verdict file;
+- a time budget of `max(1, round(timeoutMs / 60000 * 0.8))` minutes;
+- the severity semantics, including that the lane blocks on `blockOn` or
+  higher;
+- for a **delta** review (§Composition), that everything up to and
+  including the prior head already passed this lane and only the new range
+  is to be reviewed.
+
+The reviewer MUST write exactly one JSON file at a host-chosen path outside
+the reviewed tree. The reference host uses
+`<ledger>/<repoSlug>/runs/<runId>/<checkId>.verdict.json`, with `/` in the
+check id replaced by `__`. The file's content is:
+
+```json
+{
+  "decision": "approve",
+  "summary": "one line",
+  "findings": [
+    { "severity": "high", "title": "one line", "detail": "why it matters", "file": "src/x.ts", "line": 12 }
+  ]
+}
+```
+
+`decision` (`approve` or `request_changes`) and `summary` are optional;
+`findings` is required and MAY be empty; a finding requires `severity` and
+`title`; `detail` defaults to the empty string; `file` is repo-relative;
+`line`, if present, is a positive integer. A host SHOULD tolerate a
+surrounding Markdown code fence around the JSON. A missing file, an
+unparsable file, or a file that does not match this shape makes the lane
+`skipped`, never `pass`.
+
+#### Reviewer sessions
+
+An agent lane runs in a child session under [AIP-46](/docs/aip-46). A host
+SHOULD run it with the following properties; the spawn options named are
+those of the reference host, and their equivalents in another host are
+host-defined:
+
+- the session's working directory is the repository root, so the reviewer
+  sees the reviewed checkout;
+- the role is `executor`, the origin is `review`, and no separate git
+  worktree is created and duplicate-session reuse is disabled;
+- the session label is `review:<reviewId>:<checkId>`, and its parent is the
+  session that requested the review, when there is one;
+- the session is ended after its single turn, and on timeout or cancel.
+
+**Presets.** `preset` names a host-defined reviewer preset. This AIP does not
+define the preset surface; a preset MUST resolve to a harness, a default
+model, and the access profile under which the reviewer runs. The reference
+host looks up a **harness preset** first, then a **user preset**. A
+preset that cannot be resolved makes the lane `skipped`.
+
+The reference host maps these failures to `skipped`, each with an `error`:
+preset not found; spawn failure; a turn that produced nothing or ended with
+reason `error`; the session exiting before its turn ended; no reviewer host
+being available. The `model` recorded on the lane is the session record's
+active model, falling back to its model, and is omitted when unknown.
+
+A host with no reviewer host (the CLI's `--headless` mode) runs command lanes
+and reports every agent lane as `skipped`; the verdict is then `incomplete`.
+
+#### The verdict fold
+
+The `verdict` is computed from the lanes by a pure function. It MUST be
+derived from the lanes and MUST NOT be settable independently.
+
+1. If the binding's `quorum` is anything other than `all-blocking-pass`,
+   the result is `incomplete`.
+2. If there are no blocking lanes, the result is `incomplete` (a defensive
+   case, unreachable when cross-field rule 6 holds).
+3. If any blocking lane has status `fail`, the result is `block`.
+4. Otherwise, if any blocking lane has a status other than `pass`
+   (`timeout` or `skipped`), the result is `incomplete`.
+5. Otherwise the result is `pass`.
+
+A `block` outranks an `incomplete`: a run with one failed and one timed-out
+blocking lane is `block`. Advisory lanes never affect the result.
+
+#### Run outcomes
+
+A run ends as one of: a recorded attestation (verdict `pass`, `block`, or
+`incomplete`); **failed** (a `prepare` step failed, or the request could not
+be run: no attestation); **cancelled**. A cancelled run — including one
+superseded by a newer head — records **nothing**: no verdict, no ledger
+entry, and its run directory is removed.
+
+The reference CLI's `review run` maps these to exit codes: `0` pass, `1`
+block, `2` incomplete (also a cancelled run and an unreachable host), `3`
+could not run, `64` usage error.
+
+### The attestation
+
+Canonical schema: [`ATTESTATION.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/ATTESTATION.schema.json).
+
+An attestation is a JSON document:
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | `"agentproto.review.attestation/v1"` | Required. A verifier MUST reject a document with another value. |
+| `runId` | string | Required. `review-<uuid>`. |
+| `reviewId` | string | Required. The REVIEW.md `id`. |
+| `manifestSha` | hex sha256 | Required. SHA-256 of the REVIEW.md source bytes. |
+| `binding` | string | Required. The binding that ran. |
+| `target` | object | Required. `{ repoRemote, baseSha, headSha }`. |
+| `rangeSha` | hex sha256 | Required. SHA-256 of the UTF-8 string `<baseSha>..<headSha>`. |
+| `lanes` | array | Required. `LaneResult` objects (below). |
+| `verdict` | `pass`, `block`, `incomplete` | Required. MUST equal the fold of `lanes`. |
+| `attestor` | object | Required. `{ daemon, presets, signature? }`. `presets` is the de-duplicated list of presets agent lanes ran under. |
+| `rubrics` | array | Required (possibly empty). `{ check, path, sha256 }` for each agent lane whose rubric was readable. |
+| `packs` | array | Optional; omitted when the manifest has no `uses`. One `PackDigest` per `uses[]` entry, in `uses` order. |
+| `dirty` | `true` | Present only when true. |
+| `requester` | object | Optional; present only if at least one member is known. `{ sessionId?, gitAuthor?: { name, email } }`. |
+| `pr` | object | Optional. `{ provider: "github", repo: "owner/name", number, url }`. |
+| `createdAt` | ISO timestamp | Required. |
+
+A `LaneResult` has the members `id`, `kind`, `status`, `blocking`,
+`findings`, `durationMs`, and optionally `error`, `sessionId`, `preset`,
+`summary`, `exitCode`, `model`, and `composedFrom`. Each finding has
+`severity`, `title`, `detail`, and optionally `file` and `line`.
+`composedFrom` has `rangeSha`, `headSha`, and `attestationSha256`
+(§Composition).
+
+The **verdict is always derived**: an implementation that builds an
+attestation MUST compute `verdict` from `lanes` with the fold above and MUST
+NOT accept it from a caller.
+
+`requester` and `pr` are provenance. `requester` names who asked for the
+review (the requesting session, the head commit's author); it does not
+authenticate them. `pr` is recorded only when the caller knew the pull
+request at review time. A pull-request association found later is stored in
+the ledger's annotations (§Ledger), not in the attestation.
+
+#### Canonical JSON
+
+The signature and the attestation digest are computed over **canonical
+JSON** of the attestation:
+
+- object keys sorted in ascending order of UTF-16 code units (the default
+  ordering of a JavaScript string sort);
+- no insignificant whitespace;
+- array order preserved;
+- members whose value is undefined omitted;
+- strings and numbers serialized as `JSON.stringify` does.
+
+Two digests are derived from it:
+
+- the **signed bytes** are the canonical JSON of the attestation with
+  `attestor.signature` **removed**;
+- `attestationSha256` is the lowercase hex SHA-256 of the canonical JSON of
+  the **whole** attestation, `attestor.signature` included. This is the
+  value `composedFrom.attestationSha256` records.
+
+A worked example is in
+[`EXAMPLES.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/EXAMPLES.md).
+
+### The ledger
+
+A **ledger** is the host's local store of attestations and the source of the
+verdict cache. It is keyed by
+
+```
+ledgerKey = (target.repoRemote, manifestSha, binding, rangeSha)
+```
+
+The reference layout is
+`~/.agentproto/reviews/<repoSlug>/<manifestSha>/<binding>/<rangeSha>.json`,
+where `repoSlug` is `repoRemote` with each run of characters outside
+`[A-Za-z0-9._-]` replaced by `_`, leading and trailing `_` removed, and
+`repo` when that leaves nothing. There is one file per key; a re-run of the
+same key overwrites it.
+
+Each file is a **ledger entry**: `{ attestation, host }`, where `host` is
+`{ repoRoot, manifestPath, exportDir? }`. The host metadata locates the
+checkout for later operations and is **not** part of the attestation and is
+never exported.
+
+Every attestation is recorded, including `incomplete` and `dirty` ones.
+
+#### Cache rule
+
+Before running, a host MAY serve a prior attestation for the ledger key. A
+host MUST return a cached attestation only if **all** hold:
+
+- its `verdict` is not `incomplete`;
+- it is not `dirty`;
+- the **rubric multiset** is identical: the sorted multiset of
+  `<check>\0<path>\0<sha256>` for the recorded rubrics equals that for the
+  rubrics computed for this run (§The run, step 7);
+- the **pack multiset** is identical: the sorted multiset of
+  `<ref>\0<id>\0<version>\0<alg>\0<sha256>` for the recorded packs equals
+  that for the packs resolved for this run.
+
+A `block` verdict is cacheable: an unchanged range that failed still fails.
+A caller MAY bypass the cache (`nocache`), which also disables composition.
+A cached attestation is not re-signed and is returned as recorded.
+
+#### Annotations
+
+Beside each entry a host MAY keep an **annotations** sidecar
+`<rangeSha>.annotations.json` with the members `pr` and `prStatus`. `prStatus`
+is an append-only list of entries, each with `fetchedAt`, `state` (`open`,
+`merged`, or `closed`), `reviews` (each with `login`, `state`, and
+`submittedAt`), optionally `checks` (each with `name` and `conclusion`), and
+optionally `headSha`.
+Annotations are **mutable**, are written atomically, are never hashed into
+any attestation digest, are never signed, and are never exported. Recording
+a pull request or its status MUST NOT modify the attestation.
+
+#### Export
+
+Exporting an attestation writes its JSON (two-space indent, trailing
+newline) to a caller-given path, or, by default, to
+`<exportDir>/<reviewId>-<binding>-<headSha first 12>.json`, where
+`exportDir` is `verdict.exportDir`. An export is the unit a CI gate reads.
+
+### Signing
+
+Only the host that ran the review signs. Owners, sessions, models, and
+presets are claims inside the payload and are never signers.
+
+- **Key.** A host keeps an ed25519 key, by default
+  `~/.agentproto/keys/review_ed25519` (mode `0600`, with a `.pub`), generated
+  with `ssh-keygen -t ed25519 -N ""` and the comment
+  `agentproto-review@<hostname>` on first use.
+- **Signing.** After building the attestation, the host writes the signed
+  bytes to a temporary file and runs `ssh-keygen -Y sign` with that key, the
+  namespace `agentproto-review` (`-n`), and the file as `<payload>`, reading
+  the armored SSHSIG from `<payload>.sig`. The namespace is exactly
+  `agentproto-review`.
+- **The `signature` member.** `attestor.signature` has
+  the members `alg` (the literal `ssh-ed25519`), `keyFingerprint`,
+  `principal`, `signedAt`, and `sig`. `keyFingerprint`
+  is the `SHA256:...` fingerprint from `ssh-keygen -lf`; `sig` is the
+  armored SSHSIG; `signedAt` is an ISO timestamp.
+- **The principal.** `principal` is the identity the host vouches for: the
+  configured principal, else `git config user.email`, else
+  `agentproto-review@<hostname>`. It is a **claim inside the signed
+  envelope**: the signature authenticates the key, and the principal is
+  what the key's owner asserts. A verifier decides whether that key may
+  speak for that principal.
+- **Signing never fails a review.** If signing is unavailable (no
+  `ssh-keygen`, an unreadable key) the attestation is recorded **unsigned**
+  and the run carries a `signingError`. A verifier that does not require
+  signatures is correct either way.
+- **Trust** is expressed in an OpenSSH `allowed_signers` file. A line has
+  the form `<principal> namespaces="agentproto-review" <algo> <key>`. The
+  namespace restriction SHOULD be present so a key trusted for something
+  else is not trusted for reviews.
+
+### Composition
+
+Composition lets an **agent lane** reuse a prior passing attestation and
+review only the delta when a range has grown (`base..mid` passed, then
+`base..head` is requested).
+
+**Command lanes never compose**: they check tree state, not a diff, and
+always run at the new head. Composition is decided per agent lane, from the
+host's **own** ledger (candidates are entries with the same `repoRemote`,
+`manifestSha`, and `binding`, newest first). The first candidate that meets
+**all** of the following is used:
+
+1. the prior attestation's `verdict` is `pass` and it is not `dirty`;
+2. its `target.baseSha` equals the new run's `baseSha`;
+3. it has a lane with the same check id whose `status` is `pass`;
+4. it has a `rubrics` entry for that check whose `sha256` equals the current
+   rubric digest;
+5. if the check is imported from a pack, its `packs` has an entry with the
+   same `id`, the same `alg`, and the same `sha256` as the pack resolved now
+   for that namespace (the rubric digest alone would not catch an edit to
+   another part of the pack);
+6. its `target.headSha` is a **strict ancestor** of the new head
+   (`git merge-base --is-ancestor`); equal shas are not an ancestor.
+
+If a candidate qualifies, the lane's reviewed range is `priorHead..head`,
+the prompt is the delta form (§The agent-lane contract), and the lane
+records
+
+```json
+"composedFrom": {
+  "rangeSha": "<the prior attestation's own rangeSha>",
+  "headSha": "<the prior attestation's headSha>",
+  "attestationSha256": "<sha256 of the prior attestation's canonical JSON>"
+}
+```
+
+`composedFrom.attestationSha256` pins the exact prior attestation, so a
+verifier can confirm it was not swapped afterwards.
+
+**Trust.** In this AIP a candidate is trusted because it comes from the
+host's own ledger; nothing imports an attestation from elsewhere to
+compose from. A future version MAY additionally trust a prior attestation
+signed by a key in an `allowed_signers` file. That path is not defined by
+v1.
+
+`nocache` implies no composition. Composition is on by default.
+
+### Verification
+
+Verification is what a CI gate runs to decide whether a range is attested,
+given the repository, the manifest, and an exported attestation. It does not
+re-run any lane. The reference verb is `review verify`.
+
+Inputs: the manifest path; optionally `head` (default `HEAD`), `base`
+(default `merge-base(target.base, head)`), `binding`, the attestation path
+or export directory, the expected verdict (default `pass`; `any` skips this
+check), an `allowed_signers` path (default `.agentproto/allowed_signers` if
+present), and a require-signed flag.
+
+A conformant verifier performs, in order:
+
+1. **Read and parse the manifest** with the strict parser. Packs are **not**
+   resolved at this step. A manifest that cannot be parsed is a could-not-run
+   error.
+2. **Resolve the expectation**: `headSha`, `baseSha`, and `repoRemote`
+   (normalized as in §The run).
+3. **Locate the attestation.** If given a `.json` path, read it. Otherwise
+   search the export directory (`verdict.exportDir`; if the manifest declares
+   none, that is a usage error, or, when the caller passed `--if-exported`,
+   the distinct not-exported outcome) for an attestation matching `baseSha`,
+   `headSha`, and (if given) `binding`, choosing the newest by
+   `createdAt`. If none is found, the caller did not give `head`,
+   and `HEAD` touches only files under the export directory, retry with
+   `HEAD^`: this lets a commit that adds the export be verified as the commit
+   it attests. Not found is a distinct outcome.
+4. **Verify the attestation** against the expectation, collecting every
+   problem found:
+   - `schema` is `agentproto.review.attestation/v1`;
+   - `rangeSha` equals the SHA-256 of `<baseSha>..<headSha>` recomputed from
+     `target`;
+   - `verdict` equals the fold of `lanes` with the default quorum (a
+     tampered verdict is caught here);
+   - `manifestSha` equals the SHA-256 of the manifest source bytes read in
+     step 1;
+   - `target.baseSha`, `target.headSha`, and `target.repoRemote` match the
+     expectation;
+   - `binding` matches, **only if** the caller supplied `binding`;
+   - `verdict` equals the expected verdict (`pass` by default);
+   - the `dirty` flag is not set.
+   `reviewId` is not checked; `manifestSha` already binds the manifest.
+5. **Resolve `composedFrom`.** For every lane that carries `composedFrom`,
+   the prior attestation MUST be found in the export directory by scanning
+   its `*.json` files (non-recursively) for one whose `rangeSha` and
+   `binding` match, its `attestationSha256` (recomputed over its canonical
+   JSON) MUST equal the recorded one, and it MUST itself verify with verdict
+   `pass`. Here "verify" means the checks of step 4 that need no
+   repository state: the schema, `rangeSha`, the re-folded verdict, and the
+   `dirty` flag. A prior that is missing, or does not match, is **invalid**.
+   This step is one level deep: a prior's own `composedFrom` references, its
+   signature, and its pack digests are not checked here.
+6. **Verify pack digests**, when `packs` is non-empty. Resolve the packs from
+   the manifest with the same loader a run uses. Each recorded pack MUST
+   match a resolved pack by `ref`. An `alg` mismatch, or an `alg` the
+   verifier does not recognize, is a **hard failure** and is checked before
+   the digest. A `sha256` mismatch is a failure. If pack **resolution
+   itself** cannot complete (an npm pack not installed, a git pack not
+   fetchable), the result is a note, not a failure.
+7. **Verify the signature** against `allowed_signers`:
+   - if `attestor.signature` is present, it MUST verify; an invalid
+     signature is always a failure of the signature class;
+   - if the signature is absent, or no `allowed_signers` file exists, this
+     is a failure of the signature class **only** when the caller required
+     signed attestations; otherwise it is reported as a note.
+
+   Signature verification uses `ssh-keygen`. With the allowed-signers file
+   as `<as>` and the armored signature as `<sig>`, `ssh-keygen -Y
+   find-principals -f <as> -s <sig>` MUST list the claimed `principal`, and
+   `ssh-keygen -Y verify -f <as> -I <principal> -n agentproto-review -s <sig>`
+   MUST accept the canonical signed bytes on standard input. A missing `ssh-keygen` is a
+   signature problem.
+
+The reference verifier's exit codes are:
+
+| Code | Meaning |
+|---|---|
+| `0` | Verified. |
+| `1` | Invalid: any of steps 4, 5, 6 failed (including `composedFrom` and pack-digest failures). |
+| `3` | Could not run (an unparsable manifest, an unreadable file, other errors). |
+| `4` | Attestation not found. |
+| `5` | The manifest declares no `exportDir` and the caller passed `--if-exported`. |
+| `6` | Signature problem (step 7). |
+| `64` | Usage error (including a missing `exportDir` without `--if-exported` and no path). |
+
+### Host surface
+
+A host exposes the review to agents through tools. The reference host's MCP
+tools are `review_run`, `review_status`, `review_cancel`, `review_ledger`,
+`review_export`, and `review_pr`. `review_run` accepts `cwd`, `manifestPath`,
+`binding`, `base`, `head`, `nocache`, `compose`, `wait`,
+`requesterSessionId`, `pr`, and `supersede`. `review_pr` writes only
+annotations and never modifies an attestation. The set of tools is
+informative; the behaviors above are normative.
+
+## Example
+
+The complete example set, with schemas, is in
+[`EXAMPLES.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/EXAMPLES.md).
+A minimal manifest:
+
+```md
+---
+kind: review
+id: my-repo
+target: git-range
+checks:
+  - id: types
+    kind: command
+    run: pnpm check-types
+  - id: correctness
+    kind: agent
+    preset: kimi
+    rubric: ./rubrics/correctness.md
+    blockOn: high
+verdict:
+  exportDir: .reviews
+---
+```
+
+With no `bindings`, an implied `default` binding runs `types` and
+`correctness`. A run produces an attestation of the shape below (elided
+members are as in `EXAMPLES.md`):
+
+```json
+{
+  "schema": "agentproto.review.attestation/v1",
+  "reviewId": "my-repo",
+  "binding": "default",
+  "target": { "repoRemote": "github.com/example/my-repo", "baseSha": "…", "headSha": "…" },
+  "lanes": [
+    { "id": "types", "kind": "command", "status": "pass", "blocking": true, "findings": [], "durationMs": 41250, "exitCode": 0 },
+    { "id": "correctness", "kind": "agent", "status": "timeout", "blocking": true, "findings": [], "durationMs": 900000, "error": "exceeded timeoutMs" }
+  ],
+  "verdict": "incomplete"
+}
+```
+
+Here the agent lane timed out; the verdict is `incomplete` and the gate does
+not pass. A pack-consuming manifest, and a fully populated signed
+attestation with a composed lane, are in `EXAMPLES.md`.
+
+## Reference implementation
+
+| Concern | Source (in `agentproto/ts`) |
+|---|---|
+| Manifest parse, cross-field rules, placeholders | `packages/review/src/manifest.ts`, `placeholders.ts` |
+| Packs: parse, resolution, digest | `packages/review/src/packs.ts`; loader and trust in `packages/runtime/src/review-pack-loader.ts` |
+| Compile to a workflow | `packages/review/src/compile.ts` |
+| Agent-lane contract, prompt, verdict file | `packages/review/src/agent-lane.ts` |
+| Attestation, fold, canonical JSON | `packages/review/src/types.ts`, `attestation.ts`, `verdict.ts`, `canonical-json.ts` |
+| Runner, reviewer host, ledger | `packages/runtime/src/review-runner.ts`, `review-reviewer-host.ts`, `review-ledger.ts` |
+| Signing, composition | `packages/runtime/src/review-signing.ts`, `review-compose.ts` |
+| CLI verbs (`run`, `verify`, `init`, …) | `packages/cli/src/commands/review*.ts`, `docs/cli/verbs/review.md` |
+
+## Backward compatibility
+
+This AIP is additive: it introduces a new artifact and adds no field to any
+existing AIP. It codifies the behavior shipped in `@agentproto/review`,
+`@agentproto/runtime`, and `@agentproto/cli`, including signing, composition,
+and packs.
+
+The attestation evolves additively within
+`agentproto.review.attestation/v1`: `attestor.signature`, `packs`,
+`requester`, `pr`, `lanes[].model`, and `lanes[].composedFrom` were added
+after the first release as optional members without changing the `schema`
+value, and a document without them remains valid. A verifier that does not
+know an optional member ignores it; a verifier that ignores
+`attestor.signature` stays correct. (The manifest, by contrast, is strict:
+an unknown key is a parse error.)
+
+A digest recipe change MUST bump `alg` (`agentproto-pack-digest/v2`). A
+verifier that meets an unknown `alg` MUST refuse to compare.
+
+The `git-range` target is the only target kind in v1; further kinds are an
+additive `kind` value (§Open questions).
+
+## Security considerations
+
+**Forged exports without signatures.** An exported attestation is a file in
+the repository, and anyone who can commit can commit a file. Without a
+signature, a verifier checks internal consistency only (the range, the
+fold, the manifest hash), and an author who can write the export can fabricate
+lanes that satisfy all of those checks. A gate that relies on attestations
+for a merge decision SHOULD require signed attestations
+(`--require-signed`) against a maintained `allowed_signers` file. Even then,
+the file authenticates the **host's key**, not the review's quality.
+`allowed_signers` SHOULD list only keys of hosts the organisation controls,
+and SHOULD carry the `namespaces="agentproto-review"` restriction. The
+attestation's `principal` is a claim, checked against the `allowed_signers`
+principal column; it is meaningful only if the key is.
+
+**Pack command execution.** A command check is `sh -c`. A pack's commands
+are code from elsewhere. An npm pack and a git pack are never trusted, so
+their commands run only when the consumer writes `allowCommands: true`;
+enabling it is equivalent to authoring those commands. A relative pack is
+trusted only when it is inside the repository and tracked by git, so it is
+part of the reviewed content; the check fails safe. Hosts SHOULD run command lanes under a
+[AIP-36](/docs/aip-36) sandbox where they can. A git reference MUST be
+`git+https` and pinned to a full commit sha, which removes branch and tag
+movement and non-https transports (including `ext::`, which can execute
+commands). The reference implementation's git cache treats an existing
+`REVIEW.md` in the per-sha directory as a hit without re-verifying the
+checked-out content against the sha, so a local process able to write that
+directory can substitute pack content. The pack digest, recorded in the
+attestation and re-computed by a verifier that resolves the pack from an
+unmodified source, is what exposes the substitution.
+
+**Rubric path confinement.** Pack rubric paths are confined to the pack root
+by real path, which stops a pack from making a reviewer read arbitrary
+files (including through a symlink) and, through it, exfiltrate. A
+consumer's own, non-pack rubric paths are **not** confined; they are
+authored by the repository owner and hashed into the attestation.
+
+**Reviewer prompt injection.** An agent lane feeds content authored by the
+change's author, the diff and the files it touches, to a model whose verdict
+is a merge signal. An adversarial change can instruct the reviewer to
+approve. Mitigations, none complete: the reviewer is read-only and its only
+output is a structured file whose status is **derived from findings**, not
+from the reviewer's own `decision`; the rubric is content-hashed into the
+attestation so a rubric edit is visible; and a missing or malformed verdict
+file is `skipped`, so `incomplete`, never a pass. A reviewer session SHOULD be run with
+the minimum access its preset grants (no network, no credentials beyond the
+model). Organisations SHOULD treat an agent-only `pass` on untrusted
+contributions as advisory and combine it with a human or a second,
+differently-configured lane.
+
+**Dirty trees.** A review of a range while the working tree has uncommitted
+changes to tracked files ran its checks against content the range does not
+contain. Such an attestation is recorded with `dirty: true`, is never
+served from the cache, is never a composition base, and is not accepted by
+verification. Untracked files do not set `dirty`: a command lane can still
+read an untracked file, so an untracked file may influence a `pass`.
+Hosts SHOULD run reviews from a clean checkout or worktree.
+
+**Cache and composition trust.** A cache hit requires identical rubric
+and pack digests, so editing a rubric or a pack invalidates it; overrides
+and presets are part of the manifest and invalidate it through
+`manifestSha`. Composition takes a prior only from the host's own ledger and
+requires the same manifest, binding, base, rubric, and pack digest, so it
+cannot launder a `pass` from a different rule set.
+
+**Attestation contents.** Findings, summaries, and command-output tails
+in an attestation are derived from the repository and reviewer output and
+may contain sensitive text. `host` metadata (checkout paths) is kept out of
+the attestation and never exported. Annotations are unsigned and mutable
+and MUST NOT be used for merge decisions.
+
+## Connecting to other AIPs
+
+### AIP-15 WORKFLOW: the compile target
+
+A review binding compiles to an in-memory [AIP-15](/docs/aip-15) workflow
+(§Compilation to a workflow): `gate` steps for prepare, a `parallel`
+step for the lanes, and runtime `transform` steps for freeze and the fold.
+`transform` is not an authorable step kind, so the result is an execution
+handle, not a WORKFLOW.md. A future AIP-15 revision that makes a
+verdict-folding step authorable would let the compiled form be exported.
+
+### Harness presets
+
+An agent check's `preset` names a host-defined reviewer preset: a harness,
+a default model, and an access profile. No AIP defines that surface yet. This
+AIP requires only that an unresolved preset produces a `skipped` lane, and
+that the preset's name (never its secrets) is recorded on the lane and in
+`attestor.presets`. A future AIP that standardizes presets would let a
+REVIEW.md be portable across hosts; until then `preset` is a host-local
+name.
+
+### AIP-46 AGENT-SESSIONS: reviewer child sessions
+
+Each agent lane runs in a child session started through
+[AIP-46](/docs/aip-46)'s `agent_start`, parented to the requesting session,
+with the role, label, and working-directory conventions in §Reviewer
+sessions. The lane records `sessionId` so a verdict can be traced back to the
+session that produced it, and `model` when known.
+
+### AIP-54 REF and the future PACK AIP
+
+Review packs are a **separate format** in this AIP: `kind: review-pack`, a
+loader with its own `uses[]` reference forms (npm, path, `git+https` with a
+pinned sha), its own trust rule, and its own digest recipe. That pack
+machinery (fetching a reference, pinning it, digesting its contents,
+deciding whether to trust it) is not specific to review. A future **PACK AIP**,
+which would define shared fetch, pin, digest, and trust semantics over the
+[AIP-54](/docs/aip-54) artifact-ref model (`aip://<n>/<id>[@version]`), is
+expected to subsume the pack loader; a review pack would then be one
+artifact family under it. This AIP does not design that AIP. Until it
+exists, the pack rules above are normative for `uses[]`, and
+`agentproto-pack-digest/v1` remains the digest an attestation records.
+
+### AIP-7 GOVERNANCE
+
+An organisation's merge policy is the natural consumer of an attestation:
+"a signed `pass` for this range under this manifest". This AIP defines the
+attestation and how to verify it; it does not define policy.
+
+## Open questions
+
+1. **Non-git targets.** v1 reviews a git range. Two obvious other targets
+   have no content-addressed range: a session's output (a transcript or
+   produced files) and outbound messages (a draft about to be sent). Each
+   needs its own immutable-content definition (what plays the role of
+   `baseSha..headSha`), its own freeze rule, and a `target.kind`; the
+   attestation's `target` and the ledger key would generalize accordingly.
+2. **Composition trust from `allowed_signers`.** Composition currently
+   accepts only the host's own ledger. Importing a prior attestation signed
+   by an allowed key would let a CI runner compose from a developer's export.
+3. **Local rubric confinement.** Pack rubrics are confined to the pack
+   root; a manifest's own rubrics are not. Should v2 confine them to the
+   repository?
+4. **Composition chains in `verify`.** `composedFrom` resolution checks one
+   prior per lane, by schema, range, fold, and dirty flag only, and finds it
+   by a non-recursive scan of the export directory. Should verification
+   follow the chain (the prior's own composed lanes, signature, and pack
+   digests), and should the prior be located by a content-addressed store
+   instead of a directory scan?
+5. **A git-pack cache that re-verifies.** The cache hit test is presence of
+   `REVIEW.md`. Re-hashing the checkout against the sha, or verifying with
+   `git rev-parse HEAD`, would close the local-substitution gap.
+6. **Preset portability.** `preset` is a host-local name. A shared preset
+   surface would make a manifest portable.
+7. **Authorable fold step.** See §Connecting to other AIPs (AIP-15).
+8. **Dirty-tree granularity.** `dirty` ignores untracked files. Should a
+   command lane's view of untracked files count?
+
+## See also
+
+- [AIP-1 — process](/docs/aip-1)
+- [AIP-7 — GOVERNANCE](/docs/aip-7) — merge policy that consumes an attestation
+- [AIP-15 — WORKFLOW.md](/docs/aip-15) — the compile target
+- [AIP-36 — SANDBOX](/docs/aip-36) — confinement for command lanes and reviewer sessions
+- [AIP-46 — AGENT-SESSIONS](/docs/aip-46) — reviewer child sessions
+- [AIP-54 — REF](/docs/aip-54) — the artifact-ref model a future PACK AIP is expected to use
+- [`REVIEW.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW.schema.json), [`REVIEW-PACK.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW-PACK.schema.json), [`ATTESTATION.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/ATTESTATION.schema.json) — canonical schemas
+- [`EXAMPLES.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/EXAMPLES.md) — manifests, a pack, an attestation, and test vectors
