@@ -2,7 +2,7 @@
 title: "AIP-56: DOCTYPE — the `createDoctype` meta-factory for `defineX` constructors"
 description: The shared invariant prologue behind every AIP `defineX` constructor. `createDoctype<TDef, THandle>(opts)` validates the identity against a default kebab/snake/dot pattern (overridable), validates description length (1–2000 by default, disableable), runs spec-specific `validate`, and returns a top-level `Object.freeze`d handle — with a canonical error prefix naming the constructor, doctype, and AIP. Includes `filterSerializable`, the pure projection of a validated definition to its YAML-serialisable subset.
 aip: 56
-status: Draft
+status: Review
 type: Schema
 created: 2026-09-07
 author: Jeremy André <jeremy@agentik.net>

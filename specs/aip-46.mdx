@@ -2,7 +2,7 @@
 title: "AIP-46: AGENT-SESSIONS — agent-session-lifecycle/v1 (long-running multi-turn agent orchestration)"
 description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-54 (REF) as the session's ground.
 aip: 46
-status: Draft
+status: Review
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>

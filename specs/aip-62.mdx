@@ -2,7 +2,7 @@
 title: "AIP-62: REVIEW.md: agentreview/v1 (attested verdicts over a content range)"
 description: "Names the review — a declared set of command and agent checks run over a frozen git range and folded into a `pass | block | incomplete` verdict — as a first-class primitive, and fixes the attestation that binds that verdict to the exact manifest and content it is about. Specifies the REVIEW.md manifest (`kind: review`; `target`, `checks`, `bindings`, `uses`, `verdict`, and every cross-field rule), reusable review packs (`kind: review-pack`) with their trust rules and the `agentproto-pack-digest/v1` digest, the execution model (prepare before the range freezes, parallel bounded lanes, the trinary fold in which `incomplete` is never a pass), the `agentproto.review.attestation/v1` document, the ledger key and cache rule, ssh-ed25519 signing over canonical JSON, delta composition via `composedFrom`, and the step-by-step verification algorithm."
 aip: 62
-status: Draft
+status: Review
 type: Schema
 created: 2026-09-29
 author: Jeremy André <jeremy@agentik.net>

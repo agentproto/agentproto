@@ -2,7 +2,7 @@
 title: "AIP-58: RUN — agentrun/v1 (run resource, state machine, workspace, event log, journal)"
 description: Names "the run" as a first-class resource shared by every AIP that executes something — a workflow step, an app run, a routine fire, a bare tool call. Fixes the run's fields, a state machine that always reaches a terminal state or a durable suspend, a deterministic outcome rule (an explicit request-input signal, never a text heuristic, is what suspends a step), a dedicated per-run workspace with an explicit publish step (never an implicit sync to a path two runs could share), an append-only event log as the one true status interface, a per-step journal enabling crash-resume and replay, and the transport-agnostic operations (run.create/get/list/events/cancel/resume/replay/requestInput/publish) a host exposes over MCP and HTTP.
 aip: 58
-status: Draft
+status: Review
 type: Schema
 created: 2026-09-25
 updated: 2026-09-25
