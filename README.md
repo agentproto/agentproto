@@ -130,7 +130,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full submission guide and [CODE
 | Repo | Contents | License |
 |---|---|---|
 | [`agentproto/agentproto`](https://github.com/agentproto/agentproto) | Markdown AIP specs + canonical resources + RFCs | CC-BY-4.0 |
-| [`agentproto/ts`](https://github.com/agentproto/ts) | TypeScript reference runtime + adapters | MIT |
+| [`agentproto/ts`](https://github.com/agentproto/ts) | TypeScript reference runtime + adapters | Apache-2.0 |
 | [`agentproto/site`](https://github.com/agentproto/site) | Next.js renderer at agentproto.sh | MIT |
 
 This repo (the one you're reading) holds the **markdown specs only** — no code.
@@ -149,6 +149,6 @@ agentproto/
 |---|---|
 | AIP markdown specifications (this repo's `specs/`) | [CC-BY-4.0](./LICENSE-AIPs) |
 | Code samples embedded in specs | [MIT](./LICENSE-code) |
-| Reference TypeScript runtime ([`agentproto/ts`](https://github.com/agentproto/ts)) | MIT |
+| Reference TypeScript runtime ([`agentproto/ts`](https://github.com/agentproto/ts)) | Apache-2.0 |
 
 The two-license split mirrors how RFCs and W3C documents work: the *standard* is freely shareable and adaptable; the *implementation code* is permissively licensed for downstream use.
