@@ -628,11 +628,11 @@ generated id currently backs that pair.
 - `@agentproto/sandbox`'s `SandboxProvider` (`packages/sandbox/src/
   agent-session-host.ts`) — `boot`/`connect?`/`probe?` on the provider,
   `stop`/`pause?` on the booted handle — is the exact interface §2 mirrors.
-- `@agentproto/runtime`'s `agent-start-schema.ts` already ships `route:
-  {gateway, baseUrl?}`, `access: {profileRef?}`, `model`, `deferredTools`,
-  and the AIP-36 `sandbox` field that §4 and §5 wire the new fields against;
-  none of that surface needs to change shape, only to gain `inference` and
-  `privacy` as siblings.
+- `@agentproto/runtime`'s `agent-start-schema.ts` already ships
+  `route: {gateway, baseUrl?}`, `access: {profileRef?}`, `model`,
+  `deferredTools`, and the AIP-36 `sandbox` field that §4 and §5 wire the
+  new fields against; none of that surface needs to change shape, only to
+  gain `inference` and `privacy` as siblings.
 
 **Not yet shipped** — the gap this AIP specifies against:
 
