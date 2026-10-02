@@ -318,13 +318,14 @@ authored the workflow rather than silently accepted.
 For a step that DOES declare a contract, ending a turn, exiting a
 process, or a timer firing is **never**, by itself, success. This is
 the rule closing the Motivation's first failure: an agent-backed step
-whose turn ends without satisfying its contract resolves `suspended {
-reason: "input-required" }` **only** on an explicit signal — never by
-reading the turn's final message as prose. There are exactly two
+whose turn ends without satisfying its contract resolves
+`suspended { reason: "input-required" }` **only** on an explicit signal —
+never by reading the turn's final message as prose. There are exactly two
 explicit signals:
 
-(a) the step's session invoked the host-provided `run.requestInput
-    { stepId, prompt, schema? }` operation (§9) before the turn ended, or
+(a) the step's session invoked the host-provided
+    `run.requestInput { stepId, prompt, schema? }` operation (§9) before
+    the turn ended, or
 (b) the harness reported a protocol-level awaiting-input event per
     [AIP-46](/docs/aip-46) (its session `awaiting-input` state, or the
     underlying ACP `agent-prompt` event) at the point the turn ended.
@@ -824,9 +825,9 @@ Compatibility section for what changed and why nothing existing breaks.
 - **Run input/output and journal entries may carry secrets**, the same
   caveat [AIP-46](/docs/aip-46) states for its session ring buffer — a
   step's resolved input or an agent's final message routinely contains
-  whatever the caller or a prior step handed it. Consumers of `run.get
-  { full: true }`, `run.events`, or the journal MUST treat the payload
-  as potentially sensitive; hosts MAY redact known secret patterns but
+  whatever the caller or a prior step handed it. Consumers of
+  `run.get { full: true }`, `run.events`, or the journal MUST treat the
+  payload as potentially sensitive; hosts MAY redact known secret patterns but
   this AIP does not require it.
 - **The run workspace is a filesystem surface with the same escape
   risk [AIP-53](/docs/aip-53)'s data plane names for app data.** A host
