@@ -11,7 +11,7 @@ aip: 15
 status: Review
 type: Schema
 created: 2026-04-28
-updated: 2026-09-25
+updated: 2026-10-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 7, 14, 16, 30, 58]
 resources: ./resources/aip-15/draft
@@ -517,6 +517,7 @@ and its runtime projection in `@agentproto/workflow-runtime`
 | `sandbox` | string \| object | Run the step's session inside a sandbox — a provider slug or an inline spec (`{ provider: ... }`). Only meaningful with `adapter`; a `sessionRef` reuse inherits the referenced session's placement. Hosts without sandbox support MUST fail the spawn loudly rather than silently running on the host. |
 | `cacheable` | boolean | Cache this step's output under the run's cacheKey. Default `false`. |
 | `maxRetries` | integer | Re-prompt-and-retry attempts on `outputSchema` mismatch. Default 2. |
+| `retry` | object | The common `retry` block (`{ max_attempts, backoff, initial_ms }`), applied to **transport failures only** — see "Transport retry" below. Unset ⇒ one retry for a session lost mid-turn. `max_attempts: 1` disables it. |
 | `outputSchema` | JSON Schema | Validates the session's final message; re-prompts on mismatch. |
 | `policy` | object | `awaiting`: `"auto-allow"` (with `prompt`) \| `"escalate"` (with optional `webhookUrl`, `timeoutMs`) \| `"fail"` — what to do when the session asks for something outside its permission. |
 | `options` | object | Adapter option id → value, forwarded to a NEW spawn's `startSession({ options })`. Only meaningful with `adapter`; ignored on a `sessionRef` reuse. |
@@ -542,6 +543,48 @@ turn-end that doesn't satisfy the contract resolves
 `failed { code: "missing-output" }`. This AIP's own `maxRetries` /
 `outputSchema` re-prompt behaviour is unchanged — AIP-58 governs what
 happens once retries are exhausted, not the retry loop itself.
+
+**Transport retry (added 2026-10-08).** For an agent step the common
+`retry` block does not mean "try again until it works": it covers only
+failures of the session's plumbing, never of its content. A host MUST
+re-spawn a step only when:
+
+1. the step spawns its session (`adapter` / `agent.ref`) — a
+   `sessionRef` reuse has no fresh session to fall back to, and is
+   never retried; **and**
+2. the failure happened before the step's **first** turn ended: the
+   spawn itself failed, or the session died mid-turn (killed or crashed
+   without a deliberate end reason, its ACP connection closed, the
+   prompt could not be delivered); **and**
+3. the run is not being cancelled.
+
+A turn that ended is never retried, whatever it produced — an empty or
+errored reply, an `outputSchema` mismatch (that is `maxRetries`'
+job), an input request. Neither is a failure after the first turn (a
+re-prompt or a resume that loses the session), nor a session ended on
+purpose (an operator kill, a cost cap, a provider usage limit, a
+context hard-stop).
+
+Each retry spawns a NEW session with the same resolved prompt, working
+directory and harness, in the same run workspace (AIP-58 §4). The lost
+session is released first and its spend still counts toward the run's
+budget; a retry that would exceed it fails `budget-exceeded` instead.
+`backoff` / `initial_ms` space the attempts exactly as they do for a
+gate. When the step declares no `retry`, a host SHOULD still retry a
+session lost mid-turn once (the reference runtime waits 1 s); a spawn
+failure is retried only under a declared `retry`, since it is usually
+deterministic (a bad cwd, a missing adapter) and a fan-out's spawn
+circuit breaker needs to see it at once. A step body SHOULD be safe to
+re-run: the lost session may have left partial edits in the workspace.
+Each retry is reported as AIP-58's `step.retrying` event.
+
+```yaml
+- id: apply-fact-fixes
+  kind: agent
+  agent: { ref: "@editorial-desk/reviser" }
+  prompt: "Apply the fixes listed in {{run.workspace}}/fact-check.md"
+  retry: { max_attempts: 3, backoff: exponential, initial_ms: 2000 }
+```
 
 ##### `kind: "gate"`
 

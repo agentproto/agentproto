@@ -5,7 +5,7 @@ aip: 58
 status: Review
 type: Schema
 created: 2026-09-25
-updated: 2026-09-25
+updated: 2026-10-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 15, 16, 37, 46]
 resources: ./resources/aip-58/draft
@@ -467,6 +467,16 @@ interface RunEvent {
 | `run.cancelled` | `step.failed` |
 | `run.published` | `step.skipped` |
 | | `step.spend` |
+| | `step.retrying` |
+
+`step.retrying` (added 2026-10-08) marks a step about to start another
+attempt after a transport failure — for an AIP-15 agent step, a session
+that died before its first turn ended (AIP-15 "Transport retry"). It is
+not terminal: the step stays `running`, and a `step.succeeded` or
+`step.failed` still follows. Its `data` carries `{ attempt, maxAttempts,
+error, delayMs, sessionId? }` — `attempt` is the one about to start (2
+for the first retry), `sessionId` the lost session when one had been
+spawned.
 
 `step.skipped` marks a step in an untaken AIP-15 branch arm. It is
 terminal — the step never starts in this run — and its `data` carries
