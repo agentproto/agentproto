@@ -1,0 +1,10 @@
+{"i":1,"tMs":300,"file":"frames/000001.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"actionSeq":1,"bytes":4175}
+{"i":2,"tMs":1200,"file":"frames/000002.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"bytes":4175,"prev":"b523f6c44e9ae57edf9de45c1aa1a8fd6eb3ee026a76646815cce2565a8ed01d"}
+{"i":3,"tMs":1700,"file":"frames/000003.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"actionSeq":2,"bytes":4472,"prev":"e4c7437a3c817deb83e219d1886523e5ed20e9d663d4f934d4ee78741d5494e9"}
+{"i":4,"tMs":2700,"file":"frames/000004.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"actionSeq":3,"bytes":4851,"prev":"c3d196b4db25ebeddb5fee3ebd0aaab2b9dc530196d6cd80e3783041c00d1c3f"}
+{"i":5,"tMs":3900,"file":"frames/000005.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"actionSeq":4,"masked":"fields","bytes":4962,"prev":"292603f52bba0a1d006ce619e40345316efeff9c14af3b5bf97a6189babd8e17"}
+{"i":6,"tMs":4300,"file":"frames/000006.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"masked":"fields","bytes":4962,"prev":"43561c6fb7562d115c8ae93520b3327b2ac79c64a79240105b8df1e410aa1aa3"}
+{"i":7,"tMs":5300,"file":"frames/000007.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"actionSeq":5,"masked":"fields","bytes":4614,"prev":"faa3ab71926589d2cc6e5213271ed32cc59bfac8ed5d0f86e6d36be6620980db"}
+{"i":8,"tMs":6900,"file":"frames/000008.jpg","url":"https://app.example.test/dashboard","tabId":"tab-1","w":320,"h":180,"bytes":5617,"prev":"22cabf6ed1521d06ce95cb977815e61bacd393620eed22722ec4fede08cdc996"}
+{"i":9,"tMs":8600,"file":"frames/000009.jpg","url":"https://app.example.test/dashboard","tabId":"tab-1","w":320,"h":180,"actionSeq":6,"bytes":4785,"prev":"4406974e55d6d49d02943f54601623a8b7cd6324aa04b14f60f654d749314455"}
+{"i":10,"tMs":9800,"file":"frames/000010.jpg","url":"https://app.example.test/dashboard","tabId":"tab-1","w":320,"h":180,"actionSeq":7,"bytes":5902,"prev":"82b6c965a72463d990c11f79898a68a1168605e0c50001097a6b98551f46cda1"}
