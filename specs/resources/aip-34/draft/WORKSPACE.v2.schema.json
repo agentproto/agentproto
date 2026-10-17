@@ -44,11 +44,15 @@
     "storage": { "$ref": "#/$defs/storageRef" },
     "sandbox": { "$ref": "#/$defs/sandboxRef" },
     "code": { "$ref": "#/$defs/codeRef" },
+    "work": {
+      "$ref": "#/$defs/workRef",
+      "description": "AIP-20 WORK.md block. Optional — when present, this node's status/board is tracked there (items are AIP-18 ITEM.md records under the collection(s) WORK.md declares), not in a flat status file. Same inline/ref/file union shape as `code`."
+    },
     "identity": { "$ref": "#/$defs/identityRefBlock" },
     "wall": {
       "enum": ["shared", "isolated", "sealed", "hard"],
       "default": "isolated",
-      "description": "Visibility level toward sibling/ancestor nodes. shared: siblings read the whole node (implicit export `to: \"children\"` of the PARENT). isolated (default): nothing crosses without an explicit includes/exports door; ancestors still see everything. sealed: as isolated, PLUS ancestors see only this node's EXPORT.md / RAPPORT.md, never raw files; inbound includes require host-side approval (AIP-7). hard: as sealed, PLUS enforced by a separate process/identity — no shared daemon, no shared auth profile, no shared MCP surface; the only traffic in or out is the declared exports, delivered by message, never by mount. A child MAY raise its own wall (shared→isolated→sealed→hard) but MUST NOT set a level looser than its parent's or its TYPES.md entry's `default_wall`."
+      "description": "Visibility level toward sibling/ancestor nodes. shared: siblings read the whole node (implicit export `to: \"children\"` of the PARENT). isolated (default): nothing crosses without an explicit includes/exports door; ancestors still see everything. sealed: as isolated, PLUS ancestors see only this node's EXPORT.md, never raw files; inbound includes require host-side approval (AIP-7). hard: as sealed, PLUS enforced by a separate process/identity — no shared daemon, no shared auth profile, no shared MCP surface; the only traffic in or out is the declared exports, delivered by message, never by mount. A child MAY raise its own wall (shared→isolated→sealed→hard) but MUST NOT set a level looser than its parent's or its TYPES.md entry's `default_wall`."
     },
     "includes": {
       "type": "array",
@@ -276,6 +280,28 @@
       ]
     },
     "codeRef": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["inline"],
+          "additionalProperties": false,
+          "properties": { "inline": { "type": "object" } }
+        },
+        {
+          "type": "object",
+          "required": ["ref"],
+          "additionalProperties": false,
+          "properties": { "ref": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "required": ["file"],
+          "additionalProperties": false,
+          "properties": { "file": { "type": "string", "minLength": 1 } }
+        }
+      ]
+    },
+    "workRef": {
       "anyOf": [
         {
           "type": "object",

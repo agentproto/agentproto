@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentproto.sh/schemas/aip-34/EXPORT.schema.json",
   "title": "EXPORT.md frontmatter — workspace-export/v1 (sealed/hard node digest)",
-  "description": "Validates the YAML frontmatter portion of an EXPORT.md manifest. A `wall: sealed` or `wall: hard` node's ONLY readable surface for its ancestors: the body is free-form prose (summaries), never raw files. Companion to RAPPORT.md (project status digest, no wall requirement) from the same family of 'the body is what crosses the wall' manifests.",
+  "description": "Validates the YAML frontmatter portion of an EXPORT.md manifest. A `wall: sealed` or `wall: hard` node's ONLY readable surface for its ancestors: the body is free-form prose (summaries), never raw files.",
   "type": "object",
   "required": ["schema", "from", "generated_at"],
   "additionalProperties": false,

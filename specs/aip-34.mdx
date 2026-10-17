@@ -6,7 +6,7 @@ status: Review
 type: Schema
 created: 2026-05-02
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 19, 35, 36, 38, 40, 41, 42, 53]
+requires: [1, 2, 18, 19, 20, 35, 36, 38, 40, 41, 42, 53]
 discussions-to: https://github.com/agentproto/agentproto/discussions/34
 layer: surfaces
 package: "@agentproto/workspace"
@@ -429,6 +429,7 @@ Added / changed:
 | `apps` | array | `[]` | `{ id, version, expose?: ("agents"\|"tools"\|"ui"\|"data")[], attach?: "self" \| <id> }`. `version` is a semver or semver-range; the exact resolved version is recorded in `agentproto.lock`, never in WORKSPACE.md. |
 | `policy` | object | — | Same AIP-38 POLICY shape as v1, with `limits[].kind` additionally allowing `budget-usd-per-month` \| `budget-usd-per-day` (value = USD). See "Budgets aggregate". |
 | `lock` | string | `"agentproto.lock"` | Workspace-relative path to this node's lockfile. Only meaningful on a node that attaches apps/packs directly. |
+| `work` | object | — | `{ inline: <WORK.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }` — [AIP-20](/docs/aip-20) WORK.md, the same inline/ref/file union as `code`. A project node's status/board lives here, NOT in a flat status file: items are AIP-18 `ITEM.md` records under the collection(s) `work` declares. `agentproto workspace check` only confirms `work` resolves to a parseable WORK.md (`schema: "work.workspace/v2"`) — it does not (yet) check item freshness. |
 
 ### The four wall levels
 
@@ -436,7 +437,7 @@ Added / changed:
 |---|---|---|---|
 | 0 | `shared` | Descendants read the whole node. | Implicit `exports: [{ path: ".", to: "children", mode: "read" }]`. |
 | 1 | `isolated` (**default**) | Nothing, without an explicit include + matching export. Ancestors still see everything (no restriction applies upward). | Host-side resolver filters every file/memory/app-tool call by the requesting session's node scope. |
-| 2 | `sealed` | Like `isolated`, **and** ancestors ALSO lose raw-file visibility: they read only this node's `EXPORT.md` (or `RAPPORT.md`). Inbound `includes` from elsewhere require host-side approval (AIP-7 `approval_request`). | Same process/daemon; sessions scoped to this node carry a node-scoped token. |
+| 2 | `sealed` | Like `isolated`, **and** ancestors ALSO lose raw-file visibility: they read only this node's `EXPORT.md`. Inbound `includes` from elsewhere require host-side approval (AIP-7 `approval_request`). | Same process/daemon; sessions scoped to this node carry a node-scoped token. |
 | 3 | `hard` | Like `sealed`, **and** enforced by a separate process/identity: no shared daemon, no shared auth profile, no shared MCP surface. The only traffic in or out is a declared export, delivered as a message, never mounted. | Second daemon, or a dedicated OS user/sandbox. |
 
 A node MAY raise its own wall (0→1→2→3) relative to what its parent or
@@ -549,7 +550,6 @@ types:
   project:
     parents: [company]
     default_wall: isolated
-    requires_files: [RAPPORT.md]
     starter:
       agents: [{ template: "@pygmalion/staff/project-lead" }]
       routines: [{ template: "@pygmalion/staff/heartbeat-26h" }]
@@ -569,6 +569,14 @@ sibling files `agentproto workspace check` expects at a node of this
 type. Each entry conceptually compiles to an [AIP-40](/docs/aip-40)
 `EXTENSION.md`; TYPES.md is the authoring surface for that compilation,
 not a competing mechanism.
+
+Note that `project` above does NOT declare `requires_files` for a status
+file. A project's status is not a markdown file to require — it's the
+`work:` field (see the frontmatter table above): an [AIP-20](/docs/aip-20)
+WORK.md reference, whose items are AIP-18 `ITEM.md` records. `agentproto
+workspace check` validates `work:` resolves to a parseable WORK.md the
+same way it validates `requires_files` resolve to existing files — see
+"Conformance rules" below.
 
 ### Tree-wide lockfile: agentproto.lock
 
@@ -655,6 +663,14 @@ Deux entretiens programmés ; détails hors de portée du cerveau.
 13. **A child's resolved budget is bounded by its parent's.** See
     "Budgets aggregate".
 
+14. **A declared `work:` MUST resolve to a parseable AIP-20 WORK.md**
+    (`schema: "work.workspace/v2"`). This replaces a `requires_files`
+    status-file check for `project`-typed nodes: status comes from the
+    board `work:` points at, not from a flat file whose existence is
+    the only thing checked. `agentproto workspace check` does not (yet)
+    check item-level freshness inside that board, nor how that board
+    relates to any host's own runtime task store — deferred, open work.
+
 ### Example (workspace/v2 tree)
 
 ```md
@@ -671,6 +687,8 @@ storage:
 code:
   inline:
     path: /path/to/monorepo/projects/simone
+work:
+  file: WORK.md
 includes:
   - { ref: "ws://workspaces/@jeremy/agentik#commun", mode: read }
 secrets: { file: .secrets/SECRETS.md }
@@ -736,4 +754,6 @@ whether and when to honour it.
 - [AIP-41 — ROUTINE.md](/docs/aip-41) — sibling manifest declared under `routines:` (workspace/v2)
 - [AIP-42 — AGENT.md](/docs/aip-42) — sibling manifest declared under `agents:` (workspace/v2)
 - [AIP-53 — APP.md](/docs/aip-53) — referenced from `apps:` (workspace/v2) and `agentproto.lock`
+- [AIP-20 — WORK.md](/docs/aip-20) — referenced from `work:` (workspace/v2); a project node's status/board, not a flat status file
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — item storage for the collection(s) a `work:` WORK.md declares
 - [AIP-54 — ws:// resource scheme](/docs/aip-54) — grammar for `includes[].ref`

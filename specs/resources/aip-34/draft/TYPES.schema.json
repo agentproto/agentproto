@@ -42,7 +42,7 @@
           "type": "array",
           "items": { "type": "string" },
           "default": [],
-          "description": "Sibling files `agentproto workspace check` requires at a node of this type (e.g. project → [RAPPORT.md])."
+          "description": "Sibling files `agentproto workspace check` requires at a node of this type (e.g. company → [COMPANY.md]). A project node's status is checked via its `work:` field (AIP-20 WORK.md), not a requires_files entry."
         },
         "starter": {
           "type": "object",
