@@ -1,8 +1,9 @@
 ---
-schema: workspace/v1
+schema: workspace/v2
 id: "@agentik/agents-standard"
 version: 0.1.0-alpha
 name: "Agentik Standard Agents Library"
+type: library
 description: |
   Reference library of common AGENT.md files (AIP-42) — base
   standalone agents for utilities, sub-agents, and helpers. Operators

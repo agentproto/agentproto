@@ -1,8 +1,9 @@
 ---
-schema: workspace/v1
+schema: workspace/v2
 id: "@agentik/actions-standard"
 version: 0.1.0-alpha
 name: "Agentik Standard Actions Library"
+type: library
 description: |
   Reference library of common ACTION.md files (AIP-39) covering the
   Day-1 verb vocabulary across storage / sandbox / secrets / workspace

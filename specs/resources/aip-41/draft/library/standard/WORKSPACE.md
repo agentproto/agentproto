@@ -1,8 +1,9 @@
 ---
-schema: workspace/v1
+schema: workspace/v2
 id: "@agentik/routines-standard"
 version: 0.1.0-alpha
 name: "Agentik Standard Routines Library"
+type: library
 description: |
   Reference library of common ROUTINE.md files (AIP-41) covering the
   Day-1 schedule vocabulary — daily, weekly, monthly, hourly, plus
