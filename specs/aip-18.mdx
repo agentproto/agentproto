@@ -88,9 +88,9 @@ This decouples four things that workspace AIPs habitually couple:
 AIP-13 is the cautionary tale. Its three hardcoded kinds were the right
 call for a v1 spec — concrete enough to ship, narrow enough to debug —
 but the cost shows up the moment a real team wants a fourth kind. The
-planned successor, AIP-20 (`work/v2`), will keep the workspace
-manifest, drop the hardcoded kinds, and require each enabled kind to
-reference a `COLLECTION.md`. Knowledge entries (AIP-10) and company
+successor, [AIP-20](/docs/aip-20) (`work/v2`), keeps a work manifest,
+drops the hardcoded kinds, and requires each enabled kind to be a
+`COLLECTION.md` extending its normative `work-item` base. Knowledge entries (AIP-10) and company
 roles (AIP-6) are next in line: same trick, same primitive. AIP-18 is
 the substrate.
 
@@ -170,7 +170,7 @@ appliesTo:                              # OPTIONAL — bind this view to
 fields:                                 # array; merge-by-name vs parent
   - name: <field-id>                    # required, kebab-case
     type: string | number | boolean | enum | date | datetime
-        | text | url | ref | array
+        | text | url | ref | array | object
     required: true | false              # default: false
     description: <prose>                # OPTIONAL
     enum: [<value>, ...]                # required when type=enum
@@ -191,6 +191,8 @@ statuses:                               # OPTIONAL; merge-by-id vs parent
   - id: <kebab-id>                      # required, stable
     label: <human-readable>             # required
     terminal: true | false              # default: false
+    category: todo | active | waiting   # OPTIONAL — protocol class of
+        | done | failed | cancelled     # the status (see Status categories)
     transitionsTo:                      # OPTIONAL — allowed next ids
       - <status-id>
 initialStatus: <status-id>              # OPTIONAL — default for new items
@@ -249,6 +251,10 @@ enforces:
   `type: array`, and `refKind` is REQUIRED when `type: ref`. A field
   definition that declares one of those types without its companion key
   is invalid.
+- `object` is a JSON object whose inner shape the collection does not
+  constrain (gate specs, evidence links, string maps). Hosts check only
+  that the value is an object; a consumer AIP that needs a fixed inner
+  shape documents it and validates it itself.
 - The rules apply recursively: an `array` whose `items` is itself an
   `array` (or an `enum`, or a `ref`) MUST carry that type's own
   companion key inside `items:`.
@@ -364,7 +370,7 @@ When a host loads a `COLLECTION.md` whose `extends:` is set:
 | `extends` | local-only | Not inherited. |
 | `appliesTo` | local-only | Not inherited. Each child declares its own scope. |
 | `fields` | merge-by-name | Same `name` → child replaces parent's, subject to type-drift refusal (below). New names → appended. |
-| `statuses` | merge-by-id | Same `id` → child replaces parent's, subject to status-removal refusal (below). New ids → appended. |
+| `statuses` | merge-by-id | Same `id` → child replaces parent's, subject to status-removal and category-drift refusals. New ids → appended. |
 | `initialStatus` | override | |
 | `ownership.*` | leaf-field override | `cardinality`, `role`, `required` each override independently. |
 | `deadline.*` | leaf-field override | |
@@ -438,6 +444,31 @@ These three HARD refusals (`collection_field_type_drift`,
 guarantee that an item valid under a parent collection remains valid
 under any descendant collection. Without that guarantee, every fork
 breaks every reader.
+
+### Status categories
+
+A status MAY carry a `category`, one of a fixed vocabulary that lets
+consumers reason about statuses whose ids they do not know:
+
+| Category | Terminal | Meaning |
+|---|---|---|
+| `todo` | no | Not started. |
+| `active` | no | In progress. |
+| `waiting` | no | Started, paused on something external (a decision, a third party). |
+| `done` | yes | Completed. |
+| `failed` | yes | Attempted, did not succeed. |
+| `cancelled` | yes | Abandoned. |
+
+When `category` is set, `terminal` MUST be true exactly for `done`,
+`failed` and `cancelled`; a host MUST refuse a collection that
+contradicts this with `collection_status_category_mismatch`. AIP-18
+leaves `category` OPTIONAL; a consumer AIP MAY require it — [AIP-20](/docs/aip-20)
+requires it on every work collection and defines its coordination
+protocol over categories rather than status ids. Under `extends:`, a
+child MUST NOT change the `category` of an inherited status (an item in
+that status would change meaning); doing so surfaces
+`collection_status_category_drift` (HARD), alongside the other drift
+refusals below.
 
 ### Validation contract
 
@@ -710,22 +741,20 @@ implementation; once the in-flight `packages/collection/core` package
 lands, this AIP will absorb the working schema in full as part of
 moving Draft → Review.
 
-The first consumer is AIP-20 (work v2), which will replace AIP-13's
-hardcoded `project`/`initiative`/`task` doctypes with three
-`COLLECTION.md` files shipped alongside the workspace AIP. The second
+The first consumer is [AIP-20](/docs/aip-20) (work v2), whose
+normative `work-item` base collection (with `task` and `initiative`
+extending it) replaces AIP-13's hardcoded doctypes and is the first
+consumer to require status `category`. The second
 consumer is a planned refactor of AIP-10's `entityTypes` field into
 `collection://*` references — turning the wiki's entity types into
 shippable, forkable collections.
 
 ## Backwards Compatibility
 
-Not applicable — this AIP introduces a new spec. AIP-13's hardcoded
-work doctypes remain valid under the v1 spec; AIP-20 will be a
-*successor* (replacing AIP-13 in the registry index) rather than a
-breaking change to AIP-13. Hosts SHOULD continue to support
-`work/v1` until AIP-20's deprecation window closes; the migration
-path from `work/v1` to `collection.item/v1` (via AIP-20) will be
-documented in AIP-20's `Backwards Compatibility` section, not here.
+Not applicable — this AIP introduces a new spec. The status `category`
+and field type `object` are additive: collections and items that do
+not use them are unchanged. AIP-13's `work/v1` is Superseded by AIP-20
+with no compatibility layer.
 
 ## Security Considerations
 

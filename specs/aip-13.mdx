@@ -26,9 +26,9 @@ layer: coordination
 > hardcoded `project`, `initiative`, and `task` doctypes. It has been
 > superseded by [AIP-20](/docs/aip-20) (`agentwork/v2`), which lifts
 > the per-item-kind schemas to [AIP-18](/docs/aip-18) collections.
-> AIP-20 itself is still Draft; its `agentwork-v1-compat` starter
-> collections keep existing v1 workspaces loadable during the
-> transition.
+> No compatibility layer is provided: hosts need not load `work/v1`
+> documents. A v1 `project` becomes an [AIP-34](/docs/aip-34) project
+> node whose `work:` points at an AIP-20 `WORK.md`.
 
 ## Abstract
 

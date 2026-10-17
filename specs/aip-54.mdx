@@ -157,6 +157,7 @@ work: `agencies`, `assemblies`, `policies`, `identities`, and
 | `operators` | `operator` | [AIP-9](/docs/aip-9) |
 | `personas` | `persona` | [AIP-25](/docs/aip-25) |
 | `users` | `user` | host user registry |
+| `sessions` | `session` | [AIP-46](/docs/aip-46) agent session (a runtime execution instance, not an identity) |
 | `companies` | `company` | [AIP-6](/docs/aip-6) |
 | `collections` | `collection_doc` | [AIP-18](/docs/aip-18) — see §Seams |
 | `wikis` | `wiki` | [AIP-10](/docs/aip-10) |
@@ -198,6 +199,7 @@ email-body    = address
 operator-body = slug [ "@" workspace ]      ; @workspace = cross-workspace disambiguator
 user-body     = id [ "@" workspace ]
 persona-body  = id
+session-body  = id                          ; AIP-46 session id
 eth_tx-body   = chainId ":" txHash          ; EIP-155 chainId; 0x-prefixed lowercase hex
 ots-body      = inner-compact-ref           ; e.g. ots:local:engagements/.../247.ots
 ```
