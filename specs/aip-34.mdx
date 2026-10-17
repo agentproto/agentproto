@@ -1,12 +1,12 @@
 ---
-title: "AIP-34: WORKSPACE.md — agentworkspace/v1 (workspace identity manifest)"
-description: A markdown + frontmatter format for declaring a workspace's identity — globally addressable id, owner, storage choice, defaults, publish posture. The root manifest of every AIP-organized workspace; pairs with STORAGE.md (AIP-35) for the storage policy block.
+title: "AIP-34: WORKSPACE.md — agentworkspace/v2 (workspace tree node manifest)"
+description: A markdown + frontmatter format for declaring a workspace node's identity AND its place in a tree of workspace nodes — globally addressable id, owner, storage choice, node type, visibility wall, two-sided includes/exports/apps doors, never-inherited secrets, and budget aggregation. Supersedes the original workspace/v1 identity-only draft outright (no parallel v1 support, no mixed-schema tree); see "Migrating from workspace/v1".
 aip: 34
 status: Review
 type: Schema
 created: 2026-05-02
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 19, 35, 36]
+requires: [1, 2, 18, 19, 20, 35, 36, 38, 40, 41, 42, 53]
 discussions-to: https://github.com/agentproto/agentproto/discussions/34
 layer: surfaces
 package: "@agentproto/workspace"
@@ -16,20 +16,29 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/workspace
 | Field | Value |
 |---|---|
 | AIP | 34 |
-| Title | WORKSPACE.md — agentworkspace/v1 (workspace identity manifest) |
-| Status | Draft |
+| Title | WORKSPACE.md — agentworkspace/v2 (workspace tree node manifest) |
+| Status | Review |
 | Type | Schema |
 | Domain | workspace.sh |
-| Requires | [AIP-19](/docs/aip-19) (SECRETS), [AIP-35](/docs/aip-35) (STORAGE), [AIP-36](/docs/aip-36) (SANDBOX) |
+| Requires | [AIP-19](/docs/aip-19) (SECRETS), [AIP-20](/docs/aip-20) (WORK), [AIP-35](/docs/aip-35) (STORAGE), [AIP-36](/docs/aip-36) (SANDBOX) |
 
 ## Abstract
 
 `WORKSPACE.md` is a markdown-with-frontmatter file format that
-packages a single workspace's **identity** — its globally
-addressable id, owner, name, description, storage choice,
-defaults, and publish posture. It is the root manifest of every
-AIP-organized workspace and the entry point hosts read first when
-materializing a workspace.
+packages a workspace node's **identity** — its globally addressable
+id, owner, name, description, storage choice, defaults, publish
+posture — **and** its place in a **tree** of workspace nodes: a node
+`type`, a visibility `wall`, two-sided `includes`/`exports`/`apps`
+doors, never-inherited secrets, and budget aggregation. It is the
+manifest every AIP-organized workspace node carries, and the entry
+point hosts read first when materializing one.
+
+This is `workspace/v2` — the **current and only normative schema** of
+this AIP. An earlier `workspace/v1` draft (identity only, no tree
+composition) is **superseded outright**: there is no parallel v1
+support, no mixed v1/v2 tree, and no compatibility schema. A tree is
+homogeneously `workspace/v2`. See "Migrating from workspace/v1" for
+the field-by-field note.
 
 The format pairs with two sibling blocks that mirror Mastra's
 `Workspace = filesystem + sandbox` shape:
@@ -53,7 +62,7 @@ Workspaces today exist implicitly: a row in some app's database
 points at a folder somewhere, and conventions emerge — `.tools/`,
 `.workflows/`, `.skills/`, `.runs/`. The folder is real, the
 conventions are real, but the workspace itself has no manifest.
-That implicit shape blocks four real workflows:
+That implicit shape blocks five real workflows:
 
 1. **No portable identity.** "What is this workspace? Whose is it?
    Where do its bytes live?" answers require querying the host's
@@ -73,17 +82,29 @@ That implicit shape blocks four real workflows:
    `find . -name "WORKSPACE.md" -maxdepth 2` enumerates the
    substrate.
 
-`WORKSPACE.md` makes the workspace a first-class declared entity.
+5. **No tree composition.** Even once a single workspace has a
+   manifest, nothing describes how MANY workspaces relate — which
+   one is whose parent, who may read across a boundary, how budgets
+   or secrets propagate. Hosts invent ad hoc parent-child conventions
+   per product, each with its own leak surface.
+
+`WORKSPACE.md` makes the workspace — and the tree it sits in — a
+first-class declared entity.
 
 ## Design principles
 
-1. **One file at the root.** A workspace is a folder containing
-   exactly one `WORKSPACE.md` at its root. No subfolder counts.
+1. **One file per node.** A workspace NODE is a folder containing
+   exactly one `WORKSPACE.md` at its root. A TREE is composed of many
+   such nodes — the folder hierarchy IS the parent/child relationship
+   (a node's implicit parent is its folder's nearest ancestor that
+   also has a `WORKSPACE.md`), never a separate `parent:` field that
+   could drift from the filesystem.
 
-2. **Identity is globally addressable.** `id` follows the form
-   `@<owner-slug>/<workspace-slug>`. Same posture as
+2. **Identity is globally addressable and flat.** `id` follows the
+   form `@<owner-slug>/<workspace-slug>`. Same posture as
    designkit / canvakit / agentproto manifests. The address is
-   resolvable across hosts that share an owner namespace.
+   resolvable across hosts that share an owner namespace, and is
+   immutable even if the node moves to a different folder.
 
 3. **Storage policy is its own block.** WORKSPACE.md does NOT
    redefine storage configuration. It either inlines a STORAGE.md
@@ -112,51 +133,96 @@ That implicit shape blocks four real workflows:
    declaration is the input to a downstream registry; this AIP
    does not specify the registry itself.
 
+8. **Visibility defaults closed, every crossing is two-sided.** A
+   node's `wall` defaults to `isolated`: nothing crosses a node
+   boundary — files (`includes`/`exports`), secrets (`uses_secrets`),
+   or app surfaces (`apps[].attach`) — without an EXPLICIT grant
+   declared on BOTH the consumer and the provider side. A looser
+   level (`shared`) or a stricter one (`sealed`, `hard`) is opt-in in
+   both directions; there is no single-sided override anywhere in
+   this AIP.
+
 ## Specification
 
 ### File location
 
 ```
-<workspace-root>/
-  WORKSPACE.md          ← this AIP, exactly one
-  .tools/<id>/TOOL.md   ← AIP-14
-  .drivers/<id>/DRIVER.md ← AIP-30
+<tree-root>/
+  WORKSPACE.md              ← this AIP, exactly one per node — the tree ROOT
+  TYPES.md                  ← node-type registry (root only)
+  agentproto.lock           ← tree-wide app/pack lockfile (root only)
+  .secrets/SECRETS.md       ← AIP-19, this node's own secrets
+  .tools/<id>/TOOL.md       ← AIP-14
+  .drivers/<id>/DRIVER.md   ← AIP-30
   .workflows/<id>/WORKFLOW.md ← AIP-15
-  .code/<id>/CODE.md    ← AIP-26
-  .skills/<id>/SKILL.md ← AIP-3
-  storage/<slug>.STORAGE.md  ← AIP-35 (if separated)
-  ... other AIP folders ...
+  .code/<id>/CODE.md        ← AIP-26
+  .skills/<id>/SKILL.md     ← AIP-3
+  storage/<slug>.STORAGE.md ← AIP-35 (if separated)
+  EXPORT.md                 ← AIP-34, only if wall is sealed/hard
+  <child-dir>/
+    WORKSPACE.md            ← a NESTED node — its own id, own frontmatter,
+                               implicit parent = this directory
+    ... (same shape, recursively) ...
 ```
+
+A folder with no `WORKSPACE.md` is simply part of its nearest
+ancestor's node — same "nearest manifest wins" rule a single
+workspace already uses to find its own root, applied recursively
+across a tree of them.
 
 ### Frontmatter
 
 YAML frontmatter, delimited by `---` lines. All fields are
-case-sensitive.
+case-sensitive. `schema` is always `"workspace/v2"` — the sole
+discriminator value this AIP defines.
+
+**On `version` vs. `schema`** — two independent axes, do not conflate
+them: `version` is the revision of THIS PARTICULAR manifest instance
+(bump it when you meaningfully change this file's own content — an
+owner reassignment, a storage swap, a policy change). `schema:
+"workspace/v2"` is the FORMAT version — which shape the file follows,
+defined by this AIP. Editing your WORKSPACE.md's `version` never
+implies the format changed; a format change is a new AIP revision
+with (if ever needed again) a new `schema` literal, not a `version`
+bump.
 
 #### Required fields
 
 | Field | Type | Description |
 |---|---|---|
-| `schema` | string | Always `workspace/v1`. |
-| `id` | string | Globally addressable id: `@<owner-slug>/<workspace-slug>`. Lowercase, digits, dashes. |
-| `version` | semver string | Spec version of THIS file. Bump on breaking shape change. |
+| `schema` | string | Always `workspace/v2`. |
+| `id` | string | Globally addressable, FLAT id: `@<owner-slug>/<workspace-slug>`. Lowercase, digits, dashes. Immutable — survives the node moving to a different folder. |
+| `version` | semver string | Revision of THIS manifest instance. See "On `version` vs. `schema`" above. |
 | `name` | string | Human-readable display name. 1–80 chars. |
-| `owner` | object | `{ type: "guild" \| "user" \| "org", id: string, slug: string }`. The `slug` participates in the addressable `id` above. |
-| `storage` | object | Filesystem policy: either `{ inline: <STORAGE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }`. See AIP-35. |
+| `type` | string | Node kind. MUST be a key in the nearest ancestor `TYPES.md` (walking up through plain folders with no `WORKSPACE.md`). Day-1 vocabulary: `root`, `perso`, `company`, `project`, `initiative`. The schema accepts any kebab string; **the registry, not this schema, is the extension point** — a tree MAY declare a `client` type that `extends: project`. |
+| `owner` | object | `{ type: "guild" \| "user" \| "org", id: string, slug: string }`. The `slug` participates in the addressable `id` above and MUST match its slug suffix. |
+| `storage` | object | Filesystem policy: `{ inline: <STORAGE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }` or `{ file: "<path>" }`. See AIP-35. |
 
 #### Optional fields
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `description` | string | `""` | One-paragraph purpose. ≤2000 chars. |
-| `sandbox` | object | (none) | Sandbox policy: either `{ inline: <SANDBOX.md frontmatter body> }` or `{ ref: "<path or registry slug>" }` or `{ file: "<path>" }`. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
-| `code` | object | (none) | Code policy: either `{ inline: <CODE.md frontmatter body> }` or `{ ref: "<path or registry slug>" }` or `{ file: "<path>" }`. See AIP-26. Optional — when present, the workspace IS a code-workspace / repo (see "Workspace as repo" below). |
+| `status` | enum | `"active"` | `"active"` \| `"paused"` \| `"archived"`. See "Node status: active / paused / archived" below. |
+| `sandbox` | object | (none) | Sandbox policy: inline / ref / file. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
+| `code` | object | (none) | Code policy: inline / ref / file. See AIP-26. Optional — when present, the workspace IS a code-workspace / repo (see "Workspace as repo" below). |
+| `work` | object | (none) | `{ inline: <WORK.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }` — [AIP-20](/docs/aip-20) WORK.md, same inline/ref/file union as `code`. A project node's status/board lives here, NOT in a flat status file: items are AIP-18 `ITEM.md` records under the collection(s) `work` declares. See "Node status: `work:`" below. |
 | `identity` | object \| array | (none) | AIP-23 identity-ref block — default identity for all sub-blocks of this workspace. Sub-blocks (storage, sandbox, code) override. See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
-| `policy` | object \| array | (none) | AIP-38 POLICY block — access grants, defaults, limits, requirements scoped to this workspace. Composable: inline / ref / file, OR an array that composes (most-restrictive wins). Grants on AIP-39 ACTION ids. See [AIP-38 POLICY.md](/docs/aip-38). |
+| `wall` | enum | `"isolated"` | Visibility level: `"shared"` \| `"isolated"` \| `"sealed"` \| `"hard"`. See "The four wall levels" below. |
+| `includes` | array | `[]` | `{ ref: "ws://workspaces/<id>[#<subpath>]", mode: "read" \| "write" \| "append" }`. Consumer-side half of a door. Honoured only if the target ALSO exports to this id — see "Includes and exports". |
+| `exports` | array | `[]` | `{ path, to, mode: "read" \| "write" }`. Provider-side half of a door. `to` is a workspace id, an array of ids, or the sentinel `"children"` — see "Includes and exports". |
+| `agents` | array | `[]` | `{ file, share?: string[] }` — AIP-42 AGENT.md manifests this node hosts. `share` lists other workspace ids the agent is also declared transverse to (runs scoped to whichever of these ids is the live caller, never a union). |
+| `routines` | array | `[]` | `{ file }` — AIP-41 ROUTINE.md manifests this node hosts. |
+| `secrets` | object | (none) | `{ file }` — ref to this node's OWN `.secrets/SECRETS.md` (AIP-19). Omitted = no secrets of its own. **Never inherited; see "Secrets never descend".** |
+| `uses_secrets` | array | `[]` | `{ from: <id>, slug, mode?: "bind" \| "reveal" }`. Consumer-side half of a secret grant — effective only if `from`'s SECRETS.md carries a matching `access.{bind,reveal}[].workspace` grant for THIS node's id (AIP-19 extension — see "Secrets never descend"). |
+| `apps` | array | `[]` | `{ id, version, expose?: ("agents"\|"tools"\|"ui"\|"data")[], attach?: "self" \| <id> }`. `version` is a semver or semver-range; the exact resolved version is recorded in `agentproto.lock`, never in WORKSPACE.md. `attach` crossing to another node needs that node's consent — see "Apps and consent". |
+| `accepted_apps` | array | `[]` | `{ from: <id>, app?: <id> }`. Provider-side consent for an `apps[].attach` pointed at THIS node by another node. See "Apps and consent". |
+| `policy` | object \| array | (none) | AIP-38 POLICY block — access grants, defaults, limits, requirements scoped to this workspace. Composable: inline / ref / file, OR an array (most-restrictive wins). `limits[].kind` additionally allows `budget-usd-per-month` \| `budget-usd-per-day` (value = USD) — see "Budgets aggregate". |
 | `defaults` | object | `{}` | `{ read_only: bool }` and other workspace-wide defaults. |
 | `publish` | object | `{ template: false, visibility: "private" }` | Publish posture: `{ template: bool, registry?: string, visibility: "private" \| "unlisted" \| "public" }`. |
 | `tags` | string[] | `[]` | Free-form discovery tags. |
 | `created_at` | string (ISO 8601) | none | Creation timestamp. |
+| `lock` | string | `"agentproto.lock"` | Tree-relative path to this node's apps/packs lockfile. Only meaningful on a node that attaches apps/packs directly. |
 | `metadata` | object | `{}` | Free-form. Authors MAY stash adapter-specific hints under namespaced keys. |
 
 ### Body
@@ -178,10 +244,11 @@ frontmatter.
 defineWorkspace(definition: WorkspaceDefinition): WorkspaceHandle
 
 interface WorkspaceDefinition {
-  schema:      "workspace/v1"
+  schema:      "workspace/v2"
   id:          string                     // "@<owner>/<slug>"
   version:     string
   name:        string
+  type:        string                     // key in the nearest TYPES.md
   description?: string
   owner: {
     type: "guild" | "user" | "org"
@@ -190,8 +257,8 @@ interface WorkspaceDefinition {
   }
   storage:
     | { inline: StorageDefinition }       // AIP-35 (required)
-    | { ref:    string }                  // path or registry slug
-    | { file:   string }                  // workspace-relative path
+    | { ref:    string }
+    | { file:   string }
   sandbox?:
     | { inline: SandboxDefinition }       // AIP-36 (optional)
     | { ref:    string }
@@ -200,10 +267,24 @@ interface WorkspaceDefinition {
     | { inline: CodeDefinition }          // AIP-26 (optional — workspace as repo)
     | { ref:    string }
     | { file:   string }
+  work?:
+    | { inline: WorkDefinition }          // AIP-20 (optional — node status/board)
+    | { ref:    string }
+    | { file:   string }
   identity?:                              // AIP-23 identity-ref
-    | IdentityRef                          // single
-    | IdentityRef[]                        // multi-attribution
-  defaults?: { readOnly?: boolean }
+    | IdentityRef
+    | IdentityRef[]
+  wall?:       "shared" | "isolated" | "sealed" | "hard"   // default "isolated"
+  includes?:   { ref: string; mode?: "read" | "write" | "append" }[]
+  exports?:    { path: string; to: string | string[] | "children"; mode?: "read" | "write" }[]
+  agents?:     { file: string; share?: string[] }[]
+  routines?:   { file: string }[]
+  secrets?:    { file: string }
+  uses_secrets?: { from: string; slug: string; mode?: "bind" | "reveal" }[]
+  apps?:       { id: string; version: string; expose?: ("agents"|"tools"|"ui"|"data")[]; attach?: string }[]
+  accepted_apps?: { from: string; app?: string }[]
+  policy?:     PolicyBlock | PolicyBlock[]
+  defaults?:   { readOnly?: boolean }
   publish?: {
     template?:   boolean
     registry?:   string
@@ -211,36 +292,419 @@ interface WorkspaceDefinition {
   }
   tags?:       string[]
   createdAt?:  string
+  lock?:       string                     // default "agentproto.lock"
+  status?:     "active" | "paused" | "archived"   // default "active"
   metadata?:   Record<string, unknown>
 }
 ```
 
 ### Conformance rules
 
-1. **Exactly one WORKSPACE.md per workspace root.** Multiple
-   files at root is a spec violation; nested ones are ignored.
+1. **One `WORKSPACE.md` per node.** A node is a folder with exactly
+   one `WORKSPACE.md`. Nested `WORKSPACE.md` files ARE nodes — every
+   one under a tree root is read, none are "the only one that
+   counts" — with the nearest ancestor `WORKSPACE.md` as the implicit
+   parent (a folder with no manifest of its own is simply part of
+   its nearest ancestor's node).
 
 2. **`id` is immutable.** Once set, never changes. Renaming the
-   workspace mutates `name`, never `id`. Hosts that need to
-   change `id` MUST treat the result as a new workspace.
+   workspace mutates `name`, never `id`. Moving the node to a
+   different folder (`ws mv`) rewrites the path, never the id. Hosts
+   that need to change `id` MUST treat the result as a new workspace.
 
 3. **`owner.slug` and the slug suffix of `id` MUST match.** A
    workspace at `@acme-corp/marketing-ops` MUST have
    `owner.slug = "acme-corp"`. Validators MUST reject mismatches.
 
 4. **`storage.inline` and `storage.ref` are mutually exclusive.**
-   Exactly one form per WORKSPACE.md.
+   Exactly one form per WORKSPACE.md (same for `sandbox`, `code`,
+   `work`).
 
 5. **No I/O at parse time.** Reading WORKSPACE.md MUST NOT trigger
    credential resolution, network calls, or storage instantiation.
    Hosts materialize storage lazily.
 
+6. **A node's `type` MUST resolve in the nearest ancestor `TYPES.md`**,
+   and that type's `parents` MUST include the resolved type of the
+   node's own nearest-ancestor-with-a-`WORKSPACE.md` (or be a root
+   type with no ancestor). Unresolvable or disallowed nesting is a
+   hard error.
+
+7. **`wall` MUST NOT be looser than the type's `default_wall`.**
+   Ordered `shared < isolated < sealed < hard`; a node MAY only equal
+   or exceed its floor.
+
+8. **An `includes` entry is inert without a matching `exports` entry**
+   on the target, and vice versa — see "Includes and exports". Doors
+   are two-sided by construction; there is no single-sided override.
+
+9. **Secrets are never inherited.** A node's effective secret set is
+   exactly its own `.secrets/SECRETS.md` plus whatever `uses_secrets`
+   entries have a matching grant. Nothing else, regardless of wall
+   level or ancestry.
+
+10. **A child's resolved budget is bounded by its parent's.** See
+    "Budgets aggregate".
+
+11. **A declared `work:` MUST resolve to a parseable AIP-20 WORK.md**
+    (`schema: "work.workspace/v2"`). `work:` itself is optional — this
+    rule only fires when it IS declared.
+
+12. **An `apps[].attach` pointed at a DIFFERENT node is inert without
+    a matching `accepted_apps` entry on that target** — same
+    two-sided consent as includes/exports/secrets. See "Apps and
+    consent".
+
+13. **Paths MUST be tree-relative and confined.** `exports[].path`,
+    `includes[].ref` fragments, `secrets`/`agents`/`routines`/`work`/
+    `code` file refs, and `agentproto.lock`'s `dataDir` MUST NOT
+    escape the tree via `..` traversal, a leading `/`, or a symlink.
+    See "Path confinement".
+
+14. **A node's effective status is the most restrictive value along
+    its ancestor chain** (`archived` > `paused` > `active`) — a child
+    is never more active than an ancestor. Hosts MUST NOT start agents
+    or fire routines at a node whose effective status is `paused` or
+    `archived`. See "Node status: active / paused / archived".
+
 ### Stable identity
 
 `id` + `version` together form the workspace's stable identity.
-A breaking change to the manifest shape (a `storage` provider
-swap, an owner reassignment, a schema upgrade that drops fields)
-SHOULD bump `version`.
+A breaking change to the manifest's OWN content (a `storage` provider
+swap, an owner reassignment, dropping a field this manifest used to
+carry) SHOULD bump `version`. This is independent of `schema`, which
+never changes for an AIP-34 node short of a future AIP revision — see
+"On `version` vs. `schema`" above.
+
+### The four wall levels
+
+| Level | Name | What crosses | Mechanism |
+|---|---|---|---|
+| 0 | `shared` | This node's **siblings** — the other children of the same parent — read the whole node. | The PARENT behaves as though it had declared `exports: [{ path: <this node's relative path>, to: "children", mode: "read" }]` on itself. See "Includes and exports" for why the declaring node matters. |
+| 1 | `isolated` (**default**) | Nothing, without an explicit include + matching export (or an apps/secrets grant). Ancestors still see everything (no restriction applies upward). | Host-side resolver filters every file/memory/app-tool call by the requesting session's node scope. |
+| 2 | `sealed` | Like `isolated`, **and** ancestors ALSO lose raw-file visibility: they read only this node's `EXPORT.md`. Inbound `includes` from elsewhere require host-side approval (AIP-7 `approval_request`). | Same process/daemon; sessions scoped to this node carry a node-scoped token. |
+| 3 | `hard` | Like `sealed`, **and** enforced by a separate process/identity: no shared daemon, no shared auth profile, no shared MCP surface. The only traffic in or out is a declared export, delivered as a message, never mounted. | Second daemon, or a dedicated OS user/sandbox. |
+
+A node MAY raise its own wall (0→1→2→3) relative to what its parent or
+its `TYPES.md.default_wall` would otherwise give it, but MUST NOT set
+a level looser than that floor (conformance rule 7). `agentproto
+workspace check` flags a looser-than-floor `wall` as a hard error, not
+a warning.
+
+### Includes and exports (two-sided consent)
+
+A door exists only when BOTH sides declare it:
+
+```yaml
+# consumer: agentik/chatcommerce/WORKSPACE.md
+includes:
+  - { ref: "ws://workspaces/@jeremy/simone#docs/whatsapp-flows", mode: read }
+```
+
+```yaml
+# provider: agentik/simone/WORKSPACE.md
+exports:
+  - { path: docs/whatsapp-flows, to: "@jeremy/chatcommerce", mode: read }
+```
+
+Resolution rule: an `includes` entry is honoured iff some `exports`
+entry on the target node has `to` equal to the consumer's id, an array
+containing it, OR the sentinel `"children"` with the consumer actually
+nested in the declaring node's folder subtree (see next paragraph for
+what "declaring node" means). The **effective** mode is the more
+restrictive of the two sides ordered `read < append < write`; a
+consumer asking for `write` against a `read`-only export gets `read`,
+and the verifier reports the downgrade rather than silently granting
+less than requested. A one-sided declaration (include with no matching
+export, or an export nobody includes) is not an error by itself — it's
+simply inert — but `agentproto workspace check` SHOULD surface unused
+exports and unresolved includes so dangling doors get noticed.
+
+**One definition for `to: "children"`, used both explicitly and
+implicitly:** it means every node nested, in the FOLDER tree, under
+whichever workspace **declares** the export entry — direct or
+transitive descendants, regardless of id. For an explicit `exports:`
+entry, the declaring node is whoever wrote it (e.g. a node MAY export
+part of itself to its own descendants). For the IMPLICIT grant
+`wall: shared` synthesizes, the declaring node is the **parent**, not
+the shared node itself — which is why `wall: shared` reaches a node's
+SIBLINGS (the parent's other children), not merely its own
+descendants: `agentik/commun/` set to `wall: shared` is read by every
+other project folder under `agentik/`, because `agentik` (the parent)
+is the one implicitly exporting `commun/` `to: "children"`, and
+`agentik`'s children include `commun/`'s siblings. `to: "children"` is
+folder-relative, not id-relative, by design: ids are flat and
+immutable (rule 2), so there is no id pattern that would mean "my
+siblings" or "my descendants" the way a path-relative sentinel does.
+
+### Apps and consent
+
+`apps[].attach` defaults to `"self"` — the declaring node and its own
+subtree, which needs no consent because a node can only ever restrict
+itself that way. Pointing `attach` at a DIFFERENT workspace id crosses
+that node's wall exactly like an `includes` entry would, and is
+subject to the same two-sided rule: the TARGET node must declare a
+matching `accepted_apps` entry.
+
+```yaml
+# declaring node: agentik/seo-tooling/WORKSPACE.md
+apps:
+  - { id: "@agentik/seo-crew", version: "^0.1.0", attach: "@jeremy/chatcommerce" }
+```
+
+```yaml
+# target: agentik/chatcommerce/WORKSPACE.md
+accepted_apps:
+  - { from: "@jeremy/seo-tooling", app: "@agentik/seo-crew" }
+```
+
+`accepted_apps[].app` is optional — omitted, the grant covers any app
+`from` attaches. Without a matching entry, the cross-node `attach` is
+inert (conformance rule 12): `agentproto workspace check` reports it
+as an unresolved, unconsented attach, the same posture as a one-sided
+`includes`/`exports` pair.
+
+### Secrets never descend
+
+A node's `.secrets/SECRETS.md` is scoped to that node ONLY — it is
+never visible to children by inheritance, mirroring the opposite of
+how `defaults.*` preferences behave (those flow DOWN and get
+overridden; secrets don't flow at all without an explicit grant).
+Sharing a specific secret with a specific node is a two-sided
+declaration exactly like includes/exports:
+
+```yaml
+# provider: agentik/.secrets/SECRETS.md (AIP-19, extended)
+secrets:
+  - slug: stripe-api-key
+    name: Stripe (Agentik account)
+    description: Payments. Never visible from Simone.
+    access:
+      bind:
+        - workspace: "@jeremy/chatcommerce"   # AIP-19 extension — see below
+```
+
+```yaml
+# consumer: agentik/chatcommerce/WORKSPACE.md
+uses_secrets:
+  - { from: "@jeremy/agentik", slug: stripe-api-key, mode: bind }
+```
+
+This requires one small, additive extension to [AIP-19](/docs/aip-19)
+SECRETS.md: `accessEntry` grows a sixth alternative, `workspace: <id>`,
+alongside the existing `role` / `userId` / `cap` / `tool` / `workflow`
+(still `oneOf` — exactly one principal kind per grant entry). Existing
+SECRETS.md manifests are unaffected; this is a new optional field, not
+a shape change to any existing one.
+
+### Budgets aggregate
+
+`policy.limits[].kind: "budget-usd-per-month"` (or `-per-day`) on a
+node is a ceiling on spend attributed to that node AND everything
+under it. Resolution walks the chain from root to the node and takes
+the MINIMUM declared value at the same kind — the same
+most-restrictive-wins rule AIP-38 already states for grants, applied
+to numeric limits. A child declaring a HIGHER budget than its parent
+is not a schema error (over-reservation across siblings is allowed —
+their limits may sum to more than the parent's), but the effective
+ceiling for that child is still the parent's lower number, and the
+parent's own limit is consumed first when several children spend
+concurrently. `agentproto workspace check` reports the effective
+(resolved) ceiling per node, not just the locally-declared one.
+
+### Node type registry: TYPES.md
+
+Exactly one `TYPES.md` per tree, at the root, `schema:
+"workspace-types/v1"`:
+
+```yaml
+---
+schema: workspace-types/v1
+types:
+  root:
+    parents: []
+    max_per_tree: 1
+  perso:
+    parents: [root]
+    default_wall: hard
+  company:
+    parents: [root]
+    default_wall: isolated
+    requires_files: [COMPANY.md]
+  project:
+    parents: [company]
+    default_wall: isolated
+    starter:
+      agents: [{ template: "@pygmalion/staff/project-lead" }]
+      routines: [{ template: "@pygmalion/staff/heartbeat-26h" }]
+  initiative:
+    parents: [perso, company, project]
+    default_wall: isolated
+  client:                     # tree-local extension
+    extends: project
+    adds_fields: { contract_end: date }
+---
+```
+
+`parents` lists the `type` values this type MAY nest under (nearest
+WORKSPACE.md ancestor). `default_wall` is the floor a node of this
+type gets when its own `wall` is omitted. `requires_files` names
+sibling files `agentproto workspace check` expects at a node of this
+type. Each entry conceptually compiles to an [AIP-40](/docs/aip-40)
+`EXTENSION.md`; TYPES.md is the authoring surface for that compilation,
+not a competing mechanism.
+
+### Node status: `work:`
+
+`project` above does NOT declare `requires_files` for a status file.
+A project's status is not a markdown file to require — it's the
+`work:` field: an [AIP-20](/docs/aip-20) WORK.md reference, whose
+items are AIP-18 `ITEM.md` records. `agentproto workspace check`
+validates a *declared* `work:` resolves to a parseable WORK.md
+(conformance rule 11) the same way it validates `requires_files`
+resolve to existing files, but does not require `work:` to be present,
+and does not (yet) check item-level freshness inside that board, nor
+how that board relates to any host's own runtime task store —
+deferred, open work.
+
+### Node status: active / paused / archived
+
+Unrelated to the `work:` board status above — this is the node's own
+`status` field (conformance rule 14 governs its inheritance).
+
+- **`active`** (default) — runs normally.
+- **`paused`** — the node keeps its declarations and data but runs
+  nothing: a host MUST NOT start agents nor fire routines declared at
+  or below it, and it's excluded from budget/heartbeat checks, same
+  as `archived`. Unlike `archived`, it stays writable and resumes by
+  flipping `status` back to `active`.
+- **`archived`** — read-only, excluded from budget/heartbeat checks,
+  and never runs anything.
+
+A node's declared `status` is exactly what its own WORKSPACE.md says —
+never rewritten by inheritance. What a host enforces is the node's
+EFFECTIVE status: the most restrictive value along its ancestor chain
+(`archived` > `paused` > `active`); a child is never more active than
+an ancestor. `agentproto workspace check` reports each node's
+effective status, and names the ancestor it's inherited from whenever
+that differs from the node's own declared value:
+
+```
+@acme/root                    status: paused    → effective: paused
+@acme/root/billing             status: active     → effective: paused (inherited from @acme/root)
+@acme/root/billing/invoices    status: archived   → effective: archived
+```
+
+### Tree-wide lockfile: agentproto.lock
+
+Plain YAML (no frontmatter, no body) at the tree root, `lockfile:
+"agentproto-lock/v1"`. Pins every [AIP-53](/docs/aip-53) app and
+AIP-64 pack installed anywhere in the tree to an exact version, its
+source, the sha256 of the fetched artifact, which node it's attached
+to, and a **per-attach** data directory:
+
+```yaml
+lockfile: agentproto-lock/v1
+generated: 2026-10-17T18:00:00Z
+apps:
+  - id: "@agentik/seo-crew"
+    version: 0.1.0
+    source: "file:/path/to/seo-crew"
+    sha256: "…"
+    attach: "@jeremy/chatcommerce"
+    dataDir: agentik/chatcommerce/.apps/seo-crew
+packs:
+  - name: "@pygmalion/staff"
+    version: 0.1.0
+    digest: "agentproto-pack-digest/v1:…"
+    attach: "@jeremy/root"
+```
+
+`dataDir` is keyed **per attach point**, not per installed app — the
+same app id attached to two different nodes gets two separate data
+directories, each behind its own node's wall. `agentproto workspace
+check` compares each node's `apps[].version` range against the
+resolved `version` recorded here and flags drift. `dataDir` is subject
+to path confinement (below) — hosts MUST reject a lock entry whose
+`dataDir` escapes the tree.
+
+### Sealed/hard digest: EXPORT.md
+
+The only file an ancestor of a `sealed` or `hard` node is allowed to
+read from it. `schema: "workspace-export/v1"` frontmatter (`from`,
+`generated_at`, optional `generated_by`, `sections`), free-form prose
+body:
+
+```yaml
+---
+schema: workspace-export/v1
+from: "@jeremy/perso"
+generated_at: 2026-10-17T07:00:00Z
+generated_by: coach
+sections: [Santé, Emploi]
+---
+
+## Santé
+
+Rien à signaler cette semaine.
+
+## Emploi
+
+Deux entretiens programmés ; détails hors de portée du cerveau.
+```
+
+### Path confinement
+
+Every tree-relative path this AIP accepts — `exports[].path`,
+`includes[].ref`'s `#<subpath>` fragment, `secrets.file`,
+`agents[].file`, `routines[].file`, `work.file`, `code.file`, and
+`agentproto.lock`'s `dataDir` — MUST resolve inside the tree. Three
+distinct failure modes, all MUST be rejected as hard errors:
+
+1. **Leading `/`** — an absolute path escapes relativity entirely.
+2. **`..` traversal** — any path segment equal to `..`, anywhere in
+   the string (not just at the start).
+3. **Symlink escape** — a path that is syntactically safe (no `/`, no
+   `..`) but resolves, via a symlink somewhere along it, to a
+   location outside the tree.
+
+The JSON Schema enforces (1) and (2) with a `pattern` on every
+affected string field — see `$defs.safeRelativePath` in
+`WORKSPACE.schema.json`. (3) is NOT detectable from the string alone:
+hosts and `agentproto workspace check` MUST ALSO realpath-resolve
+every such path and verify the result is still a descendant of the
+tree root before reading, writing, or reporting its contents.
+
+### Example (workspace/v2 tree)
+
+```md
+---
+schema: workspace/v2
+id: "@jeremy/simone"
+version: 1.0.0
+name: Simone
+type: project
+status: active
+owner: { type: org, id: agentik, slug: jeremy }
+storage:
+  inline: { provider: local-fs, config: { mount_path: /Users/jeremy/agentproto/agentik/simone } }
+code:
+  inline:
+    path: /path/to/monorepo/projects/simone
+work:
+  file: WORK.md
+includes:
+  - { ref: "ws://workspaces/@jeremy/agentik#commun", mode: read }
+secrets: { file: .secrets/SECRETS.md }
+policy:
+  limits: [{ kind: budget-usd-per-month, value: 80 }]
+---
+
+## Description
+
+Simone's project node. Code lives in the monorepo; this manifest is
+the organigramme entry, not a second copy of the repo.
+```
 
 ## Address resolution
 
@@ -272,10 +736,11 @@ There is no separate "CODESPACE.md" primitive. The pattern is:
 
 ```yaml
 # WORKSPACE.md at the root of acme/marketing-bot repo
-schema: workspace/v1
+schema: workspace/v2
 id: "@acme/marketing-bot"
 version: 1.0.0
 name: "Marketing Bot"
+type: project
 owner: { type: org, id: "01HQ8VR...", slug: acme }
 
 storage:
@@ -333,44 +798,28 @@ To migrate a host into the AIP-34 model:
    covers.
 3. On row mutation, re-emit the manifest to keep them in sync.
 
-## Example
+## Migrating from workspace/v1
 
-```md
----
-schema: workspace/v1
-id: "@acme-corp/marketing-ops"
-version: 1.0.0
-name: Acme Marketing Ops
-description: |
-  Marketing automation workspace for Acme Corp — content briefs,
-  publishing routines, brand-guidelines kit.
-owner:
-  type: org
-  id: 01HQ8VRZX5WNNGCV6YD2N7B6RX
-  slug: acme-corp
-storage:
-  ref: "@acme-corp/shared-s3-policy"
-defaults:
-  read_only: false
-publish:
-  template: false
-  visibility: private
-tags: [marketing, content, brand]
-created_at: 2026-05-02T10:00:00Z
----
+An earlier draft of this AIP shipped `workspace/v1` — identity only,
+no `type`, no tree composition. It is superseded outright by this
+document: there is no v1 parser, no v1 schema file, and no tree mixing
+a v1 node under a v2 one. A `schema: workspace/v1` manifest is simply
+not a valid AIP-34 node.
 
-## Description
+Rewriting one is small — every v1 field keeps its v2 meaning
+unchanged:
 
-The marketing team's primary workspace. Brand kits live under
-`.designs/`, content briefs under `.briefs/`, automation routines
-under `.workflows/`.
+| v1 field | v2 |
+|---|---|
+| `schema: workspace/v1` | `schema: workspace/v2` |
+| `id`, `version`, `name`, `owner`, `storage`, `sandbox`, `code`, `identity`, `defaults`, `publish`, `tags`, `created_at`, `metadata` | unchanged, carry over as-is |
+| *(none — new, required)* | add `type`: pick the node's kind from the tree's `TYPES.md` (or write a minimal `TYPES.md` first if this is the first AIP-34 v2 node in the tree) |
+| *(none — new, all optional, all default closed/empty)* | `wall` (default `isolated`), `includes`/`exports`/`apps`/`accepted_apps`/`uses_secrets`/`agents`/`routines` (all default `[]`), `secrets`, `work`, `status` (default `active`), `lock` (default `agentproto.lock`) — add only the ones this node actually needs |
 
-## Maintainers
-
-- Operator `bob` (marketing director)
-- Operator `eve` (content strategist)
-- Routine `weekly-report` (every Monday 09:00 UTC)
-```
+The only step with a real decision in it is `type` — everything else
+is a mechanical field copy plus the discriminator flip. There is
+nothing to do for a tree with no existing `WORKSPACE.md` at all: just
+author `workspace/v2` from the start.
 
 ## Security considerations
 
@@ -389,18 +838,36 @@ storage.
 declaration is input to a downstream registry; the host decides
 whether and when to honour it.
 
+An unconfined path (see "Path confinement") is a tree-escape primitive
+disguised as a content reference: `exports[].path`, an `includes`
+fragment, or a lock `dataDir` that traverses or follows a symlink out
+of the tree could expose files the wall was supposed to hide, or write
+app data outside any node's control. Hosts MUST treat path confinement
+failures as security-relevant, not cosmetic, errors.
+
+An unconsented `apps[].attach` (see "Apps and consent") is the same
+class of problem applied to app surfaces instead of files: without
+the two-sided `accepted_apps` check, a node could grant itself tool/UI
+exposure on an arbitrary OTHER node purely by declaring it, which is
+exactly the privilege-escalation shape `includes`/`exports` already
+guard against for raw files.
+
 ## Open questions
 
-1. **Mounting workspaces into other workspaces.** A future
-   extension may allow a workspace to declare `mounts: [{ at:
-   "/external/lib", source: "@vendor/lib" }]`. Defer until concrete
-   need.
+1. ~~**Mounting workspaces into other workspaces.**~~ Resolved by
+   `includes`/`exports` (two-sided consent doors, see "Includes and
+   exports") rather than a `mounts:` field on the consumer alone — a
+   provider that hasn't exported has no mount, regardless of what the
+   consumer declares.
 
-2. **Workspace versioning across hosts.** When a workspace
+2. ~~**Mixed-schema trees.**~~ Resolved: not supported. A tree is
+   homogeneously `workspace/v2`; see "Migrating from workspace/v1".
+
+3. **Workspace versioning across hosts.** When a workspace
    declared at host A is published and forked at host B, what's
    the lineage record? Likely a separate `LINEAGE.md` AIP.
 
-3. **Per-workspace policy bundles.** Workspaces may want to
+4. **Per-workspace policy bundles.** Workspaces may want to
    declare default approval policies, default agent identity
    bindings, default compute budgets. Whether these live in
    WORKSPACE.md or sibling manifests is an open call.
@@ -410,11 +877,18 @@ whether and when to honour it.
 - [AIP-3 — SKILL.md](/docs/aip-3) — sibling manifest the workspace hosts
 - [AIP-14 — TOOL.md](/docs/aip-14) — sibling manifest the workspace hosts
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — sibling manifest the workspace hosts
-- [AIP-19 — SECRETS.md](/docs/aip-19) — referenced from STORAGE.md.auth
-- [AIP-26 — CODE.md](/docs/aip-26) — sibling manifest the workspace hosts
-- [AIP-30 — DRIVER.md](/docs/aip-30) — sibling manifest the workspace hosts
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — item storage for the collection(s) a `work:` WORK.md declares
+- [AIP-19 — SECRETS.md](/docs/aip-19) — `secrets:`/`uses_secrets:`; `workspace:` access entries pair with `uses_secrets`
+- [AIP-20 — WORK.md](/docs/aip-20) — referenced from `work:`; a project node's status/board, not a flat status file
 - [AIP-23 — IDENTITY.md (identity-ref)](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — referenced from `identity?`
 - [AIP-26 — CODE.md](/docs/aip-26) — referenced from `code?` (workspace-as-repo)
+- [AIP-30 — DRIVER.md](/docs/aip-30) — sibling manifest the workspace hosts
 - [AIP-35 — STORAGE.md](/docs/aip-35) — filesystem policy block
 - [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox/compute policy block
 - [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary referenced by sub-block lifecycles
+- [AIP-38 — POLICY.md](/docs/aip-38) — `policy.limits` budget kinds
+- [AIP-40 — EXTENSION.md](/docs/aip-40) — compilation target of each TYPES.md entry
+- [AIP-41 — ROUTINE.md](/docs/aip-41) — sibling manifest declared under `routines:`
+- [AIP-42 — AGENT.md](/docs/aip-42) — sibling manifest declared under `agents:`
+- [AIP-53 — APP.md](/docs/aip-53) — referenced from `apps:`/`accepted_apps:` and `agentproto.lock`
+- [AIP-54 — ws:// resource scheme](/docs/aip-54) — grammar for `includes[].ref`

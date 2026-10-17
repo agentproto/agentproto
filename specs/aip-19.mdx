@@ -169,15 +169,26 @@ access:
     - cap: cap://secret/reveal/stripe-api-key    # capability-URN match (AIP-18)
     - tool: stripe-charge                        # auto-grant when this tool runs
     - workflow: invoice-sync                     # auto-grant when this workflow runs
+    - workspace: "@acme-corp/chatcommerce"       # AIP-34 v2 — a specific workspace node
   bind:
     - tool: stripe-charge                        # injected into the tool's runtime.env
 ```
 
 A request is granted when **any** entry matches the requesting
 context (role / userId / capability / invoking-tool / invoking-
-workflow). Hosts that don't support a particular grant kind MUST
-ignore the entry, not fail — forward-compatibility for new entry
-kinds.
+workflow / invoking-workspace). Hosts that don't support a particular
+grant kind MUST ignore the entry, not fail — forward-compatibility for
+new entry kinds.
+
+`workspace` (added alongside [AIP-34 v2](/docs/aip-34#secrets-never-descend))
+matches when the requesting session's workspace id equals the grant.
+This is how AIP-34 v2's `uses_secrets` consumer declaration becomes
+effective: the consumer names `{ from, slug }`, the provider's
+SECRETS.md names `{ workspace: <consumer id> }` under `access.bind` or
+`access.reveal` for that same slug — consent on both sides, same
+pattern as `includes`/`exports`. A `workspace` grant without a
+matching `uses_secrets` declaration (or vice versa) is inert, exactly
+like a one-sided include.
 
 ### Audit
 
@@ -423,11 +434,12 @@ interface AccessGrants {
 }
 
 type AccessEntry =
-  | { role:     string }
-  | { userId:   string }
-  | { cap:      string }                          // AIP-18 capability URN
-  | { tool:     string }
-  | { workflow: string }
+  | { role:      string }
+  | { userId:    string }
+  | { cap:       string }                         // AIP-18 capability URN
+  | { tool:      string }
+  | { workflow:  string }
+  | { workspace: string }                         // AIP-34 v2 workspace id
 
 interface AuditConfig {
   retention?:      string                         // ISO 8601 duration ("P7Y") or shorthand ("7y")
@@ -572,6 +584,7 @@ intentionally out of scope for v1 and tracked as future AIPs.)
 - [AIP-17 — RUNTIME.md](/docs/aip-17) — primary consumer (`runtime.env` resolves to SECRETS slugs)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-18 — CAPABILITY.md (proposed)](/docs/aip-18) — `cap://secret/reveal/<slug>` is the underlying capability URN
+- [AIP-34 — WORKSPACE.md, workspace/v2](/docs/aip-34#secrets-never-descend) — `workspace:` access entries pair with a consumer's `uses_secrets` declaration
 - [`./SECRETS.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-19/draft) — schema validator
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-19/draft) — implementer's guide
 - [`./skills/author-secrets/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-19/draft/skills/author-secrets/SKILL.md) — agent-side authoring skill
