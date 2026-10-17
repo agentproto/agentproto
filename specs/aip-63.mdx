@@ -704,7 +704,7 @@ An observer is an object with any of these members, all optional.
 
 | Member | Called | Receives |
 |---|---|---|
-| `onAttach` | after the provider instance is registered and usable (`start_browser` returned a session) | `sessionId`, `provider`, `instanceId`, `adapter` |
+| `onAttach` | after the provider instance is registered and usable (`start_browser` returned a session) | `sessionId`, `provider`, `instanceId`, `adapter`, and `capture` (`screenshot`, `evaluate`) when the provider implements both. `capture` is for the observer's own frames and page probes; it is never reachable from a tool call |
 | `onDetach` | when the session ends for any reason: `stop_browser`, crash, host shutdown | `sessionId`, `reason` (`stop`, `crash`, `shutdown`) |
 | `beforeCall` | before a `browser.*` tool executes | `sessionId`, `tool` (without the `browser.` prefix), `args`, `tabId` when known, `callId` |
 | `afterCall` | after it executed, before the result is returned | the `beforeCall` fields plus `durationMs`, `ok`, and `error.code` when it failed. Never the result body |
