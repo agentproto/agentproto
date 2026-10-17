@@ -26,7 +26,8 @@
     },
     "status": {
       "enum": ["active", "paused", "archived"],
-      "default": "active"
+      "default": "active",
+      "description": "active: runs normally. paused: keeps declarations/data but runs nothing — hosts MUST NOT start agents or fire routines at or below this node, excluded from budget/heartbeat checks like archived, stays writable and resumes by flipping back to active. archived: read-only, excluded from budget/heartbeat checks, never runs anything. A node's EFFECTIVE status is the most restrictive value along its ancestor chain (archived > paused > active) — a child is never more active than an ancestor; the field itself always holds only this node's own declared value."
     },
     "owner": {
       "type": "object",

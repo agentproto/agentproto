@@ -203,7 +203,7 @@ bump.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `description` | string | `""` | One-paragraph purpose. ≤2000 chars. |
-| `status` | enum | `"active"` | `"active"` \| `"paused"` \| `"archived"`. An archived node is read-only and excluded from budget/heartbeat checks. |
+| `status` | enum | `"active"` | `"active"` \| `"paused"` \| `"archived"`. See "Node status: active / paused / archived" below. |
 | `sandbox` | object | (none) | Sandbox policy: inline / ref / file. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
 | `code` | object | (none) | Code policy: inline / ref / file. See AIP-26. Optional — when present, the workspace IS a code-workspace / repo (see "Workspace as repo" below). |
 | `work` | object | (none) | `{ inline: <WORK.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }` — [AIP-20](/docs/aip-20) WORK.md, same inline/ref/file union as `code`. A project node's status/board lives here, NOT in a flat status file: items are AIP-18 `ITEM.md` records under the collection(s) `work` declares. See "Node status: `work:`" below. |
@@ -360,6 +360,12 @@ interface WorkspaceDefinition {
     `code` file refs, and `agentproto.lock`'s `dataDir` MUST NOT
     escape the tree via `..` traversal, a leading `/`, or a symlink.
     See "Path confinement".
+
+14. **A node's effective status is the most restrictive value along
+    its ancestor chain** (`archived` > `paused` > `active`) — a child
+    is never more active than an ancestor. Hosts MUST NOT start agents
+    or fire routines at a node whose effective status is `paused` or
+    `archived`. See "Node status: active / paused / archived".
 
 ### Stable identity
 
@@ -560,6 +566,34 @@ resolve to existing files, but does not require `work:` to be present,
 and does not (yet) check item-level freshness inside that board, nor
 how that board relates to any host's own runtime task store —
 deferred, open work.
+
+### Node status: active / paused / archived
+
+Unrelated to the `work:` board status above — this is the node's own
+`status` field (conformance rule 14 governs its inheritance).
+
+- **`active`** (default) — runs normally.
+- **`paused`** — the node keeps its declarations and data but runs
+  nothing: a host MUST NOT start agents nor fire routines declared at
+  or below it, and it's excluded from budget/heartbeat checks, same
+  as `archived`. Unlike `archived`, it stays writable and resumes by
+  flipping `status` back to `active`.
+- **`archived`** — read-only, excluded from budget/heartbeat checks,
+  and never runs anything.
+
+A node's declared `status` is exactly what its own WORKSPACE.md says —
+never rewritten by inheritance. What a host enforces is the node's
+EFFECTIVE status: the most restrictive value along its ancestor chain
+(`archived` > `paused` > `active`); a child is never more active than
+an ancestor. `agentproto workspace check` reports each node's
+effective status, and names the ancestor it's inherited from whenever
+that differs from the node's own declared value:
+
+```
+@acme/root                    status: paused    → effective: paused
+@acme/root/billing             status: active     → effective: paused (inherited from @acme/root)
+@acme/root/billing/invoices    status: archived   → effective: archived
+```
 
 ### Tree-wide lockfile: agentproto.lock
 
