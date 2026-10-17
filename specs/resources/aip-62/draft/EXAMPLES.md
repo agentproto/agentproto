@@ -21,7 +21,8 @@ closest pattern and edit fields rather than draft from scratch.
 The manifest the agentik-studio monorepo runs on `git push`. Three command
 lanes are advisory (`blocking: false`): they are recorded on the attestation but
 never move the verdict. `gate` is a blocking command lane. `correctness` is a
-blocking agent lane that fails only on a `high` finding. There is no `prepare`
+blocking agent lane that fails only on a `high` finding, placed in an e2b
+sandbox rather than on the host (§Placement). There is no `prepare`
 phase. `{changed}` is the host-supplied placeholder for the range's changed
 packages. Validates against `REVIEW.schema.json`.
 
@@ -61,13 +62,15 @@ checks:
     kind: command
     run: "node --test scripts/gate.test.mjs"
     timeoutMs: 60000
-  # The always-on gate: blocks only on a high-severity finding.
+  # The always-on gate: blocks only on a high-severity finding. Runs in an
+  # e2b sandbox rather than on the host.
   - id: correctness
     kind: agent
     preset: cc-subs-agentik
     rubric: ./scripts/review/rubrics/correctness.md
     blockOn: high
     timeoutMs: 900000
+    sandbox: e2b
 bindings:
   local: { on: pre-push, checks: [types, test, structure, gate, correctness] }
 ---
@@ -232,7 +235,9 @@ A `pass` attestation for binding `local` of pattern 4, signed, carrying one
 digest per resolved pack (every `uses[]` entry is resolved and recorded, even
 when the binding selects none of its checks) and one composed lane. The `correctness` lane reviewed only the delta
 above a prior passing attestation whose head was `1a1a…1a1a`; `composedFrom`
-pins that prior attestation. `manifestSha`, `attestationSha256`, and the
+pins that prior attestation. `decision` records that binding `local` was
+picked by an AIP-65 decision rather than named literally by the caller.
+`manifestSha`, `attestationSha256`, and the
 signature body are illustrative values, not computed from the manifests above;
 `rangeSha` and the `core` pack digest are computed from the test vectors in
 pattern 6. Validates against `ATTESTATION.schema.json`.
@@ -347,6 +352,10 @@ pattern 6. Validates against `ATTESTATION.schema.json`.
     "repo": "example/web-app",
     "number": 42,
     "url": "https://github.com/example/web-app/pull/42"
+  },
+  "decision": {
+    "decisionId": "decision-8a2f1c9d-4b3e-4a7f-9c1d-2e5f8a0b3c6d",
+    "spec": { "id": "review-range", "version": "1" }
   },
   "createdAt": "2026-09-29T10:15:30.000Z"
 }
