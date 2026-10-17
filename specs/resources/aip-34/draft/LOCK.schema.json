@@ -47,7 +47,8 @@
         },
         "dataDir": {
           "type": "string",
-          "description": "Tree-relative path to this ATTACH's own data directory — one per attach point, never shared across attaches of the same app."
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$",
+          "description": "Tree-relative path to this ATTACH's own data directory — one per attach point, never shared across attaches of the same app. Path confinement applies (AIP-34 §Path confinement): no leading `/`, no `..` segment; hosts MUST ALSO realpath-verify containment."
         }
       }
     },
