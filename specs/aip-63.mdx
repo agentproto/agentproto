@@ -159,7 +159,7 @@ Capabilities:
 | `cdp` | A Chrome DevTools Protocol endpoint is available (`endpoints.cdp`). |
 | `downloads` | File downloads can be captured. |
 | `recording` | `none`, `screencast` or `video`. `screencast`: the provider can push frames continuously, so a recorder can write `mode: screencast`. `video`: it can also produce a video file natively. A recorder can always write `mode: per-action` from `browser.screenshot`, whatever this value is. The artifact is § 5. |
-| observers (inside `core`) | hosts that expose the observer seam | O1 to O7. O1 runs on every host |
+| observers (inside `core`) | hosts that expose the observer seam | O1 to O8. O1 runs on every host |
 | `stealth` | The provider is designed to resist bot detection. A design goal, never a promise (see § Security considerations). |
 | `fullPageScreenshot` | Screenshots beyond the viewport. |
 | `trustedInput` | Input is produced at browser or OS level, so page script sees it as user input. |
@@ -681,11 +681,12 @@ Rule index (every rule names its level; this table is the fixture):
 | O4 | core | `core.observers.best-effort` |
 | O5 | core | `core.observers.every-call` |
 | O6 | core | `core.observers.screenshot-transform` |
-| O7 | core | `core.observers.trusted-code` |
+| O7 | core | `core.observers.args-redacted` |
+| O8 | core | `core.observers.module-trust` |
 
 The C9 hook plants a canary cookie value and greps tool results, error
 messages, logs and the ledger for it. The C7 hook drives every tool as
-an agent caller and asserts that no call changes the domain set. The O1 hook runs the full tool suite with and without the seam and diffs the results. The O6 hook registers a transform that halves the image and asserts the caller never receives the original size. The R7
+an agent caller and asserts that no call changes the domain set. The O1 hook runs the full tool suite with and without the seam and diffs the results. The O7 hook fills a password field through the seam and searches every event for the typed canary and for its length. The O6 hook registers a transform that halves the image and asserts the caller never receives the original size. The R7
 and R8 hooks plant a canary password in a test page, fill it through the
 recorder and search every file of the recording for it, and check the
 pixels of the masked region.
@@ -725,10 +726,11 @@ its tool surface for each MCP request (the stateless transport) would
 otherwise lose the observer on the next call.
 
 **O4** (observers). `onAttach`, `onDetach`, `beforeCall` and `afterCall`
-are best-effort. An observer that throws or exceeds its time budget (the
-host SHOULD cap it at 2 seconds) MUST NOT change the outcome of the tool
-call, MUST NOT delay it beyond that budget, and MUST be logged without
-the arguments. `onDetach` MUST fire exactly once per attached session,
+fail open. An observer that throws or exceeds its time budget (the host
+SHOULD cap it at 2 seconds) MUST NOT change the outcome of the tool call,
+MUST NOT delay it beyond that budget, and MUST be logged without the
+arguments. The single exception is a `required` screenshot transform
+(O6). `onDetach` MUST fire exactly once per attached session,
 including when the instance is stopped by the registry rather than by
 `stop_browser`.
 
@@ -747,11 +749,24 @@ MUST return `browser:transform_failed` and MUST NOT return the original
 image. When a non-required one fails, the original passes and the failure
 is logged.
 
-**O7** (observers). Observers receive the call arguments, which can hold
-typed secrets (a `fill` value, an `evaluate` expression). An observer is
-therefore part of the operator's trusted code. The host MUST NOT forward
-events to a remote party on its own, and an observer that persists
-anything MUST apply R7 and R8 itself.
+**O7** (observers). The host redacts call arguments before any observer
+sees them, not after. `args` carries locators and flags only (selector,
+url, tab, button, click count, scroll position). The value of a `fill`
+and the expression of an `evaluate` are removed, and no field stands in
+for them: not their length, not a hash, not a boolean that says the value
+was empty. Whether a target is a password field is not known to the host
+from the arguments; an observer that needs it asks the page itself, and
+an observer that persists anything applies R7 and R8 on top. Tool results
+are never passed to `afterCall`.
+
+**O8** (observers). A host that loads observers from a file does so from
+the operator's own environment only, never from a tool argument, an
+agent-supplied path or a workspace file. The path MUST be absolute and
+MUST resolve to a regular file owned by the daemon user and not writable
+by group or others. A load failure MUST be logged at boot with the cause.
+The host MAY continue without observers, and MUST offer a switch that
+turns the failure into a refusal to boot, for operators whose observers
+are a safety control (a required masking transform).
 
 ## Rationale
 
