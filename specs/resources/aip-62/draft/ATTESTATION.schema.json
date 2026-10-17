@@ -160,7 +160,7 @@
       "properties": {
         "id": { "type": "string" },
         "kind": { "enum": ["command", "agent"] },
-        "status": { "enum": ["pass", "fail", "skipped", "timeout"] },
+        "status": { "enum": ["pass", "fail", "skipped", "timeout", "error"] },
         "blocking": { "type": "boolean" },
         "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
         "durationMs": { "type": "number", "minimum": 0 },
