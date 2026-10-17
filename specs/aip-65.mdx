@@ -728,7 +728,13 @@ three amendments, each filed and reviewed separately:
   `override | env | pack`. The existing `judge.session` role is
   unaffected.
 - **AIP-62:** add an optional attestation field recording the decision
-  that picked the binding (`decisionId`, `spec.id`, `spec.version`).
+  that picked the binding (`decisionId`, `spec.id`, `spec.version`). Done:
+  AIP-62's `decision` attestation field (§The attestation) and its
+  §Connecting to other AIPs "AIP-65 DECISION: binding selection" section
+  specify exactly this, filed together with this draft. That section also
+  states explicitly what this AIP leaves implicit: placement (local vs.
+  sandbox execution) is a deterministic host rule, not a decision — it is
+  not a fourth thing the ladder should ever be asked to pick.
 
 ## Security considerations
 
@@ -759,8 +765,11 @@ three amendments, each filed and reviewed separately:
   consumes the result.
 - **AIP-57 MODEL-ROUTING:** `llm` rungs resolve models through roles;
   overlays and failover apply where the host implements AIP-57 for them.
-- **AIP-62 REVIEW:** a review host MAY pick its binding from a decision
-  and records it (amendment).
+- **AIP-62 REVIEW:** a review host MAY pick its binding from a decision and
+  records it (`decision` attestation field). Out of scope on purpose: WHERE
+  a check's reviewer session runs (host or sandbox) is a deterministic rule
+  evaluated at spawn time (is a route healthy right now), not a judgement
+  call, and is never routed through a ladder — see AIP-62 §Placement.
 - **AIP-7 GOVERNANCE:** delivery and authentication channel for human
   rungs.
 - **AIP-61 INFERENCE:** defines `local` for exposure; `local-only`

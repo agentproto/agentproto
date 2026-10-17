@@ -21,7 +21,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/review
 | Status | Draft |
 | Type | Schema |
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-15](/docs/aip-15) (WORKFLOW — the execution shape a review binding compiles to), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — the reviewer child sessions agent lanes run in), [AIP-54](/docs/aip-54) (REF — the artifact-reference model a future PACK AIP is expected to reuse for review packs) |
-| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE — where an organisation's merge policy consumes an attestation), [AIP-36](/docs/aip-36) (SANDBOX — the confinement a host SHOULD put around command lanes and reviewer sessions) |
+| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE — where an organisation's merge policy consumes an attestation), [AIP-36](/docs/aip-36) (SANDBOX — the confinement a host SHOULD put around command lanes and reviewer sessions, and the inline form an agent check's `sandbox` field reuses), [AIP-65](/docs/aip-65) (DECISION — a host MAY pick a binding with a decision and the attestation records which one) |
 | Created | 2026-09-29 |
 | Package | `@agentproto/review` (manifest, compile, attestation, verdict fold, pack resolution); `@agentproto/runtime` (ledger, signing, composition, reviewer host); `@agentproto/cli` (`review` verbs) |
 
@@ -186,11 +186,45 @@ manifest) and a `kind`.
 | `blocking` | boolean | `true` | As for command checks. |
 | `timeoutMs` | positive integer | `900000` | Hard limit. |
 | `effects` | boolean | `false` | MUST be `false` or absent. `effects: true` on an agent check is an error: an agent is always a read-only reviewer. |
+| `sandbox` | string or object | none (host spawn) | Optional. Places the reviewer session in a sandbox instead of on the host. See §Placement below. |
 | `description` | string | none | |
 
 A **blocking** check can change the verdict. An **advisory** check
 (`blocking: false`) is run and recorded on the attestation but never moves
 the verdict.
+
+#### Placement
+
+An agent check MAY declare `sandbox`, in the same inline form [AIP-36](/docs/aip-36)
+defines for embedding a SANDBOX block in another manifest's `sandbox:` field
+(a provider slug, or an object with `provider`, `config`, and `env`). When set,
+the reviewer session for that check runs inside the named sandbox instead of
+on the host, exactly as [AIP-15](/docs/aip-15) already runs an `agent` step's
+session in a sandbox named by that step's own `sandbox` field (its
+`Selector<AgentSandboxRef> | AgentSandboxRef` shape) — this AIP reuses the
+same reference type, not a new one.
+
+`sandbox` is absent by default, which keeps today's behavior: the reviewer
+runs on the host, sharing the daemon's filesystem (§The agent-lane contract's
+verdict file is a host path). A host that places a check in a sandbox MUST
+make the verdict file (or an equivalent read-back of it) reachable from the
+host by the time the lane's turn ends; this AIP does not mandate a transport
+for that — a host-to-sandbox file bridge and a convention where the reviewer
+posts its verdict and the host reads it back over the same channel it uses
+for the session's output are both conformant, as long as a verdict file that
+cannot be read back makes the lane `skipped` like any other unreadable
+verdict (§Lanes).
+
+**Choosing a placement is not this AIP's job.** Whether a given check runs on
+the host or in a sandbox when `sandbox` is absent is a deterministic,
+non-model host policy — for example, "is a configured free-model route
+healthy right now" — evaluated at spawn time. This AIP does not define that
+rule or require one; it only defines what happens once a placement (static
+`sandbox`, or a host's own dynamic choice) is in effect. Placement is
+explicitly **not** a [AIP-65](/docs/aip-65) decision: it has one correct
+answer from observable system state (a route is reachable or it is not), not
+a judgement call, so modeling it as a judge ladder would be the wrong tool
+(see AIP-65 §Connecting to other AIPs).
 
 #### Placeholders
 
@@ -484,6 +518,21 @@ not authorable). The compiled workflow is therefore an in-memory execution
 handle, not a serializable WORKFLOW.md; it MUST NOT be presented to another
 host as a manifest.
 
+**A hand-authored equivalent.** The shape above — parallel deterministic and
+agent steps, then a fold — is also reachable with AIP-15's existing
+authorable step kinds, with no engine change: `command` and `agent` steps as
+a `parallel` branch set (agent steps placed with `sandbox` per the inline
+form above), followed by one `kind: "tool"` step naming an AIP-14 TOOL that
+implements the verdict fold of §The verdict fold over the branch outputs. A
+host exposing such a TOOL (for example `review-fold`) lets an author write
+and inspect the WHOLE execution — including placement and model choice per
+step — as a real, exportable WORKFLOW.md, rather than only as this AIP's
+opaque compiled form. The resulting attestation is conformant either way:
+this AIP constrains the verdict fold and the attestation shape, not which of
+the two equivalent execution paths produced them. This resolves
+§Open questions' prior "authorable fold step" question without a change to
+AIP-15: `kind: "tool"` already covers it.
+
 #### Prepare, freeze, and the dirty flag
 
 `prepare` checks run before the range freezes, so a prepare step that
@@ -670,7 +719,16 @@ An attestation is a JSON document:
 | `dirty` | `true` | Present only when true. |
 | `requester` | object | Optional; present only if at least one member is known. `{ sessionId?, gitAuthor?: { name, email } }`. |
 | `pr` | object | Optional. `{ provider: "github", repo: "owner/name", number, url }`. |
+| `decision` | object | Optional. `{ decisionId, spec: { id, version } }` — the [AIP-65](/docs/aip-65) decision that picked `binding`, when the caller resolved it that way. |
 | `createdAt` | ISO timestamp | Required. |
+
+`decision` is provenance, like `requester`: it names which decision produced
+the binding choice so an auditor can look up that decision's record (and,
+through it, its trace, its inputs if kept, and any label later attached to
+it) without the attestation itself duplicating any of that. A host that
+resolves `binding` by any other means (a caller-supplied binding name, a
+fixed default) omits `decision` entirely — it is never fabricated or
+inferred after the fact.
 
 A `LaneResult` has the members `id`, `kind`, `status`, `blocking`,
 `findings`, `durationMs`, and optionally `error`, `sessionId`, `preset`,
@@ -771,6 +829,30 @@ Exporting an attestation writes its JSON (two-space indent, trailing
 newline) to a caller-given path, or, by default, to
 `<exportDir>/<reviewId>-<binding>-<headSha first 12>.json`, where
 `exportDir` is `verdict.exportDir`. An export is the unit a CI gate reads.
+
+#### Verdict delivery
+
+Export and the ledger are passive: something else has to go read them. This
+AIP recognizes two delivery sinks a host MAY push the finished verdict to,
+neither of which changes the attestation itself:
+
+- **The requester session.** When `requester.sessionId` is known (the review
+  was asked for by a running session, not a bare CLI invocation), a host
+  SHOULD notify that session once the run ends, naming at least the verdict
+  and the range (`review <verdict> <baseSha>..<headSha> (<runId>)` is
+  sufficient). This is how an agent that asked for a review learns the
+  answer without polling.
+- **The pull request.** When `pr` is known, a host MAY post the verdict as a
+  comment or review on that pull request. This AIP does not define the post
+  format or which GitHub API call makes it; `review_pr` (§Host surface)
+  writes only the mutable annotation side of this (§Annotations) and is
+  deliberately silent on delivery, which stays host- and organisation-defined
+  (commit format, comment vs. formal review, inline findings) because it
+  varies far more than the attestation itself does.
+
+Both are best-effort notifications over an already-complete, already-signed
+attestation — delivery failing or being skipped does not change the verdict,
+does not retry the review, and is not itself recorded on the attestation.
 
 ### Signing
 
@@ -1012,18 +1094,22 @@ attestation with a composed lane, are in `EXAMPLES.md`.
 ## Backward compatibility
 
 This AIP is additive: it introduces a new artifact and adds no field to any
-existing AIP. It codifies the behavior shipped in `@agentproto/review`,
-`@agentproto/runtime`, and `@agentproto/cli`, including signing, composition,
-and packs.
+existing AIP (the agent check's `sandbox` field reuses AIP-36's existing
+inline form rather than adding a new one to AIP-36 itself). It codifies the
+behavior shipped in `@agentproto/review`, `@agentproto/runtime`, and
+`@agentproto/cli`, including signing, composition, and packs.
 
 The attestation evolves additively within
 `agentproto.review.attestation/v1`: `attestor.signature`, `packs`,
-`requester`, `pr`, `lanes[].model`, and `lanes[].composedFrom` were added
-after the first release as optional members without changing the `schema`
-value, and a document without them remains valid. A verifier that does not
-know an optional member ignores it; a verifier that ignores
-`attestor.signature` stays correct. (The manifest, by contrast, is strict:
-an unknown key is a parse error.)
+`requester`, `pr`, `lanes[].model`, `lanes[].composedFrom`, and now
+`decision`, were added after the first release as optional members without
+changing the `schema` value, and a document without them remains valid. A
+verifier that does not know an optional member ignores it; a verifier that
+ignores `attestor.signature` stays correct. (The manifest, by contrast, is
+strict: an unknown key is a parse error. An agent check's new `sandbox`
+field is optional — a manifest that omits it is unaffected — but a manifest
+that uses it is, correctly, refused by a host that predates this amendment,
+the same posture every other manifest field already has.)
 
 A digest recipe change MUST bump `alg` (`agentproto-pack-digest/v2`). A
 verifier that meets an unknown `alg` MUST refuse to compare.
@@ -1102,6 +1188,17 @@ may contain sensitive text. `host` metadata (checkout paths) is kept out of
 the attestation and never exported. Annotations are unsigned and mutable
 and MUST NOT be used for merge decisions.
 
+**Sandboxed reviewer credentials.** A sandboxed agent check (§Placement)
+receives whatever credentials its `sandbox` env declares — at minimum
+enough to read the range and, if it is to deliver findings itself, enough
+to reach the host or the pull request. That is strictly more exposure than
+a host-spawned reviewer, which never leaves the host's own process
+boundary. Hosts SHOULD scope a sandboxed reviewer's credentials to the
+narrowest set the check needs (read-only range access; a delivery
+credential only if the check posts for itself) and SHOULD prefer the host
+reading the verdict back over handing the sandbox a credential able to
+post on the host's behalf.
+
 ## Connecting to other AIPs
 
 ### AIP-15 WORKFLOW: the compile target
@@ -1110,8 +1207,33 @@ A review binding compiles to an in-memory [AIP-15](/docs/aip-15) workflow
 (§Compilation to a workflow): `gate` steps for prepare, a `parallel`
 step for the lanes, and runtime `transform` steps for freeze and the fold.
 `transform` is not an authorable step kind, so the result is an execution
-handle, not a WORKFLOW.md. A future AIP-15 revision that makes a
-verdict-folding step authorable would let the compiled form be exported.
+handle, not a WORKFLOW.md. A host MAY instead express the same shape as a
+hand-authored WORKFLOW.md using only authorable step kinds (§Compilation to
+a workflow's "A hand-authored equivalent") — that path needs no AIP-15
+change, since `kind: "tool"` already covers folding.
+
+### AIP-65 DECISION: binding selection
+
+§Bindings resolves "the binding the caller named" without saying how the
+caller decided. A host MAY run an [AIP-65](/docs/aip-65) decision — a
+`choice` or `ordinal` question over the range's risk signals — and pass its
+result as the binding name on `review_run` (§Host surface). This is pure
+composition: `review_run`'s own binding-resolution algorithm does not
+change, and a binding chosen this way is indistinguishable, at the
+`review_run` call, from one a caller typed literally. The only normative
+tie is the attestation's optional `decision` field (§The attestation),
+which a host SHOULD set when it resolved the binding this way, so the
+choice stays auditable after the fact instead of being reconstructable only
+from the decision log's own timing.
+
+Placement (§Placement, above) is deliberately NOT part of this composition:
+a decision picks a binding (which checks run, under what reviewer), never
+where a check's session executes. Folding placement into the decision would
+make a deterministic, cheap, frequently-re-evaluated fact (is a route
+healthy right now) compete for a rung slot against questions that actually
+need judgement, which is exactly the mis-fit AIP-65 itself warns against
+(§Design principles 5, "cheap first, escalate on doubt" — not "put
+everything through the ladder").
 
 ### Harness presets
 
@@ -1176,17 +1298,26 @@ attestation and how to verify it; it does not define policy.
    `git rev-parse HEAD`, would close the local-substitution gap.
 6. **Preset portability.** `preset` is a host-local name. A shared preset
    surface would make a manifest portable.
-7. **Authorable fold step.** See §Connecting to other AIPs (AIP-15).
+7. ~~**Authorable fold step.**~~ Resolved: see §Compilation to a workflow's
+   "A hand-authored equivalent" — `kind: "tool"` already covers it, no
+   AIP-15 change needed.
 8. **Dirty-tree granularity.** `dirty` ignores untracked files. Should a
    command lane's view of untracked files count?
+9. **Sandbox verdict-file transport.** §Placement requires a sandboxed
+   check's verdict file to be readable back by the host but does not
+   mandate a mechanism. Should a future revision normalize one (so two
+   hosts' sandboxed reviews are comparably reliable), or is "the lane is
+   `skipped` if it can't be read back" sufficient given §The verdict fold
+   already makes that safe?
 
 ## See also
 
 - [AIP-1 — process](/docs/aip-1)
 - [AIP-7 — GOVERNANCE](/docs/aip-7) — merge policy that consumes an attestation
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — the compile target
-- [AIP-36 — SANDBOX](/docs/aip-36) — confinement for command lanes and reviewer sessions
+- [AIP-36 — SANDBOX](/docs/aip-36) — confinement for command lanes and reviewer sessions, and the inline `sandbox` form on an agent check
 - [AIP-46 — AGENT-SESSIONS](/docs/aip-46) — reviewer child sessions
 - [AIP-54 — REF](/docs/aip-54) — the artifact-ref model a future PACK AIP is expected to use
+- [AIP-65 — DECISION](/docs/aip-65) — a host MAY pick a binding with a decision; the attestation records which one
 - [`REVIEW.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW.schema.json), [`REVIEW-PACK.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW-PACK.schema.json), [`ATTESTATION.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/ATTESTATION.schema.json) — canonical schemas
 - [`EXAMPLES.md`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/EXAMPLES.md) — manifests, a pack, an attestation, and test vectors

@@ -119,6 +119,24 @@
         "url": { "type": "string" }
       }
     },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decisionId", "spec"],
+      "description": "The AIP-65 decision that picked `binding`, when the caller resolved it that way. Omitted when binding was resolved any other way.",
+      "properties": {
+        "decisionId": { "type": "string", "minLength": 1 },
+        "spec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
     "createdAt": { "type": "string", "format": "date-time" }
   },
   "$defs": {

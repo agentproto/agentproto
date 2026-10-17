@@ -114,6 +114,10 @@
         "effects": {
           "const": false,
           "description": "An agent check is always a read-only reviewer; effects: true is an error."
+        },
+        "sandbox": {
+          "$ref": "#/$defs/sandboxRef",
+          "description": "Optional. Places this check's reviewer session in a sandbox instead of on the host (AIP-36 inline form). Absent by default (host spawn)."
         }
       }
     },
@@ -176,6 +180,13 @@
         },
         "allowCommands": { "type": "boolean", "default": false }
       }
+    },
+    "sandboxRef": {
+      "description": "AIP-36 inline SANDBOX form embedded directly in this manifest — a provider slug, or an object naming a provider with its config/env (AIP-36's own frontmatter-only fields such as schema/id/version do not apply here).",
+      "anyOf": [
+        { "type": "string", "minLength": 1, "description": "A sandbox provider slug (e.g. \"e2b\"); the spec is fully host-derived." },
+        { "$ref": "https://agentproto.sh/schemas/aip-36/SANDBOX.schema.json" }
+      ]
     }
   }
 }
