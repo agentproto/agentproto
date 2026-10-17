@@ -90,8 +90,10 @@ and an attestation a verifier can check.
    under a specific manifest, with specific rubric and pack bytes. Any of
    those changing makes it a different verdict.
 2. **`incomplete` is never a pass.** A blocking lane that timed out, was
-   skipped, or could not run yields `incomplete`. Consumers MUST treat
-   anything but `pass` as not-passing.
+   skipped, could not run, or ran but could not report back (`error`)
+   yields `incomplete`. Consumers MUST treat anything but `pass` as
+   not-passing — `incomplete` is exactly as non-passing as `block`, not a
+   softer middle state.
 3. **Every lane is bounded.** Every check has a timeout; a runaway lane is
    killed and recorded as `timeout`. A review always terminates.
 4. **Code that runs is declared.** A command check names its command in a
@@ -234,8 +236,14 @@ order and MUST NOT treat the lane as settled before it has:
    failure from a lane that never got a reviewer at all (preset
    unresolved, spawn failure — still `skipped`), and MUST be surfaced as
    such so it is never mistaken for, or silently folded into, routine
-   unavailability. Like `skipped` and `timeout`, `error` can never produce
-   a `pass` (§The verdict fold).
+   unavailability. **On a blocking check (`blocking: true`, the default),
+   `error` therefore can never be a silent pass**: §The verdict fold's rule
+   4 routes any blocking lane whose status is not `pass` — `error` included,
+   same as `timeout` and `skipped` — to `incomplete`, and Design Principle 2
+   requires every consumer to treat `incomplete` as exactly as non-passing
+   as `block`, never as a softer or ignorable state. A non-blocking
+   (`blocking: false`) check's `error` is recorded and visible but, like any
+   advisory lane, never moves the verdict either way.
 
 Both channels carry the same trust properties as a host-spawned lane's
 verdict file: content from either is produced by the same untrusted
