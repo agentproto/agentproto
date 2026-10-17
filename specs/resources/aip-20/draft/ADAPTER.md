@@ -1,630 +1,576 @@
 # ADAPTER.md — implementing AIP-20 in a host runtime
 
-This document is the implementer's guide for any runtime, framework, or language
-that wants to **load, register, and maintain** [AIP-20](/docs/aip-20)
-`agentwork/v2` workspaces. It is normative for the parts marked MUST and
-informative for the parts marked SHOULD.
+This document is the implementer's guide for a **coordinator**: the process
+that loads a `WORK.md` work root and serves the write verbs of
+[AIP-20](/docs/aip-20) over the item files in it. It is normative for the
+parts marked MUST and informative for the parts marked SHOULD.
 
-The audience is a workspace-runtime author — someone exposing
-`defineWorkWorkspace` to manifest authors and routing item-level calls down to
-[AIP-18](/docs/aip-18)'s `defineCollection` / `defineItem`. Manifest authors
-themselves should read
-[`./skills/author-work-workspace/SKILL.md`](./skills/author-work-workspace/SKILL.md),
-not this file.
+The audience is a runtime author — someone shipping a `TaskStore`-shaped
+component (the reference one is the agentproto daemon's task ledger, moved
+onto files). Authors who just want to write a `WORK.md` and work items by
+hand should read
+[`./skills/author-work-workspace/SKILL.md`](./skills/author-work-workspace/SKILL.md)
+instead.
 
 ## Contract overview
 
-A conforming host implements **five responsibilities**:
+A conforming coordinator implements four responsibilities:
 
-1. **Load the workspace manifest** — read `WORK.md` at the work-tree root (or in
-   a consumer folder for a view), validate against
-   [`./WORK.schema.json`](./WORK.schema.json), resolve any `extends:` chain,
-   expose both the merged effective config and the resolution chain.
-2. **Validate workspace-level invariants** — the one-way switches
-   (`auditMutations`, `scope.containment.enabled`,
-   `scope.applicability.valueClass`) MUST be checked across the resolved chain;
-   violations are HARD refusals.
-3. **Resolve `extends:`** — walk the chain bottom-up, merge per the strategy
-   table, expose warnings on malformed chains, refuse views with unresolvable
-   `appliesTo` bindings.
-4. **Register collections** — for each entry in `collections[]`, delegate to
-   [AIP-18](/docs/aip-18). Inline → register directly via AIP-18's
-   `defineCollection`. Ref (file or registry) → load via AIP-18, register under
-   the alias if set. AIP-20 owns workspace-level conflicts (alias collisions);
-   AIP-18 owns item-schema conflicts (type drift, status removal).
-5. **Run lints + rollups** — workspace-spanning lints (orphan across
-   collections, stale-tree, broken parent ref, scope mismatch) at
-   maintenance-pass time; status rollups at parent-item read time (or background
-   materialization, when `statusRollup.exposeViaField` is set).
+1. **Load `WORK.md`** — parse, validate against
+   [`./WORK.schema.json`](./WORK.schema.json), resolve `collections[]` through
+   [AIP-18](/docs/aip-18), and refuse anything carrying a field from the
+   retired design (§1 below).
+2. **Serve the write verbs** — `create`, `get`, `list`, `claim`, `update`,
+   `link-approval` — over `items/<collection>/<id>.md`, enforcing the rev CAS,
+   the lock discipline, rights, and the category state machine on every write
+   (§2–§5).
+3. **Run the lease and liveness sweep** — release claims owned by dead
+   sessions (§6).
+4. **Append the audit trail** — one [AIP-7](/docs/aip-7) `audit-event` per
+   applied write or system transition, in the same lock as the item write
+   (§7).
 
-The signature `defineWorkWorkspace` is the boundary between the host and the
-manifest author.
+Everything here operates on **files**: `items/<collection>/<id>.md` inside one
+work root. A coordinator that keeps its own in-memory index MUST treat the
+files as the source of truth and rebuild the index from them, never the
+reverse.
 
-## Loading `WORK.md`
+## 1. Loading `WORK.md`
 
-The workspace manifest is the host's first read on every workspace load and on
-every consumer (operator/company/skill) activation.
-
-### Resolution algorithm
-
-When a host reads a `WORK.md`:
-
-1. **Parse the frontmatter** as YAML. Validate against the schema in
+1. **Parse the frontmatter** as YAML. Validate against
    [`./WORK.schema.json`](./WORK.schema.json). On failure, surface
-   `work_workspace_invalid` with the failing field path.
-2. **If `extends:` is absent**, the manifest IS the merged effective config. The
-   resolution chain has length 1.
-3. **If `extends:` is set**, walk the chain bottom-up:
-   - Resolve `extends:` relative to the current manifest's directory.
-   - If the parent file does not exist: emit `work_extends_missing` as a WARNING
-     (not an error), use the local manifest only, mark the chain as broken, and
-     proceed.
-   - If the parent has already appeared in the visited set: emit
-     `work_extends_cycle` as a WARNING, break the chain at the cycle point, use
-     the partial chain, and proceed.
-   - If the chain depth would exceed eight: emit `work_extends_depth_exceeded`
-     as a WARNING, break the chain at the eighth ancestor, use the partial
-     chain, and proceed.
-   - Otherwise, recurse into the parent and add its absolute path to the visited
-     set.
-4. **Merge** the chain top-down (workspace root first, leaf view last) using the
-   strategy table below.
-5. **Check one-way switches across the resolved chain.** For each one-way switch
-   (`defaults.auditMutations`, `scope.containment.enabled`,
-   `scope.applicability.valueClass`), walk the resolution chain and verify no
-   descendant relaxes the ancestor's value. If the chain violates an invariant,
-   refuse with the corresponding HARD code (`work_audit_downgrade`,
-   `work_scope_disable`, `work_scope_value_class_drift`). Unlike chain warnings,
-   these are HARD failures: the view is rejected.
-6. **Validate `appliesTo` resolvability**. For each ref in the leaf manifest's
-   `appliesTo`, verify the consumer exists. Refuse the view (do NOT degrade)
-   with `work_appliesto_unresolvable` if any binding fails to resolve.
-7. **Register collections** by walking the merged `collections[]` array. See
-   [Collection registration](#collection-registration).
-8. **Validate cross-AIP refs** — `executor`, `governance`, `knowledge`,
-   `agency`, `playbook`, `defaults.workflow`. Each unresolvable ref surfaces
-   `work_xref_unresolvable` (HARD for
-   `executor`/`governance`/`knowledge`/`agency`/`playbook`; warn for
-   `defaults.workflow` since the workflow may be intentionally provisioned
-   later).
+   `work_manifest_invalid` with the failing field path.
+2. **Refuse retired fields.** `WORK.md` has no `extends:`, no `appliesTo:`, no
+   view mode, no `scope`, no `display`, no `defaults.approvalClass`. A
+   manifest carrying any of these MUST be refused with
+   `work_manifest_invalid` — do not silently drop the field, and do not try to
+   interpret it as the pre-rewrite draft did. There is exactly one `WORK.md`
+   per node; there are no per-consumer views of it (consumers get `views:`,
+   §9 below).
+3. **Resolve `collections[]`.** For each entry, resolve per
+   [AIP-18](/docs/aip-18)'s order: inline → local file → registry.
+   - Compute the effective name (`alias` if set, else the resolved
+     collection's `name`). Two entries resolving to the same effective name
+     are refused with `work_collection_alias_conflict`.
+   - Walk the resolved collection's own `extends:` chain (AIP-18's, not
+     AIP-20's — AIP-20 collections don't chain against each other, they chain
+     against `work-item`). If `work-item` is not in the chain and the
+     collection is not `work-item` itself, refuse with
+     `work_collection_not_work_item`.
+   - A versioned ref (`{ ref, version: "1.x" }`) pins the schema version
+     range; a resolved collection outside the range is refused per AIP-18's
+     pinned-drift vocabulary.
+4. **Validate `containment.allowedParents`.** Keys and values MUST name
+   effective collection names from step 3. This is checked at manifest load
+   so a bad key fails fast rather than at the first item write.
+5. **Validate cross-AIP refs** — `executor`, `governance`, `knowledge`. Each
+   MUST resolve inside the node's own tenant; an unresolvable ref is refused
+   with `work_xref_unresolvable`.
+6. **Validate `views[]`.** Each view's `filter` keys MUST be a subset of
+   `{collection, status, category, owner, parent, blocked, includeClosed}`;
+   `groupBy` and `layout` MUST be one of the enumerated values (§9 of the
+   spec). The first view is the default. Views are saved queries only — a
+   host MUST NOT let a view change which collections are tracked or weaken
+   any protocol rule; that is the whole point of dropping view mode.
+7. **Register `coordination` tunables.** `leaseTtlSeconds` (default `0`) and
+   `lockStaleSeconds` (default `30`) are read once at load and apply to every
+   item in the root.
 
-The host MUST NOT execute any code in `WORK.md`. It is data.
+The host MUST NOT execute any code found in `WORK.md`; it is data.
 
-### Merge strategy
+## 2. Item files and the work root layout
 
-The host MUST apply this strategy when merging a parent into a child:
+```
+work/
+├── WORK.md
+├── collections/<name>/COLLECTION.md     # local collections (optional)
+├── items/<collection>/<id>.md           # one item per file — normative
+├── audit/audit-log.jsonl                # AIP-7 audit chain, this root's scope
+└── .work/                               # coordinator state, NOT committed
+    ├── locks/<collection>/<id>.lock
+    └── leases/<collection>/<id>.json
+```
 
-| Field                                                       | Strategy                | Notes                                                                                                                                                             |
-| ----------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`, `title`, `description`, `version`                   | override                | Child's identity wins. Both are exposed via the resolution chain for tooling.                                                                                     |
-| `extends`                                                   | local-only              | Not inherited.                                                                                                                                                    |
-| `appliesTo`                                                 | local-only              | Not inherited. Each view declares its own scope.                                                                                                                  |
-| `executor`, `governance`, `knowledge`, `agency`, `playbook` | override                | Child can rebind. Subject to one-way switches and governance gating.                                                                                              |
-| `collections`                                               | merge-by-effective-name | Effective name = `alias` if set, otherwise the collection's `name`. Child entry with same effective name → child replaces parent's; new effective names appended. |
-| `scope.containment.enabled`                                 | child wins (one-way)    | Once `true` at any ancestor, descendants MUST NOT set `false`. HARD: `work_scope_disable`.                                                                        |
-| `scope.containment.field` / `rules.*`                       | leaf-field deep-merge   | `allowedKinds`, `maxDepth` each override independently.                                                                                                           |
-| `scope.applicability.enabled`                               | override                |                                                                                                                                                                   |
-| `scope.applicability.field`                                 | override                |                                                                                                                                                                   |
-| `scope.applicability.valueClass`                            | child wins (one-way)    | Once set at any ancestor, descendants MUST NOT change. HARD: `work_scope_value_class_drift`.                                                                      |
-| `scope.ownership.*`                                         | leaf-field override     | `policy` may narrow (`open` → `inherit` → `strict`); widening is allowed mechanically but governance MAY forbid it.                                               |
-| `statusRollup.enabled`                                      | override                |                                                                                                                                                                   |
-| `statusRollup.policy`                                       | merge-by-`when`         | Same `when:` clause → child replaces parent's. New clauses appended.                                                                                              |
-| `statusRollup.exposeViaField`                               | override                |                                                                                                                                                                   |
-| `lints`                                                     | merge-by-id             | Same `id` → child replaces parent's. New ids appended.                                                                                                            |
-| `lints[].severity`                                          | child wins              | Subject to governance: a parent's policy MAY forbid softening below `error`.                                                                                      |
-| `defaults.workflow`                                         | override                |                                                                                                                                                                   |
-| `defaults.approvalClass`                                    | override                |                                                                                                                                                                   |
-| `defaults.auditMutations`                                   | child wins (one-way)    | Once `true` at any ancestor, descendants MUST NOT set `false`. HARD: `work_audit_downgrade`.                                                                      |
-| `display.*`                                                 | leaf-field override     | `homePage`, `defaultGrouping`, `defaultView` each override independently.                                                                                         |
-| `metadata`                                                  | deep-merge              | Recursive merge; vendor namespaces accumulate.                                                                                                                    |
+The filing rule `items/<collection>/<id>.md` is normative — the protocol
+addresses items by path, not by an index. If a collection declares AIP-18
+`identity.filingPath`, the host MUST refuse to register it in a work root
+unless that template equals `items/{collection}/{id}.md`.
 
-## Collection registration
+`id` MUST match `^[a-z0-9][a-z0-9-]{0,63}$` and be unique **within the work
+root**, not only within its collection — the coordinator MUST check this
+across all registered collections' `items/` directories, because `create`'s
+`work_id_taken` check is root-scoped.
 
-For each entry in the merged `collections[]`, the host MUST:
+An **item ref** is `<collection>/<id>` for a local item, or
+`ws://workspaces/<node-id>#work/<collection>/<id>` for a cross-root ref (only
+legal for `blockedBy`, and only when the target node exports its work root to
+the caller's node).
 
-1. **Compute the effective name.** If `alias:` is set, the effective name is the
-   alias. Otherwise the effective name is the collection's own `name` (read from
-   the inline frontmatter or from the loaded `COLLECTION.md` for refs).
-2. **Detect alias collisions.** If two entries resolve to the same effective
-   name across the merged array, refuse with `work_collection_alias_conflict`
-   (HARD). The collision check runs AFTER the merge — same-name overrides
-   between parent and child are merge-by-effective-name (the child replaces);
-   same-name collisions WITHIN one workspace's merged array are conflicts.
-3. **Delegate to AIP-18.**
-   - **Inline**: validate the inline frontmatter against
-     [AIP-18's `COLLECTION.schema.json`](../aip-18/draft/COLLECTION.schema.json),
-     then call AIP-18's `defineCollection` with the parsed frontmatter. The host
-     registers the collection under the effective name (alias if set).
-   - **File ref** (`./path/to/COLLECTION.md`): resolve the path relative to the
-     manifest's directory, load the file, validate, then call
-     `defineCollection`. Surface `work_collection_unresolvable` (delegating to
-     AIP-18's `collection_unresolvable` semantics) on missing files.
-   - **Registry ref** (`ws://collections/<slug>`): resolve through the host's
-     collection registry. Surface `work_collection_unresolvable` if the registry
-     has no entry.
-   - **Versioned ref** (`{ ref, version: "1.x" }`): pin the schema version
-     range. The host MUST refuse a registered collection whose version falls
-     outside the range with `collection_item_schema_pinned_drift` (HARD, AIP-18
-     vocabulary) at item load time.
-4. **Expose collection registration** through the merged effective config: a
-   debug surface keyed by effective name returning the collection's resolved
-   schema, the resolution chain (collection's own `extends:` chain — separate
-   from the workspace's), and the registration source (inline / file /
-   registry).
+## 3. The write algorithm
 
-AIP-20 owns the workspace-level conflicts (alias collisions, ref
-unresolvability, version range pinning). AIP-18 owns the item-schema conflicts
-(field type drift, status removal, required-field narrowing). The two AIPs do
-NOT share a refusal vocabulary; delegate cleanly.
+Every verb except `get` and `list` goes through this sequence. `create` and
+`link-approval` skip the rev check (§3.2, §3.6) but otherwise follow the same
+lock → write → audit → unlock shape.
 
-## Scope axis enforcement
-
-The three scope axes (`containment`, `applicability`, `ownership`) are
-workspace-level declarations whose enforcement happens at item write time. The
-host MUST:
-
-1. **Containment.** When validating an item with a `parent` field (or whatever
-   `scope.containment.field` declares), verify:
-   - The parent ref resolves to an existing item.
-   - If `scope.containment.rules.allowedKinds` is set, the parent's collection
-     name is in the list.
-   - If `scope.containment.rules.maxDepth` is set, the chain of ancestors is at
-     most that deep.
-
-   Failures surface as `work_containment_violated` (HARD on item write).
-
-2. **Applicability.** When validating an item with the applicability field set
-   (default `appliesTo`), verify every value resolves under the declared
-   `valueClass`:
-   - `company` → ref to an AIP-6 company workspace.
-   - `role` → ref to an AIP-6 role.
-   - `role-and-company` → compound ref `company/<slug>:role/<slug>`.
-   - `operator` → ref to an AIP-9 operator.
-   - Custom class names → host-defined resolver.
-
-   Failures surface as `work_applicability_value_class_violation`.
-
-3. **Ownership.** When validating an item, the host MUST consult the
-   _per-collection_ ownership rules ([AIP-18](/docs/aip-18) `ownership.role`,
-   `cardinality`, `required`) FIRST, then apply the workspace-level policy:
-   - `policy: strict` — every collection's ownership.required MUST be true. The
-     host SHOULD refuse a workspace registration where this invariant fails
-     (`work_ownership_policy_violated`).
-   - `policy: inherit` — delegate to the per-collection setting.
-   - `policy: open` — even collections with `required: true` MAY have items
-     without owners (the host downgrades the AIP-18 check to a warning).
-
-**Per-collection field-name override.** A collection MAY declare its own field
-name for an axis (e.g. AIP-18 `ownership.role: assignee` instead of `owner`).
-The host MUST read the collection's field name in preference to the workspace
-default when validating an item of that collection. The workspace's `valueClass`
-and `policy` still apply.
-
-## Status rollup
-
-Per-collection statuses live on [AIP-18](/docs/aip-18); the workspace's
-`statusRollup.policy` is the _aggregation layer_. The host MUST evaluate the
-rollup at parent-item read time (or at background materialization time, when
-`exposeViaField` is set).
-
-### Evaluation algorithm
-
-For each parent item read or written:
-
-1. **Collect direct children.** Walk the items registry; collect every item
-   whose `parent` ref points to this item. Ignore transitive descendants (rollup
-   is one level).
-2. **Evaluate each rollup clause** in declaration order:
-   - `all-children-terminal` → true if every collected child has a status whose
-     collection-level `terminal: true`.
-   - `any-child-blocked` → true if at least one child has `status: blocked`
-     (literal id, not a categorisation).
-   - `any-child-overdue` → true if at least one child has `dueAt` in the past
-     and a non-terminal status.
-   - `no-children` → true if the collected set is empty.
-   - `custom:<id>` → host-defined predicate.
-3. **First match wins.** The first clause whose predicate evaluates to true
-   contributes its `bubbleParentStatus`. Subsequent clauses are not evaluated
-   for this parent.
-4. **Validate eligibility.** If the bubbled status id is not declared on the
-   parent's collection, surface `work_status_rollup_invalid` as a warning (not
-   error) and skip the rollup for this parent. This is intentionally soft —
-   non-conforming parents simply keep their stored status.
-
-### Materialization
-
-When `statusRollup.exposeViaField: <fieldName>` is set, the host MAY write the
-rolled status to the named field on parent items during a background pass. When
-unset, the rolled status is query-time only and never written to disk.
-
-Materialization MUST round-trip cleanly: a re-evaluation at write time produces
-the same value the field carries. If the rolled status diverges from the stored
-field, surface `work_status_rollup_drift` and prefer the freshly evaluated
-value.
-
-## Cross-AIP ref resolution
-
-| Ref                                 | AIP                    | Resolver                                                                       |
-| ----------------------------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| `ws://operators/<slug>`             | [AIP-9](/docs/aip-9)   | Look up the operator workspace; verify it exists and the host can activate it. |
-| `ws://companies/<slug>`             | [AIP-6](/docs/aip-6)   | Look up the company workspace.                                                 |
-| `ws://skills/<slug>`                | [AIP-3](/docs/aip-3)   | Look up the skill manifest.                                                    |
-| `ws://wikis/<slug>(/KNOWLEDGE.md)?` | [AIP-10](/docs/aip-10) | Resolve the wiki workspace.                                                    |
-| `ws://agencies/<slug>`              | [AIP-8](/docs/aip-8)   | Resolve the agency workspace.                                                  |
-| `ws://playbooks/<slug>`             | [AIP-12](/docs/aip-12) | Resolve the playbook.                                                          |
-| `ws://collections/<slug>`           | [AIP-18](/docs/aip-18) | Resolve through the collection registry.                                       |
-| `governance: <path>`                | [AIP-7](/docs/aip-7)   | Resolve as a relative path to a policy/audit binding.                          |
-| `defaults.workflow: <ref>`          | [AIP-15](/docs/aip-15) | Resolve as a path or ws:// to a `WORKFLOW.md`.                                 |
-| `extends: <path>`                   | AIP-20                 | Resolve as a relative path to another `WORK.md`.                               |
-| `collections[].ref`                 | [AIP-18](/docs/aip-18) | Resolve as a path or ws:// to a `COLLECTION.md`.                               |
-
-`appliesTo` enforcement: a host MUST refuse to activate a view whose `appliesTo`
-references a non-existent consumer (HARD, `work_appliesto_unresolvable`).
-
-`executor`/`governance`/`knowledge`/`agency`/`playbook` enforcement: a host MUST
-refuse a workspace whose binding does not resolve at load time (HARD,
-`work_xref_unresolvable`). This is stricter than [AIP-10](/docs/aip-10), which
-allows lazy activation for `curator`/`governance`; AIP-20 takes a strict-load
-posture because work-tracking is the substrate other AIPs build on, and a
-tracker with broken cross-AIP refs cannot meaningfully coordinate.
-
-## View activation
-
-When an [AIP-9](/docs/aip-9) operator (or [AIP-6](/docs/aip-6) company, or
-[AIP-3](/docs/aip-3) skill) loads, the host SHOULD:
-
-1. Look for a `WORK.md` in the consumer's workspace folder.
-2. If present, run the resolution algorithm above (including the one-way switch
-   check across the chain).
-3. Pass the merged effective config to the consumer's runtime context: queries
-   against the tracker SHOULD use the view's merged `collections`, `scope.*`,
-   and `lints`; mutations SHOULD honour `defaults.approvalClass` and
-   `defaults.auditMutations`.
-4. Expose the resolution chain on a debug surface keyed by the consumer's id so
-   reviewers can audit which manifest contributed which field.
-
-When no view exists for a consumer, the host falls back to the workspace-root
-`WORK.md` directly. Consumers without their own view inherit the tracker's
-default lens.
-
-## Effective config exposure
-
-A conforming host MUST expose, for every loaded manifest:
+### 3.1 Lock
 
 ```ts
-type ResolvedWorkWorkspace = {
-  effective: WorkWorkspace // merged config
-  chain: Array<{
-    // resolution chain (ordered, root → leaf)
-    path: string // absolute path to the manifest
-    doctype: "work.workspace/v2"
-    name: string
-    version: string
-  }>
-  collections: Array<{
-    // resolved collection registrations
-    effectiveName: string // alias if set, else collection.name
-    source: "inline" | "file" | "registry"
-    sourcePath?: string // for file refs
-    sourceUri?: string // for ws:// refs
-    versionPin?: string // semver range if set
-    aip18Resolved: ResolvedCollection // delegated AIP-18 resolution
-  }>
-  warnings: Array<{
-    // soft-fail diagnostics
-    code:
-      | "work_extends_missing"
-      | "work_extends_cycle"
-      | "work_extends_depth_exceeded"
-      | "work_status_rollup_invalid"
-      | "work_status_rollup_drift"
-      | "work_collection_disabled_with_items"
-    message: string
-    at?: string // path of the offending manifest
-  }>
+async function withItemLock<T>(
+  root: WorkRoot, collection: string, id: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const lockPath = `${root}/.work/locks/${collection}/${id}.lock`
+  while (true) {
+    try {
+      await fs.open(lockPath, "wx") // O_CREAT|O_EXCL
+      break
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e
+      const stat = await fs.stat(lockPath).catch(() => null)
+      if (stat && ageSeconds(stat) > root.coordination.lockStaleSeconds) {
+        await fs.unlink(lockPath).catch(() => {}) // break a stale lock
+        continue
+      }
+      await backoff()
+    }
+  }
+  await fs.writeFile(lockPath, JSON.stringify({ host, pid, acquiredAt: now() }))
+  try {
+    return await fn()
+  } finally {
+    await fs.unlink(lockPath)
+  }
 }
 ```
 
-The merged `effective` is what consumers use; the `chain` is what tooling uses
-to explain _where_ a field came from; the `collections` array is the
-workspace-to-AIP-18 bridge surface; the `warnings` list is empty on a healthy
-load.
+A coordinator that is the *only* writer of a root MAY substitute an
+in-process mutex for the fast path, but MUST still create and honour the
+lock file, because a second coordinator (another host, a CLI) may be writing
+the same root concurrently. Readers never take the lock: rename atomicity
+(§3.3) guarantees a reader observes either the pre-write or the post-write
+file, never a partial one.
 
-## Conflict cases
-
-The following examples illustrate the merge rules and HARD refusals with
-concrete parent/child manifests. Each is a minimal pair, not a full manifest.
-
-**1. Collection added by child.**
-
-Parent (`<work-root>/WORK.md`):
-
-```yaml
-collections:
-  - ref: ./collections/task/COLLECTION.md
-```
-
-Child (`operators/eng-lead/WORK.md`):
-
-```yaml
-extends: ../../<work-root>/WORK.md
-collections:
-  - ref: ./collections/task/COLLECTION.md
-  - ref: ws://collections/eng-bug
-    alias: bug
-```
-
-Effective: two collections — `task` (inherited) and `bug` (added by child,
-aliased from `eng-bug`). The host registers both under their effective names.
-
-**2. Status rollup override.**
-
-Parent:
-
-```yaml
-statusRollup:
-  enabled: true
-  policy:
-    - when: all-children-terminal
-      bubbleParentStatus: closed
-```
-
-Child:
-
-```yaml
-extends: ../parent/WORK.md
-statusRollup:
-  policy:
-    - when: all-children-terminal
-      bubbleParentStatus: done # override
-    - when: any-child-blocked
-      bubbleParentStatus: blocked # add
-```
-
-Effective:
-
-```yaml
-statusRollup:
-  enabled: true
-  policy:
-    - when: all-children-terminal
-      bubbleParentStatus: done # child's override
-    - when: any-child-blocked
-      bubbleParentStatus: blocked # added
-```
-
-**3. Audit one-way switch HARD refusal.**
-
-Parent:
-
-```yaml
-defaults:
-  auditMutations: true
-```
-
-Child:
-
-```yaml
-extends: ../parent/WORK.md
-defaults:
-  auditMutations: false
-```
-
-Result: the host refuses the child view with `work_audit_downgrade` (HARD). The
-chain is rejected — the view does NOT degrade to local-only. The author MUST
-remove `auditMutations: false` from the child to load the view.
-
-**4. Scope value-class drift HARD refusal.**
-
-Parent:
-
-```yaml
-scope:
-  applicability:
-    enabled: true
-    field: appliesTo
-    valueClass: company
-```
-
-Child:
-
-```yaml
-extends: ../parent/WORK.md
-scope:
-  applicability:
-    valueClass: role
-```
-
-Result: the host refuses with `work_scope_value_class_drift` (HARD). Existing
-items wrote `appliesTo` against `company` refs; switching the value class would
-invalidate them. The child MUST drop the `valueClass:` override.
-
-**5. Cross-AIP ref binding.**
-
-Parent:
-
-```yaml
-executor: ws://operators/eng-lead
-governance: ../policies/eng-tracker.yaml
-knowledge: ws://wikis/eng/KNOWLEDGE.md
-agency: ws://agencies/internal-eng
-playbook: ws://playbooks/eng-quarterly
-```
-
-Child:
-
-```yaml
-extends: ../parent/WORK.md
-executor: ws://operators/research-lead # rebind
-```
-
-Effective: the child rebinds `executor` only; the four other cross-AIP refs are
-inherited untouched. The host MUST verify `ws://operators/research-lead`
-resolves before activating the view.
-
-**6. View `appliesTo` enforcement.**
-
-```yaml
-extends: ../parent/WORK.md
-appliesTo:
-  - ws://operators/research-lead
-  - ws://operators/this-operator-does-not-exist
-```
-
-Result: the host attempts to resolve every ref in `appliesTo`. The second ref
-fails to resolve. The host refuses with `work_appliesto_unresolvable` (HARD).
-The view does NOT degrade — authors MUST remove the dangling ref before the view
-loads.
-
-## Error envelope
-
-All errors leave the host as:
+### 3.2 Read and check
 
 ```ts
-type WorkResult<T> =
-  | { ok: true; value: T }
-  | {
-      ok: false
-      error: { code: string; message: string; at?: string; cause?: unknown }
+const current = await readItem(path) // parse + AIP-18 validate
+if (verb !== "create" && verb !== "link-approval") {
+  if (current.rev !== input.rev) {
+    return { ok: false, conflict: true, current }
+  }
+}
+assertTransitionLegal(current.status, input, collectionSchema) // §4 below
+assertRights(caller, current, verb, input)                     // §5 below
+const next = applyVerb(current, input)                         // pure merge
+assertSchemaValid(next, collectionSchema)                       // AIP-18
+```
+
+Any failure here returns `{ ok: false, conflict: false, code, message }` and
+takes no further action — the lock is released without a write.
+
+### 3.3 Write (atomic)
+
+```ts
+const tmp = `${itemPath}.tmp-${host}-${pid}`
+await fs.writeFile(tmp, serialize(next))
+await fs.fsync(tmp)         // flush to stable storage before rename
+await fs.rename(tmp, itemPath)
+// hosts SHOULD also fsync the containing directory, since rename
+// durability on some filesystems depends on the directory entry's own flush
+```
+
+`next.rev` is the caller's `rev + 1` (or `1` on `create`). The coordinator
+never writes `rev` from anywhere but this increment — rev is
+coordinator-maintained, full stop.
+
+### 3.4 Audit
+
+Append one AIP-7 `audit-event` line to `<work root>/audit/audit-log.jsonl`
+*before* releasing the lock (§7 below), when
+`defaults.auditMutations` is `true` (the default; `false` is legal only on a
+scratch root).
+
+### 3.5 Unlock
+
+Delete the lock file. If the process crashes between write and unlock, the
+next writer finds a stale lock (stat age > `lockStaleSeconds`) and breaks it;
+the file on disk is already consistent because the rename in §3.3 already
+completed or didn't.
+
+### 3.6 Result shape
+
+```ts
+type WorkWriteResult =
+  | { ok: true;  item: WorkItem; verifying?: true }
+  | { ok: false; conflict: true;  current: WorkItem }
+  | { ok: false; conflict: false; code: WorkErrorCode; message: string }
+```
+
+A conflict is not an error: the caller is expected to re-read `current` and
+retry with its `rev`, not surface a failure to the end user.
+
+## 4. Status categories and legal transitions
+
+The coordinator validates against **categories**, never literal status ids —
+a collection may rename or add statuses freely. Base statuses:
+`pending`→`todo`, `in-progress`→`active`, `awaiting-approval`→`waiting`,
+`done`→`done`, `failed`→`failed`, `cancelled`→`cancelled`.
+
+| From category → to | Who | Verb |
+|---|---|---|
+| `todo → active` | any caller with write access, item unowned | `claim` only |
+| `todo → active` | owner (pre-assigned) | `update` |
+| `active → todo` | owner or manager | `update` (release) |
+| `active → waiting` | owner or manager; `approvals` non-empty when target is the approval-wait status | `update` / `link-approval` |
+| `waiting → active` | owner or manager, or system on approval granted | `update` / system |
+| `active → done` | owner or manager, subject to the verify gate | `update` |
+| `active → failed` | owner or manager | `update` |
+| `todo / active / waiting → cancelled` | manager, or system on approval denied | `update` / system |
+| `done → todo` | manager only (reopen) | `update` |
+| `failed`, `cancelled` | — | none (final) |
+
+A target status whose category is not reachable from the current category by
+this table is refused with `work_invalid_transition`, before the collection's
+own (narrower) `transitionsTo` is even consulted. The collection's
+`transitionsTo` MAY narrow further (e.g. forbid `in-progress → failed`
+directly, requiring `in-review` first) but MUST NOT legalise a move this
+table forbids.
+
+Moving an unowned item to an `active` status by `update` (bypassing `claim`)
+is refused with `work_unowned_start`.
+
+## 5. Claim
+
+```ts
+function claim(ref: ItemRef, rev: number, caller: Principal) {
+  return withItemLock(ref, () => {
+    const current = readItem(ref)
+    if (current.owner !== undefined || current.rev !== rev) {
+      return { ok: false, conflict: true, current } // either failure races identically
     }
+    if (categoryOf(current.status) !== "todo") {
+      return { ok: false, conflict: false, code: "work_not_claimable", message: "..." }
+    }
+    current.owner = callerRef(caller)
+    current.status = firstActiveStatus(collectionOf(current))
+    if (caller.kind === "session") current.sessions.push(caller.id)
+    current.rev += 1
+    current.updatedAt = now()
+    writeAtomic(ref, current)
+    if (caller.kind === "session") writeLease(ref, caller, current)
+    audit("work.item.claimed", caller, ref, { fromRev: rev, toRev: current.rev })
+    return { ok: true, item: current }
+  })
+}
 ```
 
-`code` SHOULD use the AIP-20 vocabulary:
+Owner-absent and rev-match are checked together so two racing claimants can
+never both succeed: whichever write lands first bumps `rev`, and the second
+claimant's `rev` no longer matches — it gets a `conflict`, not a silent
+double-claim.
 
-| Code                                       | Severity                                                                                | Meaning                                                                                                                                 |
-| ------------------------------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `work_workspace_invalid`                   | HARD                                                                                    | `WORK.md` frontmatter fails schema validation. Returns the failing field path.                                                          |
-| `work_extends_cycle`                       | warn                                                                                    | `extends:` chain visits the same manifest twice. Runtime breaks the chain at the cycle point.                                           |
-| `work_extends_missing`                     | warn                                                                                    | View's `extends:` points to a non-existent file. Runtime degrades to local-only.                                                        |
-| `work_extends_depth_exceeded`              | warn                                                                                    | Chain depth exceeds eight. Runtime breaks at the eighth ancestor.                                                                       |
-| `work_appliesto_unresolvable`              | HARD                                                                                    | View's `appliesTo` references a consumer (operator/company/skill) that does not exist. View is refused.                                 |
-| `work_audit_downgrade`                     | HARD                                                                                    | Descendant relaxes `defaults.auditMutations` from true to false. View is refused.                                                       |
-| `work_scope_disable`                       | HARD                                                                                    | Descendant disables `scope.containment.enabled` after an ancestor enabled it. View is refused.                                          |
-| `work_scope_value_class_drift`             | HARD                                                                                    | Descendant changes `scope.applicability.valueClass` from an ancestor's value. View is refused.                                          |
-| `work_collection_alias_conflict`           | HARD                                                                                    | Two collection entries resolve to the same effective name. Workspace is refused.                                                        |
-| `work_collection_unresolvable`             | HARD                                                                                    | Collection ref does not resolve (file missing, registry has no entry). Delegates the underlying AIP-18 error code where useful.         |
-| `work_collection_disabled_with_items`      | warn                                                                                    | Child disables a parent's collection but live items still reference it. Registration proceeds; lint surfaces the orphaned items.        |
-| `work_status_rollup_invalid`               | warn                                                                                    | Rollup policy bubbles a status id not declared on some eligible parent collection. Rollup degrades to no-op for non-conforming parents. |
-| `work_status_rollup_drift`                 | warn                                                                                    | Materialized rollup field disagrees with re-evaluation. Host prefers the fresh value.                                                   |
-| `work_xref_unresolvable`                   | HARD (executor / governance / knowledge / agency / playbook) / warn (defaults.workflow) | Cross-AIP ref does not resolve.                                                                                                         |
-| `work_containment_violated`                | HARD                                                                                    | Item write violates `scope.containment.rules` (allowedKinds, maxDepth).                                                                 |
-| `work_applicability_value_class_violation` | HARD                                                                                    | Item write carries an applicability ref that fails the declared value class.                                                            |
-| `work_ownership_policy_violated`           | warn                                                                                    | Workspace's ownership policy conflicts with a registered collection's ownership setting.                                                |
+Pre-assignment (`create` or a manager `update` setting `owner` on a `todo`
+item) is not a claim: the item stays `todo`, its owner has first right to
+claim it, but `claim` is still the verb that moves it to `active`.
 
-Domain prefixes use a colon (`vendor:specific_code`), never an underscore.
+## 6. Lease and liveness
 
-## Canonical signatures
+A claim by a `session:` owner writes `.work/leases/<collection>/<id>.json`:
 
-The host exposes the following function signatures:
+```json
+{ "item": "task/t-01jc8x2k4r", "owner": "session:sess_4117b2b0",
+  "host": "studio-mac", "claimedAt": "…", "renewedAt": "…", "ttlSeconds": 0 }
+```
+
+Leases are coordinator state, never committed, and a renewal never touches
+the item file — that is the whole reason they live outside the frontmatter
+(a heartbeat would otherwise be a git diff and a merge conflict every few
+seconds).
+
+- **The issuing host** releases the item when its owning session exits, and
+  at its own start-up for every lease whose session did not survive the
+  restart.
+- **Release** = clear `owner`, move an `active` item back to the collection's
+  initial `todo` status, set `releaseReason` (`owner-exited` /
+  `host-restart`), delete the lease file, bump `rev`, audit
+  `work.item.released`.
+- An item in a `waiting` category is **never** released by liveness — a
+  human decision may still be outstanding and the owner's death doesn't
+  cancel it.
+- With `coordination.leaseTtlSeconds > 0`, the owning host renews
+  `renewedAt` on its own cadence; *any* coordinator serving the root MAY
+  release a lease whose `renewedAt` is older than `ttlSeconds`. With the
+  default `0`, only the issuing host ever releases, and only on observed
+  session death — there is no cross-host timeout race to design for.
+- `operator:`, `user:`, `user`, and `host` owners have no lease file and are
+  never released automatically; a manager has to reassign or release them by
+  hand.
+
+Liveness release can never fail an item into `failed` or `cancelled` — a
+released item goes back to `todo`, claimable by anyone, because an item is
+intent, not a run; its work may simply be resumed.
 
 ```ts
-// Workspace manifest — root or view.
-defineWorkWorkspace({
-  schema: "work.workspace/v2"
-  name: string
-  title: string
-  description: string
-  version: string
-  extends?: string                      // relative path to parent WORK.md
-  appliesTo?: string[]                  // ws:// refs or relative paths
-  executor?: string                     // ws://operators/<slug>
-  governance?: string                   // path or ref
-  knowledge?: string                    // ws://wikis/<slug>
-  agency?: string                       // ws://agencies/<slug>
-  playbook?: string                     // ws://playbooks/<slug>
-  collections?: Array<
-    | { inline: AIP18CollectionSchema }
-    | { ref: string; alias?: string; version?: string }
-  >
-  scope?: {
-    containment?: { enabled?: boolean; field?: string; rules?: { allowedKinds?: string[]; maxDepth?: number } }
-    applicability?: { enabled?: boolean; field?: string; valueClass?: string }
-    ownership?: { enabled?: boolean; field?: string; policy?: "strict" | "inherit" | "open" }
+async function sweepDeadLeases(root: WorkRoot) {
+  for (const lease of await listLeases(root)) {
+    if (!(await sessionIsAlive(lease.owner))) {
+      await withItemLock(lease.item, () => releaseItem(lease.item, "owner-exited"))
+    }
   }
-  statusRollup?: {
-    enabled?: boolean
-    policy?: Array<{ when: string; bubbleParentStatus: string }>
-    exposeViaField?: string
-  }
-  lints?: Array<{ id: string; kind: "orphan-across-collections" | "stale-tree" | "broken-parent-ref" | "scope-mismatch" | "custom"; severity: "error" | "warn" | "info"; params?: Record<string, unknown> }>
-  defaults?: { workflow?: string; approvalClass?: string; auditMutations?: boolean }
-  display?: { homePage?: string; defaultGrouping?: "kind" | "status" | "owner" | "parent"; defaultView?: "list" | "board" | "tree" | "timeline" }
-  metadata?: Record<string, unknown>
-}): ResolvedWorkWorkspace
+}
 ```
 
-Hosts MAY alias `defineWorkWorkspace` as `defineWorkspace`, `registerWorkspace`,
-`defineWork`. The canonical name MUST be present.
+Run the sweep at host start-up (covers leases orphaned by a crash) and on
+every observed session-exit event thereafter — a coordinator MUST NOT rely
+on a polling-only sweep as its sole release path, since a crashed host also
+means no poller is running until the *next* host starts.
 
-`defineCollection` and `defineItem` are NOT exposed by AIP-20 — those are
-AIP-18's signatures. The boundary between the two AIPs is intentional:
-workspace-level concerns flow through `defineWorkWorkspace`, item-level concerns
-flow through AIP-18.
+## 7. Rights
 
-## Multi-language hosts
+Two roles, no per-field matrix:
 
-Hosts in non-TS languages follow the same contract with language-idiomatic
-naming:
+- **Owner** — the principal in `owner` (`host`/`user` callers act as owner of
+  items owned by `host`/`user` respectively). MAY change `status` within the
+  legal moves (§4), release itself, and set `note`, `approvals`,
+  `artifacts`, `runs`, `touches`, `provenance`.
+- **Manager** — the item's `createdBy`, the `host` principal, or any
+  principal the bound [AIP-7](/docs/aip-7) governance grants `work.manage`
+  on the root. MAY additionally edit `title`, body, `blockedBy`, `parent`,
+  `verify`, reassign or clear `owner`, cancel, and reopen.
 
-| Language                | Function name           | Schema dialect          |
-| ----------------------- | ----------------------- | ----------------------- |
-| TypeScript / JavaScript | `defineWorkWorkspace`   | JSON Schema or zod      |
-| Python                  | `define_work_workspace` | JSON Schema or pydantic |
-| Go                      | `DefineWorkWorkspace`   | struct tags             |
-| Rust                    | `define_work_workspace` | JSON Schema or schemars |
+`create` and `claim` are open to anyone with write access to the root — they
+don't touch another principal's state. A write attempted by a caller who is
+neither owner nor manager for that item is refused with `work_forbidden`.
 
-The frontmatter shape is the same across all languages — it's parsed by the
-host, not by the manifest author's language.
+System transitions — liveness release (§6), approval decided (§8), a settled
+verify gate (§9) — are not subject to rights at all; they are attributed to
+`host` in the audit log because no external caller requested them.
 
-## Registration test
+```ts
+function assertRights(caller: Principal, item: WorkItem, verb: Verb, input: UpdateInput) {
+  if (verb === "create" || verb === "claim") return
+  const isOwner = refEquals(item.owner, caller) || (item.owner === "host" && caller.kind === "host") || (item.owner === "user" && caller.kind === "user")
+  const isManager = refEquals(item.createdBy, caller) || caller.kind === "host" || governanceGrants(caller, "work.manage")
+  const ownerFields = new Set(["status", "note", "approvals", "artifacts", "runs", "touches", "provenance"])
+  const managerOnlyFields = new Set(["title", "body", "blockedBy", "parent", "verify", "owner"])
+  const touched = changedFields(input)
+  if (touched.some((f) => managerOnlyFields.has(f)) && !isManager) {
+    throw workError("work_forbidden")
+  }
+  if (touched.some((f) => ownerFields.has(f)) && !isOwner && !isManager) {
+    throw workError("work_forbidden")
+  }
+}
+```
 
-A conforming host SHOULD provide a `validate(workRoot)` helper that:
+## 8. Path claims (`touches`)
 
-1. Checks `WORK.md` is present at the work root and validates against
-   [`./WORK.schema.json`](./WORK.schema.json).
-2. Resolves the `extends:` chain (if any), walking warnings.
-3. Checks the one-way switches across the chain (HARD refusals).
-4. Validates `appliesTo` resolvability (HARD on misses).
-5. For each entry in the merged `collections[]`, resolves and registers via
-   [AIP-18](/docs/aip-18); checks for alias collisions (HARD).
-6. Validates every cross-AIP ref (`executor`, `governance`, `knowledge`,
-   `agency`, `playbook`, `defaults.workflow`).
-7. Round-trips parse → resolve → register collections → re-serialise to verify
-   the loader is deterministic.
-8. Runs the workspace-spanning lints; reports findings as a structured list.
-9. Reports the first failure with file + field path.
+`touches` is advisory, never enforced as a lock. At `claim` time, compare the
+claimant's intended `touches` globs (carried on `create`, or already present
+on the item) against the `touches` of every other item in the root currently
+`active` or `waiting`. On overlap, return the claim as applied but attach a
+warning:
 
-This is the standard "is this workspace conforming?" handshake. The same helper
-MAY be re-used to validate a per-context view by passing the consumer's folder
-instead of the work root.
+```ts
+{ ok: true, item, warnings: [{ code: "work_touches_overlap", with: ["task/t-..."] }] }
+```
 
-## What this guide does NOT cover
+Never refuse a claim, and never take a filesystem lock on the touched paths
+themselves — `touches` is a courtesy signal between agents, not mutual
+exclusion over the repo.
 
-- **Per-item-kind validation** — that's [AIP-18](/docs/aip-18)'s ADAPTER. AIP-20
-  delegates field-type validation, status state machine enforcement, and
-  ownership cardinality checks downstream.
-- **Item write semantics** — also AIP-18's. AIP-20 only enforces workspace-level
-  invariants (containment rules, applicability value class, ownership policy) on
-  the item's surface.
-- **The host's retrieval strategy** (BM25, embeddings, graph). AIP-20 explicitly
-  leaves this to runtime policy.
-- **The host's UI for browsing, editing, or approving items.**
-- **Multi-tenant isolation, quotas, billing** — runtime concerns.
+## 9. Verification (done integrity)
 
-These stay out of the spec on purpose.
+Two tiers, chosen per item by whether it carries `verify`:
+
+- **Tier 0 — no `verify`.** `update {status: done}` applies immediately,
+  stamping `verification: {kind: self-report, by, ts}` (or
+  `{kind: human, ts}` when the caller is `user`/`host`). Visible as
+  self-reported in every reader, never silently indistinguishable from a
+  gated done.
+- **Tier 1 — `verify` declared.** `update {status: done}` is *accepted but
+  not applied*: respond `{ok: true, verifying: true}`, leave the item in its
+  current `active` status, and run the gate out of band.
+  - **Pass** → transition to `done`,
+    `verification: {kind: gate, policyId?, exitCode?, ts}`, clear
+    `lastVerifyError`.
+  - **Fail** → stay `active`, set `lastVerifyError`.
+  - Both outcomes bump `rev` and are audited as a system transition
+    (`work.item.verify-passed` / `.verify-failed`).
+  - A second `done` request while a gate is already running for the same
+    item is refused with `work_verify_in_flight`.
+  - A gate outcome that arrives after the item left `active` by some other
+    path (released, cancelled) is discarded — it no longer describes the
+    item's current state.
+- **Evidence shortcut.** `update {status: done, evidence: {policyId}}`
+  applies `done` immediately **only if the host can independently confirm**
+  that `policyId` already passed (e.g. it ran the gate itself and has the
+  result on file); otherwise refuse with `work_evidence_not_passed`. A
+  coordinator MUST NOT accept a caller's unverified claim that a policy
+  passed.
+
+A coordinator that cannot run a declared gate MUST fail it, never pass it by
+default, and MUST NOT infer `done` from a session's turn simply ending —
+"the agent stopped talking" is not a verification outcome.
+
+```ts
+async function settleVerifyGate(ref: ItemRef, gate: VerifySpec) {
+  const result = await runGate(gate).catch((e) => ({ passed: false, error: String(e) }))
+  await withItemLock(ref, () => {
+    const current = readItem(ref)
+    if (categoryOf(current.status) !== "active") return // discarded, left active
+    if (result.passed) {
+      current.status = terminalDoneStatus(collectionOf(current))
+      current.verification = { kind: "gate", policyId: gate.policyId, exitCode: result.exitCode, ts: now() }
+      current.lastVerifyError = null
+      current.closedAt = now()
+    } else {
+      current.lastVerifyError = result.error
+    }
+    current.rev += 1
+    writeAtomic(ref, current)
+    audit(result.passed ? "work.item.verify-passed" : "work.item.verify-failed", "host", ref, {})
+  })
+}
+```
+
+## 10. Approvals
+
+AIP-20 only links [AIP-7](/docs/aip-7) `approval-request` records; it does
+not decide them.
+
+1. The owner creates an AIP-7 approval request with `taskId` set to the item
+   ref, then calls `link-approval(item, approvalId)` — no `rev` required,
+   idempotent. The id is appended to `approvals`; an `active` item moves to
+   the collection's approval-wait status. Only the owner or a manager may
+   link, and only on an `active` or `waiting` item.
+2. An `update` that targets the approval-wait status directly, with
+   `approvals` still empty, is refused with `work_approval_required`.
+3. On the AIP-7 decision, the coordinator applies a **system transition** to
+   every `waiting` item that lists that approval id:
+   - `approved` → back to the collection's first `active` status.
+   - `denied` → `cancelled`, with `closeReason: denied`.
+   - `expired` → no transition; it surfaces on the item for a reader to act
+     on, it does not auto-cancel.
+   - An item that already left `waiting` by some other path before the
+     decision lands is not touched.
+4. The owner or a manager MAY leave the wait manually (`waiting → active`)
+   or cancel at any time — linking an approval is not a one-way gate on the
+   item, only on the decision itself.
+
+Whether a transition *requires* an approval at all is a governance question
+answered by the bound `GOVERNANCE.md` (AIP-7 `defaultApproval`, `policy:`
+refs), not by AIP-20. The coordinator consults governance before accepting an
+`update` into `active → waiting` where governance mandates an approval was
+never created, and otherwise only enforces the structural rule in point 2
+above.
+
+## 11. External edits
+
+The coordinator records the content hash of every file it writes. On every
+read, if the on-disk hash differs from the last one the coordinator itself
+wrote, that is an **external edit** — a human, a git pull, or another tool
+touched the file outside the protocol:
+
+- If the file still validates against the collection's resolved schema and
+  its `rev` is ≥ the coordinator's last known `rev`, adopt it: set
+  `rev = max(known, file) + 1`, and append a `work.item.external-edit` audit
+  event. The bump guarantees the adopted file's `rev` is still unique going
+  forward even though it didn't come from this coordinator's own write path.
+- If it does not validate, do **not** load it as an item. Surface
+  `work_item_invalid` to any caller, and keep serving the last valid version
+  **read-only** (reject all writes to it) until the file is fixed on disk.
+
+Agents and tools MUST NOT edit item frontmatter directly while a coordinator
+serves the root — this path exists for humans and git, not as a sanctioned
+second write API.
+
+## 12. Git
+
+The item files, the collections, and the audit log are designed to be
+committed; `.work/` (locks, leases) is not.
+
+- A work root MUST be read and written through **one authoritative
+  checkout**. An agent working in its own git worktree or branch MUST reach
+  the board through the coordinator serving the authoritative checkout —
+  never by writing its worktree's copy of `items/` directly, or every branch
+  ends up with its own board and no coordinator can arbitrate between them.
+- `.work/` MUST be listed in `.gitignore` for the work root.
+- Coordinators SHOULD batch commits of item and audit files rather than
+  commit on every single write — commit-per-write is correct but needlessly
+  noisy in history.
+- On a merge conflict in an item file: the version with the higher `rev`
+  wins automatically. Equal `rev` with different content cannot be
+  auto-resolved and surfaces `work_merge_conflict` for a manager to resolve
+  by hand.
+
+## 13. Verbs and error codes
+
+| Verb | Input | Notes |
+|---|---|---|
+| `create` | collection, title, body?, owner?, parent?, blockedBy?, verify?, touches?, provenance? | `status` = collection `initialStatus`; `createdBy` = caller; `rev: 1`. |
+| `get` | item ref | |
+| `list` | filter: collection?, status?, category?, owner?, parent?, includeClosed? (default false) | Terminal items excluded unless asked. |
+| `claim` | item ref, rev | §5. |
+| `update` | item ref, rev, and any of: status, title, body, owner (string = reassign, null = release), blockedBy, parent, approvals, artifacts, runs, touches, note, provenance, evidence | Release cannot be combined with a status change in the same call. |
+| `link-approval` | item ref, approval id | §10. No `rev` — idempotent. |
+
+Error codes:
+
+| Code | Raised when |
+|---|---|
+| `work_manifest_invalid` | `WORK.md` fails schema validation, or carries a retired field (§1). |
+| `work_collection_alias_conflict` | Two `collections[]` entries resolve to the same effective name. |
+| `work_collection_not_work_item` | A resolved collection's `extends:` chain does not include `work-item`. |
+| `work_xref_unresolvable` | `executor` / `governance` / `knowledge` does not resolve inside the node's tenant. |
+| `work_containment_violation` | An item's `parent` is not listed in `containment.allowedParents[<collection>]`, or exceeds `maxDepth`. |
+| `work_not_found` | No item at the given ref. |
+| `work_forbidden` | Caller is neither owner nor manager for a field it touched (§7). |
+| `work_invalid_transition` | Target status's category is not reachable from the current category (§4), or the collection's own `transitionsTo` forbids it. |
+| `work_not_claimable` | `claim` called on an item not in a `todo` status. |
+| `work_unowned_start` | `update` tries to move an unowned item to `active` (bypassing `claim`). |
+| `work_approval_required` | `update` targets the approval-wait status with `approvals` still empty. |
+| `work_verify_in_flight` | A second `done` request while a Tier-1 gate is already running. |
+| `work_evidence_not_passed` | Evidence shortcut cites a policy the host cannot independently confirm passed. |
+| `work_id_taken` | `create` targets an `id` that already exists anywhere in the work root. |
+| `work_item_invalid` | An on-disk item fails schema validation (typically after an external edit). |
+| `work_merge_conflict` | A git merge produced two versions of an item at equal `rev` with different content. |
+
+`work_touches_overlap` is not an error code — it is a warning attached to an
+otherwise-successful `claim` result (§8).
+
+## 14. Audit event shape
+
+Every applied write and every system transition appends one line to
+`<work root>/audit/audit-log.jsonl`, in the same lock as the item write:
+
+```json
+{
+  "action": "work.item.claimed",
+  "actor": "session:sess_4117b2b0",
+  "entity": "task/t-01jc8x2k4r",
+  "input": { "fromRev": 6, "toRev": 7, "changes": { "status": ["pending", "in-progress"], "owner": [null, "session:sess_4117b2b0"] } }
+}
+```
+
+`action` is one of `work.item.created`, `.claimed`, `.status` (any write
+that changes `status`), `.updated` (other fields only), `.released`,
+`.reopened`, `.approval-linked`, `.verify-passed`, `.verify-failed`,
+`.external-edit` — exactly one per applied write. `actor` is `host` for every system
+transition. An item's history is simply the audit log filtered by `entity`.
 
 ## See also
 
 - [AIP-20 — agentwork/v2 spec](/docs/aip-20)
-- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — substrate this AIP composes
-  on
-- [AIP-13 — agentwork/v1](/docs/aip-13) — the predecessor (deprecated)
-- [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace AIP, mirror
-  composition mechanic
-- [AIP-7 — governance, approval, audit](/docs/aip-7) — one-way-switch convention
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — collections, items,
+  status categories this AIP builds on
+- [AIP-7 — governance, approval, audit](/docs/aip-7) — `approval-request`,
+  `audit-event`
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — the node that owns a work root
+- [AIP-46 — agent sessions](/docs/aip-46) — session claimants and liveness
+- [AIP-54 — refs](/docs/aip-54) — principal and item ref grammar
+- [AIP-58 — RUN](/docs/aip-58) — runs linked from items
 - [`./WORK.schema.json`](./WORK.schema.json) — frontmatter validator
-- [`./EXAMPLES.md`](./EXAMPLES.md) — reference manifests
+- [`./EXAMPLES.md`](./EXAMPLES.md) — concrete manifests and items
 - [`./skills/author-work-workspace/SKILL.md`](./skills/author-work-workspace/SKILL.md)
   — agent-side authoring skill
-- [`./starters/agentwork-v1-compat/`](./starters/agentwork-v1-compat) — AIP-13
-  compatibility starter library

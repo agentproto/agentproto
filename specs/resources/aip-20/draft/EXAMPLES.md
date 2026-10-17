@@ -1,602 +1,532 @@
 # EXAMPLES.md — agentwork/v2 reference patterns
 
-Reference manifests exemplifying common authoring patterns for
-[AIP-20](/docs/aip-20). Each example is a self-contained `WORK.md` a host could
-load as-is. Manifest authors should copy the closest pattern and edit fields
-rather than draft from scratch.
+Concrete files for [AIP-20](/docs/aip-20): a project node's `WORKSPACE.md`
+excerpt, its `WORK.md`, a `bug` collection extending `work-item`, items in
+every stage of the protocol, a lease file, audit log lines, and a conflict
+response. Copy the closest pattern rather than drafting from scratch.
 
-## Patterns covered
+## Contents
 
-1. [Minimal workspace — solo dev tracker](#example-1--minimal-workspace--solo-dev-tracker)
-2. [Per-operator view — eng lead lens](#example-2--per-operator-view--eng-lead-lens)
-3. [Multi-collection workspace — engineering tracker](#example-3--multi-collection-workspace--engineering-tracker)
-4. [Per-company composition — agency engagement](#example-4--per-company-composition--agency-engagement)
-5. [Three-level chain — org → team → operator (one-way switch)](#example-5--three-level-chain--org--team--operator-one-way-switch)
+1. [The project node and its work root](#1-the-project-node-and-its-work-root)
+2. [`WORK.md`](#2-workmd)
+3. [The `bug` collection](#3-the-bug-collection)
+4. [Items through the protocol](#4-items-through-the-protocol)
+5. [Lease file](#5-lease-file)
+6. [Audit log](#6-audit-log)
+7. [Conflict response](#7-conflict-response)
 
 ---
 
-## Example 1 — Minimal workspace — solo dev tracker
+## 1. The project node and its work root
 
-The smallest legal `WORK.md`: required frontmatter, one inline `task`
-collection, status rollup off. Useful for a solo dev tracker that lives next to
-the code, with no consumers, no governance, no agency context.
+A project is an [AIP-34](/docs/aip-34) workspace node, not a work item. Its
+`WORKSPACE.md` points at the work root with the `work:` field; everything
+under `work/` is AIP-20's.
 
-````yaml
+`projects/billing-v2/WORKSPACE.md` (excerpt — only the field this AIP cares
+about):
+
+```yaml
+---
+schema: workspace/v1
+id: "@acme/billing-v2"
+name: Billing v2
+owner: { kind: company, slug: acme }
+work: { file: work/WORK.md }
+---
+```
+
+Layout on disk:
+
+```
+projects/billing-v2/
+├── WORKSPACE.md
+└── work/
+    ├── WORK.md
+    ├── collections/
+    │   ├── work-item/COLLECTION.md    # vendored copy of the normative base
+    │   └── bug/COLLECTION.md
+    ├── items/
+    │   ├── initiative/init-01jc8wyyaa.md
+    │   ├── task/t-01jc8x2k4r.md
+    │   ├── task/t-01jc8wz0aa.md
+    │   └── bug/bug-01jc90f1zz.md
+    ├── audit/audit-log.jsonl
+    └── .work/                 # gitignored
+        ├── locks/
+        └── leases/task/t-01jc8x2k4r.json
+```
+
+---
+
+## 2. `WORK.md`
+
+```yaml
 ---
 schema: work.workspace/v2
-name: solo-dev
-title: Solo dev tracker
+name: billing-v2-work
+title: Billing v2 work
 description: |
-  Personal tracker for the solo dev. One inline 'task' collection,
-  no rollup, no cross-AIP bindings. Lives at the repo root next to
-  the code.
-version: 1.0.0
+  Work tracked for the billing-v2 project: initiatives, tasks, and
+  bug reports. Verification gates on task done; approvals route
+  through the billing engineering lead.
 
 collections:
-  - inline:
-      schema: collection.schema/v1
-      name: task
-      title: Task
-      description: An atomic unit of work to complete.
-      version: 1.0.0
-      fields:
-        - name: priority
-          type: enum
-          enum: [low, normal, high]
-        - name: estimate
-          type: number
-          description: Estimated hours to complete.
-      statuses:
-        - { id: open, label: Open }
-        - { id: in-progress, label: In progress, transitionsTo: [done, blocked] }
-        - { id: blocked, label: Blocked, transitionsTo: [in-progress] }
-        - { id: done, label: Done, terminal: true }
-      initialStatus: open
-      ownership:
-        cardinality: single
-        role: owner
-        required: false
-      deadline:
-        kind: target-date
-        required: false
-        fieldName: dueAt
+  - ref: ws://collections/task
+  - ref: ws://collections/initiative
+  - ref: ./collections/bug/COLLECTION.md
 
-scope:
-  containment:
-    enabled: false
-  applicability:
-    enabled: false
-  ownership:
-    enabled: true
-    field: owner
-    policy: open
+containment:
+  allowedParents:
+    task: [initiative, task]
+    bug: [initiative]
+    initiative: []
+  maxDepth: 3
 
 statusRollup:
-  enabled: false
+  enabled: true
+  rules:
+    - { when: all-children-terminal, category: done }
+    - { when: any-child-waiting,     category: waiting }
+    - { when: any-child-blocked,     category: active }
+    - { when: no-children,           category: todo }
 
-display:
-  defaultGrouping: status
-  defaultView: list
+coordination:
+  leaseTtlSeconds: 0
+  lockStaleSeconds: 30
+
+lints:
+  - { id: dangling-blockedby, kind: dangling-dependency, severity: warn, params: {} }
+  - { id: stale-active-14d,   kind: stale,               severity: warn, params: { days: 14 } }
+
+defaults:
+  auditMutations: true
+
+views:
+  - id: active
+    title: In flight
+    filter: { category: [active, waiting] }
+    groupBy: owner
+    layout: board
+  - id: triage
+    title: Unclaimed bugs
+    filter: { collection: bug, category: [todo] }
+    groupBy: status
+    layout: list
+
+executor: ws://operators/billing-triage
+governance: ../GOVERNANCE.md
+knowledge: ws://wikis/billing/KNOWLEDGE.md
 ---
 
-# Solo dev tracker
+# Billing v2 work
 
 ## Purpose
 
-Personal task tracker. Just one collection, no rollups, no
-governance.
+Tracks the billing-v2 rewrite: the initiative tree, its tasks, and
+bug reports filed against the shipped service.
 
-## What this workspace does NOT track
+## Conventions
 
-- Multi-person initiatives — there is only one user.
-- Cross-team coordination — out of scope.
+- A `bug` always parents to an `initiative`, never to a `task`.
+- `touches` SHOULD name the billing package paths a task or bug will
+  edit, so overlapping claims surface early.
+- Tasks that touch payment provider calls declare `verify` (a gate),
+  never a self-report done.
+```
 
-## Examples
+`WORK.md` declares no `extends:`, no `appliesTo:`, no `scope`, no `display`,
+no `defaults.approvalClass` — a host loading this file with any of those
+present would refuse it with `work_manifest_invalid`.
 
-A typical task:
+---
+
+## 3. The `bug` collection
+
+`work/collections/bug/COLLECTION.md` — extends a vendored copy of the
+normative [`work-item`](./collections/work-item/COLLECTION.md) base
+collection published with this AIP (`work/collections/work-item/COLLECTION.md`
+in the layout above — `extends:` is always a relative path, so a host
+vendors the base collection's file into the work root rather than naming it
+by registry ref), adding two fields and one extra status in the `active`
+category.
+
+```yaml
+---
+schema: collection.schema/v1
+name: bug
+title: Bug
+description: A defect reported against a shipped service.
+version: 1.0.0
+extends: ../work-item/COLLECTION.md
+
+fields:
+  - name: severity
+    type: enum
+    enum: [low, medium, high, critical]
+    required: true
+  - name: repro
+    type: text
+    description: Steps to reproduce.
+
+statuses:
+  - { id: triaging, label: Triaging, category: active, transitionsTo: [in-progress, cancelled] }
+
+initialStatus: pending
+---
+
+# Bug
+
+## Conventions
+
+New reports land in `pending`. A manager moves a report to
+`triaging` before anyone claims it, to attach `severity`; `claim`
+then moves it to `in-progress` as usual. Severity `critical` MUST
+carry a `verify` gate — no self-reported done on a critical fix.
+```
+
+`pending`, `in-progress`, `awaiting-approval`, `done`, `failed`, `cancelled`
+are inherited unchanged from `work-item`, as required; `triaging` is new and
+sits in the `active` category alongside `in-progress`.
+
+---
+
+## 4. Items through the protocol
+
+### 4.1 Pending — unclaimed, pre-assigned nothing
+
+`items/task/t-01jc8wz0aa.md`:
 
 ```yaml
 ---
 schema: collection.item/v1
 collection: task
-id: TASK-1234
-title: Refactor auth module
+id: t-01jc8wz0aa
+title: Design the webhook retry schema
+status: pending
+rev: 1
+
+createdBy: operator:billing-triage
+sessions: []
+runs: []
+
+parent: initiative/init-01jc8wyyaa
+blockedBy: []
+touches: ["packages/billing/src/webhooks/**"]
+
+approvals: []
+artifacts: []
+
+verify: null
+verification: null
+lastVerifyError: null
+
+closeReason: null
+releaseReason: null
+reopenedBy: null
+note: null
+provenance: {}
+
+createdAt: "2026-10-17T09:00:00Z"
+updatedAt: "2026-10-17T09:00:00Z"
+closedAt: null
+---
+
+Design the retry/backoff schema for outbound webhook delivery.
+```
+
+Note there is no `owner` key at all — absence, not `null`, is what makes an
+item claimable.
+
+### 4.2 Claimed, in progress
+
+`items/task/t-01jc8x2k4r.md` after `claim("task/t-01jc8x2k4r", rev: 2)` by
+`session:sess_4117b2b0`:
+
+```yaml
+---
+schema: collection.item/v1
+collection: task
+id: t-01jc8x2k4r
+title: Wire the billing webhook
 status: in-progress
-priority: high
-estimate: 4
----
-````
+rev: 3
 
-````
+owner: session:sess_4117b2b0
+createdBy: host
+sessions: [sess_4117b2b0]
+runs: [run_01jc9a2f00]
 
-**When to use.** Solo trackers, scratch notebooks, prototypes. The
-workspace deliberately avoids declaring scope axes other than
-ownership; there is nothing to compose with.
+parent: initiative/init-01jc8wyyaa
+blockedBy: [task/t-01jc8wz0aa]
+touches: ["packages/billing/src/webhooks/**"]
 
----
+approvals: []
+artifacts:
+  - { run: run_01jc9a2f00, key: out/diff.patch }
 
-## Example 2 — Per-operator view — eng lead lens
+verify: { command: pnpm, args: [test, --filter, "@acme/billing"] }
+verification: null
+lastVerifyError: null
 
-A view that extends a shared engineering workspace, narrows
-visibility to project + initiative collections (hides task), adds
-a workspace-level lint, and rebinds the executor.
+closeReason: null
+releaseReason: null
+reopenedBy: null
+note: "Blocked task not yet done; starting the HTTP client wiring in parallel."
+provenance: { prUrl: "https://github.com/acme/billing-v2/pull/42" }
 
-```yaml
----
-schema: work.workspace/v2
-name: eng-lead-view
-title: Engineering lead view
-description: |
-  Engineering lead's lens on the shared engineering tracker.
-  Surfaces only projects and initiatives; tasks are visible through
-  parent rollups. Stricter stale-tree lint to catch initiatives
-  that have stalled.
-version: 1.0.0
-
-extends: ../../engineering/WORK.md
-appliesTo:
-  - ws://operators/eng-lead
-
-executor: ws://operators/eng-lead
-
-# Inherit collections from parent, but the view uses scope filters
-# in the host's UI to surface only project + initiative. The merged
-# collections list still includes 'task' — the view doesn't disable
-# it, just deprioritises it.
-collections:
-  - ref: ./collections/project/COLLECTION.md
-  - ref: ./collections/initiative/COLLECTION.md
-
-lints:
-  - id: stale-initiative-tree
-    kind: stale-tree
-    severity: warn
-    params:
-      collections: [initiative]
-      days: 14
-
-display:
-  defaultGrouping: parent
-  defaultView: tree
+createdAt: "2026-10-17T09:05:00Z"
+updatedAt: "2026-10-17T14:40:00Z"
+closedAt: null
 ---
 
-# Engineering lead view
-
-## Purpose
-
-The eng lead's daily landing page. Project + initiative tree, with
-stale-tree lint catching initiatives that haven't moved in two
-weeks.
-
-## When to extend vs replace
-
-Sub-team leads extending this view should narrow `display.homePage`
-to their root project, not redeclare the lints.
-````
-
-**When to use.** Whenever an operator (AIP-9) needs a lens on a shared tracker.
-The view inherits the workspace's scope axes, status rollups, and one-way
-switches; it adds only what's specific to the lead's role.
-
----
-
-## Example 3 — Multi-collection workspace — engineering tracker
-
-The full engineering tracker: three collections (`project`, `initiative`,
-`task`) — two via file ref, one inline; status rollup ON; cross-AIP `governance`
-binding. This is the kind of workspace the example-2 view extends.
-
-```yaml
----
-schema: work.workspace/v2
-name: engineering
-title: Engineering tracker
-description: |
-  Shared engineering coordination workspace. Tracks projects,
-  initiatives, tasks, and bugs. Bound to the engineering wiki and
-  the engineering governance policy.
-version: 2.1.0
-
-executor: ws://operators/eng-triage
-governance: ../policies/engineering.yaml
-knowledge: ws://wikis/engineering/KNOWLEDGE.md
-playbook: ws://playbooks/eng-quarterly
-
-collections:
-  # Two starter collections from the agentwork-v1-compat library:
-  - ref: ./collections/project/COLLECTION.md
-  - ref: ./collections/initiative/COLLECTION.md
-  # One inline collection extending the starter task with eng-specific fields:
-  - inline:
-      schema: collection.schema/v1
-      name: task
-      title: Engineering task
-      description: |
-        Atomic unit of engineering work. Adds 'component' and
-        'estimate' fields on top of the starter task collection.
-      version: 1.0.0
-      extends: ../../starters/agentwork-v1-compat/task/COLLECTION.md
-      fields:
-        - name: component
-          type: enum
-          enum: [api, web, infra, mobile, docs]
-          required: true
-        - name: estimate
-          type: number
-          description: Estimated hours.
-        - name: severity
-          type: enum
-          enum: [trivial, minor, normal, major, critical]
-      ownership:
-        cardinality: single
-        role: assignee
-        required: true
-  # A registry import for cross-team bug reporting:
-  - ref: ws://collections/issue
-    alias: bug
-    version: "1.x"
-
-scope:
-  containment:
-    enabled: true
-    field: parent
-    rules:
-      allowedKinds: [project, initiative]
-      maxDepth: 3
-  applicability:
-    enabled: true
-    field: appliesTo
-    valueClass: role
-  ownership:
-    enabled: true
-    field: owner
-    policy: inherit
-
-statusRollup:
-  enabled: true
-  policy:
-    - when: all-children-terminal
-      bubbleParentStatus: done
-    - when: any-child-blocked
-      bubbleParentStatus: blocked
-    - when: any-child-overdue
-      bubbleParentStatus: at-risk
-  exposeViaField: rolledStatus
-
-lints:
-  - id: orphan-task
-    kind: orphan-across-collections
-    severity: error
-    params:
-      collections: [task, bug]
-  - id: stale-tree-30d
-    kind: stale-tree
-    severity: warn
-    params:
-      days: 30
-  - id: broken-parent
-    kind: broken-parent-ref
-    severity: error
-  - id: scope-mismatch-role
-    kind: scope-mismatch
-    severity: warn
-    params:
-      axis: applicability
-
-defaults:
-  workflow: ./workflows/nightly-sweep/WORKFLOW.md
-  approvalClass: on-mutate
-  auditMutations: true                     # one-way switch ON
-
-display:
-  homePage: PROJ-onboarding
-  defaultGrouping: parent
-  defaultView: board
----
-
-# Engineering tracker
-
-## Purpose
-
-Coordination workspace for the engineering team. Projects contain
-initiatives, initiatives contain tasks and bugs. Status rollup
-surfaces blocked / at-risk parents automatically.
-
-## Conventions
-
-- A `task` is a one-person, one-week-or-less unit. Larger work is an
-  `initiative`.
-- A `bug` is a defect report. Bugs MAY have a project parent but
-  often live un-parented.
-- `appliesTo` carries roles, not specific operators. Use the role
-  registry from the company workspace.
-
-## What this workspace does NOT track
-
-- Customer-facing roadmap items — those live in the product
-  tracker.
-- HR or hiring tasks — those live in the people tracker.
-
-## When to extend vs replace
-
-Sub-team views (web, infra, mobile) SHOULD extend this workspace
-and narrow visibility via `appliesTo`. Forking is rarely the right
-move; the registry-of-views pattern keeps everyone on one tree.
+Wire the retry/backoff client into the outbound webhook sender.
 ```
 
-**When to use.** A multi-team coordination tracker. Mixes ref forms (file +
-registry), declares all three scope axes, enables rollup, binds governance +
-knowledge + playbook. The engineering team's canonical workspace — every view
-extends from here.
+The coordinator wrote `rev: 3` — `2` was consumed by the claim itself, and a
+later `update` (the `note`/`artifacts`/`runs` edit above) consumed one more.
+`blockedBy` listing a non-terminal item is informational: the task was
+claimed and started anyway, and a reader surfaces it as derived `blocked`.
 
----
+### 4.3 Awaiting approval, with a linked request
 
-## Example 4 — Per-company composition — agency engagement
-
-A company workspace that extends a shared org tracker, adds an `okr` collection
-ref, binds an [AIP-8](/docs/aip-8) agency for client-billable work, and binds an
-[AIP-10](/docs/aip-10) wiki for institutional context.
+A `critical` bug fix needing a human sign-off before deploy.
+`items/bug/bug-01jc90f1zz.md`:
 
 ```yaml
 ---
-schema: work.workspace/v2
-name: acme-engagement
-title: Acme client engagement tracker
-description: |
-  Acme's per-client engagement tracker. Extends the shared
-  org tracker; adds OKR tracking; binds the Acme-specific agency
-  context for time-tracking and billable approvals; binds the
-  client knowledge base for institutional context.
-version: 1.4.0
+schema: collection.item/v1
+collection: bug
+id: bug-01jc90f1zz
+title: Webhook signature check bypassable with empty header
+status: awaiting-approval
+rev: 5
+severity: critical
+repro: |
+  Send a webhook POST with an empty X-Signature header; the current
+  check short-circuits to valid on empty input.
 
-extends: ../../org/WORK.md
-appliesTo:
-  - ws://companies/acme
+owner: session:sess_4117b2b0
+createdBy: user:jeremy
+sessions: [sess_4117b2b0]
+runs: [run_01jc9b1100]
 
-agency: ws://agencies/internal-consulting
-knowledge: ws://wikis/acme-client/KNOWLEDGE.md
+parent: initiative/init-01jc8wyyaa
+blockedBy: []
+touches: ["packages/billing/src/webhooks/verify.ts"]
 
-collections:
-  - ref: ws://collections/okr
-    version: "2.x"
-  # Inherit project / initiative / task from parent.
+approvals: [apr_01jc9c]
+artifacts:
+  - { run: run_01jc9b1100, key: out/patch.diff }
 
-scope:
-  applicability:
-    enabled: true
-    field: appliesTo
-    valueClass: role-and-company
+verify: { command: pnpm, args: [test, --filter, "@acme/billing", --, verify.test.ts] }
+verification: null
+lastVerifyError: null
 
-lints:
-  - id: missing-billable-tag
-    kind: custom
-    severity: warn
-    params:
-      tag: billable
-      collections: [project, initiative]
+closeReason: null
+releaseReason: null
+reopenedBy: null
+note: "Fix ready, needs sign-off before merge given it touches auth."
+provenance: { prUrl: "https://github.com/acme/billing-v2/pull/51" }
 
-defaults:
-  approvalClass: policy:../policies/billable-mutations.yaml
-
-display:
-  homePage: OKR-2026-Q2
-  defaultGrouping: kind
-  defaultView: board
+createdAt: "2026-10-17T10:10:00Z"
+updatedAt: "2026-10-17T15:00:00Z"
+closedAt: null
 ---
 
-# Acme client engagement
-
-## Purpose
-
-Tracks deliverables for the Acme account. Adds OKR tracking on top
-of the shared org tracker; binds the Acme-specific agency for
-billable approvals; binds the Acme knowledge base.
-
-## Conventions
-
-- Every billable item carries the `billable` tag — the
-  `missing-billable-tag` lint surfaces unmarked items.
-- OKRs use the org-shared `okr` registry collection (version 2.x).
-- Time-tracking flows through the bound agency.
-
-## What this workspace does NOT track
-
-- Internal Acme team initiatives — that lives in the Acme team's
-  own tracker, not this client engagement workspace.
+Patch closes the empty-header bypass. Needs a human eye on the
+security-sensitive diff before it lands.
 ```
 
-**When to use.** Per-client / per-company composition where the company-specific
-binding (agency, knowledge, custom lint) is added on top of a shared tracker.
-The view inherits all the org-level scope axes and rollups; it only adds what's
-company-specific.
+The linked `apr_01jc9c` approval request (AIP-7, not AIP-20):
 
----
+```json
+{
+  "doctype": "approval-request",
+  "id": "apr_01jc9c",
+  "kind": "deploy",
+  "title": "Sign off: webhook signature bypass fix",
+  "payloadHash": "9b1c2f7a4e0d6b3c8f1a2d5e7c9b0a4f3d6e8c1b5a7f9d2e4c6a8b0d3f5e7c9b",
+  "status": "pending",
+  "requestedBy": { "sessionId": "sess_4117b2b0" },
+  "channels": ["slack:#billing-approvals"],
+  "requestedAt": "2026-10-17T15:00:00Z",
+  "taskId": "bug/bug-01jc90f1zz"
+}
+```
 
-## Example 5 — Three-level chain — org → team → operator (one-way switch)
+### 4.4 Gated done, with verification
 
-A three-level composition demonstrating the one-way switch on
-`defaults.auditMutations` and `scope.containment.enabled`. The org sets the
-audit + containment switches; the team passes them through unchanged; the
-operator's view CANNOT relax them. We also include a counter-example showing the
-HARD refusal.
-
-### Level 1 — Org workspace
-
-`org/WORK.md`:
+Once the gate in `verify` passes, the coordinator (not the caller) moves the
+task to `done` and stamps `verification`:
 
 ```yaml
 ---
-schema: work.workspace/v2
-name: org-root
-title: Organisation tracker (root)
-description: |
-  Organisation-wide root workspace. Sets the audit switch and the
-  containment-axis switch — both are one-way; descendants cannot
-  relax them. Concrete collections are added by sub-team views.
-version: 1.0.0
+schema: collection.item/v1
+collection: task
+id: t-01jc8x2k4r
+title: Wire the billing webhook
+status: done
+rev: 9
 
-governance: ../policies/org-default.yaml
+owner: session:sess_4117b2b0
+createdBy: host
+sessions: [sess_4117b2b0]
+runs: [run_01jc9a2f00, run_01jc9a3300]
 
-collections:
-  - ref: ./collections/project/COLLECTION.md
-  - ref: ./collections/initiative/COLLECTION.md
-  - ref: ./collections/task/COLLECTION.md
+parent: initiative/init-01jc8wyyaa
+blockedBy: [task/t-01jc8wz0aa]
+touches: ["packages/billing/src/webhooks/**"]
 
-scope:
-  containment:
-    enabled: true                          # ONE-WAY: descendants cannot disable
-    field: parent
-    rules:
-      allowedKinds: [project, initiative]
-      maxDepth: 4
-  applicability:
-    enabled: true
-    field: appliesTo
-    valueClass: role-and-company           # ONE-WAY: descendants cannot change
-  ownership:
-    enabled: true
-    field: owner
-    policy: inherit
+approvals: []
+artifacts:
+  - { run: run_01jc9a3300, key: out/test-report.json }
 
-defaults:
-  approvalClass: on-mutate
-  auditMutations: true                     # ONE-WAY: descendants cannot disable
+verify: { command: pnpm, args: [test, --filter, "@acme/billing"] }
+verification: { kind: gate, policyId: null, exitCode: 0, ts: "2026-10-17T15:02:11Z" }
+lastVerifyError: null
+
+closeReason: null
+releaseReason: null
+reopenedBy: null
+note: null
+provenance: { prUrl: "https://github.com/acme/billing-v2/pull/42" }
+
+createdAt: "2026-10-17T09:05:00Z"
+updatedAt: "2026-10-17T15:02:11Z"
+closedAt: "2026-10-17T15:02:11Z"
 ---
 
-# Org root
-
-## Purpose
-
-The organisation's root tracker. Every team and operator extends
-this workspace; the audit + containment switches are set here so
-no descendant can relax them.
-
-## When to extend vs replace
-
-Always extend. Forking the org root would lose the audit invariant
-that compliance relies on.
+Wire the retry/backoff client into the outbound webhook sender.
 ```
 
-### Level 2 — Team workspace
+The `update {status: done}` call that preceded this got back
+`{ok: true, verifying: true}` and the item stayed `in-progress` until the
+gate finished — this file is the *outcome*, written by the coordinator, not
+by the caller's own write.
 
-`teams/eng/WORK.md`:
+### 4.5 Released, with `releaseReason`
+
+The owning session of `task/t-01jc8wz0aa` crashed mid-work; the issuing
+host's liveness sweep released it back to `pending`:
 
 ```yaml
 ---
-schema: work.workspace/v2
-name: eng-team
-title: Engineering team workspace
-description: |
-  Engineering team workspace. Inherits the org's audit and
-  containment switches unchanged; adds an engineering-specific bug
-  collection and the engineering wiki binding.
-version: 1.2.0
-extends: ../../org/WORK.md
+schema: collection.item/v1
+collection: task
+id: t-01jc8wz0aa
+title: Design the webhook retry schema
+status: pending
+rev: 4
 
-knowledge: ws://wikis/engineering/KNOWLEDGE.md
+createdBy: operator:billing-triage
+sessions: [sess_3f9a0c21]
+runs: []
 
-collections:
-  - ref: ws://collections/eng-bug
-    alias: bug
+parent: initiative/init-01jc8wyyaa
+blockedBy: []
+touches: ["packages/billing/src/webhooks/**"]
 
+approvals: []
+artifacts: []
 
-# Containment + audit + applicability inherited unchanged.
-# scope.applicability.valueClass remains 'role-and-company' (one-way).
-# defaults.auditMutations remains true (one-way).
+verify: null
+verification: null
+lastVerifyError: null
+
+closeReason: null
+releaseReason: owner-exited
+reopenedBy: null
+note: null
+provenance: {}
+
+createdAt: "2026-10-17T09:00:00Z"
+updatedAt: "2026-10-17T16:20:00Z"
+closedAt: null
 ---
-# Engineering team
 
-## Purpose
-
-Engineering team's lens on the org tracker. Adds bug tracking and the
-engineering wiki; inherits everything else from the org.
+Design the retry/backoff schema for outbound webhook delivery.
 ```
 
-### Level 3 — Operator view (CORRECT)
+`owner` is absent again — `releaseReason` is the only trace that this item
+was once claimed and lost its claimant; `sessions` still remembers who.
 
-`operators/eng-lead/WORK.md`:
-
-```yaml
 ---
-schema: work.workspace/v2
-name: eng-lead-view
-title: Eng lead lens
-description: |
-  Engineering lead's lens on the team tracker. Narrows the homepage
-  to the eng lead's root project; surfaces a per-lead lint. Does
-  NOT touch the audit or scope one-way switches.
-version: 1.0.0
-extends: ../../teams/eng/WORK.md
-appliesTo:
-  - ws://operators/eng-lead
 
-lints:
-  - id: lead-stale-projects
-    kind: stale-tree
-    severity: warn
-    params:
-      collections: [project]
-      days: 21
-      ownerEquals: ws://operators/eng-lead
+## 5. Lease file
 
-display:
-  homePage: PROJ-eng-q2
-  defaultView: tree
----
-# Eng lead lens
+`.work/leases/task/t-01jc8x2k4r.json`, written when the claim in §4.2
+happened, deleted the moment the task leaves `active` (by `done`, release,
+or cancel):
 
-## Purpose
-
-Daily landing for the eng lead. Stricter stale-tree lint on the lead's own
-projects, narrower default homepage.
+```json
+{
+  "item": "task/t-01jc8x2k4r",
+  "owner": "session:sess_4117b2b0",
+  "host": "studio-mac",
+  "claimedAt": "2026-10-17T09:10:00Z",
+  "renewedAt": "2026-10-17T09:10:00Z",
+  "ttlSeconds": 0
+}
 ```
 
-The chain validates cleanly. The host computes the merged effective config,
-exposes the resolution chain
-(`org/WORK.md → teams/eng/WORK.md → operators/eng-lead/WORK.md`), and registers
-all four collections (`project`, `initiative`, `task`, `bug`) under their
-effective names.
+`ttlSeconds: 0` means only the issuing host (`studio-mac`) ever releases it,
+on observed session death — no other coordinator times it out.
 
-### Level 3 — Operator view (COUNTER-EXAMPLE: HARD refusal)
-
-A view that tries to relax the audit switch:
-
-```yaml
 ---
-schema: work.workspace/v2
-name: eng-lead-view-broken
-title: Eng lead lens (broken)
-description: Tries to silence the audit log for this lens.
-version: 1.0.0
 
-extends: ../../teams/eng/WORK.md
-appliesTo:
-  - ws://operators/eng-lead
+## 6. Audit log
 
-defaults:
-  auditMutations: false # ATTEMPTS TO DOWNGRADE
----
+`audit/audit-log.jsonl` — one JSON line per applied write or system
+transition, in the order they happened (newline-delimited, append-only):
+
+```jsonl
+{"action":"work.item.created","actor":"operator:billing-triage","entity":"task/t-01jc8wz0aa","input":{"fromRev":0,"toRev":1,"changes":{}}}
+{"action":"work.item.claimed","actor":"session:sess_4117b2b0","entity":"task/t-01jc8x2k4r","input":{"fromRev":2,"toRev":3,"changes":{"status":["pending","in-progress"],"owner":[null,"session:sess_4117b2b0"]}}}
+{"action":"work.item.updated","actor":"session:sess_4117b2b0","entity":"task/t-01jc8x2k4r","input":{"fromRev":3,"toRev":4,"changes":{"note":[null,"Blocked task not yet done; starting the HTTP client wiring in parallel."]}}}
+{"action":"work.item.approval-linked","actor":"session:sess_4117b2b0","entity":"bug/bug-01jc90f1zz","input":{"fromRev":4,"toRev":5,"changes":{"status":["in-progress","awaiting-approval"],"approvals":[[],["apr_01jc9c"]]}}}
+{"action":"work.item.verify-passed","actor":"host","entity":"task/t-01jc8x2k4r","input":{"fromRev":8,"toRev":9,"changes":{"status":["in-progress","done"]}}}
+{"action":"work.item.released","actor":"host","entity":"task/t-01jc8wz0aa","input":{"fromRev":3,"toRev":4,"changes":{"status":["in-progress","pending"],"owner":["session:sess_3f9a0c21",null]}}}
 ```
 
-**Result.** The host walks the resolution chain:
+An item's history is this log filtered by `entity`; `actor: host` on the
+last two lines marks them as system transitions, not calls from an external
+principal.
 
-1. `org/WORK.md` sets `defaults.auditMutations: true`.
-2. `teams/eng/WORK.md` inherits it (no override).
-3. `operators/eng-lead/WORK.md` (this view) tries `false`.
+---
 
-The host MUST refuse the view with `work_audit_downgrade` (HARD). The view does
-NOT degrade to local-only; it fails to load entirely. The author MUST remove
-`defaults.auditMutations: false` to load the view at all.
+## 7. Conflict response
 
-The same posture applies if the view tries `scope.containment.enabled: false`
-(refused with `work_scope_disable`) or `scope.applicability.valueClass: company`
-(refused with `work_scope_value_class_drift`, since the org set
-`role-and-company`).
+Two sessions both read `task/t-01jc8wz0aa` at `rev: 1` and both attempt to
+`claim` it. The first write lands and bumps `rev` to `2`. The second
+claimant's call:
 
-**When to use.** Three-level (or deeper) compositions where compliance, audit,
-or referential-integrity invariants must hold across every descendant. The
-one-way switches make the resolution chain trustworthy without re-validating
-every leaf.
+```ts
+claim({ ref: "task/t-01jc8wz0aa", rev: 1 }, caller: "session:sess_9c0a1b2d")
+```
+
+gets back:
+
+```json
+{
+  "ok": false,
+  "conflict": true,
+  "current": {
+    "schema": "collection.item/v1",
+    "collection": "task",
+    "id": "t-01jc8wz0aa",
+    "title": "Design the webhook retry schema",
+    "status": "in-progress",
+    "rev": 2,
+    "owner": "session:sess_3f9a0c21",
+    "...": "..."
+  }
+}
+```
+
+No error code, no partial write — the file was never touched by the losing
+call. The losing session's caller is expected to inspect `current` (it's now
+owned, not `pending`) and move on to a different item rather than retry.
 
 ---
 
@@ -604,9 +534,9 @@ every leaf.
 
 - [AIP-20 — agentwork/v2 spec](/docs/aip-20)
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18)
-- [`./WORK.schema.json`](./WORK.schema.json) — frontmatter validator
+- [`./collections/`](./collections) — the normative `work-item` base
+  collection plus the `task` and `initiative` starters
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide
 - [`./skills/author-work-workspace/SKILL.md`](./skills/author-work-workspace/SKILL.md)
   — agent-side authoring skill
-- [`./starters/agentwork-v1-compat/`](./starters/agentwork-v1-compat) — starter
-  collection library
+- [`./WORK.schema.json`](./WORK.schema.json) — frontmatter validator

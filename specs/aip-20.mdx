@@ -1,12 +1,12 @@
 ---
-title: "AIP-20: WORK.md — agentwork/v2 (typed coordination workspace on AIP-18 collections)"
-description: A workspace-only successor to AIP-13 that drops hardcoded project/initiative/task doctypes and delegates all per-item-kind schema work to AIP-18 collections — owning only the workspace root manifest, scope axes, status rollups, and cross-AIP composition.
+title: "AIP-20: WORK.md — agentwork/v2 (work items, coordination protocol, audit)"
+description: The work layer of a workspace node — a WORK.md manifest naming the AIP-18 collections a project tracks, a normative `work-item` base collection every work kind extends, and a file-level coordination protocol (rev CAS, claim + lease, atomic write, approvals, verification, audit) under which many agents and humans share one board whose files are the source of truth.
 aip: 20
-status: Review
+status: Draft
 type: Schema
 created: 2026-04-28
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 18]
+requires: [1, 2, 7, 18, 34]
 replaces: 13
 resources: ./resources/aip-20/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/20
@@ -18,1108 +18,824 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/work
 | Field | Value |
 |---|---|
 | AIP | 20 |
-| Title | WORK.md — agentwork/v2 (typed coordination workspace on AIP-18 collections) |
+| Title | WORK.md — agentwork/v2 (work items, coordination protocol, audit) |
 | Status | Draft |
 | Type | Schema |
 | Domain | work.sh |
-| Doctypes | `work.workspace/v2` (workspace manifest + view, written as `WORK.md`) |
-| Requires | [AIP-18](/docs/aip-18) |
-| Replaces | [AIP-13](/docs/aip-13) (`agentwork/v1`) — once Final |
-| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies), [AIP-7](/docs/aip-7) (governance), [AIP-8](/docs/aip-8) (agencies), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections) |
-| Resources | [`./resources/aip-20`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft) — [`WORK.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/WORK.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/skills/author-work-workspace/SKILL.md), [`starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat) |
+| Doctypes | `work.workspace/v2` (`WORK.md`, the work manifest of one workspace node) + the normative `work-item` base collection ([AIP-18](/docs/aip-18) `collection.schema/v1`) |
+| Requires | [AIP-7](/docs/aip-7) (approvals, audit), [AIP-18](/docs/aip-18) (collections, items), [AIP-34](/docs/aip-34) (workspace node that owns the work root) |
+| Replaces | [AIP-13](/docs/aip-13) (`agentwork/v1`) — Superseded, no compatibility layer |
+| Composes with | [AIP-46](/docs/aip-46) (sessions — claimants), [AIP-54](/docs/aip-54) (refs), [AIP-58](/docs/aip-58) (runs), [AIP-15](/docs/aip-15) (workflows), [AIP-9](/docs/aip-9) (operators) |
+| Resources | [`./resources/aip-20`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft) — [`WORK.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/WORK.schema.json), [`collections/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/collections) (`work-item`, `task`, `initiative`), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/EXAMPLES.md) |
 
 ## Abstract
 
-`agentwork/v2` is a **workspace-only** successor to
-[AIP-13](/docs/aip-13). It defines a single doctype —
-`work.workspace/v2`, written as `WORK.md` — that declares the shape
-of a coordination tracker without baking the per-item-kind schemas
-into the spec. Where AIP-13 hardcoded `project`, `initiative`, and
-`task` as first-class doctypes, AIP-20 lifts every per-item-kind
-concern (fields, status state machine, ownership cardinality,
-deadline kind, lint rules) to [AIP-18](/docs/aip-18) `COLLECTION.md`
-files and keeps only the **workspace-level** concerns at the
-`WORK.md` layer: which collections are enabled, how scope axes apply
-across collections, when parent items roll up child statuses, what
-lints span the whole workspace, and how the workspace binds to the
-rest of the AIP family. The same doctype, used recursively via
-`extends:`, also expresses **per-context views** — an operator
-([AIP-9](/docs/aip-9)), a company ([AIP-6](/docs/aip-6)), or a skill
-([AIP-3](/docs/aip-3)) ships its OWN `WORK.md` that adapts the base
-workspace for its lens. AIP-20 ships a small starter library
-(`starters/agentwork-v1-compat/`) of three [AIP-18](/docs/aip-18)
-collections that mirror AIP-13's hardcoded doctypes so existing v1
-trackers can be loaded under v2 without breaking.
+`agentwork/v2` is the **work layer of a workspace node**. A project is
+an [AIP-34](/docs/aip-34) workspace node; its `work:` field points at a
+`WORK.md` (`work.workspace/v2`) that names the [AIP-18](/docs/aip-18)
+collections the project tracks (initiatives, tasks, bugs, …). Every
+work collection extends one normative base collection, **`work-item`**,
+which fixes the fields and the status-category machine every agent can
+rely on: owner, claim history, dependencies, approvals, linked runs,
+verification, and a revision token.
+
+The heart of this AIP is the **coordination protocol**: how many agents
+and humans write the same board without double-claims, lost updates or
+silent resurrection. Items are files and the files are the truth; a
+**coordinator** (the reference one is the agentproto daemon's
+TaskStore) wraps around them, enforcing compare-and-swap on `rev`,
+claim leases released on claimant death, an atomic write discipline,
+role-based write rights, approval and verification gates, and an
+[AIP-7](/docs/aip-7) audit trail. The protocol is the one the agentproto
+daemon's task ledger proved in production; this AIP is written from it,
+and [Appendix A](#appendix-a--ledger-field-mapping) maps every ledger
+field onto the spec so that one system remains.
 
 ## Motivation
 
-The hard lesson from [AIP-13](/docs/aip-13) was that **the per-item-kind
-schema does not belong on the workspace AIP**. AIP-13's three
-hardcoded doctypes — `project`, `initiative`, `task` — were the
-right call for shipping v1 (concrete, debuggable, narrow), but they
-collapsed the moment a real team needed a fourth kind. An engineering
-team wants `bug`. A revenue team wants `okr`. An incident team wants
-`postmortem`. With v1, every additional kind required either a fork
-of the workspace AIP or a smuggled-in `metadata.<vendor>` extension
-that the spec cannot validate. The cost of mixing workspace concerns
-with item-schema concerns shows up as soon as the workspace tries to
-serve more than one team's vocabulary.
+Two lessons drive this revision.
 
-The fix is to **separate workspace concerns from item-schema
-concerns** along the seam that [AIP-18](/docs/aip-18) carved out.
-AIP-18 owns the type system: a `COLLECTION.md` declares the schema
-for a class of records (fields, statuses, ownership cardinality,
-deadline kind, lints, identity rules); an `ITEM.md` is a single
-record validated against a named collection. AIP-20 owns everything
-*above* the type system: which collections a workspace tracks, how
-scope axes apply across them, when parent items aggregate child
-status, what lints span the whole tracker, and how the workspace
-binds to operators, governance, knowledge, agencies, playbooks, and
-workflows. **Two AIPs, two surfaces, one mental model.** A team that
-needs a fourth kind writes a fourth `COLLECTION.md` (an authoring
-problem), not a revision to the workspace spec (a registry problem).
+**The item schema does not belong on the workspace AIP.**
+[AIP-13](/docs/aip-13) hardcoded `project`, `initiative` and `task`;
+the moment a team needed a fourth kind it had to fork the spec. AIP-18
+carved out the type system; AIP-20 keeps only what is common to *work*:
+the base fields and the coordination rules. A team that needs `bug` or
+`okr` writes a `COLLECTION.md` that extends `work-item`.
 
-This is exactly the registry-of-views pattern codified in
-[AIP-2](/docs/aip-2) and applied to wikis in [AIP-10](/docs/aip-10)
-and to governance in [AIP-7](/docs/aip-7). One workspace doctype,
-two modes:
+**A board that only declares shape is not a board.** The first v2 draft
+specified manifests, scope axes and view composition, and left
+concurrency to "git's problem". Meanwhile the agentproto daemon shipped
+a separate task ledger (JSON file, CAS claims, owner liveness,
+approvals, verify gates) because agents needed those guarantees
+*today*. The result was two truths: a spec nobody's runtime used and a
+runtime no spec described. Git does not arbitrate a claim between two
+agents writing the same checkout within the same second; nothing in a
+frontmatter-only spec prevents two sessions from both believing they
+own a task. This AIP therefore specifies the protocol, and requires
+the runtime to store its state *as* the spec's files.
 
-- **Workspace-root mode** (`<work-root>/WORK.md`, no `extends:`)
-  declares the BASE shape — which collections are enabled, what the
-  scope axes mean, how rollups behave.
-- **View mode** (`<consumer>/WORK.md`, `extends:` set) adapts the
-  base for a specific operator/company/skill — narrowing the visible
-  collections, adding a workspace-level lint, rebinding governance
-  for that context. The tracker is one; the views are many.
-
-This composability is what makes the registry trustworthy: every
-view is just another `WORK.md`, validated against the same schema,
-merged via the same algorithm. A reviewer auditing a deployed
-tracker hashes the merged effective config; a third-party importer
-follows `extends:` to its terminal root; a runtime swap re-derives
-the same lens from disk.
-
-[AIP-13](/docs/aip-13) is deliberately preserved as Draft for the
-duration of this transition. The migration path is conservative:
-AIP-20 ships a starter library
-([`starters/agentwork-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat))
-containing three [AIP-18](/docs/aip-18) collections — `project`,
-`initiative`, `task` — whose fields, statuses, ownership rules, and
-deadline semantics mirror AIP-13's hardcoded doctypes. An existing
-AIP-13 workspace can opt into v2 by adding a `WORK.md` at its tracker
-root and pointing `collections:` at the starter library; existing
-items load unchanged. Richer migrations (introducing new kinds,
-extending starter collections with team-specific fields) are an
-operator concern, not a spec concern. AIP-13 will move to Superseded
-once AIP-20 reaches Final, with the deprecation banner on AIP-13
-documenting the path.
+**The project is the workspace node.** A project already has an
+identity, a wall, agents, secrets, apps and a budget as an
+[AIP-34](/docs/aip-34) node. Making it a work item as well gave it two
+homes. AIP-20 stops at the node boundary: what lives *inside* a
+project's work root (initiatives, tasks, any other kind) is AIP-20;
+the project itself and the company above it are AIP-34 nodes.
 
 ## Specification
 
-A conforming `agentwork/v2` deployment is a single doctype:
-`work.workspace/v2`, written as `WORK.md`. The workspace's items
-live under [AIP-18](/docs/aip-18) collections — AIP-20 does NOT
-define an item doctype of its own. Every per-item-kind concern is
-deferred to AIP-18. Every workspace-level concern is owned by this
-AIP.
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
+interpreted as described in RFC 2119.
 
-### File location
-
-The filename `WORK.md` is normative — discovery, install, and
-toolchains key off it. The path is conventional, not normative.
-Conventional layout:
+### 1. Hierarchy and location
 
 ```
-<work-root>/
-├── WORK.md                          # workspace manifest (REQUIRED at the work-tree root)
-├── collections/                     # AIP-18 collections enabled by this workspace
-│   ├── project/
-│   │   └── COLLECTION.md            # AIP-18 collection definition
-│   ├── initiative/
-│   │   └── COLLECTION.md
-│   └── task/
-│       └── COLLECTION.md
-└── items/                           # AIP-18 ITEM.md records, filed by collection
-    ├── project/
-    │   └── <slug>.md
-    ├── initiative/
-    │   └── <slug>.md
-    └── task/
-        └── <slug>.md
+company           AIP-34 node (type: company)
+└── project       AIP-34 node (type: project), work: → WORK.md
+    └── work root           (the directory holding WORK.md)
+        ├── initiative      work item (collection: initiative)
+        │   └── task        work item (collection: task, parent: initiative/…)
+        └── task            work item
 ```
 
-**Per-context views** live alongside their consumer, not under the
-work root:
+A workspace node declares its work root with the AIP-34 v2 `work:`
+field (`{ file: <path> }` or `{ ref: … }`). Any node type MAY declare
+one; `project` nodes conventionally do. A node has at most one work
+root. Conventional layout:
 
 ```
-operators/eng-lead/WORK.md         # extends ../../<work-root>/WORK.md
-companies/acme/WORK.md             # extends ../../<work-root>/WORK.md
-skills/triage-tasks/WORK.md        # extends ../../<work-root>/WORK.md
+<node>/
+├── WORKSPACE.md                         # AIP-34 v2, work: { file: work/WORK.md }
+└── work/                                # the work root
+    ├── WORK.md                          # work.workspace/v2 (REQUIRED)
+    ├── collections/<name>/COLLECTION.md # local collections (OPTIONAL)
+    ├── items/<collection>/<id>.md       # one AIP-18 item per file (normative)
+    ├── audit/audit-log.jsonl            # AIP-7 audit chain for this root
+    └── .work/                           # coordinator state, NOT committed
+        ├── locks/<collection>/<id>.lock
+        └── leases/<collection>/<id>.json
 ```
 
-A view's `extends:` field points to a parent `WORK.md` (workspace
-root OR another view). `appliesTo:` binds the view to one or more
-operator/company/skill workspace refs. The host resolves the chain
-on load and exposes the merged effective config to the consumer.
+The filename `WORK.md` and the `items/<collection>/<id>.md` filing
+rule are normative: the coordination protocol addresses items by path.
+A collection's AIP-18 `identity.filingPath`, if set, MUST equal
+`items/{collection}/{id}.md` for collections enabled in a work root.
 
-### `WORK.md` — frontmatter shape
+**Scratch roots.** A coordinator MAY allocate work roots that belong to
+no workspace node — for example one per supervision tree of agent
+sessions — under its own state directory. A scratch root is a full work
+root (same `WORK.md`, same item files, same protocol); it is simply not
+committed to any repository. Scratch roots exist for ephemeral
+coordination; durable work belongs on a node.
+
+**Visibility** is the node's: read and write access to a work root is
+access to the node, governed by AIP-34 v2 walls and `includes` /
+`exports` doors. AIP-20 adds no visibility mechanism of its own. A
+scratch root's visibility is defined by the coordinator that owns it
+(the reference coordinator scopes it to the session lineage, see
+Appendix A).
+
+### 2. `WORK.md` — frontmatter
 
 ```yaml
 ---
 schema: work.workspace/v2
-name: <kebab-case-id>                       # required
-title: <human-readable>                     # required
-description: <one-paragraph purpose>        # required
-version: <semver>                           # required, the WORKSPACE version
+name: <kebab-case-id>                    # required
+title: <human-readable>                  # required
+description: <one-paragraph purpose>     # required
 
-# Composition (view mode)
-extends: ../path/to/parent/WORK.md          # OPTIONAL
-appliesTo:                                  # OPTIONAL — bind this view to consumers
-  - ws://operators/<slug>                   #   AIP-9 operator
-  - ws://companies/<slug>                   #   AIP-6 company
-  - ws://skills/<slug>                      #   AIP-3 skill
-
-# Cross-AIP composition (the centre of gravity)
-executor: ws://operators/<slug>             # OPTIONAL — AIP-9 default executor
-governance: <path-or-ref>                   # OPTIONAL — AIP-7 governance binding
-knowledge: ws://wikis/<slug>/KNOWLEDGE.md   # OPTIONAL — AIP-10 wiki binding
-agency: ws://agencies/<slug>                # OPTIONAL — AIP-8 agency context
-playbook: ws://playbooks/<slug>             # OPTIONAL — AIP-12 active playbook
-
-# The collections this workspace tracks. Three forms supported.
-collections:                                # array; merge-by-name with parent
-  # 1. Inline declaration (small workspaces, no sharing):
-  - inline:
-      schema: collection.schema/v1
-      name: task
-      title: Task
-      description: An atomic unit of work owned by a single operator.
-      version: 1.0.0
-      fields: [...]
-      statuses: [...]
-      ownership: { cardinality: single, role: assignee, required: false }
-      # full COLLECTION.md frontmatter, parsed in-place under AIP-18
-  # 2. File ref (shared with peers):
-  - ref: ./collections/eng-bug/COLLECTION.md
-  # 3. Registry import:
-  - ref: ws://collections/okr
-  # With aliasing (for renaming or version pinning at workspace level):
+# Collections tracked in this root. Every entry MUST resolve to a
+# collection that is `work-item` or extends it (AIP-18 extends: chain).
+collections:
+  - ref: ws://collections/task           # registry
+  - ref: ./collections/bug/COLLECTION.md # local file
+  - inline: { ...COLLECTION.md frontmatter... }
   - ref: ws://collections/issue
-    alias: bug
-    version: "1.x"
+    alias: bug                           # optional local name
+    version: "1.x"                       # optional semver range
 
-# Scope axes (the AIP-13 distinctive insight, kept at workspace level)
-scope:
-  containment:
-    enabled: true
-    field: parent                           # which item field carries the containment ref
-    rules:
-      allowedKinds: [project, task]         # OPTIONAL constraints
-      maxDepth: 5
-  applicability:
-    enabled: true
-    field: appliesTo                        # which item field carries scope-applicability list
-    valueClass: company | role | role-and-company | <custom>
-  ownership:
-    enabled: true
-    field: owner                            # delegates to per-collection ownership.role by default
-    policy: strict | inherit | open
+# Containment between kinds inside this root.
+containment:
+  allowedParents:                        # child collection -> allowed parent collections
+    task: [initiative, task]
+    initiative: []
+  maxDepth: 5
 
-# Status rollup — workspace-level rules for how parent items aggregate child status
-statusRollup:
-  enabled: true | false
-  policy:
-    - when: "all-children-terminal"
-      bubbleParentStatus: closed
-    - when: "any-child-blocked"
-      bubbleParentStatus: blocked
-  exposeViaField: rolledStatus              # OPTIONAL — host writes this field on parents
-
-# Workspace-spanning lints (AIP-18 lints are per-collection; these span collections)
-lints:                                       # array; merge-by-id with parent
-  - id: <kebab-id>
-    kind: orphan-across-collections | stale-tree | broken-parent-ref | scope-mismatch | custom
-    severity: error | warn | info
-    params: { <key>: <value> }
-
-# Routine workflow defaults (composes with AIP-15)
-defaults:
-  workflow: <ref>                           # OPTIONAL — default WORKFLOW.md path or ref
-  approvalClass: auto | always | on-mutate | policy:<ref>
-  auditMutations: true | false              # ONE-WAY SWITCH — once true, child can't disable
-
-# Display / UX hints
-display:
-  homePage: <slug>                          # OPTIONAL — landing item id
-  defaultGrouping: kind | status | owner | parent
-  defaultView: list | board | tree | timeline
-
-metadata:                                    # vendor extensions, namespaced under <vendor>
-  <vendor>:
-    <field>: <value>
----
-
-# <body — markdown prose>
-
-Conventional sections in the body include:
-
-- ## Purpose — what this workspace tracks, who uses it
-- ## Conventions — when an item belongs in collection A vs collection B
-- ## What this workspace does NOT track — set boundaries explicitly
-- ## When to extend vs replace — composition guidance
-```
-
-The body is free-form markdown. The frontmatter is the contract.
-
-### Collection declaration
-
-The `collections:` array is the bridge between AIP-20 and
-[AIP-18](/docs/aip-18). Each entry MUST be one of three forms:
-
-**1. Inline declaration.** A full `collection.schema/v1`
-frontmatter, parsed in-place. The host registers the collection
-directly via [AIP-18](/docs/aip-18)'s `defineCollection` without
-loading a separate file. Useful for small, single-tenant workspaces
-where the collection is not shared:
-
-```yaml
-collections:
-  - inline:
-      schema: collection.schema/v1
-      name: task
-      title: Task
-      description: An atomic unit of work.
-      version: 1.0.0
-      fields:
-        - { name: priority, type: enum, enum: [low, normal, high] }
-      statuses:
-        - { id: open, label: Open }
-        - { id: done, label: Done, terminal: true }
-      ownership: { cardinality: single, role: assignee, required: false }
-```
-
-**2. File ref.** A relative path to a `COLLECTION.md` on disk. The
-host loads the file via [AIP-18](/docs/aip-18) and registers the
-collection. Useful when the collection is shared with peer
-workspaces or when the collection's version is managed independently:
-
-```yaml
-collections:
-  - ref: ./collections/eng-bug/COLLECTION.md
-```
-
-**3. Registry import.** A `ws://collections/<slug>` URI resolved
-against the host's collection registry. Useful for cross-workspace
-sharing and for installing third-party collection definitions:
-
-```yaml
-collections:
-  - ref: ws://collections/okr
-```
-
-**Aliasing.** Any ref form MAY carry an `alias:` to expose the
-collection in this workspace under a different name. This is the
-escape hatch for ref-name conflicts (two registry collections both
-named `issue`) and for workspace-local naming preferences (`bug`
-locally, `issue` upstream):
-
-```yaml
-collections:
-  - ref: ws://collections/issue
-    alias: bug
-    version: "1.x"
-```
-
-When `alias:` is set, items in this workspace MUST reference the
-alias, not the upstream name (`collection: bug`, not
-`collection: issue`). The host MUST refuse a workspace whose two
-entries resolve to the same effective name (alias or upstream) with
-`work_collection_alias_conflict` (HARD).
-
-When `version:` is set on a ref, it pins the schema version range
-(semver). Schema bumps outside the range fail with the
-[AIP-18](/docs/aip-18) `collection_item_schema_pinned_drift` HARD
-refusal at item load time.
-
-The `collections:` array merges across the `extends:` chain by
-**effective name** (alias if set, otherwise the collection's `name`).
-A child entry with the same effective name replaces the parent's
-ref or inline; new effective names are appended. A child MAY also
-disable a parent's collection by setting an explicit override that
-omits the entry — but the host enforces the [AIP-18](/docs/aip-18)
-guarantee that items remain valid, so disabling a collection that
-has live items surfaces a `work_collection_disabled_with_items`
-warning.
-
-### Scope axes
-
-The three orthogonal axes from [AIP-13](/docs/aip-13) — containment,
-applicability, ownership — survive in v2 as a **workspace-level
-declaration** rather than a per-item field set. The workspace
-declares *which* axes are enabled, *which* item field carries each
-axis, and *what value class* the axis accepts. The actual fields
-live on items; their semantics are owned by the per-collection
-schema [AIP-18](/docs/aip-18) defines. AIP-20's job is to ensure the
-three axes remain orthogonal *across* collections.
-
-| Axis | Question it answers | Item field (default) | Per-collection counterpart |
-|---|---|---|---|
-| `containment` | What is this part of? | `parent` | [AIP-18](/docs/aip-18) `parent` (top-level) |
-| `applicability` | Who is this *about* / scoped to? | `appliesTo` | a collection-declared field with `type: array` of refs |
-| `ownership` | Who is *doing* this? | `owner` | [AIP-18](/docs/aip-18) `ownership.role` |
-
-**Ownership** is the cleanest case. AIP-18 already declares per-collection
-ownership cardinality and role-field name (`owner` by default,
-overridable to `assignee` or `lead`). AIP-20 does not redefine
-ownership; it declares the workspace-level *policy* (strict, inherit,
-open) and reads the collection's ownership rules at item-validation
-time. A workspace setting `scope.ownership.policy: strict` requires
-every collection's resolved schema to mark `ownership.required: true`;
-a workspace with `policy: inherit` lets collections decide.
-
-**Containment** is the parent/child axis. The item field `parent`
-(borrowed from [AIP-18](/docs/aip-18)'s universal-ish layer) carries
-the containment ref. The workspace narrows it: `allowedKinds:
-[project, task]` means task items may have a parent of kind
-`project` or `task` only — not `initiative`. `maxDepth` caps
-recursion. The host MUST enforce these constraints at item-write
-time.
-
-**Applicability** is the visibility axis. The item field
-(default `appliesTo`) is a list of refs declaring *who the item is
-about*. The workspace's `valueClass` declares the kind of refs the
-list accepts: `company` (refs to AIP-6 companies), `role` (refs to
-AIP-6 roles), `role-and-company` (compound refs), or a custom class
-the host knows how to resolve. Hosts MUST validate every value
-against the declared class.
-
-The three axes are **declared once at the workspace level**, not
-per-collection. This is the AIP-13 inheritance: keeping
-applicability orthogonal to containment orthogonal to ownership
-prevents the conflations that creep into trackers when those concepts
-collapse into a single field. AIP-18's per-collection schemas are
-free to add domain-specific fields on top, but the three axes
-themselves are workspace-uniform.
-
-**Per-item override.** A collection MAY declare its own field name
-for any axis (e.g. a `task` collection that uses `assignee` instead
-of `owner`); when it does, the host reads the collection's field name
-in preference to the workspace default. Per-collection naming is a
-local optimization; the workspace's `valueClass` and
-`policy` still govern.
-
-### Status rollup
-
-Per-collection statuses live on [AIP-18](/docs/aip-18) — every
-`COLLECTION.md` declares its own state machine, transitions, and
-terminal flags. AIP-20 adds a *workspace-level* concept: when a
-parent item's children all terminate, the parent's effective status
-SHOULD reflect that. Rollup is **derived**, not stored — it's
-computed at query time (or, optionally, materialized into a
-`rolledStatus` field on parents).
-
-```yaml
+# Derived parent status (never stored as authoritative).
 statusRollup:
   enabled: true
-  policy:
-    - when: "all-children-terminal"
-      bubbleParentStatus: closed
-    - when: "any-child-blocked"
-      bubbleParentStatus: blocked
-    - when: "any-child-overdue"
-      bubbleParentStatus: at-risk
-  exposeViaField: rolledStatus
+  rules:
+    - { when: all-children-terminal, category: done }
+    - { when: any-child-waiting,     category: waiting }
+
+# Coordination tunables (§4).
+coordination:
+  leaseTtlSeconds: 0                     # 0 = liveness-only leases (default)
+  lockStaleSeconds: 30
+
+# Workspace-wide lints (per-collection lints live on AIP-18).
+lints:
+  - { id: <kebab-id>, kind: orphan | stale | broken-ref | dangling-dependency | custom, severity: error | warn | info, params: {} }
+
+defaults:
+  workflow: <ref>                        # OPTIONAL — AIP-15 routine for this root
+  auditMutations: true                   # default true (§8)
+
+# Saved queries (§9).
+views:
+  - id: active
+    title: In flight
+    filter: { category: [active, waiting] }
+    groupBy: owner
+    layout: board
+
+# Cross-AIP bindings.
+executor: ws://operators/<slug>          # OPTIONAL — AIP-9 default executor
+governance: <path-or-ref>                # OPTIONAL — AIP-7 GOVERNANCE.md for approvals/policy
+knowledge: ws://wikis/<slug>             # OPTIONAL — AIP-10 wiki
+
+metadata: { <vendor>: {} }
+---
 ```
 
-Conditions on `when:` are limited to a small vocabulary the host
-MUST recognize:
+`WORK.md` has **no** `extends:` or `appliesTo:` and no view mode. A
+node has one work manifest; per-consumer lenses are `views:` (saved
+queries), and composition across nodes is AIP-34's job. A host MUST
+refuse a `WORK.md` carrying `extends` or `appliesTo` with
+`work_manifest_invalid`.
 
-| `when` clause | Meaning |
+**Collections.** Entries resolve per [AIP-18](/docs/aip-18)'s resolution
+order (inline → local file → registry). Two entries resolving to the
+same effective name (alias, else `name`) are refused with
+`work_collection_alias_conflict`. An entry whose resolved collection
+does not have `work-item` in its `extends:` chain (or is not
+`work-item` itself) is refused with `work_collection_not_work_item`.
+AIP-18 `extends:` is a relative file path, so a collection reaches
+`work-item` through a local or vendored copy of its `COLLECTION.md`;
+installing a registry collection vendors its `extends:` chain with it.
+
+**Containment.** An item's `parent` MUST name an item in the same work
+root whose collection is listed in `allowedParents[<item collection>]`
+(an empty list means "no parent allowed"; an absent key means "any
+enabled collection"). Depth beyond `maxDepth` is refused. Violations
+are refused at write time with `work_containment_violation`.
+
+**Cross-AIP refs.** `executor`, `governance` and `knowledge` MUST
+resolve inside the node's own tenant; unresolvable refs are refused
+with `work_xref_unresolvable`.
+
+### 3. The `work-item` base collection
+
+`work-item` is a normative [AIP-18](/docs/aip-18) collection
+(`collection.schema/v1`, `name: work-item`) published with this AIP at
+[`resources/aip-20/draft/collections/work-item/COLLECTION.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/collections/work-item/COLLECTION.md).
+Every work collection extends it. A host MUST NOT let a child collection
+remove, retype or relax any field below (AIP-18's drift refusals
+already guarantee this).
+
+#### 3.1 Item frontmatter
+
+```yaml
+---
+schema: collection.item/v1
+collection: task                       # a collection extending work-item
+id: t-01jc8x2k4r                       # unique within the work root (§3.4)
+title: Wire the billing webhook
+status: in-progress                    # a status id of the collection
+rev: 7                                 # §4.1 — coordinator-maintained
+
+owner: session:sess_4117b2b0           # absent = claimable (§3.3 grammar)
+createdBy: host                        # who created it (same grammar)
+sessions: [sess_4117b2b0]              # append-only claim history (AIP-46 ids)
+runs: []                               # append-only linked AIP-58 run ids
+
+parent: initiative/billing-v2          # OPTIONAL containment ref
+blockedBy: [task/t-01jc8wz0aa]         # OPTIONAL dependency refs (§6)
+touches: ["packages/billing/**"]       # OPTIONAL advisory path claims (§4.6)
+
+approvals: []                          # AIP-7 approval-request ids (§7)
+artifacts: []                          # evidence links (§3.2)
+
+verify: { command: pnpm, args: [test] }  # OPTIONAL done gate (§5)
+verification:                          # REQUIRED once status category is done
+  kind: gate
+  policyId: pol_9f2
+  exitCode: 0
+  ts: "2026-10-17T15:02:11Z"
+lastVerifyError: null
+
+closeReason: null                      # e.g. denied (§7), set on failed/cancelled
+releaseReason: null                    # set when a lease was released (§4.4)
+reopenedBy: null                       # set on done -> todo (§3.5)
+note: null                             # last free-text note from owner/manager
+provenance: { prUrl: "https://github.com/..." }   # free-form string map
+
+createdAt: "2026-10-17T14:40:00Z"
+updatedAt: "2026-10-17T15:02:11Z"
+closedAt: "2026-10-17T15:02:11Z"
+---
+
+Longer description in markdown (the ledger's `description`).
+```
+
+| Field | Type | Required | Written by | Meaning |
+|---|---|---|---|---|
+| `status` | status id | yes | protocol | Current status; its **category** (§3.5) drives the protocol. |
+| `rev` | integer ≥ 1 | yes | coordinator only | Revision token, +1 on every applied write (§4.1). |
+| `owner` | principal ref | no | claim / manager | Current owner. **Absent = claimable.** |
+| `createdBy` | principal ref | yes | create | Creator; the creator is a *manager* of the item (§4.5). |
+| `sessions` | string[] | no | claim / reassign | Every session that ever owned the item, append-only. |
+| `runs` | string[] | no | owner / manager | [AIP-58](/docs/aip-58) run ids that executed work for this item, append-only. |
+| `parent` | item ref | no | manager | Containment (§2). |
+| `blockedBy` | item ref[] | no | manager | Dependencies (§6). |
+| `touches` | glob[] | no | manager / owner | Advisory file paths the work will edit (§4.6). |
+| `approvals` | string[] | no | owner / manager / link | AIP-7 approval-request ids gating this item (§7). |
+| `artifacts` | link[] | no | owner / manager | Evidence trail (§3.2). |
+| `verify` | gate spec | no | create / manager | Done gate (§5). |
+| `verification` | object | when done | protocol | How done was reached (§5). Never absent on a done item. |
+| `lastVerifyError` | string | no | protocol | Why the last gated done did not transition. |
+| `closeReason`, `releaseReason`, `reopenedBy`, `note` | string | no | protocol / owner / manager | Typed provenance of system transitions and notes. |
+| `provenance` | map string→string | no | owner / manager | Free-form links (PR URL, worktree path, action id). Advisory; never changes protocol meaning. |
+| `createdAt`, `updatedAt`, `closedAt` | quoted RFC 3339 | `createdAt`, `updatedAt` yes | coordinator | `closedAt` set on entering a terminal category, cleared on reopen. |
+
+The body is the item's description. Fields not listed above are
+collection-specific (AIP-18 flat fields).
+
+#### 3.2 Artifact links
+
+```yaml
+artifacts:
+  - { session: sess_4117b2b0, key: report.md, sha256: "9b1c…" }   # session artifact
+  - { approval: apr_01jc9 }                                        # AIP-7 approval payload
+  - { run: run_01jc9a, key: out/diff.patch }                       # AIP-58 run artifact
+```
+
+The coordinator stores and returns links; it never dereferences them.
+
+#### 3.3 Principal refs
+
+`owner` and `createdBy` use the [AIP-54](/docs/aip-54) compact form
+`<kind>:<body>`, restricted to:
+
+| Ref | Meaning |
 |---|---|
-| `all-children-terminal` | Every direct child's status is terminal (per AIP-18). |
-| `any-child-blocked` | At least one direct child has status id `blocked`. |
-| `any-child-overdue` | At least one direct child has `dueAt` past now and a non-terminal status. |
-| `no-children` | The parent has no children at all. |
-| `custom:<id>` | A host-defined predicate keyed by `id`. |
+| `session:<id>` | A live runtime session ([AIP-46](/docs/aip-46)). Leases on it follow the session's liveness (§4.4). |
+| `operator:<slug>` | A durable [AIP-9](/docs/aip-9) operator persona. |
+| `user:<id>` | A named human. |
+| `user` | A human acting through a host surface without a resolved identity. |
+| `host` | The coordinator's root principal — the human operating the host directly (CLI, root MCP endpoint, HTTP API). |
 
-`bubbleParentStatus:` MUST reference a status id that exists in
-*every* collection eligible to be a parent (i.e. every collection
-declared in `scope.containment.rules.allowedKinds`). The host MUST
-refuse a workspace whose rollup policy bubbles a status id that does
-not exist in some eligible parent collection — surface as
-`work_status_rollup_invalid` (warn; the rollup just degrades to
-no-op for non-conforming parents).
+A session is an execution instance, not an identity: one operator may
+own many sessions over time. Hosts that know the operator behind a
+session MAY record it in `provenance`; the owner stays the session so
+that liveness can be checked.
 
-`exposeViaField:` is an optional materialization hint: when set, the
-host writes the rolled status to the named field on parent items
-during background passes. When unset, the rolled status is
-query-time only and never written to disk.
+#### 3.4 Item ids and refs
 
-Rollup is one-directional: parent ← children. Cross-collection
-rollups respect the resolution order: a child of one collection
-bubbles up to a parent of another collection by following the
-`parent` ref through [AIP-18](/docs/aip-18)'s descendants resolution.
+`id` MUST match `^[a-z0-9][a-z0-9-]{0,63}$` and be unique **within the
+work root** (not only within its collection). Hosts SHOULD generate
+sortable ids (a lowercase ULID with a collection prefix, e.g.
+`t-01jc8x2k4r…`).
 
-### Composition (`extends:` chain)
+An **item ref** is `<collection>/<id>` within the same work root, or
+`ws://workspaces/<node-id>#work/<collection>/<id>` across work roots
+(the AIP-34 `includes` fragment form). `parent` MUST be a local ref;
+`blockedBy` MAY cross work roots when the target node exports its work
+root to the caller's node.
 
-When a host loads a `WORK.md` whose `extends:` is set, it MUST:
+#### 3.5 Status categories and the protocol machine
 
-1. **Walk the parent chain.** Recursively load the parent referenced
-   by `extends:`; that parent's parent if it has one; until a
-   manifest with no `extends:` is reached. Maximum chain depth is
-   eight. Hosts MUST detect cycles by tracking visited absolute
-   paths.
-2. **Treat depth overflow and cycle detection as warnings**, not
-   errors. A view whose chain is malformed MUST still load — the
-   runtime falls back to the local manifest only and surfaces
-   `work_extends_cycle` (or `work_extends_depth_exceeded`) as a
-   warning to the consumer's debug surface.
-3. **Tolerate a missing parent.** If `extends:` points to a path
-   that does not exist, the host emits `work_extends_missing` as a
-   warning and uses the local manifest only.
-4. **Merge bottom-up.** Walk the chain from the workspace root
-   toward the leaf view, merging each manifest into the accumulator
-   using the strategy below.
+[AIP-18](/docs/aip-18) statuses carry a `category`. For work collections
+the category is REQUIRED on every status, and the protocol is defined
+over categories, so a collection may name and add statuses freely while
+every agent still knows what they mean.
 
-**Merge strategy** (child wins on conflicts):
-
-| Field | Strategy | Notes |
+| Category | Terminal | Meaning |
 |---|---|---|
-| `name`, `title`, `description`, `version` | override | Child's identity wins. |
-| `extends` | local-only | Not inherited. |
-| `appliesTo` | local-only | Not inherited. Each child declares its own scope. |
-| `executor`, `governance`, `knowledge`, `agency`, `playbook` | override | Child can rebind. Subject to one-way switches and governance gating. |
-| `collections` | merge-by-effective-name | Child entry with same alias-or-name → child replaces parent's; new effective names appended. |
-| `scope.containment.*` | leaf-field deep-merge | `enabled`, `field`, `rules.*` each override independently. ONE-WAY: `enabled: true` cannot be downgraded by a descendant. |
-| `scope.applicability.*` | leaf-field deep-merge | ONE-WAY: `valueClass` cannot drift across descendants. |
-| `scope.ownership.*` | leaf-field deep-merge | `policy` may narrow (`open` → `inherit` → `strict`); widening triggers a governance check. |
-| `statusRollup.enabled`, `statusRollup.exposeViaField` | override | |
-| `statusRollup.policy` | merge-by-`when` | Child entry with same `when:` clause → child replaces parent's; new clauses appended. |
-| `lints` | merge-by-id | Child lint with same `id` → child replaces parent's. New ids appended. |
-| `lints[].severity` | child wins | Subject to governance: a parent's policy MAY forbid softening below `error`. |
-| `defaults.*` | leaf-field override | `workflow`, `approvalClass`, `auditMutations` each override independently. ONE-WAY: `auditMutations: true` cannot be downgraded. |
-| `display.*` | leaf-field override | |
-| `metadata` | deep-merge | Recursive merge; vendor namespaces accumulate. |
+| `todo` | no | Not being worked. Claimable when `owner` is absent. |
+| `active` | no | Owned and being worked. |
+| `waiting` | no | Owned, paused on something outside the owner (approval, external party). Never released by liveness. |
+| `done` | yes | Completed. `verification` MUST be present. |
+| `failed` | yes | Attempted and failed. |
+| `cancelled` | yes | Abandoned or denied. |
 
-The host MUST expose **both** the merged effective config AND the
-resolution chain (ordered list of absolute paths consumed during
-merge) on its debug surface. Consumers use the merged config; tooling
-uses the chain to explain *why* a field has the value it does.
+A status's AIP-18 `terminal` flag MUST be true exactly when its
+category is `done`, `failed` or `cancelled`. A collection MUST declare exactly one `initialStatus`, and
+its category MUST be `todo`.
 
-#### One-way switches (HARD refusals)
+**Category transitions** (the only legal moves; a collection's
+`transitionsTo` may narrow them, never widen them). `todo → active`
+appears twice on purpose: an unowned item only enters `active` by
+claim; an item pre-assigned at creation is started by its owner with an
+ordinary update.
 
-Three fields are **one-way switches**: once enabled or set at any
-ancestor in the `extends:` chain, descendants MUST NOT relax them.
-Attempting to relax surfaces a HARD refusal — the view does NOT
-degrade to local-only, it fails to load.
-
-| Field | Switch direction | Refusal code |
+| From → to | Who | Verb |
 |---|---|---|
-| `defaults.auditMutations: true` | Once true at any ancestor, child cannot set false. | `work_audit_downgrade` |
-| `scope.containment.enabled: true` | Once true at any ancestor, child cannot set false (would orphan items). | `work_scope_disable` |
-| `scope.applicability.valueClass: <X>` | Once set at any ancestor, child cannot change to a different class (would invalidate existing items). | `work_scope_value_class_drift` |
+| `todo → active` | any caller with write access, item unowned | **claim** only (§4.3) |
+| `todo → active` | owner (pre-assigned) | update |
+| `active → todo` | owner or manager | release (§4.4) or update |
+| `active → waiting` | owner or manager; `approvals` non-empty when entering an approval wait | update / link-approval |
+| `waiting → active` | owner or manager, or system on approval granted | update / system |
+| `active → done` | owner or manager, subject to the verify gate | update (§5) |
+| `active → failed` | owner or manager | update |
+| `todo / active / waiting → cancelled` | manager, or system on approval denied | update / system |
+| `done → todo` | manager only | **reopen**: records `reopenedBy`, clears `closedAt` and `verification` |
+| `failed`, `cancelled` | — | final; no transition out |
 
-These three rules are why a deployed v2 tracker is trustworthy: an
-auditor inspecting any view can verify that the workspace's audit
-trail, containment integrity, and applicability semantics hold
-across every descendant. Without the one-way invariants, a malicious
-or careless view could silently relax the audit trail or invalidate
-existing items by changing the value class. (This pattern mirrors
-[AIP-7](/docs/aip-7)'s governance one-way switches.)
+Within one category a collection MAY declare several statuses (e.g.
+`in-progress` and `in-review` both `active`); moves between them are
+ordinary updates subject to `transitionsTo`.
 
-#### `appliesTo` enforcement
+**Base statuses.** `work-item` declares: `pending` (todo, initial),
+`in-progress` (active), `awaiting-approval` (waiting), `done` (done),
+`failed` (failed), `cancelled` (cancelled). A child collection MAY add
+statuses; it MUST NOT remove these.
 
-`appliesTo` is **not inherited**. A view's bindings are local; the
-parent's bindings do not leak into the child. Cross-field constraint:
-**`appliesTo` present ⇒ `extends` REQUIRED**. A workspace that binds
-to a consumer must extend a parent — a binding without an extension
-is semantically a workspace-root with a consumer claim, which the
-registry-of-views pattern rejects as ill-formed.
+A `blocked` condition is **derived, not a status**: an item in `todo`
+whose `blockedBy` contains a non-terminal item is *blocked* (§6).
+Collections SHOULD NOT add a `blocked` status.
 
-Hosts MUST refuse a view whose `appliesTo` references a non-existent
-consumer with `work_appliesto_unresolvable`. This is a HARD failure,
-not a warning — the same posture [AIP-10](/docs/aip-10) takes for
-its workspace bindings.
+### 4. Coordination protocol
 
-### Cross-AIP composition
+All writes to a work root go through a **coordinator**: a process that
+implements the verbs below over the files. Several coordinators MAY
+serve the same root (for example the daemon and a standalone CLI);
+they coordinate through the lock files of §4.2. Agents and tools MUST
+NOT edit item frontmatter directly while a coordinator serves the root;
+direct edits are handled as external edits (§4.7).
 
-`WORK.md` is the centre of gravity for AIP-family composition. The
-table below lists every cross-AIP ref and the AIP that owns the
-binding's semantics.
+#### 4.1 Revision CAS
 
-| Field | Target AIP | Purpose |
+Every item carries `rev`. Every write verb except `create` and
+`link-approval` takes the `rev` the caller last read. The coordinator
+applies the write only if the supplied `rev` equals the file's current
+`rev`; on success it writes `rev + 1`. On mismatch it MUST answer a
+**conflict** carrying the current item, and MUST NOT modify the file.
+System transitions (§4.4, §5, §7) also increment `rev`.
+
+Every verb answers one of three shapes:
+
+```ts
+type WorkWriteResult =
+  | { ok: true;  item: WorkItem; verifying?: true }   // applied (verifying: §5)
+  | { ok: false; conflict: true;  current: WorkItem } // rebase and retry
+  | { ok: false; conflict: false; code: WorkErrorCode; message: string }
+```
+
+#### 4.2 Atomic write
+
+A coordinator applies a write to `items/<c>/<id>.md` as follows:
+
+1. **Lock.** Create `.work/locks/<c>/<id>.lock` with exclusive-create
+   semantics (`O_CREAT|O_EXCL`), containing `{host, pid, acquiredAt}`.
+   If it exists, retry with backoff; a lock older than
+   `coordination.lockStaleSeconds` MAY be broken (delete, then retry
+   exclusive-create). A coordinator that is the only writer of a root
+   MAY use an in-process mutex instead, but MUST still honour foreign
+   lock files.
+2. **Read and check.** Read the current file, verify `rev` (§4.1),
+   validate the transition (§3.5), the caller's rights (§4.5) and the
+   resulting item against the collection's resolved schema (AIP-18).
+3. **Write.** Write the full new file to
+   `<id>.md.tmp-<host>-<pid>` in the same directory, flush it to stable
+   storage, then rename it over `<id>.md`. Hosts SHOULD also flush the
+   directory.
+4. **Audit.** Append the audit event (§8) before releasing the lock.
+5. **Unlock.** Delete the lock file.
+
+`create` takes the lock on the new id and fails with `work_id_taken`
+if `<id>.md` exists. Readers never take locks: rename atomicity
+guarantees a reader sees either the old or the new file.
+
+Shared indexes (one file listing many items) MUST NOT be a source of
+truth. A coordinator MAY keep an in-memory or cached index, rebuilt
+from the item files at start and kept current by its own writes and a
+file watcher.
+
+#### 4.3 Claim
+
+`claim(itemRef, rev)` succeeds only if **`owner` is absent and `rev`
+matches** — either failure is a conflict carrying the current item, so
+two racing claimants can never both succeed. The item MUST be in a
+`todo` status (else `work_not_claimable`). On success the coordinator
+sets `owner` to the caller, moves the item to the collection's first
+`active` status (`in-progress` for the base), appends the caller's
+session id to `sessions` (session callers only) and writes the lease
+(§4.4).
+
+Pre-assignment is not a claim: `create` or a manager update MAY set
+`owner` on a `todo` item; the item stays `todo` until its owner moves
+it to `active`. Moving an unowned item to `active` by update is refused
+with `work_unowned_start`.
+
+#### 4.4 Lease and liveness
+
+A claim by a `session:` owner creates a **lease**,
+`.work/leases/<c>/<id>.json`:
+
+```json
+{ "item": "task/t-01jc8x2k4r", "owner": "session:sess_4117b2b0",
+  "host": "studio-mac", "claimedAt": "…", "renewedAt": "…", "ttlSeconds": 0 }
+```
+
+Leases are coordinator state, not item content: they are not committed
+and their renewals never touch the item file.
+
+- The **issuing host** MUST release the item when the owning session
+  exits, and at start-up for every lease whose session did not survive.
+- **Release** = clear `owner`, move an `active` item back to the
+  collection's initial `todo` status, set `releaseReason` (e.g.
+  `owner-exited`, `host-restart`), delete the lease, bump `rev`, audit.
+- An item in a `waiting` category is **never released by liveness**:
+  a human decision may be outstanding.
+- When `ttlSeconds > 0` (from `coordination.leaseTtlSeconds`), the
+  owner's host renews `renewedAt`; any coordinator MAY release a lease
+  not renewed for `ttlSeconds`. With `ttlSeconds: 0` (the default) only
+  the issuing host releases, on observed session death.
+- Owners `operator:`, `user`, `user:` and `host` have no lease and are
+  never released automatically.
+
+Liveness release never fails an item: an item is intent, not a run; its
+work may be resumed by another claimant.
+
+#### 4.5 Rights
+
+Two roles, no per-field matrix:
+
+- **Owner** — the principal in `owner` (`host` and `user` callers act
+  as owner of items owned by `host` or `user`). The owner MAY change
+  `status` within the category machine, release itself, set `note`,
+  `approvals`, `artifacts`, `runs`, `touches`, `provenance`.
+- **Manager** — the item's `createdBy`, or the `host` principal, or any
+  principal the bound [AIP-7](/docs/aip-7) governance grants
+  `work.manage` on the root. A manager MAY additionally edit `title`,
+  body, `blockedBy`, `parent`, `verify`, reassign or clear `owner`,
+  cancel and reopen.
+
+Anyone with write access to the root MAY `create` and `claim`. A write
+by neither owner nor manager is refused with `work_forbidden`. System
+transitions (liveness release, approval decided, verify settled) are
+not subject to rights; they are attributed to `host` in the audit.
+
+#### 4.6 Path claims (`touches`)
+
+`touches` lists globs relative to the node's root that the work will
+edit. It is **advisory**: at claim, a coordinator SHOULD warn the
+claimant (`work_touches_overlap`, a warning in the applied result) when
+the globs overlap those of another `active` or `waiting` item in the
+same root. It never refuses a claim and never locks files.
+
+#### 4.7 External edits
+
+A coordinator records the content hash of every file it writes. A file
+whose hash differs from the last one written (a human edit, a git pull,
+another tool) is an **external edit**:
+
+- If the file still validates and its `rev` is greater than or equal to
+  the last known `rev`, the coordinator adopts it, writes `rev =
+  max(known, file) + 1` and appends an `work.item.external-edit` audit
+  event.
+- If it does not validate, the coordinator MUST NOT load it as an item:
+  it surfaces `work_item_invalid` and keeps serving the last valid
+  version read-only until the file is fixed.
+
+#### 4.8 Git
+
+The files are designed to be committed. Rules that keep one truth:
+
+- A work root MUST be read and written in **one authoritative
+  checkout**. Agents working in per-task git worktrees or branches MUST
+  reach the board through the coordinator, never through their own
+  copy of the item files — otherwise each branch holds its own board.
+- `.work/` MUST be excluded from version control.
+- Coordinators SHOULD batch commits of item and audit files rather than
+  commit per write.
+- On a merge conflict in an item file, the version with the higher
+  `rev` wins; equal `rev` with different content is surfaced as
+  `work_merge_conflict` for a manager to resolve.
+
+#### 4.9 Verbs
+
+| Verb | Input | Notes |
 |---|---|---|
-| `executor` | [AIP-9](/docs/aip-9) operator | Default executor for items in this workspace — the operator the host activates when an item with no explicit assignee surfaces. |
-| `governance` | [AIP-7](/docs/aip-7) policy / audit | Status-transition approvals, owner-change audits, scope-widening interventions flow through this binding. Workspace-root manifests usually set this; views may override only if the parent's policy permits. |
-| `knowledge` | [AIP-10](/docs/aip-10) `KNOWLEDGE.md` | Wiki this workspace refers to. Lets cross-references on items resolve against the bound wiki by default. |
-| `agency` | [AIP-8](/docs/aip-8) agency | Binds the workspace to an autonomous-agency context for client-billable engagements, time-tracking, and contractual approval. |
-| `playbook` | [AIP-12](/docs/aip-12) playbook | Active playbook governing routine plays this workspace runs. |
-| `defaults.workflow` | [AIP-15](/docs/aip-15) `WORKFLOW.md` | Default routine workflow that runs against work items in this workspace (e.g. nightly stale-task sweep). |
-| `collections[].ref` / `collections[].inline` | [AIP-18](/docs/aip-18) `COLLECTION.md` | Per-item-kind schema. EVERY item-schema concern is delegated here. |
-| `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-6](/docs/aip-6) company, [AIP-9](/docs/aip-9) operator | View binding. |
-| `extends` | another `WORK.md` | Composition. |
+| `create` | collection, title, body?, owner?, parent?, blockedBy?, verify?, touches?, provenance? | Status = collection `initialStatus`; `createdBy` = caller; `rev: 1`. |
+| `get` | item ref | |
+| `list` | filter: collection?, status?, category?, owner?, parent?, includeClosed? (default false) | Terminal items excluded unless asked. |
+| `claim` | item ref, rev | §4.3. |
+| `update` | item ref, rev, and any of: status, title, body, owner (string = reassign, null = release), blockedBy, parent, approvals, artifacts, runs, touches, note, provenance, evidence | Release cannot be combined with a status change. `evidence` is only valid with a move to `done` (§5). |
+| `link-approval` | item ref, approval id | §7. No `rev` (idempotent). |
 
-A host MUST verify that every cross-AIP ref it loads resolves —
-unresolvable refs surface as `work_xref_unresolvable` (HARD for
-`executor`/`governance`/`knowledge`/`agency`/`playbook`; mirrors the
-[AIP-10](/docs/aip-10) posture).
+Error codes: `work_not_found`, `work_forbidden`, `work_invalid_transition`,
+`work_not_claimable`, `work_unowned_start`, `work_approval_required`,
+`work_verify_in_flight`, `work_evidence_not_passed`, `work_id_taken`,
+`work_containment_violation`, `work_item_invalid`, `work_merge_conflict`.
 
-### Body conventions
+Hosts expose these verbs over their own transports (the reference host:
+MCP `task_create` / `task_claim` / `task_update` / `task_list`, and
+HTTP `/tasks`).
 
-The frontmatter ends; the body is markdown. Conventional sections:
+### 5. Verification (done integrity)
 
-- `## Purpose` — what this workspace tracks and who uses it.
-- `## Conventions` — when an item belongs in collection A vs
-  collection B; which scope axes apply.
-- `## What this workspace does NOT track` — set boundaries
-  explicitly. Helps reviewers reject mis-filed items.
-- `## When to extend vs replace` — composition guidance for downstream
-  view authors.
-- `## Examples` — short snippets of typical items.
+Two tiers, chosen per item:
 
-The body is free-form. The contract lives in the frontmatter.
+- **Tier 0 — no `verify`.** A move to a `done` status is applied
+  immediately and stamped `verification: {kind: self-report, by, ts}`
+  (or `{kind: human, ts}` when the caller is `user`/`host`). Visible as
+  self-reported, never silently casual.
+- **Tier 1 — `verify` declared.** A move to `done` is **accepted but
+  not applied**: the answer is `{ok: true, verifying: true}`, the item
+  stays `active`, and the coordinator runs the gate in the background.
+  Pass → `done` with
+  `verification: {kind: gate, policyId?, exitCode?, ts}`,
+  `lastVerifyError` cleared. Fail → item stays `active`,
+  `lastVerifyError` set. Both outcomes bump `rev` and are audited.
+  A second done while a gate runs is refused with
+  `work_verify_in_flight`. An outcome that arrives after the item left
+  `active` (released, cancelled) is discarded.
+- **Evidence shortcut.** `update {status: done, evidence: {policyId}}`
+  applies `done` immediately if the host can independently confirm
+  that policy passed; otherwise `work_evidence_not_passed`.
 
-## Workspace root manifest (WORK.md)
+`verify` is a host gate spec (the reference host accepts its
+completion-policy gate: `{command, args?, cwd?, timeoutMs?}` or a judge
+gate). A host that cannot run a declared gate MUST fail it, never pass
+it. A coordinator MUST NOT launder a failed gate into `done`, and MUST
+NOT infer done from a session's turn ending.
 
-Per the convention codified in [AIP-2](/docs/aip-2), every Workspace
-AIP MUST define a root manifest doctype. AIP-20's root manifest is
-the same `work.workspace/v2` doctype used in two modes:
+### 6. Dependencies
 
-- **Workspace-root mode** — `<work-root>/WORK.md`, no `extends:`.
-  Declares the BASE shape: enabled collections, scope axes, status
-  rollups, lints, defaults. Lives at the root of the work tree.
-- **View mode** — `<consumer>/WORK.md`, `extends:` set. Adapts the
-  base for a specific operator/company/skill — narrows the visible
-  collections, adds a workspace-level lint, rebinds governance for
-  that context.
+`blockedBy` lists item refs that must reach a terminal category before
+this item should start. It is **informational for the state machine**:
+it never refuses a transition. Hosts MUST expose the derived condition
+`blocked` (a `todo` item with a non-terminal `blockedBy` target) in
+`get`/`list` results, and SHOULD prefer unblocked items when
+recommending what to claim. The lint `dangling-dependency` flags refs
+that do not resolve. Cycles in `blockedBy` are reported by lint, not
+refused.
 
-The same schema validates both modes; the host distinguishes by
-checking whether `extends:` is set. The same merge algorithm applies
-recursively. The same authoring skill
-([`./resources/aip-20/draft/skills/author-work-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/skills/author-work-workspace/SKILL.md))
-walks an agent through both flows.
+### 7. Approvals
 
-| Aspect | Workspace-root mode | View mode |
-|---|---|---|
-| File path | `<work-root>/WORK.md` | `<consumer>/WORK.md` |
-| `extends:` | absent | required |
-| `appliesTo:` | absent | OPTIONAL but conventional |
-| Effective shape | the manifest as written | merge of the chain, child wins |
-| Mutability | edits gated by `governance` | local edits adapt the lens, do not affect the workspace |
-| Use cases | tracker authors, schema designers | operator/company/skill teams who want their own lens |
-| Validation | full schema check | schema check + chain validation + one-way-switch check |
-| Lifecycle | versioned with the tracker | versioned with the consumer |
+Approvals are [AIP-7](/docs/aip-7) `approval-request` records; AIP-20
+only links them.
 
-## Runtime binding: work items ↔ a task ledger
+- When an owner needs a human decision, it creates an AIP-7 approval
+  request with `taskId` set to the item ref, then calls
+  `link-approval(item, approvalId)`: the id is appended to `approvals`
+  (idempotent) and an `active` item moves to the collection's
+  approval-wait status (`awaiting-approval`). Only the owner or a
+  manager may link, and only on an `active` or `waiting` item.
+- Entering a `waiting` status by update with empty `approvals` is
+  refused with `work_approval_required` when the target status is the
+  approval-wait status.
+- On the AIP-7 decision, the coordinator applies a **system
+  transition** to every `waiting` item listing that approval:
+  `approved` → back to `in-progress`; `denied` → `cancelled` with
+  `closeReason: denied`. An item that already left `waiting` is not
+  touched. `expired` triggers no transition; it surfaces on the item.
+- The owner or a manager MAY leave the wait manually
+  (`waiting → active`) or cancel.
 
-Everything above assumes a filesystem-first workspace: items are
-`ITEM.md` files, concurrency is git's problem, and `WORK.md` is a file
-a host parses off disk. Some hosts back a workspace with a live
-runtime store instead — an in-memory or journalled ledger with
-optimistic-concurrency writes, addressed through an API rather than a
-file path, with no `ITEM.md` tree and no `_index/` to regenerate. This
-section specifies how such a **runtime-backed workspace** conforms to
-`agentwork/v2`. The reference implementation is agentproto's daemon
-Task ledger (`task-ledger.ts`): a `TaskRecord` store keyed by
-`taskId`, with a `boardId` grouping/visibility scope, a nullable
-`owner` (a session id, `"human"`, or `"operator"`), an append-only
-`sessions[]` claim history, an informational `blockedBy[]`, an
-optional `verify` gate and a `verification` record of how `done` was
-reached, and a `rev` CAS token on every write.
+Whether a transition *requires* an approval is a governance decision:
+the bound `GOVERNANCE.md` policies (AIP-7 `defaultApproval`, `policy:`
+refs) decide; AIP-20 carries no approval-class field of its own.
 
-### Conformance profile
+### 8. Audit and history
 
-A **runtime-backed workspace** is a `work.workspace/v2` deployment
-whose items live in a runtime store rather than as `ITEM.md` files
-under [AIP-18](/docs/aip-18) collections. The following are REQUIRED
-for conformance:
+With `defaults.auditMutations: true` (the default), every applied
+write and every system transition appends one AIP-7 `audit-event` to
+`<work root>/audit/audit-log.jsonl` (the root is the AIP-7 scope), in
+the same lock as the item write (§4.2). Event fields:
 
-1. The runtime MUST expose, per item, the [AIP-18](/docs/aip-18)
-   universal-core semantics — a stable id, a title, and single-collection
-   membership (an item belongs to exactly one collection-equivalent
-   type, even if the runtime implements only one implicit collection).
-2. The runtime MUST implement a status machine with an explicitly
-   enumerated status set and a well-defined terminal subset, and MUST
-   validate every transition against it (mirroring [AIP-18](/docs/aip-18)'s
-   status state machine and this AIP's transition-validation posture).
-3. The runtime MUST expose containment and ownership as independently
-   queryable dimensions — the reference ledger already does, via
-   `boardId` and `owner` respectively. The runtime SHOULD additionally
-   expose applicability as a dimension separable from containment, per
-   the decomposition in "The three axes" below; the reference ledger
-   does not separate the two today.
-4. The runtime MUST provide a concurrency-safe write path, per
-   "Concurrency" below.
+- `action`: `work.item.created`, `.claimed`, `.status` (any applied
+  write that changes `status`, including system transitions),
+  `.updated` (an update that changes other fields only), `.released`,
+  `.reopened`, `.approval-linked`, `.verify-passed`, `.verify-failed`,
+  `.external-edit` — exactly one action per applied write;
+- `actor`: the caller's principal ref (`host` for system transitions);
+- `entity`: the item ref;
+- `input`: `{ fromRev, toRev, changes }` where `changes` lists changed
+  field names with old and new values for `status`, `owner` and
+  `parent`.
 
-The following are OPTIONAL:
+An item's **history** is the audit log filtered by `entity`; `sessions`
+and `runs` are its denormalised claim and execution edges. Setting
+`auditMutations: false` is allowed only for scratch roots.
 
-- A literal `WORK.md` / `COLLECTION.md` / `ITEM.md` file tree. A
-  runtime-backed workspace MAY declare its shape (enabled collections,
-  scope-axis config, status rollup policy) in whatever host-native
-  form it already uses for configuration; it is not required to
-  materialize that shape as on-disk markdown to conform. Likewise
-  `_index/work.json`-style caches are moot — the runtime store IS the
-  index.
-- Multiple collections. A runtime MAY implement a single implicit
-  collection (as the reference ledger does — every `TaskRecord` is the
-  same shape) and still conform, provided the single-collection
-  membership rule in point 1 holds.
-- The verification extension (below).
+### 9. Views
 
-### Status mapping
+`views:` are saved queries over the root, not manifests:
 
-`work`'s status vocabulary (`open | claimed | in-progress | blocked |
-done | archived`, from [AIP-13](/docs/aip-13)) and the reference
-ledger's `TaskStatus` (`pending | in_progress | done | failed |
-cancelled`) overlap on exactly one value verbatim (`done`) and one
-more by rename (`in-progress` / `in_progress`). A runtime-backed
-workspace exposing a `work`-shaped view MUST translate at the boundary
-using the following tables, and MUST NOT expose both spellings of the
-same state as if they were distinct values.
+```yaml
+views:
+  - id: <kebab-id>
+    title: <label>
+    filter: { collection?, status?, category?, owner?, parent?, blocked?, includeClosed? }
+    groupBy: category | status | owner | parent | collection
+    layout: list | board | tree | timeline
+```
 
-**`work` → ledger:**
+The first view is the default. A consumer (an operator, a dashboard)
+selects a view by id; it cannot change the root's schema or protocol.
 
-| `work` status | Ledger `TaskStatus` | Notes |
-|---|---|---|
-| `open` | `pending` | Direct correspondence — unclaimed, available to claim. |
-| `claimed` | `in_progress` | The ledger has no intermediate "claimed but not started" state — `claim()` sets `status: in_progress` in the same write that assigns `owner`. A runtime MUST NOT synthesize a `claimed` state that does not correspond to a real, independently-observable ledger state. |
-| `in-progress` | `in_progress` | Same state; hyphen vs underscore is a lexical difference the translation boundary MUST normalize. |
-| `blocked` | — (none) | The ledger has no `blocked` status. See the note on `blockedBy` below. |
-| `done` | `done` | Direct correspondence. |
-| `archived` | — (none) | The ledger has no post-terminal archival tier distinct from `done` / `failed` / `cancelled`. |
+### 10. Status rollup
 
-**Ledger → `work`:**
+Rollup is **derived** at read time and never stored as the parent's
+authoritative `status`. Rules map a condition over a parent's direct
+children to a *category* exposed as `rolledCategory` on read:
 
-| Ledger `TaskStatus` | `work` status | Notes |
-|---|---|---|
-| `pending` | `open` | |
-| `in_progress` | `in-progress` | A `work`-shaped consumer that also wants to distinguish "claimed, not yet started" from "actively being worked" gets no help from the ledger — both collapse to `in_progress`. |
-| `done` | `done` | |
-| `failed` | — (none) | No `work` counterpart. A runtime SHOULD represent this as `done` plus a queryable failure marker (`meta`, a label, or a workspace-level status-list extension via AIP-20's `statuses[]` merge), rather than silently coercing `failed` into `done` with no trace. |
-| `cancelled` | — (none) | No `work` counterpart. Same guidance as `failed`. |
+| `when` | Condition |
+|---|---|
+| `all-children-terminal` | every child is in a terminal category |
+| `any-child-waiting` | at least one child is `waiting` |
+| `any-child-blocked` | at least one child is derived-blocked (§6) |
+| `any-child-overdue` | a child has a past `dueAt` and a non-terminal category |
+| `no-children` | no children |
 
-**Rule for values with no counterpart.** A runtime-backed workspace
-MUST NOT drop information crossing either direction: `failed` and
-`cancelled` MUST remain distinguishable from `done` somewhere
-queryable even when surfaced through a `work`-shaped view, and a
-`work` item's `blocked` or `archived` state MUST remain distinguishable
-even when surfaced through a ledger-shaped view. Silent collapse
-(mapping `failed` straight to `done` with nothing to tell them apart)
-is non-conforming.
-
-**Adopting `blocked` resolves a real ambiguity.** The ledger's
-`blockedBy[]` is informational only — no scheduler reads it, and it
-does not gate the status machine. A task that is genuinely blocked on
-something and a task that is simply unclaimed both read as `pending`;
-the only way to tell them apart is to separately inspect `blockedBy`.
-`work`'s first-class `blocked` status names the distinction the ledger
-currently leaves as a side channel. A runtime adopting the mapping
-above SHOULD promote `blockedBy`-non-empty `pending` items to a real
-`blocked` status in its `work`-shaped view rather than leaving the
-caller to reconstruct the distinction by hand.
-
-### The three axes
-
-[AIP-13](/docs/aip-13) §"Scope semantics (normative)" holds
-containment (`parent`), applicability (`scope`), and ownership
-(`assignee` / `lead`) as three orthogonal axes and states that their
-null states MUST NOT be conflated — that conflation is exactly the bug
-AIP-13's Motivation names in existing trackers. The reference ledger
-has a single flat `boardId` (`tree:<rootSessionId>`, derived by
-walking session lineage to its depth-0 root; `ws:<slug>` for an
-operator caller; or a spawn-stamped `meta.boardId` override) that does
-double duty as **both** the containment grouping (which tasks belong
-to the same coordinating unit) **and** the visibility boundary (a
-session caller may reach any board within its own lineage but never a
-sibling lineage's). That is precisely the single-field conflation
-AIP-13 and AIP-20 (see "Scope axes" above) exist to avoid.
-
-A runtime-backed workspace SHOULD decompose this into two separately
-addressable fields at its API boundary, even if the underlying store
-still keeps one physical value. This is a SHOULD, not a MUST: the only
-reference implementation does not do it today, and no second runtime
-has validated the split against a differently-shaped grouping model.
-
-- **`parent` (containment).** Identifies the unit of work the item
-  belongs to. For a lineage-scoped runtime, the natural value is the
-  same grouping the runtime already computes (e.g. `tree:<rootId>`).
-- **`scope` (applicability).** Governs *visibility* independently of
-  containment. Where a runtime implements this split, its DEFAULT MUST
-  inherit from the item's `parent` — an item contained in tree X is by
-  default visible only within tree X — which reproduces the ledger's
-  current access behavior exactly and satisfies AIP-13's inheritance
-  rule. A runtime MAY allow `scope` to be set independently of `parent`
-  (narrowed to a single operator within the tree, or widened to a
-  whole company); the point of splitting the fields is that this
-  becomes *possible* without redesigning the grouping primitive
-  itself.
-
-This is a RECOMMENDED decomposition for `agentwork/v2`, not a
-description of `task-ledger.ts` as it stands today — the reference
-ledger's `boardId` remains a single field. It is the minimal
-decomposition: default-inherit keeps existing callers' visibility
-unchanged while making applicability independently settable for a
-runtime that chooses to adopt it.
-
-### Ownership
-
-Ownership is the axis with the cleanest match: the ledger's `owner`
-field lines up directly with AIP-20's `owner` axis field (see "Scope
-axes" above) — same name, same job. The one gap is vocabulary:
-[AIP-13](/docs/aip-13)'s `assignee.kind` is `operator | user`, but the
-ledger's `owner` may hold a bare session id — a runtime execution
-instance, not a durable [AIP-9](/docs/aip-9) operator identity or a
-human user.
-
-Mapping a session id onto `kind: operator` would conflate two
-different lifetimes: an AIP-9 operator is a durable, named persona; a
-session is an ephemeral runtime instance, and a single operator may
-have many sessions (sequential or concurrent) claiming work over its
-lifetime. Collapsing them loses exactly the distinction the rest of
-this section exists to preserve.
-
-**Recommendation.** A runtime-backed workspace SHOULD extend the
-ownership-kind vocabulary with a third value, `session`, whose `ref`
-is a runtime session id: `kind: operator | user | session`. Resolving
-a `session`-kind owner to a durable operator identity, if the host
-tracks one, is a host mapping concern and out of scope for this AIP.
-This extension is additive — a host that never surfaces runtime
-sessions through its `work`-shaped view has no need to add the third
-kind.
-
-### Verification (OPTIONAL extension)
-
-Neither [AIP-13](/docs/aip-13) nor the base of this AIP specifies how
-a `done` transition is substantiated — a `work` item's `status: done`
-in the file-first model is exactly as trustworthy as whoever last
-edited the frontmatter. The reference ledger's two-tier done-integrity
-model has no counterpart in either spec and is genuine prior art worth
-naming as an OPTIONAL conformance extension for runtime-backed
-workspaces:
-
-- **Tier 0 — self-report.** No gate declared for the item; a `done`
-  report is accepted immediately and MUST be stamped with how it was
-  reached (`verification: {kind: "self-report" | "human", ...}`) —
-  visibly, not silently, casual.
-- **Tier 1 — gated.** A gate is declared on the item up front. A
-  `done` report against a gated item MUST NOT transition immediately;
-  the runtime runs the declared gate (synchronously or in the
-  background) and transitions to `done` only on a passing result,
-  recording `verification: {kind: "gate", policyId?}`. A failing gate
-  MUST leave the item in its prior non-terminal status and MUST record
-  the failure (e.g. a `lastVerifyError`-equivalent field) rather than
-  discarding it.
-
-A runtime implementing this extension MUST:
-
-1. Record `verification` on every `done` item — never leave it absent
-   — so a reader can distinguish an asserted done from a verified one.
-2. Refuse or defer a `done` write against a Tier-1 item unless it is
-   backed by either a fresh gate run or an evidence shortcut naming an
-   already-passed, independently-checkable gate result.
-3. Never launder a failed gate into `done` — a red result MUST surface
-   to the caller, not silently retry into acceptance.
-
-A runtime MAY skip this extension entirely and treat every `done` as
-Tier 0 — that is exactly the base `work.workspace` posture today, and
-remains fully conforming.
-
-### `statusRollup` alignment
-
-This AIP's "Status rollup" section (above) already specifies rollup as
-DERIVED, never stored as authoritative, with `when:` clauses including
-`any-child-blocked → blocked`. A runtime's live-activity projection —
-a query-time view recomputed on every read — satisfies this
-requirement naturally: there is no on-disk `rolledStatus` field that
-can drift out of sync, because nothing persists it by default. A
-conforming runtime-backed workspace:
-
-- MUST compute rollup at query/projection time, matching this AIP's
-  default (`exposeViaField` unset).
-- MUST NOT persist a rolled/aggregated status as an item's own
-  authoritative `status`.
-- MAY materialize a rollup into a projection field for read
-  performance, subject to the same staleness caveat this AIP attaches
-  to `exposeViaField`.
-
-### Concurrency (REQUIRED for runtime-backed workspaces)
-
-The file-first model's concurrency story is git: two writers racing on
-the same `ITEM.md` produce a merge conflict a human resolves, or a
-last-write-wins clobber if neither locks first. That story does not
-extend to a runtime store — there is no working tree, no diff, no
-merge tool standing between two concurrent callers.
-
-A runtime-backed workspace MUST implement optimistic concurrency
-control on every write: each item MUST carry a monotonically
-increasing revision token (`rev` in the reference implementation), and
-every write (claim, status transition, field edit) MUST supply the
-revision it last read. A write whose supplied revision does not match
-the item's current revision MUST fail with a conflict response — never
-a silent overwrite — and that response MUST include the current
-record so the caller can rebase.
-
-This is REQUIRED, not OPTIONAL, because the failure mode without it is
-silent: two callers racing to claim the same item without CAS can both
-believe they succeeded, and the resulting double-claim is invisible
-until the two owners' work collides. Filesystem-first workspaces get
-this guarantee for free from git; a runtime-backed workspace MUST
-implement it explicitly.
-
-### Open questions
-
-- Whether `failed` and `cancelled` should become normative additions
-  to the base `work` status vocabulary ([AIP-13](/docs/aip-13) /
-  AIP-20), or remain a runtime-local extension applied through this
-  AIP's `statuses[]` merge mechanism, is undecided.
-- Whether the third ownership kind proposed above (`session`) belongs
-  in the base spec or should stay a runtime-backed-workspace-only
-  extension is undecided.
-- Whether the `parent` / `scope` decomposition should be RAISED from
-  SHOULD to MUST once a second runtime implementation validates it
-  against a differently-shaped grouping model is open — this section
-  currently recommends rather than requires the split precisely
-  because that validation doesn't exist yet.
+Rules are evaluated in order; the first match wins.
 
 ## Rationale
 
-**Why split workspace concerns from item-schema concerns.**
-[AIP-13](/docs/aip-13) collapsed both layers into one AIP. The
-workspace AIP owned both "what kinds exist" and "what a single kind
-looks like", and the cost showed up the moment a fourth kind
-appeared. AIP-18 carved out the item-schema layer; AIP-20 keeps only
-the workspace layer. This is the same separation
-[AIP-2](/docs/aip-2) codifies as the registry-of-views pattern:
-*one file, one identity, one importable unit*. A workspace is its
-shape; a collection is a shape; an item is an instance. Three
-distinct layers, three distinct AIPs, one composition mechanic.
+**Why files as the truth, with a coordinator.** Files give agents and
+humans one readable, diffable, committable record. Files alone do not
+give mutual exclusion; the coordinator supplies it with the two
+mechanisms that survive every filesystem the hosts run on: exclusive
+lock-file creation and atomic rename. The `rev` in the frontmatter
+makes the CAS visible in the record itself, so any coordinator — not
+only the one that issued the last write — can check it.
 
-**Why keep three-axes scope at the workspace level.** The three
-orthogonal axes — containment, applicability, ownership — could in
-principle be pushed into per-collection schemas. The reason they
-stay at the workspace level is *cross-collection consistency*. A
-project containing tasks (containment), a task scoped to the eng
-role (applicability), and a task assigned to alice (ownership) are
-the same three concepts whether the parent kind is `project`, `okr`,
-or `epic`. Pushing the axes into per-collection schemas would force
-every collection to redeclare them, and would let two collections in
-the same workspace disagree about whether `appliesTo` accepts roles
-or operators. Keeping the axes at the workspace level enforces
-uniformity across the whole tracker — the AIP-13 distinctive insight,
-preserved.
+**Why leases outside the item.** A lease changes on every heartbeat and
+on every host restart; putting it in frontmatter would make every
+liveness tick a git diff and a merge conflict. The item records durable
+intent (`owner`); the lease records who vouches that the owner is
+alive.
 
-**Why allow inline + ref + aliased collection declarations.** Three
-forms cover three real authoring postures. *Inline* is for small
-single-tenant trackers where the collection schema is private and
-co-located. *File ref* is for shared-on-disk collections where peer
-workspaces import the same `COLLECTION.md` (the cross-team
-publishing case). *Registry import* (`ws://collections/...`) is for
-third-party collections installed via `agentproto install`.
-*Aliasing* is the escape hatch for ref-name conflicts and
-workspace-local renaming. The host's three-step resolution order
-(inline → local file → registry) means authors can prototype inline,
-graduate to file ref when sharing emerges, and only reach for
-registry import when third-party collections enter the picture. No
-mode is mandatory; all three are first-class.
+**Why categories rather than fixed statuses.** The protocol needs to
+know "claimable", "in flight", "parked" and "closed"; teams want their
+own names. Categories give both, and rollups and agents read the
+category, not a literal id.
 
-**Why one-way switches on auditMutations + scope axis flags.** A
-view can adapt almost everything in a workspace (lints, query hints,
-collection visibility), but three things must not be adaptable:
-audit-trail enablement, containment-axis enablement, and
-applicability value class. Each one breaks an invariant a deployed
-tracker relies on. Audit downgrade silently disables the audit log
-for one consumer's view — the auditor cannot trust any tracker that
-allows it. Containment disable orphans existing items whose `parent`
-fields point at consumers in this workspace. Applicability value
-class drift invalidates every item whose `appliesTo` was written
-against the parent's value class. Hard refusal on these three is
-what makes the registry of views trustworthy: a third party
-inspecting the chain can verify the invariants hold without reading
-every leaf. (This mirrors [AIP-7](/docs/aip-7)'s
-`auditRequired` one-way switch posture verbatim.)
+**Why `blockedBy` does not gate.** The ledger shipped it informational
+and that has been enough; a gating dependency machine needs a
+scheduler and a deadlock story. The derived `blocked` condition gives
+agents the signal without the machine.
 
-**Why this pattern mirrors AIP-10/AIP-7.** The agentproto family
-converges on a shared mechanic: one `<NAMESPACE>.md` doctype, two
-modes (workspace root / view), `extends:` for composition,
-`appliesTo:` for binding, merge-by-id for arrays of objects,
-hard-refusal on bindings to non-existent consumers, soft-warning on
-malformed chains. AIP-10 codified it for wikis, AIP-7 for governance,
-AIP-13 for the v1 tracker. AIP-20 keeps the same convergent shape.
-A host implementing one Workspace AIP gets the others structurally
-for free — same loader, same merge algorithm, same effective-config
-exposure surface. The cost of inventing a per-AIP composition
-mechanic would have been shipping three subtly different loaders;
-the cost of converging is one paragraph of "see AIP-10 for the merge
-strategy" per AIP. The convergence is deliberate.
+**Why no view mode.** `extends:`/`appliesTo:` on WORK.md duplicated
+AIP-34's tree composition and AIP-18's collection composition — three
+merge mechanisms for one board — and allowed a malformed chain to fall
+back to local-only, silently dropping inherited guarantees. One
+manifest per node plus saved queries covers the use cases.
 
-**Why AIP-13 stays Draft, not Superseded, for now.** AIP-13 ships
-working code (the v1 reference implementation) and live workspaces
-in the field. Moving it to Superseded the moment AIP-20 ships would
-strand those deployments. The deprecation path is conservative:
-AIP-13 stays Draft, AIP-20 ships with `replaces: 13` set, the
-starter library makes the migration mechanically simple, and AIP-13
-moves to Superseded only after AIP-20 reaches Final. Until then,
-both AIPs are loadable; hosts MAY support either. The deprecation
-banner on AIP-13 documents the transition for any author landing
-there from a search.
-
-**Why a starter library, not a normative type list.** Shipping
-`project`/`initiative`/`task` as REQUIRED collections would
-re-introduce AIP-13's mistake (workspace concerns and item-schema
-concerns coupled at the AIP level). Shipping them as a STARTER LIBRARY
-keeps the migration concrete (existing v1 workspaces have a clear
-on-disk path) without making the type list normative. A team
-building a v2 workspace from scratch picks zero, one, two, or three
-of the starter collections, and adds whatever fourth kind their
-domain needs — without forking an AIP.
+**Why no compatibility layer.** The family has no external
+`agentwork/v1` deployments to protect. AIP-13 is Superseded without a
+loader promise; keeping a v1 starter library would keep a second shape
+alive for no user.
 
 ## Reference Implementation
 
-Reference implementation in progress. The spec leads the
-implementation; once the in-flight `packages/work/v2` package lands,
-this AIP will absorb the working schema in full as part of moving
-Draft → Review.
-
-The implementation will compose with [AIP-18](/docs/aip-18)'s
-`packages/collection/core` (also in flight) — `WORK.md` validation
-delegates per-item-kind validation to AIP-18; both packages share
-the same merge algorithm and resolution-chain exposure surface.
+- `@agentproto/work` — WORK.md validation; the file-backed coordinator
+  (item store, locks, leases, audit) is to land here.
+- `@agentproto/collection` — AIP-18 collection resolution and item
+  validation, including `category`.
+- The agentproto daemon's task ledger (`packages/runtime/src/task-ledger.ts`)
+  is the protocol's origin; Appendix A maps it field by field, and the
+  non-normative migration section describes its move onto the file
+  store.
 
 ## Backwards Compatibility
 
-[AIP-13](/docs/aip-13) (`agentwork/v1`) is the predecessor. AIP-20
-is set up to replace it via the `replaces: 13` frontmatter; AIP-13
-moves to Superseded once AIP-20 reaches Final. Until then, both
-AIPs are loadable.
-
-**Migration path.** AIP-20 ships a starter library at
-[`./resources/aip-20/draft/starters/agentwork-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat)
-containing three [AIP-18](/docs/aip-18) collections — `project`,
-`initiative`, `task` — whose fields, statuses, ownership, and
-deadline semantics mirror AIP-13's hardcoded doctypes. An existing
-v1 workspace can opt into v2 by:
-
-1. Adding a `WORK.md` at its tracker root (workspace-root mode).
-2. Pointing `collections:` at the three starter collections (file
-   refs or inline).
-3. Setting `scope.containment.enabled: true` with
-   `allowedKinds: [project, initiative, task]` to preserve the v1
-   parent semantics.
-4. Enabling `statusRollup` if the team relies on derived parent
-   status.
-
-Existing items load unchanged. The starter collections are
-*examples*, not normative — teams MAY extend them
-([AIP-18](/docs/aip-18) `extends:`) to add team-specific fields
-(`bug.severity`, `task.estimate`) without touching the workspace
-manifest.
-
-**Richer migrations** (introducing kinds AIP-13 did not anticipate,
-restructuring the parent hierarchy, adding new scope axes) are an
-operator concern, not a spec concern. AIP-20 deliberately avoids
-prescribing a richer migration path — the starter library is the
-floor, not the ceiling.
-
-**What breaks.** Nothing on the item side: AIP-13 items remain
-valid under AIP-20 once the starter collections are wired in.
-Workspace-root manifests written against AIP-13's `work.workspace/v1`
-schema do NOT load directly under AIP-20 — the discriminator
-(`schema: work.workspace/v2`), the collection declaration form
-(`collections[]` instead of `itemKinds[]`), and the scope-axis
-declaration shape are all different. Hosts that need to load both
-v1 and v2 manifests MUST switch on the `schema:` discriminator and
-route accordingly.
-
-**Deprecation window.** AIP-13 stays Draft until AIP-20 reaches
-Final. Once AIP-20 is Final, AIP-13 moves to Superseded; hosts
-SHOULD continue supporting v1 for at least one minor-version cycle
-to give live workspaces time to migrate.
+None is provided. [AIP-13](/docs/aip-13) is Superseded; hosts need not
+load `work.workspace/v1` manifests or `work/v1` items. The earlier
+AIP-20 draft's `extends`, `appliesTo`, `scope`, `display`,
+`defaults.approvalClass` fields and the `agentwork-v1-compat` starter
+collections are removed; manifests using them are refused with
+`work_manifest_invalid`. A former AIP-13 `project` becomes an AIP-34
+`project` node whose `work:` points at a `WORK.md`.
 
 ## Security Considerations
 
-Workspaces are *write surface* for coordination authority. Threats:
+- **Double claim / lost update** — prevented by the rev CAS and the
+  exclusive lock (§4.1–4.3). A coordinator that skips the lock on a root
+  served by others is non-conforming.
+- **Forged ownership or self-approval** — rights (§4.5) restrict who
+  may reassign, cancel or reopen; approvals are decided only through
+  AIP-7 human channels, and agents never decide them (AIP-7).
+- **Done laundering** — Tier-1 gates cannot be bypassed by update; the
+  evidence shortcut requires an independently checkable passed policy;
+  failed gates are recorded (§5).
+- **Silent tampering by direct file edit** — external edits are
+  detected by hash, re-validated and audited (§4.7); the AIP-7 audit
+  chain is hash-linked, so a rewritten history is detectable.
+- **Stale-lock denial of service** — locks expire after
+  `lockStaleSeconds`; leases on dead sessions are released (§4.4).
+- **Path traversal** — item ids are restricted (§3.4) and filing is
+  fixed, so an id cannot address a file outside `items/`.
+- **Cross-root references** — `blockedBy` across roots resolves only
+  through an AIP-34 export to the caller's node; refs are never a
+  read grant.
 
-- **Schema poisoning** — a malicious view relaxes lints (turns
-  `error` into `warn`, drops `required: true` indirectly through a
-  re-aliased collection). Mitigation: lints and the one-way switches
-  compose under merge-by-id and merge-by-effective-name. The
-  per-collection schema invariants ([AIP-18](/docs/aip-18)
-  `collection_field_type_drift`,
-  `collection_field_removed`, `collection_status_removed`) hold
-  through the chain. Governance ([AIP-7](/docs/aip-7)) policies
-  SHOULD restrict which lints and severities a child may soften, and
-  the host MUST expose the resolution chain so reviewers can audit
-  the diff.
+## Migration (non-normative)
 
-- **Audit downgrade** — a view sets `defaults.auditMutations: false`
-  to silence the audit log for one consumer's session. Mitigation:
-  covered by the `work_audit_downgrade` HARD refusal. Once a parent
-  in the chain enables audit, no descendant can disable it.
+How the reference daemon moves from `~/.agentproto/tasks.json` to work
+roots without a long coexistence:
 
-- **Scope axis drift** — a view changes
-  `scope.applicability.valueClass` from `company` to `role`,
-  invalidating every existing item whose `appliesTo` was written
-  against `company` refs. Mitigation: covered by the
-  `work_scope_value_class_drift` HARD refusal. Once a parent declares
-  a value class, no descendant may change it.
+1. **TaskStore seam.** The ledger's verbs keep their MCP/HTTP surface;
+   persistence moves behind a `TaskStore` interface with the current
+   JSON file as its first implementation.
+2. **FileStore.** A store implementing §4 over work roots ships in
+   `@agentproto/work`: item files, lock files, leases, audit chain.
+   Boards map to roots per Appendix A (`ws:<slug>` → the node's work
+   root; `tree:<root>` and explicit board ids → scratch roots).
+3. **Short dual write.** For one release, writes go to both stores with
+   the JSON store authoritative; at start-up and on every write the
+   daemon compares the two and logs divergences. Status ids are written
+   in kebab case in files; the tools accept the old underscore spellings
+   during this release only.
+4. **Switch-over.** The FileStore becomes authoritative; a one-shot
+   import converts any remaining `tasks.json` records into items, then
+   the JSON store, the underscore aliases and `tasks.json` are deleted.
+   No fallback reader is kept.
 
-- **Containment axis disable** — a view disables `scope.containment`
-  to remove the parent-link enforcement for one consumer. Items
-  whose `parent` fields no longer validate become orphans on next
-  load. Mitigation: covered by the `work_scope_disable` HARD refusal.
+## Appendix A — ledger field mapping
 
-- **Cross-AIP ref forgery** — a view declares `executor:
-  ws://operators/<slug>` for an operator that exists but is owned by
-  another tenant. Mitigation: hosts MUST resolve cross-AIP refs
-  inside the same tenant scope as the view file; cross-tenant
-  bindings are rejected with `work_xref_unresolvable`. The same rule
-  applies to `governance`, `knowledge`, `agency`, `playbook`, and
-  `defaults.workflow`.
+Every field and rule of the daemon task ledger lands in exactly one
+place in this spec; nothing is kept twice.
 
-- **Collection alias collision** — two collection refs resolve to
-  the same effective name (e.g. one ref aliased to `bug`, another
-  upstream-named `bug`). Mitigation: covered by the
-  `work_collection_alias_conflict` HARD refusal at workspace load.
-
-- **Workspace shadowing via view** — a malicious view extends a
-  benign workspace, replaces a collection ref with a malicious
-  inline that softens the per-collection lints. Mitigation: the
-  collection's own composition rules (AIP-18
-  `collection_field_type_drift`, etc.) prevent the most dangerous
-  drifts at the collection layer. AIP-20's
-  `work_collection_alias_conflict` and the merge-by-effective-name
-  rule make the alias-substitution case auditable through the
-  resolution chain.
-
-- **Vendor metadata as policy bypass** — a vendor extension under
-  `metadata.<vendor>` carries a flag the host honours that softens
-  one-way switches. Mitigation: hosts MUST treat vendor metadata as
-  advisory. Nothing under `metadata.*` may change the meaning of any
-  field defined in this AIP. The one-way switches are spec-level
-  invariants; vendor namespaces cannot bypass them.
-
-The threat model assumes the filesystem itself is trusted (or
-verified through [AIP-1](/docs/aip-1)'s hash/signature mechanisms).
-AIP-20 inherits that posture without restating it; per-collection
-threats (item-schema attacks, status-removal attacks) are documented
-in [AIP-18](/docs/aip-18) and not duplicated here.
+| Ledger (`task-ledger.ts`) | AIP-20 | Note |
+|---|---|---|
+| `taskId` (UUID) | `id` (+ collection, filing path) | New ids are ULID-based; imported UUIDs are prefixed (`t-<uuid>`). |
+| `boardId` `ws:<slug>` | the work root of AIP-34 node `<slug>` | |
+| `boardId` `tree:<rootSessionId>`, spawn-stamped `meta.boardId`, explicit board | a scratch root owned by the coordinator | Lineage visibility rule unchanged (§1). |
+| `title` / `description` | `title` / markdown body | |
+| `status` `pending` / `in_progress` / `awaiting_approval` / `done` / `failed` / `cancelled` | base statuses `pending` / `in-progress` / `awaiting-approval` / `done` / `failed` / `cancelled` (categories todo / active / waiting / done / failed / cancelled) | Same machine (§3.5). |
+| `ALLOWED_TRANSITIONS` | category transitions (§3.5) | `done → pending` = reopen. |
+| `owner` sessionId / `"operator"` / `"human"` | `session:<id>` / `host` / `user` | §3.3. Absent = claimable, unchanged. |
+| `createdBy` | `createdBy` | Same grammar. |
+| `blockedBy` (informational) | `blockedBy` + derived `blocked` | Still non-gating (§6). |
+| `approvalIds`, `linkApproval`, `approval:decided` handler | `approvals`, `link-approval`, system transition (§7) | Denied → `closeReason: denied` (was `meta.reason`). |
+| `artifacts` (`{sessionId,key,sha256}` / `{approvalId}`) | `artifacts` (`{session,key,sha256}` / `{approval}` / `{run,key}`) | Run links added. |
+| `sessions[]` | `sessions` | Append-only, unchanged. |
+| — | `runs` | New: AIP-58 edge. |
+| `verify` (GateSpec) | `verify` | §5. |
+| `verification` `{self-report,gate,human}` | `verification` | Unchanged. |
+| `lastVerifyError` | `lastVerifyError` | Unchanged. |
+| evidence shortcut `{policyId}` | `update … evidence` | Unchanged. |
+| `rev` CAS on every write, conflict returns current | `rev` (§4.1) | Now in the file. |
+| claim CAS (`owner` absent ∧ `rev` match) | claim (§4.3) | Unchanged. |
+| owner / manager (creator or operator) rights | §4.5 | Plus governance-granted managers. |
+| release on `session:exited` and at boot; no release while `awaiting_approval` | lease + liveness (§4.4) | Lease moved to `.work/leases/`. |
+| `meta.reopenedBy`, `meta.releasedReason`, `meta.reason`, `meta.note` | `reopenedBy`, `releaseReason`, `closeReason`, `note` | Typed fields. |
+| other `meta` keys (prUrl, worktreePath, actionId) | `provenance` | |
+| `createdAt` / `updatedAt` / `closedAt` | same | |
+| `task:changed` bus event | the audit event (§8); hosts MAY keep an in-process event | |
+| atomic tmp + rename of `tasks.json`, debounced | per-item atomic write (§4.2) | No shared file. |
+| `list` excludes closed by default | `list` `includeClosed` default false | |
+| — | `parent`, `touches`, `views`, rollup, collections | New in AIP-20. |
 
 ## See also
 
-- [AIP-1 — agent.json](/docs/aip-1)
-- [AIP-2 — AIP template & registry-of-views pattern](/docs/aip-2)
-- [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
-- [AIP-7 — governance, approval, audit](/docs/aip-7)
-- [AIP-8 — agentagencies/v1](/docs/aip-8)
-- [AIP-9 — agentoperators/v1](/docs/aip-9)
-- [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace AIP, same composition mechanic
-- [AIP-12 — agentplaybooks/v1](/docs/aip-12)
-- [AIP-13 — agentwork/v1](/docs/aip-13) — the predecessor; deprecated by this AIP
-- [AIP-15 — WORKFLOW.md](/docs/aip-15)
-- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — the substrate this AIP composes on
-- [`./resources/aip-20/draft/WORK.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/WORK.schema.json) — frontmatter validator
-- [`./resources/aip-20/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/ADAPTER.md) — implementer's guide
-- [`./resources/aip-20/draft/EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/EXAMPLES.md) — reference manifests
-- [`./resources/aip-20/draft/skills/author-work-workspace/SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/skills/author-work-workspace/SKILL.md) — agent-side authoring skill
-- [`./resources/aip-20/draft/starters/agentwork-v1-compat/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/starters/agentwork-v1-compat) — starter collection library mirroring AIP-13 doctypes
+- [AIP-7 — governance, approval, audit](/docs/aip-7) — approval requests and the audit chain
+- [AIP-13 — agentwork/v1](/docs/aip-13) — Superseded by this AIP
+- [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — collections, items, status categories
+- [AIP-34 — WORKSPACE.md](/docs/aip-34) — the node that owns a work root (`work:`)
+- [AIP-46 — agent sessions](/docs/aip-46) — session claimants
+- [AIP-54 — refs](/docs/aip-54) — principal and item ref grammar
+- [AIP-58 — RUN](/docs/aip-58) — runs linked from items
