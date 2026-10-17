@@ -1,6 +1,6 @@
 ---
 title: "AIP-63: BROWSER.md, agentbrowser/v1 (browser provider manifest, instance lifecycle, profile consent)"
-description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, and a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state.
+description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state, and the `browser-recording/v1` artifact that makes what an agent did in a browser replayable.
 aip: 63
 status: Draft
 type: Schema
@@ -23,7 +23,7 @@ package: "@agentproto/driver-browser"
 | Domain | drivers.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-14](/docs/aip-14) (TOOL), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER), [AIP-59](/docs/aip-59) (pairing) |
 | Reference Impl | [`@agentproto/driver-browser`](https://github.com/agentproto/ts/tree/main/packages/driver/browser) |
-| Resources | [`./resources/aip-63`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-63/draft): [`BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json) and three example manifests under `examples/` (camofox, chromium, browserbase) |
+| Resources | [`./resources/aip-63`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-63/draft): [`BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json) three example manifests under `examples/` (camofox, chromium, browserbase), [`RECORDING.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/RECORDING.schema.json) and a sample recording under `examples/recording-sample/` |
 
 ## Abstract
 
@@ -43,6 +43,12 @@ prevent silent restart loops and orphaned processes) and the consent
 model for seeding a browser from a user's profile: explicit per-domain
 grants, an append-only ledger, and a revoke that deletes derived
 material.
+
+Finally it fixes the **recording artifact** (`browser-recording/v1`): a
+directory of JSON Lines and JPEG files that lets a human watch, live or
+afterwards, what an agent did in a browser. One format serves both
+capture modes (one frame per action, continuous screencast), masks
+password fields, and expires on a retention clock.
 
 ## Motivation
 
@@ -103,8 +109,8 @@ The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be
 interpreted as described in [AIP-1](/docs/aip-1) (RFC 2119).
 
 Rules are numbered so they can be cited and tested. Every rule in
-§ Manifest, § Tool contracts, § Instance lifecycle and § Profile and
-consent names in parentheses the conformance level that tests it (see
+§ Manifest, § Tool contracts, § Instance lifecycle, § Profile and
+consent and § Recording artifact names in parentheses the conformance level that tests it (see
 § Conformance). Business concerns such as metering, leases and licences
 are out of scope for this AIP.
 
@@ -152,7 +158,8 @@ Capabilities:
 |---|---|
 | `cdp` | A Chrome DevTools Protocol endpoint is available (`endpoints.cdp`). |
 | `downloads` | File downloads can be captured. |
-| `recording` | `none`, `screencast` or `video`. |
+| `recording` | `none`, `screencast` or `video`. `screencast`: the provider can push frames continuously, so a recorder can write `mode: screencast`. `video`: it can also produce a video file natively. A recorder can always write `mode: per-action` from `browser.screenshot`, whatever this value is. The artifact is § 5. |
+| observers (inside `core`) | hosts that expose the observer seam | O1 to O8. O1 runs on every host |
 | `stealth` | The provider is designed to resist bot detection. A design goal, never a promise (see § Security considerations). |
 | `fullPageScreenshot` | Screenshots beyond the viewport. |
 | `trustedInput` | Input is produced at browser or OS level, so page script sees it as user input. |
@@ -183,7 +190,8 @@ requires `capabilities.cookies` or `capabilities.storageState`.
 
 **M6** (core). Each claimed `conformance` level needs the capability it
 tests: `network` needs `cdp`, `download` needs `downloads`, `profile`
-needs `cookies` or `storageState`.
+needs `cookies` or `storageState`, `recording` needs `capabilities.recording`
+other than `none`.
 
 Manifest keys and the AIP-30 universal fields cooperate rather than
 duplicate: AIP-30 `health_check` remains the resolver's cheap
@@ -236,7 +244,7 @@ provider without a CDP endpoint answers `browser.list_requests` with
 **T4** (core). Browser-specific error codes are `browser:unsupported`,
 `browser:starting` (retryable), `browser:not_ready`,
 `browser:crash_looping`, `browser:target_gone` and
-`browser:consent_required` (names the domain). They follow AIP-14's
+`browser:consent_required` (names the domain) and `browser:transform_failed` (a required observer transform failed, section 7). They follow AIP-14's
 domain-prefix convention.
 
 ### 3. Instance lifecycle
@@ -446,7 +454,156 @@ absent (`browser:consent_required`).
 honoring grants scoped to that device at once and SHOULD revoke them
 under C8.
 
-### 5. Conformance
+### 5. Recording artifact
+
+A **recording** is what a host writes when a human asked to see, or to
+keep, what an agent does in a browser. It is a directory, named by the
+recording id, holding a manifest, two append-only JSON Lines files and
+the frame images. It is a host artifact, not a provider tool: a provider
+declares `recording` (§ 1) and the host's recorder writes the directory.
+The files are validated by
+[`RECORDING.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/RECORDING.schema.json)
+(`$defs/manifest`, `$defs/frame`, `$defs/action`); a complete sample is
+under `resources/aip-63/draft/examples/recording-sample/`.
+
+```
+rec_01JSAMPLE0000000000000001/
+  manifest.json      schema browser-recording/v1: who, when, mode, status, redaction, retention
+  frames.jsonl       one line per stored frame: i, tMs, file, url, tabId, w, h
+  actions.jsonl      one line per tool call: seq, tMs, tool, url, target, summary, status, durationMs
+  frames/000001.jpg  the images, named by i
+  exports/           optional derived video (mp4, webm); regenerable, not part of the format
+```
+
+A line of `frames.jsonl` and of `actions.jsonl` looks like this:
+
+```json
+{"i":5,"tMs":3900,"file":"frames/000005.jpg","url":"https://app.example.test/login","tabId":"tab-1","w":320,"h":180,"actionSeq":4,"masked":"fields"}
+{"seq":4,"tMs":3600,"tool":"fill","url":"https://app.example.test/login","tabId":"tab-1","target":{"selector":"input[type=password]","role":"textbox","name":"Password","sensitive":true},"summary":"Type [redacted] into Password","status":"ok","durationMs":190,"redacted":true}
+```
+
+**Modes.** `per-action` writes one frame after each action that can
+change the page (the "one frame per action" model). `screencast` writes
+frames as the browser pushes them (CDP `Page.screencastFrame` or the
+provider's equivalent), subject to a rate limit and de-duplication.
+Both modes write the same files; a viewer needs no knowledge of the mode
+to play a recording. In `per-action` mode every frame carries
+`actionSeq`; in `screencast` mode a frame carries `actionSeq` when it was
+captured right after an action and omits it otherwise.
+
+**R1** (recording). A recording MUST be a directory whose name equals
+`manifest.id`, matching the `recordingId` pattern of the schema (no dot,
+no slash). It MUST contain `manifest.json`, `frames.jsonl`,
+`actions.jsonl` and `frames/`. A reader MUST resolve every path inside
+the recording against the recording directory and MUST reject a `file`
+or `exports[].file` that leaves it.
+
+**R2** (recording). `manifest.json` MUST validate against
+`$defs/manifest` and carry `schema: "browser-recording/v1"`. A reader
+MUST refuse a manifest with an unknown `schema` value instead of guessing.
+
+**R3** (recording). `frames.jsonl` and `actions.jsonl` are append-only,
+UTF-8, one JSON object per line, LF-terminated. A writer MUST NOT
+rewrite or truncate them. A frame image MUST be completely written
+(write to a temporary name, then rename) before its line is appended. A
+reader MUST ignore a final line that is not valid JSON, since a crash can
+leave one. Lines SHOULD carry `prev`, the SHA-256 of the previous line, as
+for the consent ledger (C10). `manifest.json` is the only file that may
+be replaced after creation, and only by atomic rename. While `status` is
+`recording`, its counts and `durationMs` MAY lag the JSONL files, which are
+authoritative.
+
+**R4** (recording). `i` and `seq` MUST start at 1 and increase by exactly
+1. `tMs` is an integer count of milliseconds since `manifest.startedAt`
+and MUST NOT decrease from one line to the next within a file. Frames and
+actions share this one time base, which is what lets a viewer overlay one
+on the other.
+
+**R5** (recording). Every frame line's `file` MUST be `frames/` plus `i`
+zero-padded to at least six digits plus `.jpg`, and the file MUST exist
+and be a JPEG. `w` and `h` are the pixel size of the stored image; they
+MAY be smaller than `manifest.viewport` when the writer downscales. When
+a recording is closed, `frameCount` and `actionCount` MUST equal the line
+counts of the two files.
+
+**R6** (recording). A frame of `per-action` mode MUST carry `actionSeq`
+naming an action that exists. A `screencast` writer SHOULD cap its rate
+(`screencast.maxFps`) and SHOULD skip a frame byte-identical to the
+previous stored one, so an idle page costs no storage. Neither mode may
+use a file or field the other does not.
+
+**R7** (recording). An action line records a locator and an outcome,
+never a value. `target` holds a selector, a role and an accessible name,
+and MUST NOT hold the content of an input. For a `fill` (or any tool that
+types) into a sensitive field, `summary` MUST NOT contain the typed
+value, a fragment of it or its length; the line MUST carry
+`target.sensitive: true` and `redacted: true`. A field is sensitive when it
+is `input[type=password]`, or its `autocomplete` contains `password`,
+`one-time-code` or a `cc-` token, or the writer cannot tell. The
+expression of an `evaluate` SHOULD be summarized, not stored. `url` fields
+MUST drop the fragment and any userinfo, and a writer SHOULD drop query
+parameters it knows to be credentials. An `error` carries a code (T4 or a
+vendor code) and a short message, scrubbed as in § Security considerations.
+
+**R8** (recording). Unless the operator turned it off for that
+recording, `manifest.redaction.passwordFields` MUST be `masked`, and no
+frame may show the content of a sensitive field (R7): the writer MUST mask
+those fields before the pixels reach the disk, either in the page before
+capture (CSS or DOM change over the debugging protocol) or by painting
+over their regions in the image. A frame in which a sensitive field was
+masked MUST carry `masked: "fields"`. `passwordFields: "none"` is an
+explicit operator choice, MUST be recorded, and MUST NOT be reachable from
+an agent call (C7 applies by analogy).
+
+**R9** (recording). Masking fails closed. If a writer cannot establish
+that a frame is free of sensitive content (an unmasked cross-origin frame,
+a failed mask injection, a field it cannot locate), it MUST blur the whole
+frame and mark it `masked: "full"`, or drop it and count it in
+`redaction.droppedFrames`. It MUST NOT store the frame as is.
+
+**R10** (recording). `retentionDays` MUST be recorded at creation and
+SHOULD default to 7. A recording is expired once `retentionDays` full days
+have passed since `endedAt` (since `startedAt` if it never ended). A host
+MUST delete an expired recording as a whole: manifest, both JSONL files,
+every frame and every export, with no residue. It MUST run that purge when
+it starts and SHOULD run it at least daily. `expiresAt`, when written, is
+informational and MUST agree with this rule.
+
+**R11** (recording). A recording is private. A host MUST serve it only
+over an authenticated surface (the AIP-59 device credential, § Security
+considerations) and MUST NOT expose any of its files, a listing of
+recordings, or a live feed of one on an unauthenticated route. When
+`manifest.deviceId` is set, a call from any other paired device MUST see
+the recording as absent. Responses carrying frames SHOULD send
+`Cache-Control: private, no-store`.
+
+**R12** (recording). On POSIX the recording directory MUST be created with
+mode 0700 and its files with mode 0600 (C11 applies unchanged). A default
+location under the user's data directory (for example
+`~/.pygmalion/data/browser-recordings/` in the reference host) is fine; a
+location another account can read is not.
+
+**R13** (recording). `grantIds` lists the profile grants that seeded the
+recorded session. A recorded session can show whatever a logged-in page
+shows, so when a grant is revoked (C8) the host SHOULD delete the
+recordings that list it, and if it does MUST report them as derived
+material in the `revoke` record's `derived` outcome.
+
+**R14** (recording). `status` moves only from `recording` to `complete`,
+`failed` or `interrupted`. On start, before it accepts a new recording, a
+host MUST finalize every recording still marked `recording` from a
+previous run: set `status: "interrupted"`, set `endedAt` to the last
+`tMs` seen, and correct the counts from the JSONL files (L8 by
+analogy). A closed recording is immutable except for `exports` and the
+purge of R10.
+
+**R15** (recording). A video export (`exports/*.mp4`, `exports/*.webm`) is
+derived. A host MAY build it on demand and MAY cache it under `exports/`,
+listing it in `manifest.exports`. It MUST be reproducible from frames and
+`tMs`, MUST be deleted with the recording, and MUST NOT contain pixels
+that the frames do not (so it inherits R8 and R9).
+
+### 6. Conformance
 
 Conformance is claimed per level in `browser.conformance`. A claimed
 level MUST pass the suite for it. The reference package ships the suite
@@ -461,6 +618,7 @@ deliberately broken fake, which it MUST fail.
 | `network` | providers with `cdp` | `browser.list_requests`, `browser.get_request_body`, `browser.cdp_send` |
 | `download` | providers with `downloads` | `browser.download` |
 | `profile` | providers with `cookies` or `storageState` | C1 to C13; `browser.profile.list`, `.refresh`, `.revoke` |
+| `recording` | providers with `recording` other than `none`, and the host recorder that writes their recordings | R1 to R15, against the sample recording and against a deliberately broken one (a value in a password `fill`, a gap in `i`, an unmasked password frame), which it MUST reject |
 
 Rule index (every rule names its level; this table is the fixture):
 
@@ -502,10 +660,113 @@ Rule index (every rule names its level; this table is the fixture):
 | C11 | profile | `profile.consent.perms-and-encryption` |
 | C12 | profile | `profile.consent.device-scope` |
 | C13 | profile | `profile.consent.pairing-revoked` |
+| R1 | recording | `recording.layout.directory` |
+| R2 | recording | `recording.manifest.schema` |
+| R3 | recording | `recording.jsonl.append-only` |
+| R4 | recording | `recording.timeline.monotonic` |
+| R5 | recording | `recording.frames.files` |
+| R6 | recording | `recording.modes.same-format` |
+| R7 | recording | `recording.actions.no-values` |
+| R8 | recording | `recording.redaction.password-fields` |
+| R9 | recording | `recording.redaction.fail-closed` |
+| R10 | recording | `recording.retention.purge` |
+| R11 | recording | `recording.access.authenticated` |
+| R12 | recording | `recording.access.perms` |
+| R13 | recording | `recording.access.grant-revoke` |
+| R14 | recording | `recording.lifecycle.interrupted` |
+| R15 | recording | `recording.export.derived` |
+| O1 | core | `core.observers.optional-empty` |
+| O2 | core | `core.observers.operator-only` |
+| O3 | core | `core.observers.process-scope` |
+| O4 | core | `core.observers.best-effort` |
+| O5 | core | `core.observers.every-call` |
+| O6 | core | `core.observers.screenshot-transform` |
+| O7 | core | `core.observers.args-redacted` |
+| O8 | core | `core.observers.module-trust` |
 
 The C9 hook plants a canary cookie value and greps tool results, error
 messages, logs and the ledger for it. The C7 hook drives every tool as
-an agent caller and asserts that no call changes the domain set.
+an agent caller and asserts that no call changes the domain set. The O1 hook runs the full tool suite with and without the seam and diffs the results. The O7 hook fills a password field through the seam and searches every event for the typed canary and for its length. The O6 hook registers a transform that halves the image and asserts the caller never receives the original size. The R7
+and R8 hooks plant a canary password in a test page, fill it through the
+recorder and search every file of the recording for it, and check the
+pixels of the masked region.
+
+### 7. Observers
+
+Several behaviours around a browser session need to see the same moments
+and must not each patch the tools: showing the user that an agent is
+attached to their tab, journaling actions, writing a recording (section
+5), shrinking a screenshot before it reaches the model. A host that wants
+them exposes one optional seam, the observer. This section only fixes the
+seam. What an observer does with an event is private to the operator.
+
+An observer is an object with any of these members, all optional.
+
+| Member | Called | Receives |
+|---|---|---|
+| `onAttach` | after the provider instance is registered and usable (`start_browser` returned a session) | `sessionId`, `provider`, `instanceId`, `adapter`, and `capture` (`screenshot`, `evaluate`) when the provider implements both. `capture` is for the observer's own frames and page probes; it is never reachable from a tool call |
+| `onDetach` | when the session ends for any reason: `stop_browser`, crash, host shutdown | `sessionId`, `reason` (`stop`, `crash`, `shutdown`) |
+| `beforeCall` | before a `browser.*` tool executes | `sessionId`, `tool` (without the `browser.` prefix), `args`, `tabId` when known, `callId` |
+| `afterCall` | after it executed, before the result is returned | the `beforeCall` fields plus `durationMs`, `ok`, and `error.code` when it failed. Never the result body |
+| `transformScreenshot` | in `browser.screenshot`, after capture, before the image is placed in the result | `sessionId`, `tabId`, `image` (`data` base64, `mimeType`); returns the replacement image |
+
+**O1** (observers). The seam MUST be optional and empty by default. With
+no observer registered, every tool MUST return a result identical to the
+one it returned before the seam existed.
+
+**O2** (observers). Observers are registered by the operator, in process
+or from host configuration. A tool call, a tool argument or any other
+agent-controlled input MUST NOT register, replace or remove an observer.
+Registration is keyed by an observer id and idempotent: registering the
+same id replaces the previous observer.
+
+**O3** (observers). Registration state MUST live at module or process
+scope, not inside the per-request tool registration. A host that rebuilds
+its tool surface for each MCP request (the stateless transport) would
+otherwise lose the observer on the next call.
+
+**O4** (observers). `onAttach`, `onDetach`, `beforeCall` and `afterCall`
+fail open. An observer that throws or exceeds its time budget (the host
+SHOULD cap it at 2 seconds) MUST NOT change the outcome of the tool call,
+MUST NOT delay it beyond that budget, and MUST be logged without the
+arguments. The single exception is a `required` screenshot transform
+(O6). `onDetach` MUST fire exactly once per attached session,
+including when the instance is stopped by the registry rather than by
+`stop_browser`.
+
+**O5** (observers). `beforeCall` and `afterCall` run in registration
+order and see every `browser.*` call of an attached session, over every
+host path that executes the tool (MCP and HTTP). `callId` pairs a
+`beforeCall` with its `afterCall`. A call that is refused by the gate
+(T3) or by consent (section 4) is reported to `afterCall` with its error
+code.
+
+**O6** (observers). `transformScreenshot` runs before the image is
+serialized into the result, so the original bytes never reach the caller
+or its model. Transforms chain in registration order. A transform is
+registered `required` or not. When a `required` transform fails, the tool
+MUST return `browser:transform_failed` and MUST NOT return the original
+image. When a non-required one fails, the original passes and the failure
+is logged.
+
+**O7** (observers). The host redacts call arguments before any observer
+sees them, not after. `args` carries locators and flags only (selector,
+url, tab, button, click count, scroll position). The value of a `fill`
+and the expression of an `evaluate` are removed, and no field stands in
+for them: not their length, not a hash, not a boolean that says the value
+was empty. Whether a target is a password field is not known to the host
+from the arguments; an observer that needs it asks the page itself, and
+an observer that persists anything applies R7 and R8 on top. Tool results
+are never passed to `afterCall`.
+
+**O8** (observers). A host that loads observers from a file does so from
+the operator's own environment only, never from a tool argument, an
+agent-supplied path or a workspace file. The path MUST be absolute and
+MUST resolve to a regular file owned by the daemon user and not writable
+by group or others. A load failure MUST be logged at boot with the cause.
+The host MAY continue without observers, and MUST offer a switch that
+turns the failure into a refusal to boot, for operators whose observers
+are a safety control (a required masking transform).
 
 ## Rationale
 
@@ -538,6 +799,22 @@ exception (full profile) its own name, its own warning and its own
 ledger row. Deriving policy from where material can go (sinks) rather
 than from provider brand keeps remote and local providers under one
 rule.
+
+**One format for two capture modes.** A per-action recorder is easy to
+make safe (it chooses its moments) and a screencast recorder is easy to
+make watchable (it never misses a transition). Keeping them in one file
+layout, with `actionSeq` as an optional join, lets a viewer be written
+once and lets a host start cheap and add continuous capture later.
+JSON Lines plus plain JPEG files were chosen over a container video
+because they can be appended during a run, survive a crash, are
+inspectable with ordinary tools, and let masking be verified per frame;
+a video is a derived export (R15).
+
+**Masking is in the format, not left to the viewer.** A recording is the
+most complete record of a logged-in session that a host will ever hold.
+Redacting at read time would leave the secret on disk, so the rules
+require redaction before write (R8), fail closed (R9), and give the
+action log no field in which a value could even be placed (R7).
 
 **Encryption at rest is SHOULD in v1.** Some providers persist their own
 session jar in plaintext and the host cannot change that. A MUST the
@@ -599,6 +876,16 @@ bind the debugging port to loopback.
   more tomorrow. Callers SHOULD NOT treat it as an authorization or a
   safety property, and hosts SHOULD NOT weaken any consent rule because a
   provider is stealthy.
+- **Recordings are sensitive by construction.** A recording of a session
+  seeded from a profile grant shows what the user sees, including data of
+  domains the agent was only meant to act on. R8 and R9 keep password
+  fields and unmaskable frames out, R10 bounds how long the rest lives,
+  R11 and R12 keep it off any unauthenticated route and out of other
+  accounts' reach, and R13 ties it to revoke. A page can still display
+  secrets that are not in a password field (an API key on a settings page,
+  a one-time code in text), and no masking rule finds them all: do not
+  record a session that must never show them. A recording the user shares
+  is outside this AIP's control.
 - **Host-side secrecy.** Cookie values never appear in results, logs,
   ledger or telemetry (C9). Error messages from providers SHOULD be
   scrubbed before they cross the host boundary, since a provider may echo
@@ -632,11 +919,15 @@ follow AIP-14's domain-prefix convention.
 
 - Windows and Linux cookie decryption for `import`: the consent rules
   are platform neutral; the mechanics are not specified here.
-- Video recording semantics across providers (`screencast` versus
-  `video`, where the file lands, retention).
+- Native `video` providers: whether the provider's own file should be
+  importable into the artifact (it would need the same masking proof as
+  frames, R8 and R9), rather than only host-built exports (R15).
+- Whether a viewer protocol (live feed of a recording in progress) needs
+  its own section; today only the files are fixed, and a host streams
+  them as it sees fit (R11).
 - The exact form of `deviceId` in AIP-59, which leaves device identity to
   the host.
-- Whether `browser.record` deserves a tool contract of its own.
+- Whether `browser.record` deserves a tool contract of its own (today the recorder is a host component, § 5).
 - Whether grants should be able to carry an expiry the host enforces by
   automatic revoke, rather than only recording `expiresAt`.
 

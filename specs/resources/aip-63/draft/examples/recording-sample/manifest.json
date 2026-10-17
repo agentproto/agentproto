@@ -1,0 +1,33 @@
+{
+  "schema": "browser-recording/v1",
+  "id": "rec_01JSAMPLE0000000000000001",
+  "sessionId": "sess_sample_login",
+  "provider": "chrome-live",
+  "adapter": "browser-chrome",
+  "instanceId": "inst_sample_1",
+  "mode": "screencast",
+  "screencast": {
+    "format": "jpeg",
+    "quality": 40,
+    "everyNthFrame": 3,
+    "maxFps": 2
+  },
+  "startedAt": "2026-10-17T09:30:00.000Z",
+  "endedAt": "2026-10-17T09:30:11.200Z",
+  "status": "complete",
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "frameCount": 10,
+  "actionCount": 8,
+  "durationMs": 11200,
+  "redaction": {
+    "passwordFields": "masked",
+    "maskedFrames": 3,
+    "droppedFrames": 0
+  },
+  "retentionDays": 7,
+  "expiresAt": "2026-10-24T09:30:11.200Z"
+}
