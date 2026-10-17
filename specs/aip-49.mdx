@@ -156,6 +156,7 @@ separate fields:
 policy = [ rule, … ]            an ordered, JSON-serialisable list
 rule =
   | { kind: "spendOn",  categories }                  narrows payable categories
+  | { kind: "qualify",  key, allow }                  spendable only when ctx.qualifiers[key] ∈ allow
   | { kind: "restrict", tags }                        stamps lattice tags (lineage)
   | { kind: "expire",   at: TimeSpec }                hard cliff → spendable 0
   | { kind: "decay",    curve, ratePerDay }           spendable = remaining × factor(t)
@@ -172,6 +173,49 @@ own (the sweep schedules on it). Relative `TimeSpec`s anchor on the lot's grant
 instant, so two grants into the same partition carry independent clocks. The
 legacy shorthand (`restriction`, narrowed `spendableOn`, `defaultTtlMs`) remains
 valid as a fast path for the common rules.
+
+#### Eligibility qualifier (`qualify`)
+
+> **Amendment — generic eligibility qualifier.** `spendOn` gates a lot by spend
+> *category* and `transfer` by *counterparty*; neither can express "spendable
+> only on one channel / region / tenant". `qualify` generalises the gate without
+> baking any one dimension into the primitive.
+
+`{ kind: "qualify", key, allow }` makes a lot spendable only when the spend
+context's qualifier `key` is one of `allow`. The context carries an optional
+`PolicyContext.qualifiers?: Readonly<Record<string, string>>` — free-form
+name → value pairs the caller asserts for this spend (e.g. `{ channel: "app" }`).
+Rules are pure data and JSON-serialisable like every other kind.
+
+Semantics (normative):
+
+- **Balance read is neutral.** When the context carries neither a `category`
+  nor `qualifiers`, `qualify` contributes `factor 1, eligible true`, so balance
+  displays are unaffected by the rule.
+- **A spend is fail-closed.** Otherwise (a `category` and/or `qualifiers` is
+  present) the lot is eligible iff `qualifiers[key]` is **present** and is in
+  `allow`. A spend that omits the qualifier is **ineligible**; an empty `allow`
+  admits no spend. `"*"` in `allow` matches any value, but the qualifier must
+  still be present.
+- **Gate only.** `qualify` never changes the quantity factor and never stamps
+  restriction tags. Its eligibility is AND-ed with every other rule (`spendOn`,
+  `expire`, …). Lookup MUST be by own property: an inherited key
+  (`constructor`, `__proto__`) is not a qualifier.
+- **Qualifiers are caller-asserted.** The primitive cannot verify them. The
+  caller MUST derive `qualifiers` from trusted server-side state (the
+  authenticated session, the ingress that received the request) and MUST NOT
+  forward them from client-supplied input; otherwise a client can name the
+  channel it needs.
+- **Callers pre-filter.** Coalescing consults only the legacy `spendableOn`
+  shorthand. A host that uses policy-level gates (`spendOn`, `qualify`) filters
+  lots through `evaluatePolicy` with the spend's `category` and `qualifiers`
+  before handing the survivors to coalescing.
+
+An implementation MUST pass these conformance checks for `qualify`: an allowed
+value is eligible; any other value is ineligible; a spend with the qualifier
+missing is ineligible; a bare balance read is neutral; `"*"` accepts any
+present value and still rejects a missing one; it composes by AND with
+`spendOn` and `expire`; and a policy round-trips through JSON unchanged.
 
 This maps directly on-chain: a `policy` is the off-chain twin of an ERC-1400
 transfer-restriction module plus rebasing math; a relative-expiry partition is
@@ -292,7 +336,8 @@ confined to these.
 
 [`@agentproto/wallet`](https://github.com/agentproto/ts/tree/main/packages/wallet)
 — pure (zero runtime/filesystem/HTTP), property-tested:
-`restriction-lattice` (semilattice axioms), `fold` (replay invariance + hold
+`restriction-lattice` (semilattice axioms), `partition-policy` (per-kind effects
+incl. the `qualify` conformance checks above, AND-composition, JSON round-trip), `fold` (replay invariance + hold
 cycle), `coalescing` (owned-first with short lots last, restricted-/expiring-first,
 ineligibility of points),
 `convert` (decimals scaling, restriction accumulation, no-arbitrage cycle
