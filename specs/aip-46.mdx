@@ -1009,116 +1009,111 @@ session artifact, `ref` set to the artifact's `key`. An unpinned
 artifact still lists via `session_artifact_list`; pinning is what
 promotes it into the terse "ended" summary a supervisor or UI reads
 without a separate call.
+### Session cost and billing mode (added 2026-10-18)
 
-### Coût des sessions et mode de facturation (ajouté 2026-10-18)
+> **Draft — AIP-46 amendment** (2026-10-18). *Normative identifiers
+> (field names, literals, tool names) are English and final.*
 
-> **Brouillon — amendement AIP-46** (2026-10-18). *Section rédigée en
-> français pour la revue ; les identifiants normatifs (noms de champs,
-> littéraux, noms de tools) sont en anglais et définitifs.*
+**Problem.** A conforming daemon today records a `costUsd` field of
+"API equivalent" (or 0) on sessions launched under a flat-rate
+subscription (Claude Code ~$200/month, Codex, …). A session that looks
+"free" actually consumes an amortised subscription — and a daemon may
+spawn dozens of sessions within the same 5-hour window. No
+quality-per-USD decision can rest on that number.
 
-**Problème.** Un daemon conforme note aujourd'hui un champ `costUsd`
-« équivalent API » (ou 0) sur les sessions lancées avec un abonnement
-forfaitaire (Claude Code ~200 $/mois, Codex, …). Une session « gratuite
-en apparence » consomme en réalité un abonnement amorti — et un daemon
-peut émettre des dizaines de sessions dans les mêmes 5 heures de
-fenêtre. Aucune décision qualité/USD ne peut se porter sur ce chiffre.
-L'interface `Session` ne déclare aujourd'hui aucun champ de coût ;
-chaque hôte en rajoutait un de son côté (toléré par le « MUST ignore
-unknown fields », mais sans sémantique commune). Cet amendement fixe la
-sémantique dans cette AIP : le coût est un état par session,
-exactement le domaine des descripteurs.
+The `Session` interface currently declares no cost fields; every host
+added one of its own (tolerated by the "MUST ignore unknown fields"
+rule, but with no shared semantics). This amendment fixes the
+semantics in this AIP: cost is per-session state, exactly the domain
+of the descriptors.
 
-#### Champs du descripteur
+#### Descriptor fields
 
-La `interface Session` (§[Session data model](#session-data-model))
-gagne trois champs optionnels, renseignés par l'hôte à la fin de chaque
-tour et agrégés sur la durée de vie :
+The `interface Session` (§[Session data model](#session-data-model))
+gains three optional fields, filled in by the host at the end of each
+turn and aggregated over the session's lifetime:
 
 ```ts
-  /** Coût marginal de la session, en USD (float): ce que la session
-   *  aurait coûté au prix API public. En mode "api" c'est la facture
-   *  réelle ; en "subscription" c'est le prix API équivalent,
-   *  informatif (peut être 0 si l'adaptateur ne le rapporte pas) ;
-   *  en "free", 0.
-   *  NE SERT PAS de base de décision qualité/USD quand
+  /** Marginal cost of the session, in USD (float): what the session
+   *  would have cost at the public API price. In "api" mode this is
+   *  the actual bill; in "subscription" mode it is the informative
+   *  API-equivalent price (may be 0 if the adapter does not report
+   *  it); in "free" mode, 0.
+   *  MUST NOT be the basis of a quality-per-USD decision when
    *  billingMode ≠ "api". */
   costUsd?: number
-  /** Part du coût du forfait attribuée à cette session : la
-   *  mensualité `monthlyUsd` du profil d'accès répartie
-   *  proportionnellement à la consommation (voir Amortissement).
-   *  0 quand billingMode ≠ "subscription". C'est LE chiffre à
-   *  comparer en qualité/USD. */
+  /** Share of the plan's cost attributed to this session: the access
+   *  profile's `monthlyUsd` fee apportioned proportionally to usage
+   *  (see Amortisation). 0 when billingMode ≠ "subscription". This is
+   *  THE number to compare in quality-per-USD. */
   amortizedCostUsd?: number
-  /** Comment la session est facturée. */
+  /** How the session is billed. */
   billingMode?: "api" | "subscription" | "free"
 ```
 
-Invariants :
+Invariants:
 
-- `billingMode: "api"` ⇒ `amortizedCostUsd` absent ou 0 ; `costUsd`
-  est la dépense réelle.
-- `billingMode: "subscription"` ⇒ `amortizedCostUsd` obligatoirement
-  présent ; `costUsd` est le prix API équivalent.
-- `billingMode: "free"` (modèles gratuits soumis à un rate-limit) ⇒
-  les deux coûts valent 0 ; le compteur de tokens continue d'être
-  rapporté.
-- Un hôte qui déclare un `subscription` (§Profil d'accès) DOIT
-  renseigner `billingMode` sur chacune de ses sessions ; sans profil
-  d'abonnement, les trois champs restent absents (comportement
-  actuel inchangé).
+- `billingMode: "api"` ⇒ `amortizedCostUsd` absent or 0; `costUsd`
+  is the actual spend.
+- `billingMode: "subscription"` ⇒ `amortizedCostUsd` MUST be present;
+  `costUsd` is the API-equivalent price.
+- `billingMode: "free"` (free models subject to rate limits) ⇒ both
+  costs are 0; the token counter is still reported.
+- A host declaring a `subscription` (§Access profile) MUST populate
+  `billingMode` on each of its sessions; without a subscription
+  profile, the three fields stay absent (current behaviour unchanged).
 
-#### Profil d'accès et abonnement
+#### Access profile and subscription
 
-Un hôte déclare un profil d'accès par identité de fournisseur — la
-même identité que la surface d'auth de [AIP-29](/docs/aip-29) `auth` /
-[AIP-45](/docs/aip-45). Le bloc `subscription` est optionnel et
-déclaratif :
+A host declares an access profile per provider identity — the same
+identity as the auth surface of [AIP-29](/docs/aip-29) `auth` /
+[AIP-45](/docs/aip-45). The `subscription` block is optional and
+declarative:
 
 ```yaml
 authProfiles:
   - id: claude-sub
     provider: anthropic
-    auth: auth/sales-claude           # ref AIP-29 auth (AIP-54)
+    auth: auth/sales-claude           # AIP-29 auth ref (AIP-54)
     subscription:
-      monthlyUsd: 200                 # forfait réellement payé
-      windows:                        # fenêtres de quota connues
+      monthlyUsd: 200                 # plan actually paid
+      windows:                        # known quota windows
         - kind: 5h
         - kind: weekly
 ```
 
-- `monthlyUsd` est en unités majeures (float) : c'est une donnée
-  *déclarée* par l'opérateur, pas une transaction — les montants
-  transactionnels restent en unités mineures
-  ([AIP-55](/docs/aip-55) §Minor units).
-- `windows[].limit` (optionnel) : plafond en tokens quand il est
-  connu/téléchargeable ; sinon l'hôte l'infère par observation.
-- `kind: "5h"` — fenêtre glissante de 5 heures (Claude Code, Codex) ;
-  `kind: "weekly"` — plafond hebdomadaire.
+- `monthlyUsd` is in major units (float): it is *declared* by the
+  operator, not a transaction — transactional amounts remain in minor
+  units ([AIP-55](/docs/aip-55) §Minor units).
+- `windows[].limit` (optional): a token ceiling, when known/reported;
+  otherwise the host infers it by observation.
+- `kind: "5h"` — a rolling 5-hour window (Claude Code, Codex);
+  `kind: "weekly"` — a weekly cap.
 
-#### Amortissement
+#### Amortisation
 
 ```
-coûtHebdoForfait = monthlyUsd / 4.348          (52 semaines / 12 mois)
+planWeeklyCost = monthlyUsd / 4.348          (52 weeks / 12 months)
 amortizedCostUsd(session) =
-    coûtHebdoForfait × (tokensSession / tokensProfilSurLaFenêtre)
+    planWeeklyCost × (sessionTokens / profileTokensOnTheWindow)
 ```
 
-où `tokensProfilSurLaFenêtre` est la consommation totale (toutes
-sessions confondues) de ce profil sur la fenêtre `weekly` englobante.
-Si aucune consommation n'a encore eu lieu, la répartition est
-proportionnelle au temps écoulé de la fenêtre : l'abonnement est payé
-de toute façon. La fenêtre `5h` sert au contrôle de quota, pas à
-l'amortissement (trop courte, trop bruyante).
+where `profileTokensOnTheWindow` is the total usage (all sessions
+combined) of this profile over the encompassing `weekly` window. If no
+usage has occurred yet, the apportionment is proportional to the
+elapsed time of the window: the subscription is being paid regardless.
+The `5h` window serves quota enforcement, not amortisation (too short,
+too noisy).
 
-#### Surface de lecture : quota status
+#### Read surface: quota status
 
-Un hôte conforme DOIT exposer :
+A conforming host MUST expose:
 
-| Tool | Entrées | Notes |
+| Tool | Inputs | Notes |
 |---|---|---|
-| `session_quota_status` | `{profileId?}` | Un enregistrement par profil d'accès ; `profileId` absent ⇒ tous les profils. |
+| `session_quota_status` | `{profileId?}` | One record per access profile; absent `profileId` ⇒ all profiles. |
 
-La réponse :
+The response:
 
 ```ts
 interface QuotaStatus {
@@ -1126,48 +1121,50 @@ interface QuotaStatus {
   billingMode: "api" | "subscription" | "free"
   windows: Array<{
     kind: "5h" | "weekly"
-    /** tokens consommés dans la fenêtre courante. */
+    /** tokens consumed in the current window. */
     usedTokens: number
-    /** plafond connu, sinon absent. */
+    /** known ceiling, else absent. */
     limitTokens?: number
-    /** marge restante ; absent si le plafond est inconnu. */
+    /** remaining headroom; absent when the ceiling is unknown. */
     remainingTokens?: number
-    /** prochaine réinitialisation, ISO-8601. */
+    /** next reset, ISO-8601. */
     resetsAt?: string
   }>
-  /** forfait déclaré du profil. */
+  /** profile's declared plan fee. */
   monthlyUsd: number
-  /** coût amorti par million de tokens sur la fenêtre courante — la
-   *  métrique qualité/USD comparable entre abonnement et API. */
+  /** amortised cost per million tokens over the current window —
+   *  the quality-per-USD metric comparable between subscription
+   *  and API. */
   amortizedUsdPerMTokens: number
 }
 ```
 
-HTTP : `GET /quota/status[?profile=<id>]` (miroir du tool, même
-posture read-only que le reste de la surface HTTP).
+HTTP: `GET /quota/status[?profile=<id>]` (mirror of the tool, same
+read-only posture as the rest of the HTTP surface).
 
-#### Exemples
+#### Examples
 
-1. **Claude Code sur abonnement** — le cas qui motive l'amendement.
-   Aujourd'hui : `costUsd: 0`, pareil qu'une session gratuite ; le
-   tableau qualité/USD fausse toutes les décisions. Après :
-   `billingMode: "subscription"`, `costUsd` reste l'équivalent API
-   (peut rester 0), `amortizedCostUsd` ≈ 0,86 $ pour une session de
-   1,2 M tokens sur un profil hebdo montant 80 M tokens avec un plan à
-   200 $/mois, soit 200 × (1,2 M / 84,6 M tokens mensuels équivalents).
-2. **Session `api`** (clé payée à l'appel) — inchangé : `costUsd` =
-   facture réelle, `billingMode: "api"`.
-3. **Modèle gratuit** (rate-limit par minute) —
-   `billingMode: "free"`, tokens visibles, coûts à 0.
+1. **Claude Code on a subscription** — the case that motivates the
+   amendment. Today: `costUsd: 0`, same as a free session; the
+   quality-per-USD table distorts every decision. After:
+   `billingMode: "subscription"`, `costUsd` remains the API
+   equivalent (may stay 0), `amortizedCostUsd` ≈ $0.86 for a session
+   of 1.2M tokens on a weekly profile totalling 80M tokens with a
+   $200/month plan, i.e. 200 × (1.2M / 84.6M monthly-token
+   equivalents).
+2. **`api` session** (per-call paid key) — unchanged: `costUsd` =
+   actual bill, `billingMode: "api"`.
+3. **Free model** (per-minute rate limit) —
+   `billingMode: "free"`, tokens visible, costs at 0.
 
-#### Compatibilité
+#### Compatibility
 
-Le projet n'a pas d'usagers externes : pas de migration, remplacement
-direct (`workspace/v2` posture). La lecture « `costUsd` seul »
-disparaît des affichages qualité/USD au profit d'`amortizedCostUsd` —
-c'est la correction voulue. Les consommateurs tiers qui lisaient
-`costUsd` brut continuent de le recevoir, avec un sens clarifié :
-coût *marginal*.
+The project has no external users: no migration, direct replacement
+(`workspace/v2` posture). The "`costUsd` alone" reading disappears
+from quality-per-USD displays in favour of `amortizedCostUsd` — that
+is the intended correction. Third-party consumers that read raw
+`costUsd` continue to receive it, with a clarified meaning: *marginal*
+cost.
 
 
 ## Rationale
@@ -1379,19 +1376,19 @@ kind). A host implementing it reuses [AIP-58](/docs/aip-58)'s
 consumer that already speaks AIP-58 artifacts needs no new parsing
 code, only the extra envelope fields this section adds.
 
-### The 2026-10-18 cost-and-billing amendment (brouillon)
+### The 2026-10-18 cost-and-billing amendment (draft)
 
-§Coût des sessions et mode de facturation est additive au sens strict
-des *formes* : les trois champs `costUsd` / `amortizedCostUsd` /
-`billingMode` sont optionnels sur `Session`, `session_quota_status` et
-`GET /quota/status` sont une surface nouvelle, et un hôte sans profil
-d'abonnement émet exactement la même charge utile qu'avant
-l'amendement. La seule rupture est *sémantique* et ciblée : un champ
-`costUsd` qu'un hôte peuplait déjà (implem actuelle du daemon, « API
-equivalent » ou 0 sous abonnement) reçoit maintenant un sens
-normatif — coût marginal, jamais la base d'une décision qualité/USD
-en mode `subscription`. Il n'y a pas d'usagers externes : la lecture
-corrigée remplace l'ancienne sans fenêtre de dépréciation.
+§Session cost and billing mode is additive in the strictest sense of
+*shapes*: the three `costUsd` / `amortizedCostUsd` / `billingMode`
+fields are optional on `Session`, `session_quota_status` and
+`GET /quota/status` are a new surface, and a host with no subscription
+profile emits exactly the same payloads it did before the amendment.
+The only break is *semantic* and targeted: a `costUsd` field a host
+already populated (the current daemon implementation, "API equivalent"
+or 0 under a subscription) now receives a normative meaning — marginal
+cost, never the basis of a quality-per-USD decision in `subscription`
+mode. There are no external users: the corrected reading replaces the
+old one with no deprecation window.
 
 ## Security Considerations
 
