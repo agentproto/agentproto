@@ -678,6 +678,17 @@ host renders steps natively, as in AIP-29: terminal prompts on a CLI
 (`pairing` prints the QR / link / code and polls), a form on a web
 surface.
 
+Setup steps are **UI-agnostic**. A step definition describes WHAT is
+asked or checked, never HOW it is drawn, so the same `setup[]` renders
+on any surface. A host MUST be able to render every step it supports in
+a terminal AND in a web UI. The ledger is shared between the two: a
+setup started in one surface MUST be resumable in the other, with
+completed steps skipped under the same fingerprint rules and no
+surface-specific state in the ledger. A host that offers only one of the
+two surfaces is not conforming. The renderer MUST NOT change a step's
+outcome: the same answers produce the same ledger entries whichever
+surface collected them.
+
 A **headless or non-interactive** host (`--yes`, no terminal, a remote
 control surface) applies every `default` it can, then stops: steps that
 need a human (`type: secret`, `oauth`, `external`, `pairing`, a `choice`
