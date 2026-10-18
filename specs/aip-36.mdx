@@ -512,3 +512,131 @@ sandbox escape by definition.
 - [AIP-34 — WORKSPACE.md](/docs/aip-34) — the primary consumer
 - [AIP-35 — STORAGE.md](/docs/aip-35) — sibling primitive (filesystem)
 - [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary referenced by `lifecycle.{pause_after_idle, destroy_on}`
+
+---
+
+## Amendment v1.2 — shared box (2026-10-18)
+
+Historically, a box was *the* sandbox of ONE session: the first session
+to finish destroyed it, right under the feet of the other sessions
+still attached to it. Amendment v1.2 makes the box a **multi-tenant**
+resource, with an explicit ATTACH / DETACH cycle and a declared
+teardown policy. The model remains GENERIC across providers (e2b,
+computer/msb, local…) — nothing below is specific to e2b.
+
+### 1. Attachments — the shared box
+
+A session **attaches** to a box already running (at boot, or via
+`reuse`/`attach`). It appears in the box's **list of attached
+sessions**. Execution inside the box stays isolated (§3): it is the
+lifecycle that is shared, not the files.
+
+| Rule | |
+|---|---|
+| R1 | Attachments are **durable** (ledger on disk): the refcount is authoritative even across a daemon restart. |
+| R2 | A session's teardown is by default a **DETACH**: stopping a session must never affect the box while other attachments remain. |
+| R3 | Only the detach of the LAST session triggers the teardown policy (§2). |
+
+### 2. Teardown policy declared on the box (`lifecycle.teardown`)
+
+The policy is declared ON the box (inside the `sandbox.lifecycle`
+block), not per session. Two cases:
+
+```yaml
+sandbox:
+  lifecycle:
+    teardown:
+      empty: destroy | pause | keep-<N>->destroy | keep   # case (a): zero attachments
+      emptyIdleAfterMs: <X>                               # case (b): all idle
+      destroyable: true
+      idleYMs: <Y>                                        # picked up in §5
+```
+
+- **Case (a) — no attachments left.** As soon as the refcount reaches
+  zero, the rule applies:
+  - `destroy` (default): immediate teardown;
+  - `pause`: immediate provider-side pause (e2b bills a paused box —
+    useful only on a provider with true pause/resume);
+  - `keep-<N>->destroy`: arm an N ms delay before teardown
+    (cancellable: a new attachment cancels it);
+  - `keep`: never torn down on this criterion (another event can
+    still destroy it: manual, provider TTL,
+    `destroy_on_workspace_close`).
+
+- **Case (b) — all attachments idle.** If ALL attached sessions are
+  idle for more than `emptyIdleAfterMs` AND the box is declared
+  `destroyable`, the box is torn down (or paused). A single active
+  session keeps it alive.
+
+### 3. Per-session checkout isolation
+
+Every attached session works on its OWN checkout, without leaving the
+box (the box is shared, not the working tree):
+
+- **workspace/repo differs** per session: one `git clone` per session,
+  under `/workspace/<session-id>/<repo>`;
+- **same repo, several sessions**: one `git worktree` per session
+  under `/workspace/<session-id>/` — shared object storage, distinct
+  HEAD / index / branch, zero commit collisions.
+
+### 4. Named "pool" declaration in the workspace
+
+So that an agent lands on a shared box by default, the workspace
+(AIP-34) can declare the box by label:
+
+```yaml
+sandbox:
+  ref: "<label>"   # attaches to the box labelled <label>
+```
+
+Resolution reuses the standard `ref` resolution: exact label, unique
+id prefix, or `@owner/label` slug. A box declared as a ref is
+attached, never cold-booted, so the refcount (§1) is identical
+whichever the arrival path.
+
+### 5. Detach criteria — deterministic, then decision
+
+**Evaluation order: 1) the deterministic criteria; 2) if one exists,
+the decision (§6); 3) by default, determinism wins.**
+
+Deterministic criteria (default):
+
+| Criterion | Detaches when |
+|---|---|
+| `session-end` | the session ends normally |
+| `session-kill` | the session is explicitly stopped |
+| `session-crash` | the session crashes |
+| `idle-<Y>` | the session has been idle for more than Y ms — ONLY if the box declares `idleYMs`; no window, no criterion |
+
+**Default**: no decision declared → the deterministic order applies;
+the most recent criterion wins.
+
+### 6. DECISION.md hook (optional — extension point)
+
+A box MAY declare a decision (AIP-65 DECISION.md) via
+`sandbox.lifecycle.decision.ref`:
+
+```yaml
+lifecycle:
+  decision:
+    ref: ./sandbox-teardown.DECISION.md
+```
+
+The decision answers the typed question "what should happen to this
+box?" with the options `destroy` / `pause` / `keep`. It is evaluated
+AFTER the deterministic order, at every detach AND before every
+immediate teardown, and may take precedence (e.g. "keep the box if a
+session has unpushed work"). A host without a decision engine treats
+this field as an extension point: the deterministic criteria remain in
+force, with at most a warning.
+
+### 7. Emitted events
+
+The host emits the following events (reserved names, no namespace):
+
+| Event | Fires when |
+|---|---|
+| `sandbox:attached` | a session joins the attachment list |
+| `sandbox:detached` | a session leaves the attachment list |
+| `sandbox:destroy-scheduled` | a deferred destroy is armed (case (a) `keep-<N>` or case (b)) — cancelled by a new attachment |
+| `sandbox:destroyed` | the box has been destroyed (or paused) |
