@@ -181,6 +181,12 @@ author to omit `slug` or spell it as a non-kebab path — is **non-conforming**;
 the portable wiki keeps its bare slugs and the runtime derives whatever
 internal id it needs from them.
 
+The page **`title`** (and the source `title`) is 1–1000 characters. Unlike the
+`slug`, it is display text rather than an identifier, and it MUST NOT be
+truncated to fit: sources such as statutes and practice directions carry
+section headings well over 200 characters, and a host that shortens them
+corrupts the quotation.
+
 Timestamp fields (`updated_at`, `captured_at`, and any other `format:
 date-time` field) are ISO-8601 **strings** and MUST be written quoted in YAML
 frontmatter (`updated_at: "2026-04-27T15:00:00Z"`). An unquoted ISO-8601 scalar
@@ -786,6 +792,19 @@ conformant `slug` (forcing the author to omit it or spell a path) is
 non-conforming — a real case observed against a graph backend that derived the
 node id from the file path and then refused a differing frontmatter `slug`,
 which would have silently eroded conformance had the wiki bent to it.
+
+**Why `title` allows 1000 characters while `slug` stays at 96.** The two fields
+do different jobs. The `slug` is an identifier: it appears in `[[slug]]` links,
+filenames, and `_index.md` rows, so it is kept short, kebab-case, and stable.
+The `title` is display text, and for verbatim legal material it must equal the
+official heading. Official texts (for example the Uganda Constitution (Bail
+Guidelines for Courts of Judicature) (Practice) Directions, 2022) have
+paragraph headings longer than the earlier 200-character cap, and trimming them
+would silently alter the source. The cap is raised rather than removed so a
+runaway title still fails validation. The earlier 200-character figure had no
+recorded rationale; it matched the default used for other `title` fields in the
+AIP family. Widening a maximum is backwards compatible: every page valid under
+the old cap stays valid.
 
 **Why the cross-wiki ref syntax is normative but the graph is not.** AIP-10
 is filesystem-first: a wiki must be queryable with file reads alone. So the
