@@ -5,7 +5,7 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-09-06
+updated: 2026-10-18
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42]
 resources: ./resources/aip-53/draft
@@ -198,6 +198,7 @@ interface AppDefinition {
   dev?:          AppDevDefinition
   data?:         AppDataDefinition                   // default data-dir hint for the app_data_* plane
   category?:     string                               // coarse grouping surfaced in catalogs/trees
+  setup?:        AppSetupStep[]                       // post-install configuration pipeline — see "Setup steps"
 }
 
 interface AgentEntry {
@@ -246,7 +247,7 @@ frontmatter is `.strict()` and carries no `systemPrompt` field, so the
 free-text prompt only ever lives in an `AGENT.md` body.
 
 `workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`,
-`data`, `category`, and `workspace` are all optional. An app with agents
+`data`, `category`, `setup`, and `workspace` are all optional. An app with agents
 and nothing else is still a conforming app, as is a UI-only app with an
 empty `agents` array.
 
@@ -316,6 +317,17 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
    mirror pair every doctype in the AIP series keeps separate from its
    pure `defineX` constructor.
 
+10. **`setup` step ids unique, references backward.** When `setup` is
+    present it MUST be non-empty, every step `id` MUST be unique within
+    it, and every `when.step` MUST name a step declared EARLIER in the
+    array. `defineApp` MUST refuse a definition that violates any of
+    these, and MUST refuse a `choice` whose `default` is not the
+    `value` of one of its `options`, a step with more than one
+    `persist` slot, and a `persist.answer` on a `type: secret` prompt.
+    Like rule 9, validating `setup` performs no I/O: nothing in
+    `setup` is executed or contacted until a host's install path runs
+    it (see [Setup steps](#setup-steps-setup)).
+
 ### Emitted layout
 
 `emit(dir)` (equivalently, a conforming host's install/write path) MUST
@@ -374,6 +386,7 @@ artifacts: [{ type: "…", description: "…" }]
 dev: { launch: [{ name: "…", runtimeExecutable: "…", runtimeArgs: [...], port: 4173, url: "…" }] }
 data: { dir: "data" }              # only when `data` is set — app_data_* hint, relative to <dir>
 category: "book"                   # only when `category` is set — freeform catalog grouping
+setup: [ … ]                       # only when `setup` is set — see "Setup steps"
 ```
 
 `agents[]` and `workflows[]` entries are `{ id, path }` refs, `path`
@@ -402,6 +415,11 @@ A conforming loader reading `<dir>/.agentproto/APP.md` back into an
    hand-edited `APP.md` whose refs drifted from its `AGENT.md` /
    `WORKFLOW.md` files MUST fail to load, the same way a bad
    `defineApp({...})` call fails to construct.
+
+6. When `setup` is present, validate it against the
+   [Setup steps](#setup-steps-setup) rules (conformance rule 10) and
+   carry it verbatim. A loader MUST NOT execute, prompt for, or contact
+   anything named in `setup`.
 
 A loader failure MUST name the offending path (which file, which ref) —
 a bare "invalid app" is not sufficient diagnostic detail.
@@ -463,6 +481,237 @@ cover letters per top match.
 `job-hunt`'s `WORKFLOW.md` has one `kind: agent` step referencing
 `@agentproto/job-scout` and one referencing `@agentproto/job-tailor` — the
 attachment invariant holds in both directions.
+
+### Setup steps (`setup[]`)
+
+`setup` is OPTIONAL. When present it declares an ordered, idempotent
+pipeline of **post-install configuration steps** the host runs after an
+app is installed and before the app is considered `ready`. It is the
+app-level counterpart of the [AIP-29](/docs/aip-29#setup) `setup` block
+and deliberately reuses its vocabulary — step `id`, `kind`, `skip_if`,
+`persist`, a ledger, `--force` / `--only` / `--dry-run` re-runs — so a
+host that already implements AIP-29 setup extends one engine rather than
+building a second.
+
+It exists because installing an app (unpacking `APP.md`, validating its
+refs, recording it) does not make it *usable*. A real app needs values
+only the user can supply and one-time bindings that outlive the
+install: a chat-bot token and the pairing of a chat identity, a model
+subscription (an auth profile), a choice between hosting options. Without
+a declared place for them every app ships its own bespoke onboarding
+script, and a host cannot tell "installed" from "ready", resume a half
+finished setup, or re-run one step.
+
+```yaml
+setup:
+  - id: cloud-computer
+    kind: choice
+    prompt: "Where should agent work run?"
+    options:
+      - { value: none, label: "None", description: "Everything stays on this machine." }
+      - { value: e2b, label: "E2B", description: "Bring your own E2B account." }
+      - { value: pygmalion-cloud, label: "PygmalionCloud", description: "Managed cloud computer." }
+    default: pygmalion-cloud
+    persist: { answer: cloud.provider }
+  - id: e2b-api-key
+    kind: prompt
+    type: secret
+    prompt: "E2B API key"
+    when: { step: cloud-computer, equals: e2b }
+    persist: { secret_slug: pygmalion/e2b-api-key }
+```
+
+#### Step kinds
+
+Two kinds are inherited from AIP-29 with unchanged semantics; the rest
+are added by this AIP because they need host-mediated behaviour that a
+shell command cannot express portably.
+
+| `kind` | Origin | Purpose | Required fields |
+|---|---|---|---|
+| `cmd` | AIP-29 | Run a shell command. | `cmd` |
+| `prompt` | AIP-29 | Ask for one value: `type: text \| select \| boolean \| secret`. | `prompt` |
+| `oauth` | AIP-29 | Drive an [AIP-19](/docs/aip-19) OAuth flow; tokens land in the named secret slug. | `secret_slug` |
+| `external` | AIP-29 | Open an `https` URL and wait for the user. | `url` |
+| `choice` | new | Pick exactly one of a closed set of options, with a default. | `prompt`, `options`, `default` |
+| `auth-profile` | new | Ensure the host holds enough usable model-login profiles. | none |
+| `pairing` | new | Bind an external chat identity to this install (a QR, link or code the user acts on elsewhere). | `channel` |
+| `check` | new | A read-only readiness probe. Never prompts, never mutates. | `check` |
+| `x-*` | vendor | Host- or vendor-specific extension (see [Schema note](#schema-note)). | `id`, `kind` |
+
+#### Common fields
+
+- `id` (REQUIRED) — kebab-case, unique within `setup[]`. It keys the
+  ledger, audit records and `--only`.
+- `title`, `description` (optional) — what a surface shows above the step.
+- `optional` (optional, default `false`) — the user MAY decline the step,
+  or leave it pending, without blocking `ready`. A declined optional step
+  is ledgered `declined` and is not re-offered by an unattended run, only
+  by an explicit `setup` re-run.
+- `when` (optional) — `{ step, equals }` or `{ step, done }`. The step runs
+  only if the earlier step `step` recorded the answer `equals`, or is /
+  is not complete (`done: true | false`). A step whose `when` is false is
+  ledgered `not-applicable` and never blocks `ready`. `when.step` MUST name
+  an earlier step.
+- `skip_if` (optional, `cmd` and `prompt`) — as in AIP-29: `{ cmd,
+  exit_code? }`; a matching exit code skips the step.
+- `persist` (optional) — where a captured value lands. **Exactly one**
+  slot. `env`, `secret_slug` and `cmd` are exactly AIP-29's. This AIP
+  adds **`answer: <dotted.key>`** for NON-SECRET values: the value is
+  recorded under `answers.<key>` in the app's setup record, which the
+  host exposes read-only to the app (reference: the setup record is
+  returned by the host's app status surface). `answer` MUST NOT be used
+  with `type: secret`; a secret MUST land in `secret_slug` or `env`.
+
+#### Kind semantics
+
+**`choice`.** `options` is a closed list of at least two
+`{ value, label, description? }`; `default` MUST equal one option's
+`value`. The recorded answer is the chosen `value`. A non-interactive
+run (`--yes`) applies `default`. Later steps branch on the answer with
+`when: { step: <choice-id>, equals: <value> }`, which is how one option
+(e.g. `e2b`) can require a further secret that another option does not.
+A `choice` is complete once an answer is recorded; changing it is a
+`--force --only <id>` re-run, which also invalidates every step whose
+`when` depends on it.
+
+**`auth-profile`.** Complete when the host's auth-profile store (the
+host's own notion of a stored model login — the reference host exposes
+`auth_profile_*` tools) holds at least `min` (default 1) enabled
+profiles, restricted to those usable by `harnesses` when given. When
+incomplete the host offers its discover-and-import flow first, then
+manual creation. The step records no secret: the profile store owns
+the credential, and the ledger records only that the threshold was met.
+
+**`pairing`.** `channel` is an open string; this AIP defines
+`telegram`, host-defined channels are allowed. For `telegram` the host
+MUST: require a bot token to be present first (a prior `prompt` step that
+persisted one, or one already configured on the host); mint a one-time
+pairing code bound to this install; render it per `display` (`qr` =
+a QR encoding the bot deep link carrying the code, `link`, or `code`);
+then wait up to `timeout_sec` (default 300) for the user to message the
+bot with it, and record the resulting chat identity as the binding. A
+pairing code MUST be single-use and expire at `timeout_sec`. The
+binding is the host's to store; the ledger records `persistedTo` only
+and never the identity token. A channel the host does not implement
+fails the step with `setup_unsupported_step`.
+
+**`check`.** Exactly one of `check.cmd` (`{ run, exit_code? }`, default
+exit 0) or `check.tool` (`{ id, args?, expect? }`: call a host tool; pass
+when the call succeeds and its result object contains `expect` as a
+subset). `severity: required` (default) fails the pipeline with
+`setup_failed`; `severity: warn` reports and continues. A `check` is
+**never ledgered as complete**: it is re-evaluated on every run, so
+`ready` always reflects the live system.
+
+#### Idempotence and the ledger
+
+A step is skipped, in order, when: (1) its `when` is false
+(`not-applicable`); (2) its `skip_if` matches (`skippedViaSkipIf`); (3)
+the ledger holds a `done` entry for it whose `fingerprint` still equals
+the step's current fingerprint; (4) its kind's own live probe says it is
+already satisfied (a secret slot already populated, the `auth-profile`
+threshold already met, a `pairing` binding already present, a `choice`
+already answered). Probes (4) make setup converge on a machine whose
+ledger was lost; they MUST NOT read or display a secret's value.
+
+The host MUST keep a **setup ledger** per `(app.id, workspace.id,
+user.id)` — the same tuple as AIP-29 — holding, per step id:
+`status` (`done | skipped | declined | not-applicable | pending |
+failed`), `at`, `appVersion`, `fingerprint`, `skippedViaSkipIf`, and
+`persistedTo` (a slot *name*, never a value), plus the non-secret
+`answers` map. The ledger MUST NOT store a secret value, a token, or a
+pairing identity, and no surface may echo one.
+
+`fingerprint` is a stable hash of the step's definition. It is what
+makes upgrades cheap and correct: when an app update adds a step, only
+that step is pending; when it changes a step, only that step re-runs;
+when it removes a step, the stale ledger entry is ignored. Steps the
+user already completed are never re-asked because the version number
+moved.
+
+`--force` ignores `skip_if`, the ledger and the probes. `--dry-run`
+resolves and prints what *would* run — including the verbatim text of
+every `cmd` step — without spawning, prompting or writing the ledger.
+`--only <id>` (repeatable) restricts to the named steps, in declared
+order.
+
+#### Lifecycle: what `app install` runs, and when
+
+```
+unpack/validate → record install → setup (this block) → ready
+```
+
+1. **Install** performs everything it does today (validation,
+   tool-id cross-check, the installed-app record). Setup is a phase
+   *after* the record exists, so a failed or abandoned setup leaves a
+   valid install, not a half-written one.
+2. If `setup` is present and any non-`optional`, applicable step is
+   unsatisfied, the install result reports `setupState: "required"`
+   with the pending step ids, and the app is **not ready**. The host
+   then runs the pipeline in declared order unless the caller passed
+   `--skip-setup` (or is headless — see below).
+3. A host MUST refuse `app_run` for an app that is not ready, with
+   `error.code = "setup_required"` and the pending step ids.
+   `app_apply` MAY still bind the app to a scope; readiness gates
+   running it, not applying it. Apps without `setup` are `ready` on
+   install, exactly as before.
+4. **Re-run** is `agentproto app setup <appId> [--force] [--dry-run]
+   [--only <stepId>]...`. The existing `agentproto setup <slug>` verb
+   MUST also accept an installed app id in place of an adapter slug; app
+   ids are `@scope/name`, adapter slugs are not scoped, so the two
+   namespaces cannot collide.
+5. **Update** (`app_resync` and equivalents) re-evaluates the ledger by
+   fingerprint, as above, and reports `setupState: "required"` only for
+   new or changed non-optional steps.
+
+Steps run in order. A failure aborts the pipeline with `error.code =
+"setup_failed"` and the failing step's `id`; steps that completed before
+it stay ledgered, so a re-run resumes at the failure.
+
+#### Surfaces and non-interactive hosts
+
+Setup is **host-owned UI**. An app's own `ui` surface MUST NOT be able to
+answer a setup step, read a secret, or complete a pairing on the user's
+behalf: it may only read the `answers` map and the pending-step list. A
+host renders steps natively, as in AIP-29: terminal prompts on a CLI
+(`pairing` prints the QR / link / code and polls), a form on a web
+surface.
+
+A **headless or non-interactive** host (`--yes`, no terminal, a remote
+control surface) applies every `default` it can, then stops: steps that
+need a human (`type: secret`, `oauth`, `external`, `pairing`, a `choice`
+with no applicable default) are left `pending` and the install result
+carries `setupState: "required"` with the pending list. It MUST NOT hang
+waiting, and MUST NOT invent a value. The caller finishes setup later
+with the re-run verb.
+
+#### Errors
+
+| `error.code` | When |
+|---|---|
+| `setup_required` | `app_run` on an app with unsatisfied non-optional steps. Carries the pending ids. |
+| `setup_failed` | A step errored or a `required` `check` failed. Carries the step `id`. |
+| `setup_unsupported_step` | The host does not implement a step's `kind` (or a `pairing` `channel`) and the step is not `optional`. The host MUST NOT silently skip it. |
+| `setup_consent_required` | A `cmd` step is pending and consent was not given (see Security). |
+
+#### Schema note
+
+Unlike every other field, `setup` carries per-kind validation, so
+[`APP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft)
+adds it as an explicit property with one strict (`additionalProperties:
+false`) shape per defined `kind`. The root `additionalProperties: false`
+is **unchanged**: the manifest stays closed; `setup` is a new, named
+field. The single relaxation is a vendor lane inside `setup` — a step
+whose `kind` matches `x-*` MAY carry arbitrary extra keys — so a host or
+vendor can experiment with a step kind (for example a `pairing` for a
+channel this AIP does not define) without a schema release. A host that
+does not implement the kind fails closed with `setup_unsupported_step`.
+
+An older host whose schema predates this field rejects an `APP.md` that
+carries `setup` (strict root). That is the intended fail-safe: an app
+that *needs* setup to be usable must not be installed by a host that
+would ignore the setup.
 
 ## The `.agentapp` package format (`agentapp/v1`)
 
@@ -838,7 +1087,7 @@ the source tree.
 
 ## Reference tooling (informative)
 
-The reference implementation exposes an app's lifecycle through five CLI
+The reference implementation exposes an app's lifecycle through six CLI
 verbs under `agentproto app <verb>`, none of which is itself normative
 (the wire/file contracts above are); they are named here because the
 UI-mode table and the dev-bridge route above assume their existence:
@@ -850,6 +1099,7 @@ UI-mode table and the dev-bridge route above assume their existence:
 | `serve` | Serves `.agentproto/ui/` standalone with an injected `host`-mode bridge to a running daemon's MCP endpoint — port resolution: `--port` > `APP.md`'s `ui.port` hint > OS-assigned |
 | `build` | Builds a `ui/` source project into `.agentproto/ui/` (no-op success when there's nothing to build) |
 | `dev` | Runs a `ui/` source project's own dev server plus a bridge-only server for live `window.McpApp` calls |
+| `setup` | `agentproto app setup <appId>` — runs / re-runs an installed app's [`setup[]`](#setup-steps-setup) pipeline (`--force`, `--dry-run`, `--only`) |
 
 The daemon-side MCP tool surface is likewise reference behavior built on
 top of the file contract this AIP fixes, not itself part of the
@@ -942,9 +1192,49 @@ unwrapping](#result-unwrapping) rule 1 turns that into a rejected
 Mapping `isError` to a non-2xx HTTP status in `bridge` mode would make
 the two mode's error-handling diverge exactly where they need to agree.
 
+**Why a `setup[]` field instead of a post-install script or a setup
+workflow?** A script is opaque: a host cannot tell what it will ask,
+whether it already ran, or which part to re-run, and it is arbitrary
+code on a third-party app. A workflow (AIP-15) models agent work, not
+one-time human bindings, and cannot be resumed per step or fingerprinted
+across versions. A declared, typed pipeline gives the host a ledger, a
+consent point for the one dangerous kind (`cmd`), a native UI per kind,
+and the `ready` / `setup_required` distinction that lets a headless
+caller stop cleanly instead of hanging on a prompt.
+
+**Why reuse the AIP-29 shape?** Because the engine already exists
+(`skip_if`, `persist`, the per-slug ledger, `--force` / `--only` /
+`--dry-run`). An app's setup differs in *what* it asks for, not in how
+steps are ordered, skipped, persisted or resumed, so inventing different
+semantics would force hosts to maintain two. The new kinds (`choice`,
+`auth-profile`, `pairing`, `check`) exist only where a shell command or
+a bare prompt cannot express the behaviour portably: a closed option set
+with branching, a threshold on the host's own credential store, a
+one-time code that must be single-use and expiring, and a probe that
+must never mutate.
+
+**Why fingerprints in the ledger?** Without them a host can only choose
+between re-asking everything when an app updates and never noticing a
+changed step. Hashing the step definition re-runs exactly what changed.
+
+**Why is `setup` host-owned UI, with the app's `ui` unable to answer?**
+The `ui` surface is third-party JavaScript (see the allowlist
+discussion in Security considerations). Letting it complete a pairing or
+read a token would hand a compromised page the credentials setup exists
+to protect.
+
 ## Backward compatibility
 
-Not applicable — this AIP introduces a new spec canonizing bundle,
+**`setup[]` amendment (2026-10-18).** Purely additive: `setup` is a new
+OPTIONAL frontmatter field, no existing field changes meaning, and an
+`APP.md` without it is unaffected and is `ready` on install exactly as
+before. The one visible effect is deliberate: a host built against the
+earlier closed schema rejects an `APP.md` that carries `setup` rather
+than ignoring it (see [Schema note](#schema-note)). The `schema:
+app/v1` string is unchanged. `agentproto setup <slug>` gains an
+installed-app-id form; the adapter form is untouched.
+
+The remainder of this section describes the original AIP: not applicable — this AIP introduces a new spec canonizing bundle,
 package, and UI-bridge conventions that already shipped as working code
 (`@agentproto/app-kit`'s `defineApp`/`emitApp`/`loadAppHandle`, the CLI's
 `app pack`/`unpack`/`serve`/`build`/`dev` verbs, `@agentproto/app-client`'s
@@ -1011,6 +1301,29 @@ supersede.
   resolvable; `unvalidatedAgentTools` on the install result names
   exactly which refs were skipped.
 
+- **`setup[]` `cmd` steps are arbitrary code execution at install time.**
+  An app from a catalog or a git URL is third-party content, and a `cmd`
+  step (and `skip_if.cmd`, `persist.cmd`, `check.cmd`) runs with the
+  user's privileges. A host MUST show the verbatim command text of every
+  pending `cmd`-bearing step and obtain explicit consent before running
+  any of them; `--yes` MUST NOT imply that consent (reference: a
+  dedicated `--allow-setup-cmd` flag, in the same spirit as the
+  `--allow-build` gate on `ui.build`). Without consent the step is left
+  pending and the install reports `setup_consent_required`. The other
+  kinds do not execute app-supplied code: `prompt`, `choice`,
+  `auth-profile`, `pairing` and `check.tool` are mediated entirely by the
+  host. `check.tool` MUST be limited to tools the host would let this app
+  call anyway.
+
+- **Secrets in setup never enter the ledger, the answers map, logs or the
+  app's UI.** `type: secret` input is masked by the host surface and
+  lands only in `secret_slug` / `env` (`persist.answer` is forbidden for
+  it). A `pairing` code is single-use and short-lived, and the bound
+  chat identity is stored by the host, never in the ledger. An
+  `external` `url` MUST be `https` and MUST be shown to the user in full
+  before it is opened. Because the app's `ui` cannot answer a step, a
+  compromised UI cannot complete a pairing or read a token.
+
 - **`extends`-style cross-app trust is out of scope for v1.** Unlike
   [AGENT.md's `extends`](/docs/aip-42#conformance-rules), an app has no
   inheritance mechanism in this AIP — `requires[]` names a dependency
@@ -1045,6 +1358,18 @@ supersede.
    (as `AGENT.md extends` pinning is flagged as an open question in
    [AIP-42](/docs/aip-42#open-questions)) is open.
 
+5. **Setup `choice` of a different shape.** `choice` options carry no
+   per-option sub-steps; branching is expressed with `when`. Whether
+   nested options or option-scoped `requires` are worth the extra
+   surface is open, as is a typed `pairing` payload for channels other
+   than `telegram` (WhatsApp, Discord) once a second implementation
+   exists.
+
+6. **Declared `setup` in a catalog entry.** A host could show a catalog
+   entry's pending setup (which secrets, which pairings, any `cmd`)
+   *before* install, from the entry alone. Today it is visible only after
+   `APP.md` is read.
+
 ## See also
 
 - [AIP-14 — TOOL.md](/docs/aip-14) — the tool contract `ui.tools[]`
@@ -1059,6 +1384,8 @@ supersede.
 - [AIP-24 — ASSEMBLY.md](/docs/aip-24) — the multi-agent coordination
   primitive this AIP deliberately does not duplicate (see
   [Rationale](#rationale))
+- [AIP-29 — CLI.md (agentcli/v1)](/docs/aip-29#setup) — the `setup`
+  block `setup[]` is modelled on (step kinds, `skip_if`, `persist`, ledger)
 - [AIP-19 — SECRETS](/docs/aip-19) — where a future `.agentapp` signing
   scheme would anchor publisher identity (see [Open
   questions](#open-questions))
