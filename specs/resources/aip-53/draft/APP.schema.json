@@ -188,6 +188,14 @@
       },
       "description": "Production hosting surface: one supervised service process per entry — NO dependency graph, NO scaling, NO scheduler. The host (NOT app-kit) spawns exactly one keep-alive service-owner session per entry at install time (later work item) that runs `entry`; `dev.launch` is NOT executed by the loader and is not this surface. Names MUST be unique. See the pending SERVICES schema draft (pending upstream spec PR)."
     },
+    "setup": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/setupStep"
+      },
+      "description": "OPTIONAL ordered, idempotent post-install configuration pipeline (modelled on the AIP-29 `setup` block). Step ids MUST be unique; `when.step` MUST reference an earlier id. Root `additionalProperties` stays false: this property is added explicitly and only `x-*` vendor steps are open. See AIP-53 § Setup steps."
+    },
     "data": {
       "type": "object",
       "additionalProperties": false,
@@ -210,6 +218,552 @@
       "type": "string",
       "minLength": 1,
       "description": "Coarse grouping surfaced in host catalogs/trees (e.g. `book`). Freeform — not validated against a fixed enum."
+    }
+  },
+  "$defs": {
+    "stepId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Stable step identifier, kebab-case, unique across `setup[]`. Appears in the ledger, audit logs and `--only`."
+    },
+    "skipIf": {
+      "type": "object",
+      "required": [
+        "cmd"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cmd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exit_code": {
+          "type": "integer",
+          "default": 0
+        }
+      },
+      "description": "AIP-29 `skip_if`: when `cmd` exits with `exit_code` (default 0) the step is skipped and ledgered as `skippedViaSkipIf`."
+    },
+    "when": {
+      "type": "object",
+      "required": [
+        "step"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "type": "string",
+          "description": "Id of an EARLIER step."
+        },
+        "equals": {
+          "description": "Run only when that step's recorded answer equals this value."
+        },
+        "done": {
+          "type": "boolean",
+          "description": "Run only when that step is (true) / is not (false) complete."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "equals"
+          ]
+        },
+        {
+          "required": [
+            "done"
+          ]
+        }
+      ],
+      "description": "Run the step only if the condition on an earlier step holds. Exactly one of `equals` / `done`."
+    },
+    "persist": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        },
+        "secret_slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cmd": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Run with `${value}` substituted (shell-escaped)."
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dotted key under which the NON-SECRET value is recorded in the setup record's `answers`. MUST NOT be used for `type: secret`."
+        }
+      },
+      "description": "Where the captured value lands. Exactly one slot."
+    },
+    "option": {
+      "type": "object",
+      "required": [
+        "value",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "setupStep": {
+      "oneOf": [
+        {
+          "title": "cmd step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "cmd"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "cmd"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "cmd": {
+              "type": "string",
+              "minLength": 1
+            },
+            "skip_if": {
+              "$ref": "#/$defs/skipIf"
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          }
+        },
+        {
+          "title": "prompt step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "prompt"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "prompt"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "type": {
+              "enum": [
+                "text",
+                "select",
+                "boolean",
+                "secret"
+              ],
+              "default": "text"
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "default": {},
+            "options": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/option"
+              }
+            },
+            "skip_if": {
+              "$ref": "#/$defs/skipIf"
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          }
+        },
+        {
+          "title": "choice step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "prompt",
+            "options",
+            "default"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "choice"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/option"
+              }
+            },
+            "default": {
+              "type": "string",
+              "description": "The `value` of one option. Pre-selected, and applied by `--yes`."
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          }
+        },
+        {
+          "title": "auth-profile step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "auth-profile"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "min": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "description": "Complete when at least this many enabled auth profiles exist."
+            },
+            "harnesses": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Only count profiles usable by these harness slugs. Absent = any."
+            }
+          }
+        },
+        {
+          "title": "pairing step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "channel"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "pairing"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "channel": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Open set. `telegram` is defined by AIP-53; other values are host-defined."
+            },
+            "display": {
+              "enum": [
+                "qr",
+                "link",
+                "code"
+              ],
+              "default": "qr"
+            },
+            "timeout_sec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 300
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          }
+        },
+        {
+          "title": "oauth step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "secret_slug"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "oauth"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "secret_slug": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "title": "external step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "url"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "external"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "persist": {
+              "$ref": "#/$defs/persist"
+            }
+          }
+        },
+        {
+          "title": "check step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind",
+            "check"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "const": "check"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "optional": {
+              "type": "boolean",
+              "default": false,
+              "description": "An optional step may be declined or left pending without blocking `ready`."
+            },
+            "when": {
+              "$ref": "#/$defs/when"
+            },
+            "check": {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "maxProperties": 1,
+              "properties": {
+                "cmd": {
+                  "type": "object",
+                  "required": [
+                    "run"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "run": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "exit_code": {
+                      "type": "integer",
+                      "default": 0
+                    }
+                  }
+                },
+                "tool": {
+                  "type": "object",
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "args": {
+                      "type": "object"
+                    },
+                    "expect": {
+                      "type": "object",
+                      "description": "Subset the tool's result object MUST contain."
+                    }
+                  }
+                }
+              }
+            },
+            "severity": {
+              "enum": [
+                "required",
+                "warn"
+              ],
+              "default": "required"
+            }
+          }
+        },
+        {
+          "title": "vendor step",
+          "type": "object",
+          "required": [
+            "id",
+            "kind"
+          ],
+          "additionalProperties": true,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/stepId"
+            },
+            "kind": {
+              "type": "string",
+              "pattern": "^x-[a-z0-9-]+$"
+            }
+          },
+          "description": "Vendor extension. The ONLY place in APP.md where unknown keys are tolerated. A host that does not implement the kind MUST fail with `setup_unsupported_step`, never skip it silently (unless `optional: true`)."
+        }
+      ]
     }
   },
   "allOf": [

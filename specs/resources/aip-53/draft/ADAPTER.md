@@ -115,6 +115,39 @@ table). None of these names is normative; the following behaviour is:
   `app_status` / `app_stop`.
 - **Apply gates run.** The reference refuses to run an app that isn't
   applied to the requested scope.
+- **Setup gates run too, when `setup[]` is declared.** Install records
+  the app first, then runs the [setup
+  pipeline](/docs/aip-53#setup-steps-setup); until every non-`optional`,
+  applicable step is satisfied the app is not ready and `app_run` fails
+  with `setup_required` (pending ids attached).
+
+## Setup steps
+
+Reuse your AIP-29 setup engine; the app form adds four step kinds and a
+ledger fingerprint. Checklist for a host:
+
+1. **Ledger per `(app.id, workspace.id, user.id)`** with per-step
+   `status`, `at`, `appVersion`, `fingerprint`, `skippedViaSkipIf`,
+   `persistedTo`, plus a non-secret `answers` map. File mode 0600. Never
+   write a secret value, token or pairing identity into it.
+2. **Fingerprint** = stable hash of the step's definition (key order
+   independent). An app update re-runs only new or changed steps.
+3. **Order of skipping:** `when` false, then `skip_if`, then a `done`
+   ledger entry with an unchanged fingerprint, then the kind's live probe
+   (secret slot populated, auth-profile threshold met, pairing binding
+   present, choice answered). `check` is never ledgered done.
+4. **`cmd` consent.** Print the verbatim text of every `cmd`,
+   `skip_if.cmd`, `persist.cmd` and `check.cmd` and require explicit
+   consent; `--yes` alone is not consent. Leave the step pending and
+   report `setup_consent_required` otherwise.
+5. **Non-interactive:** apply defaults, leave human-only steps (secret,
+   oauth, external, pairing, undefaulted choice) `pending`, report
+   `setupState: "required"`, never block on stdin.
+6. **Fail closed:** an unknown `kind` or `pairing` channel on a
+   non-optional step is `setup_unsupported_step`, not a silent skip.
+7. **Setup UI is host-owned.** Do not expose a way for the app's `ui`
+   to answer a step or read a secret; expose only `answers` and the
+   pending list.
 
 ## Serving the UI
 
@@ -154,7 +187,7 @@ unconditionally, digest mismatch refuses the unpack.
 ## Validation checklist
 
 - [ ] `APP.md` frontmatter validates against [`./APP.schema.json`](./APP.schema.json)
-- [ ] All nine conformance rules enforced at define-time and load-time
+- [ ] All ten conformance rules enforced at define-time and load-time
 - [ ] UI-only apps (empty `agents`, `ui` present) construct, emit, and install
 - [ ] An app with neither agents nor `ui` is refused with a named error
 - [ ] Every attachment violation names the dangling ref or orphan
@@ -162,3 +195,5 @@ unconditionally, digest mismatch refuses the unpack.
 - [ ] Allowlist enforced server-side on every UI call
 - [ ] Traversal guard rejects `../`, absolute, drive-letter, and symlink-escape paths
 - [ ] Writes are atomic (tmp + rename)
+- [ ] `setup[]` (when present): ids unique, `when` references earlier steps, one `persist` slot, `choice.default` among its options, no `persist.answer` on secrets
+- [ ] `setup` ledger holds no secret value; `cmd` steps need explicit consent; headless runs stop at `setup_required`
