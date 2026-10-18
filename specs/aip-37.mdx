@@ -231,3 +231,18 @@ payloads, which this AIP does not specify.
 - [AIP-36 SANDBOX.md](/docs/aip-36) — `lifecycle.{destroy_on,pause_on}` consumes events
 - [AIP-26 CODE.md](/docs/aip-26) — `identity.refresh_on` consumes events
 - [AIP-58 RUN](/docs/aip-58) — registers the `run.*` / `step.*` names
+
+### Sandbox box lifecycle (added 2026-10-18, per AIP-36 v1.2)
+
+[AIP-36](/docs/aip-36) v1.2 makes a sandbox box a shared, multi-tenant
+resource (explicit ATTACH / DETACH per session). These events are
+emitted by hosts that implement the shared-box model; like the
+`run.*` / `step.*` names above, they are registered here so
+`lifecycle.*`-style consumers reference one shared vocabulary.
+
+| Event | Fires when |
+|---|---|
+| `sandbox:attached` | A session attaches to a box (boot or reuse/attach) — the box's attachment list grows. |
+| `sandbox:detached` | A session detaches (session end, kill, crash, or declared idle window). |
+| `sandbox:destroy-scheduled` | A deferred destroy is armed (empty-box grace, or all-attachments-idle on a `destroyable` box). A new attachment or an active session cancels it. |
+| `sandbox:destroyed` | The box was destroyed (or paused) per the box-level teardown policy. |

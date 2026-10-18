@@ -512,3 +512,133 @@ sandbox escape by definition.
 - [AIP-34 — WORKSPACE.md](/docs/aip-34) — the primary consumer
 - [AIP-35 — STORAGE.md](/docs/aip-35) — sibling primitive (filesystem)
 - [AIP-37 — LIFECYCLE.md](/docs/aip-37) — event vocabulary referenced by `lifecycle.{pause_after_idle, destroy_on}`
+
+---
+
+## Amendment v1.2 — boîte partagée (2026-10-18)
+
+Historiquement, une boîte était *la* sandbox d'UNE session : la
+première session à se terminer la détruisait, sous les pieds des
+autres sessions encore attachées. L'amendement v1.2 fait de la boîte
+une ressource **multi-tenant**, dotée d'un cycle ATTACH / DETACH
+explicite et d'une politique de destruction déclarée. Le modèle reste
+GÉNÉRIQUE sur les fournisseurs (e2b, computer/msb, local…) — rien de
+ce qui suit n'est spécifique à e2b.
+
+### 1. Attachements — la boîte partagée
+
+Une session **s'attache** à une boîte déjà en cours d'exécution (boot
+ou `reuse`/`attach`). Elle apparaît dans la **liste des sessions
+attachées** de la boîte. L'exécution dans la boîte reste isolée (§3) :
+c'est le cycle de vie qui est partagé, pas les fichiers.
+
+| Règle | |
+|---|---|
+| R1 | Les attachements sont **durables** (ledger sur disque) : le refcount fait foi même après un redémarrage du daemon. |
+| R2 | Le teardown d'une session est par défaut un **DETACH** : arrêter une session ne doit jamais affecter la boîte tant que d'autres attachements subsistent. |
+| R3 | Seul le detach de la DERNIÈRE session déclenche la politique de teardown (§2). |
+
+### 2. Politique de teardown déclarée sur la boîte (`lifecycle.teardown`)
+
+La politique se déclare SUR la boîte (dans le bloc `sandbox.lifecycle`),
+pas par session. Deux cas :
+
+```yaml
+sandbox:
+  lifecycle:
+    teardown:
+      empty: destroy | pause | keep-<N>->destroy | keep   # cas (a) : zéro attachement
+      emptyIdleAfterMs: <X>                               # cas (b) : tous idles
+      destroyable: true
+      idleYMs: <Y>                                        # refourché au §5
+```
+
+- **Cas (a) — plus aucun attachement.** Dès que le refcount atteint
+  zéro, la règle s'applique :
+  - `destroy` (défaut) : destruction immédiate ;
+  - `pause` : pause immédiate côté fournisseur (e2b facture une boîte
+    en pause — utile seulement sur un fournisseur avec une vraie
+    pause/resume) ;
+  - `keep-<N>->destroy` : armement d'un délai de N ms avant
+    destruction (annulable : un nouvel attachement l'annule) ;
+  - `keep` : jamais détruite sur ce critère (un autre événement peut
+    toujours la détruire : manuel, TTL fournisseur,
+    `destroy_on_workspace_close`).
+
+- **Cas (b) — attachements tous idle.** Si TOUTES les sessions
+  attachées sont idle depuis plus de `emptyIdleAfterMs` ET que la
+  boîte est déclarée `destroyable`, la boîte est détruite (ou mise en
+  pause). Une seule session active suffit à la maintenir en vie.
+
+### 3. Isolation de checkout par session
+
+Chaque session attachée travaille sur son PROPRE checkout, sans
+sortir de la boîte (la boîte est partagée, pas l'arbre de travail) :
+
+- **workspace/repo différent** : un `git clone` par session, sous
+  `/workspace/<session-id>/<repo>` ;
+- **même repo, plusieurs sessions** : un `git worktree` par session
+  sous `/workspace/<session-id>/` — base d'objets commune, HEAD /
+  index / branche distincts, zéro collision de commits.
+
+### 4. Déclaration nommée « pool » dans le workspace
+
+Pour qu'un agent atterrisse sur une boîte partagée par défaut, le
+workspace (AIP-34) peut déclarer la boîte par label :
+
+```yaml
+sandbox:
+  ref: "<label>"   # s'attache à la boîte labellisée <label>
+```
+
+La résolution réutilise la résolution standard des `ref` : label
+exact, préfixe d'id unique, ou slug `@owner/label`. Une boîte
+déclarée en ref est rattachée, jamais bootée à froid, donc le refcount
+(§1) est le même quel que soit le chemin d'arrivée.
+
+### 5. Critères de detach — déterministes, puis décision
+
+**Ordre d'évaluation : 1) les critères déterministes ; 2) s'il en
+existe une, la décision (§6) ; 3) par défaut, le déterminisme gagne.**
+
+Critères déterministes (par défaut) :
+
+| Critère | Fait detach quand |
+|---|---|
+| `session-end` | fin normale de la session |
+| `session-kill` | arrêt explicite de la session |
+| `session-crash` | crash de la session |
+| `idle-<Y>` | la session est idle depuis plus de Y ms — SEULEMENT si la boîte déclare `idleYMs` ; pas de fenêtre, pas de critère |
+
+**Défaut** : aucune décision déclarée → l'ordre déterministe
+s'applique ; le critère le plus récent l'emporte.
+
+### 6. Hook DECISION.md (optionnel — point d'extension)
+
+Une boîte PEUT déclarer une décision (AIP-65 DECISION.md) via
+`sandbox.lifecycle.decision.ref` :
+
+```yaml
+lifecycle:
+  decision:
+    ref: ./sandbox-teardown.DECISION.md
+```
+
+La décision répond à la question typée « que faire de cette boîte ? »
+avec les options `destroy` / `pause` / `keep`. Elle est évaluée APRÈS
+l'ordre déterministe, à chaque detach ET avant chaque destruction
+immédiate, et peut l'emporter (ex. « garder la boîte si une session a
+du travail non-pushé »). Un hôte sans moteur de décision traite ce
+champ comme un point d'extension : les critères déterministes restent
+en vigueur, au plus un avertissement.
+
+### 7. Événements émis
+
+L'hôte émet les événements suivants (noms réservés, sans namespace) :
+
+| Événement | Fait quand |
+|---|---|
+| `sandbox:attached` | une session rejoint la liste des attachements |
+| `sandbox:detached` | une session quitte la liste des attachements |
+| `sandbox:destroy-scheduled` | un destroy différé est armé (cas (a) `keep-<N>` ou cas (b)) — annulé par un nouvel attachement |
+| `sandbox:destroyed` | la boîte a été détruite (ou mise en pause) |
