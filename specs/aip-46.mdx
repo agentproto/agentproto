@@ -1009,6 +1009,135 @@ session artifact, `ref` set to the artifact's `key`. An unpinned
 artifact still lists via `session_artifact_list`; pinning is what
 promotes it into the terse "ended" summary a supervisor or UI reads
 without a separate call.
+### Session cost and billing mode (added 2026-10-18)
+
+> **Draft — AIP-46 amendment** (2026-10-18). *Normative identifiers
+> (field names, literals, tool names) are English and final.*
+
+**Problem.** A conforming daemon today records a `costUsd` field of
+"API equivalent" (or 0) on sessions launched under a flat-rate
+subscription (Claude Code ~$200/month, Codex, …). A session that looks
+"free" actually consumes an amortised subscription — and a daemon may
+spawn dozens of sessions within the same 5-hour window. No
+quality-per-USD decision can rest on that number.
+
+The `Session` interface currently declares no cost fields; every host
+added one of its own (tolerated by the "MUST ignore unknown fields"
+rule, but with no shared semantics). This amendment fixes the
+semantics in this AIP: cost is per-session state, exactly the domain
+of the descriptors.
+
+#### Descriptor fields
+
+The `interface Session` (§[Session data model](#session-data-model))
+gains three optional fields, filled in by the host at the end of each
+turn and aggregated over the session's lifetime:
+
+```ts
+  /** Marginal cost of the session, in USD (float): what the session
+   *  would have cost at the public API price. In "api" mode this is
+   *  the actual bill; in "subscription" mode it is the informative
+   *  API-equivalent price (may be 0 if the adapter does not report
+   *  it); in "free" mode, 0.
+   *  MUST NOT be the basis of a quality-per-USD decision when
+   *  billingMode ≠ "api". */
+  costUsd?: number
+  /** Share of the plan's cost attributed to this session: the access
+   *  profile's `monthlyUsd` fee apportioned proportionally to usage
+   *  (see Amortisation). 0 when billingMode ≠ "subscription". This is
+   *  THE number to compare in quality-per-USD. */
+  amortizedCostUsd?: number
+  /** How the session is billed. */
+  billingMode?: "api" | "subscription" | "free"
+```
+
+Invariants:
+
+- `billingMode: "api"` ⇒ `amortizedCostUsd` absent or 0; `costUsd`
+  is the actual spend.
+- `billingMode: "subscription"` ⇒ `amortizedCostUsd` MUST be present;
+  `costUsd` is the API-equivalent price.
+- `billingMode: "free"` (free models subject to rate limits) ⇒ both
+  costs are 0; the token counter is still reported.
+- A host declaring a `subscription` (§Access profile) MUST populate
+  `billingMode` on each of its sessions; without a subscription
+  profile, the three fields stay absent (current behaviour unchanged).
+
+#### Access profile and subscription
+
+A host declares an access profile per provider identity — the same
+identity as the auth surface of [AIP-29](/docs/aip-29) `auth` /
+[AIP-45](/docs/aip-45). The `subscription` block is optional and
+declarative:
+
+```yaml
+authProfiles:
+  - id: claude-sub
+    provider: anthropic
+    auth: auth/sales-claude           # AIP-29 auth ref (AIP-54)
+    subscription:
+      monthlyUsd: 200                 # plan actually paid
+      windows:                        # amortisation windows (see Amortisation)
+        - kind: 5h
+        - kind: weekly
+```
+
+- `monthlyUsd` is in major units (float): it is *declared* by the
+  operator, not a transaction — transactional amounts remain in minor
+  units ([AIP-55](/docs/aip-55) §Minor units).
+- `windows[].limit` (optional): a token ceiling, when known/reported;
+  otherwise the host infers it by observation.
+- `kind: "5h"` — a rolling 5-hour window (Claude Code, Codex);
+  `kind: "weekly"` — a weekly cap.
+
+#### Amortisation
+
+```
+planWeeklyCost = monthlyUsd / 4.348          (52 weeks / 12 months)
+amortizedCostUsd(session) =
+    planWeeklyCost × (sessionTokens / profileTokensOnTheWindow)
+```
+
+where `profileTokensOnTheWindow` is the total usage (all sessions
+combined) of this profile over the encompassing `weekly` window. If no
+usage has occurred yet, the apportionment is proportional to the
+elapsed time of the window: the subscription is being paid regardless.
+The `5h` window is not used for amortisation (too short, too noisy);
+its quota semantics are specified in AIP-67.
+
+#### Quota status
+
+Quota status (remaining headroom, `resetsAt`, the `quota_status` tool
+and its HTTP mirror) is not part of this amendment. It is specified in
+[AIP-67](/docs/aip-67) (agentproto/agentproto#80). This amendment
+defines only the per-session cost fields above and the declarative
+`subscription` block that feeds amortisation; the `windows` declared
+there are inputs to the amortisation formula, not a quota read surface.
+
+#### Examples
+
+1. **Claude Code on a subscription** — the case that motivates the
+   amendment. Today: `costUsd: 0`, same as a free session; the
+   quality-per-USD table distorts every decision. After:
+   `billingMode: "subscription"`, `costUsd` remains the API
+   equivalent (may stay 0), `amortizedCostUsd` ≈ $0.86 for a session
+   of 1.2M tokens on a weekly profile totalling 80M tokens with a
+   $200/month plan, i.e. 200 × (1.2M / 84.6M monthly-token
+   equivalents).
+2. **`api` session** (per-call paid key) — unchanged: `costUsd` =
+   actual bill, `billingMode: "api"`.
+3. **Free model** (per-minute rate limit) —
+   `billingMode: "free"`, tokens visible, costs at 0.
+
+#### Compatibility
+
+The project has no external users: no migration, direct replacement
+(`workspace/v2` posture). The "`costUsd` alone" reading disappears
+from quality-per-USD displays in favour of `amortizedCostUsd` — that
+is the intended correction. Third-party consumers that read raw
+`costUsd` continue to receive it, with a clarified meaning: *marginal*
+cost.
+
 
 ## Rationale
 
@@ -1218,6 +1347,19 @@ kind). A host implementing it reuses [AIP-58](/docs/aip-58)'s
 `ArtifactEntry` shape rather than inventing a parallel one, so a future
 consumer that already speaks AIP-58 artifacts needs no new parsing
 code, only the extra envelope fields this section adds.
+
+### The 2026-10-18 cost-and-billing amendment (draft)
+
+§Session cost and billing mode is additive in the strictest sense of
+*shapes*: the three `costUsd` / `amortizedCostUsd` / `billingMode`
+fields are optional on `Session`, and a host with no subscription
+profile emits exactly the same payloads it did before the amendment.
+The only break is *semantic* and targeted: a `costUsd` field a host
+already populated (the current daemon implementation, "API equivalent"
+or 0 under a subscription) now receives a normative meaning — marginal
+cost, never the basis of a quality-per-USD decision in `subscription`
+mode. There are no external users: the corrected reading replaces the
+old one with no deprecation window.
 
 ## Security Considerations
 
