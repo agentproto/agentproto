@@ -1139,6 +1139,188 @@ is the intended correction. Third-party consumers that read raw
 cost.
 
 
+### Context continuity and idle compaction (added 2026-10-19)
+
+> **Draft — AIP-46 amendment** (2026-10-19). *Normative identifiers
+> (field names, literals, tool names) are English and final.*
+
+**Problem.** Provider prompt caches make a warm continuation an order
+of magnitude cheaper than a cold one, and they lapse quietly: the TTL
+runs from the last turn (five minutes by default, an hour with
+extended caching). The daemon's context-continuity policy acts only at
+*turn boundaries of an actively driven session* — warn / compact /
+continue-fresh / hard-stop as `contextPct` crosses thresholds. A
+session that goes idle between wakes (supervisors, cron-driven agents,
+parked worktrees) gets no care at all: its cache expires unnoticed and
+the next wake pays full cold-context price on a large transcript — and
+nothing on the surface says *whether that cache is still warm*, so a
+host cannot even choose between "wake it now" and "compact it first".
+
+This amendment adds two opt-in policy blocks — `idleCompact` (act
+while the cache is still warm) and `coldWakeGuard` (handle a wake that
+arrives after it expired) — plus two descriptor fields that make cache
+warmth observable. Both blocks default to `mode: "off"`: a host that
+does not configure them emits byte-identical payloads and takes none
+of the new actions.
+
+#### Policy carrier and precedence
+
+The context-continuity policy is a partial object, resolved once at
+spawn and stored on the session descriptor as `contextContinuity`. It
+already carries the turn-boundary thresholds:
+
+| field | default |
+|---|---|
+| `mode` (`manual` \| `ask` \| `auto`) | `ask` |
+| `warnAtPct` / `compactAtPct` / `continueFreshAtPct` / `hardStopAtPct` | 55 / 65 / 75 / 90 |
+
+It is configured at three levels; the most specific *present* level
+wins field by field:
+
+1. `agent_start`'s `contextContinuity` parameter,
+2. the agent preset (`agent.json`, [AIP-42](/docs/aip-42)),
+3. the daemon config — a per-adapter entry
+   (`defaults.adapters.<slug>.contextContinuity`) ahead of the
+   daemon-wide default (`defaults.contextContinuity`).
+
+#### The `idleCompact` block
+
+```ts
+idleCompact?: {
+  /** Default "off". "auto" acts on its own; "ask" only surfaces a
+   *  structured question (see Arming). */
+  mode?: "off" | "ask" | "auto"
+  /** Arm only above this context percentage. Default 50. */
+  atPct?: number
+  /** Arm this long before `cacheWarmUntil`. Default 60_000 ms. */
+  beforeCacheExpiryMs?: number
+  /** What the timer performs. Default "compact". */
+  action?: "compact" | "continue-fresh"
+}
+```
+
+#### The `coldWakeGuard` block
+
+```ts
+coldWakeGuard?: {
+  /** Default "off". */
+  mode?: "off" | "ask" | "auto"
+  /** Guard only above this context percentage. Default 75. */
+  atPct?: number
+}
+```
+
+Both `atPct` fields are integers in `[0, 100]` and are independent of
+the turn-boundary thresholds and of each other.
+
+#### Descriptor fields
+
+```ts
+/** ISO timestamp of the moment the last turn ended. */
+lastTurnEndAt?: string
+/** ISO timestamp when the session's prompt cache lapses
+ *  (= lastTurnEndAt + the adapter's declared cache TTL).
+ *  Absent until a turn has ended. */
+cacheWarmUntil?: string
+```
+
+**Cache TTL is declared per adapter.** The [AIP-45](/docs/aip-45)
+manifest's free-form `metadata` object MAY carry `promptCacheTtlMs`
+(integer, milliseconds); when absent the host uses `300_000` (5
+minutes), the conservative floor every adapter at least matches. A
+host that knows the TTL MUST stamp `lastTurnEndAt` and
+`cacheWarmUntil` at every turn end.
+
+#### Arming (normative)
+
+At each turn end, a host evaluates `idleCompact` in order:
+
+1. **Eligibility.** `mode` is `ask` or `auto`; the session is idle
+   (not mid-turn, no prompt queued); `contextPct` is known and
+   `> atPct`; `cacheWarmUntil` is in the future. Any failure → do
+   nothing.
+2. **Skip on a known wake.** If the host knows when this session next
+   wakes — a cron job, a sentinel — and that moment falls before
+   `cacheWarmUntil`, do nothing: the wake lands on a warm cache and
+   needs no help.
+3. **Arm.** Set the timer for `cacheWarmUntil − beforeCacheExpiryMs`;
+   if that instant already passed but the cache is still warm, arm to
+   fire as soon as the session is idle.
+4. **On fire**, re-check step 1 (a prompt may have raced in), then:
+   - `mode: "auto"` — perform `action`. `compact` writes a
+     transcript-derived checkpoint (no model call unless the policy's
+     `compactHandoffTurn` asks for one) and requests the harness's own
+     compaction on the live session; `continue-fresh` writes the same
+     kind of checkpoint and starts a fresh continuation. Either way
+     the work happens *while the cache is still warm*, and the fire is
+     announced with a `session:idle-compact` event
+     (`sessionId`, `action`, `contextPct`).
+   - `mode: "ask"` — surface `action` as a structured question with a
+     `keep-going` alternative. Nothing is mutated until the operator
+     answers; an unanswered question simply expires with the cache.
+5. **Cancellation.** Any dispatched prompt, `session.kill`, or a
+   policy edit that clears the block cancels the armed timer; it MUST
+   NOT fire while a prompt is queued or the session is mid-turn.
+
+#### Cold-wake guard (normative)
+
+At prompt admission to an idle session — after compaction prompts,
+structured-question answers, and force-resume have taken their usual
+paths (none of them is a cold wake) — the host evaluates
+`coldWakeGuard`:
+
+1. `mode` is `ask` or `auto`; `contextPct` is known and `> atPct`.
+2. The session is **cold**: `cacheWarmUntil` is in the past or absent.
+3. On fire the host first writes a **deterministic checkpoint** from
+   the transcript — no model call, nothing billed. Then:
+   - `mode: "auto"` — continue fresh with that checkpoint and hand the
+     incoming prompt to the *new* session: it becomes part of the
+     fresh session's first prompt — neither dropped nor run twice.
+     The successor is linked through `continuedTo` on the retired
+     descriptor, and the handoff is announced with a
+     `session:cold-wake-guard` event (`sessionId`, `continuedTo`,
+     `contextPct`).
+   - `mode: "ask"` — surface the checkpoint's continue-fresh question
+     with `keep-going`; the incoming prompt is admitted to the current
+     session as usual.
+4. `mode: "off"` (the default) or a warm cache → exactly today's
+   behaviour: the prompt runs on the session as it is.
+
+#### Observability
+
+`session_list`'s compact projection and `session_context_status` gain
+`lastTurnEndAt` and `cacheWarmUntil`, so a consumer can answer "will
+this wake be cheap?" without guessing from timestamps it was never
+given.
+
+#### Examples
+
+1. **5-minute TTL, defaults.** A turn ends at `T`; `cacheWarmUntil =
+   T+5 min`; with the session above 50% context the timer arms at
+   `T+4 min` (`beforeCacheExpiryMs = 60_000`). An `auto` session
+   compacts there; the next wake pays warm rates on the compacted
+   context.
+2. **1-hour extended TTL.** The adapter declares
+   `promptCacheTtlMs: 3_600_000` and the policy sets
+   `beforeCacheExpiryMs: 300_000`: the timer arms at `T+55 min`.
+3. **Cron wake inside the window.** The cache lapses at `T+5 min`, the
+   session's cron job fires at `T+3 min` — step 2 skips arming, and
+   the wake itself lands on a warm cache.
+4. **Cold wake.** A supervisor prompts a parked session the next
+   morning at 85% context with `coldWakeGuard: { mode: "auto" }`: a
+   free checkpoint, a fresh continuation, and the supervisor's message
+   as its first prompt.
+
+#### Compatibility
+
+Every added field is optional and both blocks default to `mode:
+"off"`; a host with no configuration emits exactly the payloads it
+emits today and takes none of the new actions. `promptCacheTtlMs` is
+a new key inside AIP-45's free-form `metadata` object — consumers MUST
+ignore keys they do not know (as AIP-45 already requires), so no
+manifest shape changes.
+
+
 ## Rationale
 
 **Why buckets under the host's state root, and not inside the workspace
@@ -1361,6 +1543,17 @@ cost, never the basis of a quality-per-USD decision in `subscription`
 mode. There are no external users: the corrected reading replaces the
 old one with no deprecation window.
 
+### The 2026-10-19 context-continuity amendment (draft)
+
+§Context continuity and idle compaction is additive in the strictest
+sense of *behaviour*: both policy blocks default to `mode: "off"`, the
+descriptor fields are optional, and a host that never configures them
+emits byte-identical payloads and takes none of the new actions. The
+one new key (`metadata.promptCacheTtlMs`) lands in AIP-45's free-form
+`metadata` object, which consumers already ignore when unknown. The
+policy block itself gains only nested optional fields; existing
+threshold fields and their defaults are unchanged.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -1450,6 +1643,19 @@ old one with no deprecation window.
   version's own directory — the same escape risk [AIP-53](/docs/aip-53)
   names for its app-UI data plane, reapplied here because both serve a
   directory of files a session (not the host) populated.
+- **Idle compaction mutates a session's context without a caller, and
+  the cold-wake guard can answer a prompt on a *different* session
+  than the one addressed.** Both are gated behind policy blocks that
+  default to `mode: "off"`, and every action they take writes a
+  transcript-derived checkpoint first — the mutation is recoverable by
+  construction, which is what makes daemon-initiated compaction
+  acceptable. The guard is the sharper edge: a prompt addressed to
+  session A may be handed to session B's fresh continuation. Hosts
+  MUST surface `continuedTo` and the `session:cold-wake-guard` event
+  wherever they attribute prompt results, or work will be recorded
+  against the wrong session. Neither block may fire mid-turn or with a
+  prompt queued (§Arming), so they cannot interleave with a caller's
+  in-flight work.
 
 ## Open Questions
 
