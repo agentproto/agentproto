@@ -1077,7 +1077,7 @@ authProfiles:
     auth: auth/sales-claude           # AIP-29 auth ref (AIP-54)
     subscription:
       monthlyUsd: 200                 # plan actually paid
-      windows:                        # known quota windows
+      windows:                        # amortisation windows (see Amortisation)
         - kind: 5h
         - kind: weekly
 ```
@@ -1102,45 +1102,17 @@ where `profileTokensOnTheWindow` is the total usage (all sessions
 combined) of this profile over the encompassing `weekly` window. If no
 usage has occurred yet, the apportionment is proportional to the
 elapsed time of the window: the subscription is being paid regardless.
-The `5h` window serves quota enforcement, not amortisation (too short,
-too noisy).
+The `5h` window is not used for amortisation (too short, too noisy);
+its quota semantics are specified in AIP-67.
 
-#### Read surface: quota status
+#### Quota status
 
-A conforming host MUST expose:
-
-| Tool | Inputs | Notes |
-|---|---|---|
-| `session_quota_status` | `{profileId?}` | One record per access profile; absent `profileId` ⇒ all profiles. |
-
-The response:
-
-```ts
-interface QuotaStatus {
-  profileId: string
-  billingMode: "api" | "subscription" | "free"
-  windows: Array<{
-    kind: "5h" | "weekly"
-    /** tokens consumed in the current window. */
-    usedTokens: number
-    /** known ceiling, else absent. */
-    limitTokens?: number
-    /** remaining headroom; absent when the ceiling is unknown. */
-    remainingTokens?: number
-    /** next reset, ISO-8601. */
-    resetsAt?: string
-  }>
-  /** profile's declared plan fee. */
-  monthlyUsd: number
-  /** amortised cost per million tokens over the current window —
-   *  the quality-per-USD metric comparable between subscription
-   *  and API. */
-  amortizedUsdPerMTokens: number
-}
-```
-
-HTTP: `GET /quota/status[?profile=<id>]` (mirror of the tool, same
-read-only posture as the rest of the HTTP surface).
+Quota status (remaining headroom, `resetsAt`, the `quota_status` tool
+and its HTTP mirror) is not part of this amendment. It is specified in
+[AIP-67](/docs/aip-67) (agentproto/agentproto#80). This amendment
+defines only the per-session cost fields above and the declarative
+`subscription` block that feeds amortisation; the `windows` declared
+there are inputs to the amortisation formula, not a quota read surface.
 
 #### Examples
 
@@ -1380,8 +1352,7 @@ code, only the extra envelope fields this section adds.
 
 §Session cost and billing mode is additive in the strictest sense of
 *shapes*: the three `costUsd` / `amortizedCostUsd` / `billingMode`
-fields are optional on `Session`, `session_quota_status` and
-`GET /quota/status` are a new surface, and a host with no subscription
+fields are optional on `Session`, and a host with no subscription
 profile emits exactly the same payloads it did before the amendment.
 The only break is *semantic* and targeted: a `costUsd` field a host
 already populated (the current daemon implementation, "API equivalent"
