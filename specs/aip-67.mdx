@@ -183,11 +183,15 @@ A **QuotaReader** is a named source of QuotaStatus values:
 ```ts
 interface QuotaReader {
   id: string
-  supports(profile: unknown): boolean
-  read(profile: unknown, signal?: AbortSignal): Promise<QuotaStatus | undefined>
+  supports(profile: QuotaProfile): boolean
+  read(profile: QuotaProfile, ctx?: { signal?: AbortSignal }): Promise<QuotaStatus | undefined>
 }
 ```
 
+- `QuotaProfile` is the minimal auth-profile projection a reader needs:
+  `profileRef`, the provider `endpoint`, the auth `method`
+  (`"oauth-bearer"` | `"api-key"`), and an opaque `credentialRef` that the
+  host resolves; a reader never receives the secret in the profile itself.
 - `supports(profile)` answers, cheaply and without I/O, whether this
   reader can plausibly read that profile.
 - `read` MUST NOT throw. **Every** failure resolves to `undefined`:
@@ -198,7 +202,7 @@ interface QuotaReader {
 - A read MUST be **side-effect-free and non-billable**: a balance or
   limit GET, never an inference call and never a mutation. A read
   consumes no quota it reports.
-- `signal` is a cooperative cancellation signal; a cancelled read resolves
+- `ctx.signal` is a cooperative cancellation signal; a cancelled read resolves
   to `undefined` like any other failure.
 
 ### 7. Registration
@@ -207,8 +211,7 @@ Readers register through an [AIP-43](/docs/aip-43) registry, exactly as
 STORAGE / SANDBOX / CLI handles do:
 
 - A **de facto** construct, `defineQuotaReader(...)`, produces the handle
-  (an AIP-56 `createDoctype` handle) for a reader implementation; a
-  declarative QuotaReader manifest derives the same handle from frontmatter.
+  (an AIP-56 `createDoctype` handle) for a reader implementation.
 - `defineQuotaReader` MUST validate the handle at construction time.
 - A `quotaReaderRegistry` — a `createRegistry<QuotaReaderHandle>({ family:
   "quota-reader", ... })` instance — registers, lists, and looks the
