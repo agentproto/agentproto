@@ -685,7 +685,8 @@ A child document is merged over its parent, and the merge only narrows:
   `actions` (a child may turn `post` or `comment` from `true` to
   `false`, never the reverse).
 - **Gates**: a gate is cleared only in the document that declares it. A
-  descendant redeclaring the same `id` keeps the ancestor's status.
+  descendant redeclaring an ancestor's gate cannot clear it: the
+  effective status is `open` if either declaration is `open`.
 - **Status**: the effective presence status is the most restrictive
   along the `extends` chain (`paused` over `draft` over `active`).
 
