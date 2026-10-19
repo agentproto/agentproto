@@ -1,0 +1,380 @@
+---
+title: "AIP-67: QUOTA — quota/v1 (a comparable headroom signal for inference spend)"
+description: "A runtime primitive that answers one question — how much headroom is left on an auth profile — with one comparable shape and an honest provenance label. Fixes the QuotaStatus / QuotaWindow / QuotaCredits data model, the required `basis` provenance semantics (provider / probe / observed / estimated), a QuotaReader contract whose failures resolve to undefined instead of throwing, AIP-43 registry registration via defineQuotaReader, and one read surface (MCP tool, HTTP mirror, CLI command) keyed by auth profile rather than by session. Pure: a read MUST be side-effect-free and non-billable."
+aip: 67
+status: Draft
+type: Standards Track
+created: 2026-10-19
+author: Jeremy André <jeremy@agentik.net>
+requires: [43]
+discussions-to: https://github.com/agentproto/agentproto/discussions/67
+layer: primitives
+package: "@agentproto/model-intel"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 67 (provisional, editors assign the final number) |
+| Title | QUOTA — quota/v1 (a comparable headroom signal for inference spend) |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Standards Track |
+| Requires | [AIP-43](/docs/aip-43) (the registry handles a reader is registered through) |
+| Created | 2026-10-19 |
+| Package | `@agentproto/model-intel` |
+
+## Abstract
+
+`quota/v1` is a **runtime primitive** for one question: **how much headroom
+is left** on a given auth profile — and how honest is the answer?
+
+It defines four things and nothing else:
+
+1. a **QuotaStatus** — one comparable snapshot for one auth profile,
+   timestamped and provenance-labelled,
+2. **QuotaWindow**s — per-window remaining percentage, with optional usage
+   detail,
+3. **QuotaCredits** — a monetary balance for providers that meter credits
+   instead of (or in addition to) rate windows,
+4. a **QuotaReader** contract whose every failure mode resolves to
+   `undefined`, never a fabricated figure and never an exception.
+
+Provenance (`basis`) is **normative, not diagnostic**. A router consuming a
+figure is entitled to know whether it came from a documented provider
+surface, this host's own observations, a local estimate, or an undocumented
+connector scrape.
+
+This AIP deliberately does not define how a session's spend is decomposed
+(that is [AIP-46](/docs/aip-46)), what a model costs (that is pricing), or
+how a limit is *enforced* (that is policy; this AIP defines no gating).
+
+## Motivation
+
+Quota and credit signals today are fragmented across at least four shapes,
+each owned by a different part of the stack:
+
+| Signal | Where it lives today | Shape |
+|---|---|---|
+| Rate-limit headers | response metadata (`*-ratelimit-*` families) | limit / remaining / reset per window |
+| Balance endpoints | provider account APIs | a monetary figure, maybe a currency |
+| Subscription windows | undocumented response headers | opaque tier windows, community-derived |
+| Free-tier daily caps | per-key or per-plan surfaces | a count that resets daily |
+
+A router that wants to back off, a supervisor that wants to reschedule, and
+a policy that wants to gate expensive calls each need **one comparable
+number** — "how much headroom is left" — with a figure they can trust or
+distrust deliberately. Today each consumer re-implements its own header
+parsing and its own guessing, and none of them can say where the number
+came from. Two hosts with the same subscription report different things,
+and the same host reports different shapes for different providers.
+
+The union of what hosts actually read is small, coherent, and is what this
+AIP specifies: a status keyed by auth profile, with windows that carry a
+remaining percentage and an honest basis.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as
+described in [AIP-1](/docs/aip-1).
+
+### 1. QuotaStatus
+
+A **QuotaStatus** is one snapshot for one auth profile.
+
+```ts
+interface QuotaStatus {
+  profileRef: string                 // the auth profile, by reference — never the credential
+  asOf:        string                // ISO-8601 instant of the read
+  basis:       "provider" | "probe" | "observed" | "estimated"
+  source?:     string                // which surface produced it, e.g. a response-header family
+  windows:     readonly QuotaWindow[]
+  credits?:    QuotaCredits
+}
+```
+
+- `profileRef` is an opaque reference to an auth profile. A QuotaStatus
+  MUST NOT carry the credential itself — see [Security
+  Considerations](#security-considerations).
+- `windows` and `credits` are read separately and either may be empty; at
+  least one MUST be present (see the fabrication rule, below).
+
+### 2. QuotaWindow
+
+```ts
+interface QuotaWindow {
+  id:           string      // open vocabulary; recommended ids below
+  remainingPct: number      // 0..100, REQUIRED
+  used?:        number
+  limit?:       number
+  remaining?:   number
+  unit?:        string      // e.g. "requests", "tokens", "usd"
+  resetsAt?:    string      // ISO-8601 instant
+}
+```
+
+- `id` names the window. The vocabulary is **open** — providers keep
+  inventing shapes. Recommended, non-exhaustive ids:
+  `"minute"`, `"day"`, `"5h"`, `"7d"`, `"7d-sonnet"`, `"month"`,
+  `"primary"`, `"secondary"`, `"key_limit"`. Consumers MUST NOT switch on
+  a closed set; an unknown id is a window they can still read
+  (`remainingPct`) even when they cannot interpret its semantics.
+- `remainingPct` is the ONLY required field: it is the figure other AIPs
+  consume. A reader MUST NOT ship a window it cannot fill — **a window
+  whose `remainingPct` cannot be honestly computed MUST be omitted.**
+- `used` / `limit` / `remaining` / `unit` / `resetsAt` are optional detail.
+  **Unknown means omitted.** A reader MUST NOT fabricate a figure it did
+  not obtain. `0` is a real value — a depleted window reads `remainingPct:
+  0` and MUST be kept; omitting it would report headroom that does not
+  exist.
+- When a provider reports only a monetary balance and no window (a
+  credit-metered plan), the figure goes in `credits`, not in a synthetic
+  window.
+
+### 3. QuotaCredits
+
+```ts
+interface QuotaCredits {
+  balanceUsd?: number    // monetary balance, normalised to USD when known
+  unlimited?:  boolean   // true ⇒ the metered surface reports no cap
+  currency:    string    // the currency `balanceUsd` (or the native balance) is expressed in
+}
+```
+
+- `currency` is required so a figure is never silently ambiguous. A
+  balance normalised to USD reads `balanceUsd` with `currency: "USD"`.
+- `unlimited: true` is a claim the reader actually obtained from the
+  surface (e.g. an uncapped key), not an inference from absence.
+
+### 4. The fabrication rule
+
+Normative restatement, because it is the invariant the whole AIP protects:
+
+- A reader MUST NOT synthesise a window, a percentage, or a balance.
+- Unknown = omitted. `0` = kept.
+- A status with **no window and no credits MUST NOT be produced** — the
+  reader returns `undefined` instead (see §6). An empty status is not an
+  honest answer; absence is.
+
+### 5. `basis` semantics
+
+`basis` is REQUIRED on every status. It answers *where this figure came
+from*:
+
+| Basis | Meaning |
+|---|---|
+| `provider` | obtained from a **documented, official** provider surface (documented headers, a documented account API). |
+| `observed` | derived from **this host's own traffic and responses** — e.g. a rate-limit error this request received, or limit headers echoed on a call it already made. |
+| `estimated` | computed **locally** from known plan limits and this host's own usage accounting. |
+| `probe` | obtained from a **non-official or undocumented** surface through a connector — an undocumented header family, a reverse-engineered endpoint. |
+
+Conformance:
+
+- Core and reference readers MUST NOT emit `probe`. Conforming core
+  surfaces stay on the three honest bases; connectors that scrape
+  undocumented surfaces are third-party extensions.
+- A consumer MUST NOT rely on a `probe` status alone for a hard decision.
+  It SHOULD treat `probe` as a **hint** — scheduling, surfacing, logging —
+  and confirm on a stronger basis (provider, observed) before gating.
+
+### 6. Reader contract
+
+A **QuotaReader** is a named source of QuotaStatus values:
+
+```ts
+interface QuotaReader {
+  id: string
+  supports(profile: unknown): boolean
+  read(profile: unknown, signal?: AbortSignal): Promise<QuotaStatus | undefined>
+}
+```
+
+- `supports(profile)` answers, cheaply and without I/O, whether this
+  reader can plausibly read that profile.
+- `read` MUST NOT throw. **Every** failure resolves to `undefined`:
+  unsupported profile, missing credential, non-2xx response, timeout,
+  credential error, unparseable body, empty result. A caller therefore
+  writes `??`-style handling once, and absence is always a real answer
+  ("nothing is known"), never a crash.
+- A read MUST be **side-effect-free and non-billable**: a balance or
+  limit GET, never an inference call and never a mutation. A read
+  consumes no quota it reports.
+- `signal` is a cooperative cancellation signal; a cancelled read resolves
+  to `undefined` like any other failure.
+
+### 7. Registration
+
+Readers register through an [AIP-43](/docs/aip-43) registry, exactly as
+STORAGE / SANDBOX / CLI handles do:
+
+- A **de facto** construct, `defineQuotaReader(...)`, produces the handle
+  (an AIP-56 `createDoctype` handle) for a reader implementation; a
+  declarative QuotaReader manifest derives the same handle from frontmatter.
+- `defineQuotaReader` MUST validate the handle at construction time.
+- A `quotaReaderRegistry` — a `createRegistry<QuotaReaderHandle>({ family:
+  "quota-reader", ... })` instance — registers, lists, and looks the
+  handles up through the four-verb surface. **Duplicate registration is an
+  error, not a silent overwrite.**
+
+The registry primitive, identity rules, capability metadata namespace, and
+discovery hooks are entirely [AIP-43](/docs/aip-43)'s; this AIP defines no
+new registry field or verb.
+
+### 8. Read surface
+
+One surface, three transports:
+
+| Transport | Shape |
+|---|---|
+| MCP tool | `quota_status` — inputs `profile?: string`, `refresh?: boolean`; output `{ statuses: QuotaStatus[] }` |
+| HTTP mirror | `GET /quota/status?profile=<ref>&refresh=<bool>` — same body |
+| CLI | `agentproto quota status [--profile <P>] [--refresh] [--json]` |
+
+- Statuses are keyed **by auth profile, not by session**. A subscription
+  window is shared by every session on the profile; keying by session
+  would multiply one truth into per-session fictions.
+- With no `profile` given, the host returns statuses for every profile it
+  has a reader for.
+- Hosts SHOULD cache reads. `refresh: true` (or `--refresh`) bypasses the
+  cache and forces a live read.
+
+### 9. Purity
+
+`read` MUST NOT mutate the profile, write state, or hold locks across an
+await. It is a read of an upstream surface, normalised into `quota/v1`.
+Caching, de-duplication, and refresh scheduling are the host's concern,
+composed around the reader — never inside it.
+
+## Initial sources (informative)
+
+What readers exist today, and what basis each yields:
+
+| Source | Surface | Basis |
+|---|---|---|
+| Anthropic API rate limits | documented response headers `anthropic-ratelimit-{requests,tokens,input-tokens,output-tokens}-{limit,remaining,reset}` — per-minute windows | `provider` |
+| Anthropic subscription windows | the `anthropic-ratelimit-unified-*` header family (5-hour / 7-day weekly windows) is **undocumented**; readable only through a connector | `probe` |
+| OpenRouter key credits | `GET /api/v1/key` — `limit`, `limit_remaining`; a `null` `limit_remaining` means an uncapped key, so no window is emitted | `provider` |
+| Moonshot balance | `GET /v1/users/me/balance` — `data.available_balance` (USD); a balance with no window ⇒ `credits` only | `provider` |
+| Codex usage windows | the `rate_limits` payload — `used_percent`, `window_minutes`, `reset_at`; `remainingPct = 100 - used_percent` | `provider` |
+| opencode Go / Zen hosts | no official quota API is documented for them; the only honest basis is `observed` (e.g. from a rate-limit error this host actually received) | `observed` |
+
+This table is a starting inventory, not a conformance list. New sources
+join by registering a reader; undocumented surfaces arrive as connectors
+with `basis: probe`.
+
+## Relationship to other AIPs (informative)
+
+- **[AIP-46](/docs/aip-46) SESSION.** The session-cost amendment
+  (agentproto/agentproto PR #75) keeps the spend decomposition on the
+  session — `costUsd` / `amortizedCostUsd` / `billingMode`. That answers
+  *what this session cost*; this AIP answers *how much headroom the
+  profile has left*. This AIP owns quota status and does not redefine any
+  session field.
+- **[AIP-38](/docs/aip-38) POLICY and [AIP-57](/docs/aip-57)
+  MODEL-ROUTING** MAY consume a window's `remainingPct` as an input. This
+  AIP defines **no gating itself** — it is a sensor, not an actuator; what
+  a policy does with a depleted window is policy's business.
+
+## Rationale
+
+**Why a status keyed by profile, not by session.** Rate-limit and
+subscription state lives on the credential and the plan, which every
+session on the profile shares. Per-session quota state would report three
+different "headrooms" for three concurrent sessions drawing down the same
+window, and none of them would be the true one.
+
+**Why `remainingPct` is the required core and everything else is optional.**
+Providers disagree wildly on what they expose (percentages, counts,
+balances, undocumented header families) — but every one of them can be
+normalised to "percent of the window left". Making the comparable figure
+required and the detail optional is what makes cross-provider consumption
+possible at all.
+
+**Why `basis` is required and why `probe` is quarantined.** A headroom
+number that cannot say where it came from will eventually gate a real
+decision on a scrape of an undocumented header. Forcing the label, and
+forbidding hard decisions on `probe` alone, keeps the scrape tier useful
+without letting it silently become the source of truth.
+
+**Why read-does-not-throw.** A reader is wrong precisely when the upstream
+surface is unreachable or undocumented — the common cases, not the
+exception. Threading exceptions through every consumer of an already
+uncertain signal produces defensive try/catch noise; `undefined` makes
+absence a first-class, composable answer.
+
+**Why a read must be non-billable.** A quota reader that itself spends the
+quota it reports turns monitoring into consumption and can drain a strained
+window further.
+
+## Backwards Compatibility
+
+This AIP introduces a new surface; nothing existing changes meaning. No
+existing AIP field is reinterpreted, and hosts that report no quota today
+remain conformant — quota status is additive, and absence of readers is
+indistinguishable from absence of data (`undefined`).
+
+## Examples
+
+One provider-basis status with windows:
+
+```json
+{
+  "profileRef": "profile_01H8...",
+  "asOf": "2026-10-19T09:15:00Z",
+  "basis": "provider",
+  "source": "anthropic-ratelimit-* response headers",
+  "windows": [
+    { "id": "minute", "remainingPct": 62, "used": 38, "limit": 100,
+      "remaining": 62, "unit": "requests",
+      "resetsAt": "2026-10-19T09:16:00Z" },
+    { "id": "day", "remainingPct": 0, "used": 500, "limit": 500,
+      "remaining": 0, "unit": "requests",
+      "resetsAt": "2026-10-20T00:00:00Z" }
+  ]
+}
+```
+
+A credits-only status (no window — the rule of §4 kept this status honest
+rather than synthesising one):
+
+```json
+{
+  "profileRef": "profile_01H8...",
+  "asOf": "2026-10-19T09:15:00Z",
+  "basis": "provider",
+  "source": "GET /v1/users/me/balance",
+  "windows": [],
+  "credits": { "balanceUsd": 42.5, "currency": "USD" }
+}
+```
+
+## Security Considerations
+
+- **No credential material in a status.** A QuotaStatus MUST NOT contain
+  secrets or credential material — no keys, tokens, headers-as-secrets.
+  Credentials are resolved **by reference** (`profileRef`) by the host's
+  existing credential machinery; the quota surface never sees them.
+- **`probe` is a trust downgrade, not a shortcut.** §5's quarantine exists
+  because an undocumented surface can change or lie without notice. A
+  consumer that gates on `probe` alone has outsourced a policy decision to
+  an unversioned scrape.
+- **Absence must stay absence.** §4's fabrication rule is a safety rule:
+  a fabricated "85% remaining" is worse than no figure, because consumers
+  act on it.
+- **Reads are non-billable by contract.** §6 keeps a monitoring surface
+  from becoming a spend channel.
+
+## Reference Implementation
+
+`@agentproto/model-intel` — in the
+[`agentproto/ts`](https://github.com/agentproto/ts/tree/main) monorepo —
+ships the `quota/v1` types, the reader contract, the
+`defineQuotaReader` handle factory, and readers for the `provider`-basis
+sources listed above.
+
+## See also
+
+- [AIP-43 REGISTRY](/docs/aip-43) — the registry a `defineQuotaReader`
+  handle registers into
+- [AIP-46 SESSION](/docs/aip-46) — session spend decomposition
+- [AIP-57 MODEL-ROUTING](/docs/aip-57) — a consumer of `remainingPct`
+- [AIP-38 POLICY](/docs/aip-38) — a consumer of `remainingPct`
