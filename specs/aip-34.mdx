@@ -6,7 +6,7 @@ status: Review
 type: Schema
 created: 2026-05-02
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 18, 19, 20, 35, 36, 38, 40, 41, 42, 53]
+requires: [1, 2, 7, 18, 19, 20, 25, 35, 36, 38, 40, 41, 42, 53]
 discussions-to: https://github.com/agentproto/agentproto/discussions/34
 layer: surfaces
 package: "@agentproto/workspace"
@@ -20,7 +20,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/workspace
 | Status | Review |
 | Type | Schema |
 | Domain | workspace.sh |
-| Requires | [AIP-19](/docs/aip-19) (SECRETS), [AIP-20](/docs/aip-20) (WORK), [AIP-35](/docs/aip-35) (STORAGE), [AIP-36](/docs/aip-36) (SANDBOX) |
+| Requires | [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-19](/docs/aip-19) (SECRETS), [AIP-20](/docs/aip-20) (WORK), [AIP-25](/docs/aip-25) (PERSONA), [AIP-35](/docs/aip-35) (STORAGE), [AIP-36](/docs/aip-36) (SANDBOX) |
 
 ## Abstract
 
@@ -207,6 +207,7 @@ bump.
 | `sandbox` | object | (none) | Sandbox policy: inline / ref / file. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
 | `code` | object | (none) | Code policy: inline / ref / file. See AIP-26. Optional — when present, the workspace IS a code-workspace / repo (see "Workspace as repo" below). |
 | `work` | object | (none) | `{ inline: <WORK.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }` — [AIP-20](/docs/aip-20) WORK.md, same inline/ref/file union as `code`. A project node's status/board lives here, NOT in a flat status file: items are AIP-18 `ITEM.md` records under the collection(s) `work` declares. See "Node status: `work:`" below. |
+| `presence` | object | (none) | `{ inline: <PRESENCE.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }`. A `presence/v1` document: how this node speaks in public (audience, topics, forbidden words, channels, cadence, approval, gates). Same inline/ref/file union as `work`. The voice itself stays in the [AIP-25](/docs/aip-25) PERSONA.md the document names. See "Presence block: `presence:`" below. |
 | `identity` | object \| array | (none) | AIP-23 identity-ref block — default identity for all sub-blocks of this workspace. Sub-blocks (storage, sandbox, code) override. See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
 | `wall` | enum | `"isolated"` | Visibility level: `"shared"` \| `"isolated"` \| `"sealed"` \| `"hard"`. See "The four wall levels" below. |
 | `includes` | array | `[]` | `{ ref: "ws://workspaces/<id>[#<subpath>]", mode: "read" \| "write" \| "append" }`. Consumer-side half of a door. Honoured only if the target ALSO exports to this id — see "Includes and exports". |
@@ -318,7 +319,7 @@ interface WorkspaceDefinition {
 
 4. **`storage.inline` and `storage.ref` are mutually exclusive.**
    Exactly one form per WORKSPACE.md (same for `sandbox`, `code`,
-   `work`).
+   `work`, `presence`).
 
 5. **No I/O at parse time.** Reading WORKSPACE.md MUST NOT trigger
    credential resolution, network calls, or storage instantiation.
@@ -357,7 +358,7 @@ interface WorkspaceDefinition {
 
 13. **Paths MUST be tree-relative and confined.** `exports[].path`,
     `includes[].ref` fragments, `secrets`/`agents`/`routines`/`work`/
-    `code` file refs, and `agentproto.lock`'s `dataDir` MUST NOT
+    `presence`/`code` file refs, and `agentproto.lock`'s `dataDir` MUST NOT
     escape the tree via `..` traversal, a leading `/`, or a symlink.
     See "Path confinement".
 
@@ -366,6 +367,21 @@ interface WorkspaceDefinition {
     is never more active than an ancestor. Hosts MUST NOT start agents
     or fire routines at a node whose effective status is `paused` or
     `archived`. See "Node status: active / paused / archived".
+
+15. **A declared `presence:` MUST resolve to a parseable `presence/v1`
+    document, and its effective (merged) form MUST name a `persona`.**
+    `presence:` itself is optional; this rule only fires when it IS
+    declared. A `presence.file` or `extends` path that escapes the tree
+    is a hard error (rule 13).
+
+16. **Presence only narrows down an `extends` chain.** Forbidden terms
+    are never removed, `approval` is never weakened, an open `gate` is
+    never cleared by a descendant, and the effective presence status is
+    the most restrictive along the chain. A host MUST NOT take any
+    external action (publish, comment, follow, send) for a node whose
+    effective presence status is `draft` or `paused`, nor for a node
+    whose effective node status (rule 14) is not `active`. See
+    "Presence block: `presence:`".
 
 ### Stable identity
 
@@ -595,6 +611,156 @@ that differs from the node's own declared value:
 @acme/root/billing/invoices    status: archived   → effective: archived
 ```
 
+### Presence block: `presence:`
+
+A node that speaks in public (posts, replies, comments) needs an
+editorial policy that machines can check and a human signs off: who the
+node talks to, about what, in which words, on which accounts, how often,
+and who approves each piece before it leaves. The existing blocks each
+cover a neighbouring part and none covers this one:
+
+| Concern | Already covered by | Gap this block fills |
+|---|---|---|
+| Voice, tone, register, self-declared limits | [AIP-25](/docs/aip-25) PERSONA.md (`voice`, `boundaries`) | Words that may never appear belong to the project, not to a reusable persona |
+| What the node works on | [AIP-20](/docs/aip-20) WORK.md (`work:`) | Nothing about what is said in public |
+| Limits and budgets | [AIP-38](/docs/aip-38) POLICY.md (`policy:`) | No notion of a channel, a topic or a published piece |
+| Approval requests and signatures | [AIP-7](/docs/aip-7) GOVERNANCE.md | No policy that names which pieces need approval and who approves |
+| Account credentials | [AIP-19](/docs/aip-19) SECRETS.md | No link between a secret and a channel |
+| Company-wide defaults | [AIP-6](/docs/aip-6) COMPANY.md (no brand or voice fields) | Company defaults travel as a parent `presence/v1` document through `extends` |
+
+`presence:` adds no voice, no work tracking and no policy engine. It adds
+the one document that binds them for public speech, and it names the
+persona instead of restating it.
+
+#### File and reference
+
+`presence:` is the same inline / ref / file union as `work:`. The
+document is markdown with YAML frontmatter, conventionally `PRESENCE.md`
+in a `presence/` folder next to the node's `WORKSPACE.md`. The schema is
+`PRESENCE.schema.json` (schema tag `presence/v1`) and a worked example is
+`PRESENCE.example.md`, both under `resources/aip-34/draft/`. The body is
+informational: hosts read only the frontmatter.
+
+#### Frontmatter
+
+| Field | Type | Description |
+|---|---|---|
+| `schema` | const `presence/v1` | Required. |
+| `name`, `title`, `description`, `version` | strings | Required. `name` is kebab-case, 2 to 64 chars. |
+| `status` | enum | Required. `draft`, `active` or `paused`. |
+| `extends` | path | Relative path to a parent `presence/v1` document (for example company defaults). |
+| `persona` | path or ws ref | The [AIP-25](/docs/aip-25) PERSONA.md that carries the voice. Required in the effective document. |
+| `audience` | object | `primary`, `pains[]`, `notTargeted[]`. |
+| `topics` | object | `pillars[]` (`id`, `title`, `angle`) and `exclude[]`. |
+| `lexicon` | object | `forbidden[]` (`term`, `reason`, `instead`) and `required[]` (`phrase`, `context`). |
+| `channels` | array | One entry per account: `id`, `network`, `account` (`handle`, `kind`, `owner`), `connection` (`provider`, `credentials` as a secret slug), `locale`, `formats`, `cadence`, `actions`, `publish` (provider per action), `approval`. |
+| `watch` | object | What to read before commenting: `keywords`, `accounts`, `hashtags`, `communities`, `commentRules`. |
+| `approval` | object | `mode` (`always` or `policy:<ref>`) and `approver` (a principal ref). |
+| `gates` | array | `id`, `description`, `status` (`open` or `cleared`), `blocks` (any of `links`, `posts`, `comments`, `channel:<id>`). |
+| `examples` | object | `good[]` and `bad[]` pieces (`text`, `why`, `channel`) used to calibrate drafts. |
+| `review` | object | `cadence` (`weekly` or `monthly`), `day`, `kpis[]`. |
+| `metadata` | object | Namespaced vendor extensions. |
+
+Credentials are never inline: `connection.credentials` MUST be the slug of a secret in the node's own
+SECRETS.md, or one granted through `uses_secrets`
+([AIP-19](/docs/aip-19)); the schema rejects anything that is not a bare
+slug. Reading a presence document performs no I/O (rule 5).
+
+#### Merge under `extends`
+
+A child document is merged over its parent, and the merge only narrows:
+
+- **Replace**: `title`, `description`, `audience`, `persona`, and
+  individual `review` fields. A child persona SHOULD itself extend the
+  parent's persona; hosts MAY warn when it does not.
+- **Union, never removable**: `lexicon.forbidden` (by `term`, compared
+  case-insensitively), `topics.exclude`, and every `watch.*` array. A
+  child may add a `reason` or `instead` to an inherited term, never drop
+  the term.
+- **Union by key**: `lexicon.required` (by `phrase`), `topics.pillars`
+  and `channels` (by `id`; the child overrides fields of the same `id`),
+  `gates` (by `id`), `examples` (child entries first).
+- **Tighten only**: `approval.mode` (`always` is the strictest, so a
+  child of an `always` parent MUST be `always`) and a channel's
+  `actions` (a child may turn `post` or `comment` from `true` to
+  `false`, never the reverse).
+- **Gates**: a gate is cleared only in the document that declares it. A
+  descendant redeclaring the same `id` keeps the ancestor's status.
+- **Status**: the effective presence status is the most restrictive
+  along the `extends` chain (`paused` over `draft` over `active`).
+
+#### Status semantics
+
+- `draft`: the node's agents MAY prepare pieces and submit them for
+  review; nothing leaves the host.
+- `active`: approved pieces may be sent, subject to approval, gates and
+  the node status of rule 14.
+- `paused`: nothing is prepared and nothing is sent.
+
+Presence status and node status (rule 14) are independent and both must
+allow an action.
+
+#### What a host does with it
+
+1. **Draft against it.** The agent that writes a piece reads the
+   effective document: persona for voice, `topics` for subject, `watch`
+   for what to read before a comment, `examples` for calibration.
+2. **Check the lexicon.** A piece containing a forbidden term
+   (case-insensitive, accent-folded, whole word) MUST NOT be submitted
+   for approval; it goes back to drafting with the term named. A host
+   SHOULD flag a piece that states something a `required` phrase covers
+   without using the phrase verbatim.
+3. **Honour gates.** An open gate blocks the listed kinds of action:
+   `links` forbids any URL in a piece, `posts` and `comments` forbid
+   those actions on every channel, `channel:<id>` forbids everything on
+   that channel.
+4. **Ask a human.** With `approval.mode: always`, every piece waits for
+   the `approver` ([AIP-7](/docs/aip-7)). What is approved is what is
+   sent: the text is byte-identical, and any edit after approval voids
+   the approval.
+5. **Send through the declared provider.** The provider named in
+   `publish.<action>` (or else `connection.provider`) performs the
+   action. If that provider is not connected, the action stays pending;
+   a host MUST NOT silently route it through another provider.
+6. **Report.** The `review` block names the cadence, day and KPIs of the
+   periodic review.
+
+A host MAY run these steps with an [AIP-53](/docs/aip-53) agent app that
+reads the node's `WORKSPACE.md`, its `presence:` document and the
+persona it names. This AIP does not require any particular runtime.
+
+#### Example
+
+The node declares the document:
+
+```yaml
+presence: { file: presence/PRESENCE.md }
+```
+
+and the document, reduced to the fields that matter (the full version is
+`PRESENCE.example.md`):
+
+```yaml
+---
+schema: presence/v1
+name: shopbot-presence
+title: ShopBot public presence
+description: How ShopBot speaks on LinkedIn and X.
+version: 0.1.0
+status: draft
+extends: ../../acme-brand/presence/PRESENCE.md
+persona: ./PERSONA.md
+lexicon:
+  forbidden:
+    - { term: guaranteed ranking, reason: Nobody can guarantee a position in an AI answer. }
+gates:
+  - id: public-site-stale
+    description: The public landing page still shows claims the product no longer makes.
+    status: open
+    blocks: [links]
+---
+```
+
 ### Tree-wide lockfile: agentproto.lock
 
 Plain YAML (no frontmatter, no body) at the tree root, `lockfile:
@@ -657,7 +823,8 @@ Deux entretiens programmés ; détails hors de portée du cerveau.
 
 Every tree-relative path this AIP accepts — `exports[].path`,
 `includes[].ref`'s `#<subpath>` fragment, `secrets.file`,
-`agents[].file`, `routines[].file`, `work.file`, `code.file`, and
+`agents[].file`, `routines[].file`, `work.file`, `presence.file`,
+`code.file`, and
 `agentproto.lock`'s `dataDir` — MUST resolve inside the tree. Three
 distinct failure modes, all MUST be rejected as hard errors:
 
@@ -693,6 +860,8 @@ code:
     path: /path/to/monorepo/projects/simone
 work:
   file: WORK.md
+presence:
+  file: presence/PRESENCE.md
 includes:
   - { ref: "ws://workspaces/@jeremy/agentik#commun", mode: read }
 secrets: { file: .secrets/SECRETS.md }
@@ -852,6 +1021,14 @@ exposure on an arbitrary OTHER node purely by declaring it, which is
 exactly the privilege-escalation shape `includes`/`exports` already
 guard against for raw files.
 
+A presence document is the one block in this AIP whose output leaves
+the host and is attributed to a person. A host MUST therefore treat
+`approval`, `gates` and the forbidden-term list as controls, not hints:
+a document pulled in through `extends` or `ref` can only narrow them
+(rule 16), and a pack that ships a PRESENCE.md MUST NOT ship it with
+`status: active`. Account credentials live only behind AIP-19 secret
+slugs; a document that carries a token inline is invalid.
+
 ## Open questions
 
 1. ~~**Mounting workspaces into other workspaces.**~~ Resolved by
@@ -877,10 +1054,12 @@ guard against for raw files.
 - [AIP-3 — SKILL.md](/docs/aip-3) — sibling manifest the workspace hosts
 - [AIP-14 — TOOL.md](/docs/aip-14) — sibling manifest the workspace hosts
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — sibling manifest the workspace hosts
+- [AIP-7 - GOVERNANCE.md](/docs/aip-7): approval requests and signatures behind a presence document's `approval` block
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — item storage for the collection(s) a `work:` WORK.md declares
 - [AIP-19 — SECRETS.md](/docs/aip-19) — `secrets:`/`uses_secrets:`; `workspace:` access entries pair with `uses_secrets`
 - [AIP-20 — WORK.md](/docs/aip-20) — referenced from `work:`; a project node's status/board, not a flat status file
 - [AIP-23 — IDENTITY.md (identity-ref)](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive) — referenced from `identity?`
+- [AIP-25 - PERSONA.md](/docs/aip-25): named by `presence.persona`; carries the voice that a presence document deliberately does not restate
 - [AIP-26 — CODE.md](/docs/aip-26) — referenced from `code?` (workspace-as-repo)
 - [AIP-30 — DRIVER.md](/docs/aip-30) — sibling manifest the workspace hosts
 - [AIP-35 — STORAGE.md](/docs/aip-35) — filesystem policy block
