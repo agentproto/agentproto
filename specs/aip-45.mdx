@@ -126,6 +126,7 @@ Top-level fields (informative summary):
 | `setup` | No | Post-install configuration steps (AIP-29 `$ref`) — daemons, bind-time prompts, OAuth, external pickers |
 | `auth` | No | Auth surface (AIP-29 `$ref`) |
 | `sandbox` | Yes | Sandbox profile (AIP-36 `$ref`) |
+| `confinedReadPaths` | No | READ-only paths an OS-confined spawn needs to boot (e.g. the CLI's own global config files under `$HOME`, which the sandbox denies). See § Sandbox integration. |
 | `protocol` | Yes | `acp` \| `mcp` \| `proprietary` \| `print` |
 | `acp` | When `protocol=acp` | Ref to AIP-44 ACP.md describing the wire profile |
 | `mcp` | When `protocol=mcp` | Inline MCP server config |
@@ -434,6 +435,14 @@ node-permission, etc.), `network.egress`, `mounts`, `limits`, `env`
 fields apply. The runner passes the resolved sandbox to the protocol
 arm; the protocol arm decides how to expose it (e.g. ACP's `cwd`
 parameter on `session/new`).
+
+`confinedReadPaths` is OPTIONAL. It lists READ-only paths an
+OS-confined spawn needs in order to boot — typically the CLI's own
+global config files under `$HOME`, which an OS-level sandbox profile
+denies by default. A `~/...` entry anchors at the operator's home; a
+leading `$VAR`/`${VAR}` is resolved from the per-spawn env and dropped
+when unset. The grant is READ-only: it never widens write access, and
+mutable adapter state belongs in the adapter's state home, not here.
 
 ### Auth surface
 
