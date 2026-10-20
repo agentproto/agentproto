@@ -1,0 +1,531 @@
+---
+aip: 68
+title: "AIP-68: STEWARD.md + SECRETARY.md: agentclerk/v1 (out-of-band session clerks: triage and memory lenses)"
+description: "Names the clerk, an out-of-band process that watches daemon sessions' transcripts and lifecycle events and maintains durable STATE about them without ever waking the watched session, as one workspace of two composable doctypes: STEWARD.md (`agentsteward/v1`), the session-triage profile that classifies sessions into verdicts (done / abandoned / blocked / needs-input / active) and applies AIP-46 outcomes (mark-complete, mark-failed, close-abandoned...) under an origin policy that never closes a human's session; and SECRETARY.md (`agentsecretary/v1`), the memory-secretary profile that runs LLM distill lenses (session, project, user, company) over raw transcripts toward a two-level store (per-agent local, promoted shared), with per-source cursors, anti-rebound debounces, dedup by origin, and free-tier model budgets."
+author: Jeremy André <jeremy@agentik.net>
+status: Draft
+type: Schema
+created: 2026-10-20
+requires: [1, 2, 6, 10, 11, 41, 46, 58]
+layer: memory
+package: "@agentproto/clerk"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/apps/session-steward
+---
+
+| Field | Value |
+|---|---|
+| AIP | 68 |
+| Title | STEWARD.md + SECRETARY.md: agentclerk/v1 (out-of-band session clerks) |
+| Status | Draft |
+| Type | Schema |
+| Domain | clerk.sh |
+| Doctypes | `agentsteward/v1` (session-triage profile, written as `STEWARD.md`) + `agentsecretary/v1` (memory-secretary profile, written as `SECRETARY.md`) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-46](/docs/aip-46) (sessions, lifecycle events, outcomes), [AIP-41](/docs/aip-41) (routine trigger), [AIP-58](/docs/aip-58) (run/journal of a clerk pass) |
+| Composes with | [AIP-6](/docs/aip-6) (COMPANY targets), [AIP-10](/docs/aip-10) (KNOWLEDGE targets), [AIP-11](/docs/aip-11) (LESSON.md distillation), [AIP-53](/docs/aip-53) (app-bundled clerks) |
+| Reference Impl | [`@agentproto/session-steward` app](https://github.com/agentproto/ts/tree/main/packages/apps/session-steward) (steward, shipped, no AIP); Pygmalion memory secretary (`projects/pygmalion/packages/core/src/memory/`, agentik-studio) |
+
+## Abstract
+
+Every serious deployment accumulates the same pile of **leftover
+session state**: sessions that ended without recording an outcome,
+humans rereading full transcripts after compaction or restart, and
+context that evaporates instead of compounding. The daemon already
+holds everything needed to fix this, transcripts on disk, lifecycle
+events on the bus, worktree and PR state, but it holds it as scratch.
+AIP-68 names the **clerk**: an out-of-band process that watches
+sessions from the OUTSIDE and maintains durable, resumable state about
+them, without ever waking, prompting or being attributed to the watched
+session.
+
+One AIP, two doctypes, one shared runtime core:
+
+- **`agentsteward/v1` (STEWARD.md)** triages MANY sessions: classifies
+  them into typed verdicts (`done | abandoned | blocked | needs-input |
+  active`), applies AIP-46 session outcomes (`mark-complete`,
+  `mark-failed`, `close-abandoned`, `needs-input`, `relaunch`,
+  `archive`), and is bounded by an **origin policy** that structurally
+  never closes a session a human launched. Runs on rules first, cheap
+  evidence, and a judge only for ambiguous candidates.
+- **`agentsecretary/v1` (SECRETARY.md)** curates ONE agent's memory:
+  runs declaratively-defined **lenses** (filter + distill + target) over
+  the agent's raw transcripts toward a two-level store, a private
+  per-agent local level (`STATE.md`, `HANDOFF.md`, facts, cursor) and an
+  explicit promotion step toward the shared level (COMPANY refs,
+  project/progress files, the host's user memory).
+
+Both profiles share the same normative core (§Watch core): out-of-band
+execution, disk-first snapshot reads, per-source incremental cursors,
+single-flight + debounce, never-wake delivery, bounded passes that
+never block the watched session, and a free-tier-first model budget.
+
+## Motivation
+
+Three gaps, one primitive:
+
+1. **The steward shipped without a spec.** The reference
+   implementation (`packages/apps/session-steward`, the `agentproto
+   steward` CLI, the wrap-up tools `session_wrapup_plan` /
+   `session_wrapup_apply` and `session_evidence`) is in daily use, but
+   the verdict vocabulary, the origin policy, the remaining-work check
+   and the three-step snapshot contract (`classify` → `analyze` →
+   `act`) exist only in code and a README. Any other runtime wanting
+   "wrap up idle sessions without killing a human's work" re-derives
+   those decisions from scratch and the costs of getting them wrong are
+   humans' lost sessions.
+2. **Cold context is paid twice.** When an agent wakes from a new
+   session, a compaction, or a crash, its only machine-readable memory
+   is its transcript, so it (or its operator) pays to reread the whole
+   thing. The Pygmalion runtime solved this with an out-of-band
+   secretary: per-source `offsetLine` cursors, debounced passes, an
+   anti-hallucination quote guard on distillation, and a `HANDOFF.md`
+   the brain reads FIRST on wake. The machinery is proven but
+   brain-specific; no portable format lets ANY agent declare "give me a
+   secretary".
+3. **The two are the same primitive.** The steward and the secretary
+   both sit where the transcript ends and durable state begins: both
+   watch lifecycle events, both run bounded out-of-band passes, both
+   advance an incremental cursor, both dedup replays, both write
+   "session records" (a verdict, or a STATE/HANDOFF) and both must
+   never wake the watched session. Specifying them separately would
+   duplicate the idempotence, budget and never-wake contracts; folding
+   them into one workspace AIP fixes the shared core once and lets
+   each profile compose only its own surface.
+
+Prior art: AIP-46 specifies the session lifecycle and outcomes but
+explicitly scopes out the derived-outcome policy ("what did this
+session produce"), context-continuity thresholds, and anything that
+*Maintains* state over a session fleet. AIP-11 (LESSON.md) covers
+distilled lessons but specifies a per-runtime inject contract, not the
+watch/cursor/dedup machinery that gathers the raw material. AIP-10
+(KNOWLEDGE.md) covers curated wiki knowledge but not the per-agent
+transcript ingestion that feeds it.
+
+## Specification
+
+The keywords MUST / SHOULD / MAY are RFC 2119.
+
+### 1. Workspace layout
+
+A conforming host installs one directory per declared clerk:
+
+```
+<workspace>/
+  clerks/
+    <slug>/
+      STEWARD.md      # optional, present iff this clerk triages sessions
+      SECRETARY.md    # optional, present iff this clerk curates memory
+```
+
+At least one of the two files MUST be present. The directory slug is
+the clerk's identity; hosts address a clerk as `<workspace>/clerks/<slug>`.
+
+### 2. Shared frontmatter
+
+Both doctypes open with this frontmatter (zod-validated; unknown keys
+MUST warn, never fail):
+
+```yaml
+---
+kind: steward | secretary          # REQUIRED, matches the file's name
+aip: 68
+id: <kebab-slug>                   # REQUIRED, unique per workspace
+subject:                           # REQUIRED. What this clerk watches.
+  sessions:                        # a section, not a boolean
+    match:                         # per AIP-46 descriptor field globs
+      origin: ["pygmalion*", "app-service:*"]   # optional
+      label: []                   # optional
+      cwd: []                     # optional
+      model: []                   # optional
+    exclude:                      # same shapes; first match wins
+      label: ["**/research/**"]
+---
+
+# body = policy / lenses (below)
+```
+
+An absent or non-matching `subject` means the clerk watches nothing:
+`subject.sessions.match` defaults to everything NOT excluded, and an
+empty effective subject makes the clerk inert (declared, but passive).
+Hosts MUST treat `subject` as the authority: a clerk never has ambient
+access to sessions it did not declare.
+
+### 3. `agentsecretary/v1`, SECRETARY.md body
+
+#### 3.1 The lens table (the core contract)
+
+The body declaratively fixes the lenses. A **lens** is: a FILTER over
+turns, a DISTILLER (LLM prompt + parser) over the filtered windows, and
+a TARGET where distilled `Fact`s land.
+
+```yaml
+memory:
+  lenses:
+    - id: session              # reserved id: local resume only, never promotes
+    - id: project              # reserved id: PROJECT/progress files
+    - id: user                 # reserved id: the human's own turns only
+    - id: company              # reserved id: org/finance facts, AIP-6 refs
+```
+
+`id` is REQUIRED. Hosts MUST implement the four reserved ids; custom
+ids MAY be declared with inline lens steps (see `filter`/`distill`/
+`target` below). Unknown reserved references to fields:
+
+| Lens | Filter | Distiller output | Local level | May promote? |
+|---|---|---|---|---|
+| `session` | all turns between two wakes | STATE summary, next action, open decisions | STATE.md + HANDOFF.md + open decisions | no |
+| `project` | turns tagging a project (labels, paths, `aip://` refs) | progress, decisions, next step | facts.jsonl | yes → project/progress files |
+| `user` | ONLY turns whose `role` is the human's | preferences, feedback, standing instructions | facts.jsonl | yes → the host's user/feedback memory |
+| `company` | org, role, finance/budget facts | org + finance facts | facts.jsonl | yes → AIP-6 refs |
+
+#### 3.2 Fact shape
+
+Every distilled fact is:
+
+```ts
+interface Fact {
+  id: string                 // sha1(normalizedStatement), the content address
+  lens: "session" | "project" | "user" | "company" | string
+  statement: string          // one self-contained statement
+  confidence: number         // 0..1; below the lens floor → dropped, not repaired
+  origin: {                  // provenance; kept at every move
+    source: "transcript" | "chat" | string
+    sessionId?: string
+    turnUuid?: string        // or nonce (delivery-retry key)
+    at: string               // ISO
+  }[]
+  quote?: string             // anti-hallucination guard: MUST be found ( case-insensitive
+                             // after normalization) in the named turn
+  relayedFrom?: string       // factId this was relayed from (see dedup 4.c)
+  alsoIn?: string[]          // other sources the same exchange reached
+  promotedAt?: string        // set at promotion time only
+}
+```
+
+A distiller output whose `quote` does not come from the turn it names
+MUST be dropped (an ellipsis-shortened quote passes only if every
+fragment ≥ 8 chars is present in order). A dropped fact is reported
+with its reason; it is NEVER repaired, guessed or widened.
+
+#### 3.3 Two-level store
+
+Local level, under the agent's own data dir (host-resolved):
+
+```
+<agent data dir>/
+  STATE.md                   # identity of last work, current focus, next action
+  HANDOFF.md                 # the FIRST thing this agent reads on wake
+  facts.jsonl                # durable local facts (+ id, origin, quote)
+  decisions.jsonl            # open decisions: { factId, question, state }
+  cursor.json                # per-source: { path: { offsetLines, lastAt } }
+  runs.json                  # last pass: window, calls, written, duplicates
+```
+
+The local level is used ONLY to resume THAT agent: hosts MUST NOT
+mount it into other sessions, MUST NOT ship it in PRs, and MUST NOT let
+it be read by another agent's clerk.
+
+The **shared level** is only reached through `promote`. Promotion is an
+explicit, idempotent step (a `promotedAt` on a same-content-addressed
+fact is a no-op re-run), keeps full `origin`, and writes through the
+host's normal author policy (quarantine, never attributed to the
+human). The `session` lens MUST NOT promote.
+
+#### 3.4 Cursors and idempotence
+
+A pass reads transcripts FROM DISK and advances `cursor.json` per
+source file as `offsetLines` (+ `lastAt`). Normative ordering: queue
+the targets a pass intends to touch, THEN commit the cursor. On any
+cap truncation (`maxTurns`, `maxChars`, LLM budget), the cursor MUST be
+held back (`cursorHoldReason: truncated`): unread turns are never
+committed as consumed, and a later pass replays them. An explicitly
+requested window (`since`) MAY skip older backlog data as an
+operator decision, not silently.
+
+#### 3.5 Dedup
+
+1. **Within a source**, dedup by the source's repeat key (delivery
+   nonce, turn uuid), fallback `(sessionId, role, at, payload)`.
+2. **Across sources, same exchange**, merge rule: same `role`, same
+   normalized payload, within a 120 s window; keep the richer record
+   (carrying uuid/nonce) and tag `alsoIn`.
+3. **Relayed decisions**, a decision relayed brain → PM appears in
+   both transcripts with DIFFERENT payloads; it is NOT deduped by text.
+   The fact is stored once with every observing `origin` and links
+   `relayedFrom`.
+
+#### 3.6 Triggers
+
+The secretary subscribes to AIP-46 lifecycle events. Defaults:
+
+| Trigger | Event (AIP-46) | Delivery | Demeanor |
+|---|---|---|---|
+| session-end | `exited` | fyi | run a committing pass |
+| idle-pause (host: turn-end then idle) | `turn-end`/`awaiting-input` | fyi | debounced (default 10 min idle or every 20 pauses) |
+| pre-compaction | context-continuity warn/compact threshold | in-line | run FIRST, bounded (defaults 30 s), then proceed |
+| schedule | [AIP-41 routine] |, | floor, not a cron; MUST NOT override events |
+
+Normative invariants: event delivery to the clerk MUST be `fyi`
+(no wake of the watched session). A burst (N sessions ending at once)
+MUST collapse to ≤ 1 pass per agent (per-agent single-flight + a
+debounce floor, default 60 s). A pass failure NEVER blocks the
+watched session's path: log, continue.
+
+#### 3.7 Wake consumption
+
+On wake (new session, after compaction, restart), a conforming host
+MAY inject, in this order: the agent's `STATE.md` summary, then
+`HANDOFF.md`. It MUST NOT inject raw transcript turns where a fresh
+STATE/HANDOFF exists, that is the whole optimization.
+
+### 4. `agentsteward/v1`, STEWARD.md body
+
+#### 4.1 Verdict vocabulary
+
+Five typed verdicts, fixed. A clerk MUST emit one per judged session:
+
+`done | abandoned | blocked | needs-input | active`
+
+- `done`, the session's own last words record completion (clean final
+  report; own PR merged or nothing pending).
+- `abandoned`, the session never made meaningful progress or the task
+  lost its current holder; closing is safe.
+- `blocked` / `needs-input`, no close; leave a recorded flag with a
+  question.
+- `active`, judge could not confidently disagree with "alive"; a
+  malformed judge reply is `active` (not a crash-verdict).
+
+A judge failure or a missing evidence gate always results in a
+NON-closing verdict. Closing is the harder side of the scale; tie goes
+to keep.
+
+#### 4.2 Actions (bounded by origin policy)
+
+Actions over AIP-46 sessions:
+
+```
+keep | mark-complete | mark-failed | relaunch | needs-input |
+close-abandoned | archive
+```
+
+`mark-complete` records `outcome: {verdict: done}` without killing a
+live process when the session already ended (`operator-completed`);
+`close-abandoned` terminates ended-or-stalled sessions; `archive`
+hides a cold record; `relaunch` is reserved for recent
+(`--relaunch-window`, default 360 min), non-superseded, non-owned
+failures, and can suggest a same-provider alternate sub-account -
+never a paid fallback for a free-only model.
+
+**Origin policy (normative).** A session whose `origin` is a known
+human launch (e.g. `vscode`, `chat-starter`) OR whose root has no
+`origin` and no `parentSessionId` is FLAG-ONLY: every potential close
+is recorded `needs-input` with reason `flag (origin)`. Stamped origins
+are the authorization: `cron`, `routine:*`, `workflow`, `review`,
+`webhook`, `bench`, `pygmalion`, `app-service:*`, and any session with
+a parent. An origin-less root is a legacy-fail-safe, never a license to
+close.
+
+#### 4.3 Remaining-work check (normative before ANY close)
+
+A merged worktree, a merged PR, or an ended parent says the work moved
+on, not that THIS session finished. Before any rule- or judged-close,
+a conforming steward MUST run `remainingWork` over the session's last
+assistant text and open worktree PR signals: a last message asking a
+question, proposing a next step, announcing a next action, waiting on
+someone, or a still-open worktree PR, turns the close into a
+`needs-input` flag quoting the session's own words. Exceptions: the
+session never ran, and a session that itself declared `STEWARD: DONE`.
+
+#### 4.4 Three-step snapshot (`classify` → `analyze` → `act`)
+
+A steward run SHOULD follow this shape; the RUN's journal (AIP-58)
+carries the snapshot id, and the snapshot itself is persisted app data
+(sessions never appear in step outputs):
+
+1. `classify`, rules first; cheap structural evidence per candidate
+  (label, cwd, idle, keepAlive, RAM, worktree branch/dirty/ahead/
+  behind/PR, last assistant turn tail ≤ 3 KB); per session: state,
+  typed verdict + probabilities, confidence, ONE recommended action.
+  A judge is only consumed by ambiguous candidates, capped
+  (`maxJudged`, most RAM first), read-only, and released when the item
+  settles.
+2. `analyze`, one bounded analyst turn per RELEVANT session (capped);
+  writes reason, question, errorKind, nextStep; may revise the action.
+3. `act`, daemon verbs only; re-read each session right before acting
+  and SKIP the ones whose state changed since the snapshot; bound
+  every action by origin.
+
+`act` re-runs the remaining-work check.
+
+#### 4.5 Rule file
+
+The policy is data, not code. Default rules + an OPTIONAL custom file
+(`.agentproto/steward-rules.yaml`, or `--rules <file>`); first match
+wins; unknown keys are validation errors:
+
+```yaml
+version: 1
+rules:
+  - id: bench-leftovers
+    when: { origin: "model-bench*", idleMinutes: ">=60" }
+    action: close-abandoned
+    reason: bench harness leftover
+  - id: quota-relaunch
+    when: { errorKind: quota }
+    action: relaunch
+    reason: transient
+```
+
+`when` keys (all must match): globs `origin`, `label`, `cwd`, `model`,
+`profile`; enums `class`, `state` (`live`|`ended`), `verdict`,
+`errorKind`, `action`, `originClass`; numbers `idleMinutes`,
+`confidence` (`120`, `">=120"`, `"10..60"`), `failedMinutesAgo`;
+booleans `transient`, `errored`, `neverRan`, `remainingWork`,
+`confident`, `superseded`, `ownedByRun`, `staleFailure`.
+
+#### 4.6 Ask ladder
+
+For LOW-confidence, idle, not-awaiting-input candidates, a steward MAY
+send at most ONE prompt asking them to reply
+`STEWARD: DONE ...` / `STEWARD: NOT-DONE ...`, with a bounded wait
+(default ~3 min); the answer is a `declared` verdict, evidence from
+the session's own words, not from the steward's inference. A scheduled
+run MUST defer this ask by a grace window (default 24 h) so a session
+the operator means to resume is not closed overnight; `keepAlive` does
+not disguise a session from the ask when its worktree is clean or
+merged.
+
+### 5. Watch core (shared by both profiles)
+
+Both profiles inherit these normative mechanics:
+
+- **Out-of-band.** Clerk passes run in their own runner (AIP-17) or an
+  app (AIP-53); they read state from disk (transcripts, event cursors,
+  worktrees), never from the watched session's prompt space. A clerk is
+  implemented as an AIP-53 app whose body is the binding of its two
+  doctypes plus the workflow assets.
+- **Never-wake.** All lifecycle subscriptions are `fyi`; the ask ladder
+  (§4.6) is a session's ONLY inbound wake and is bounded.
+- **Single-flight + debounce.** At most one pass per clerk per subject
+  runs; events arriving mid-pass are dropped (the pass window covers
+  them) with a debounce floor (default 60 s).
+- **Run + journal.** A pass is an AIP-58 run: the clerk's state is
+  durable app data, and the run's journal enables crash-resume.
+- **Free-tier-first.** LLM calls default to free-tier models
+  (`model.tier: free | cheap | any`, default `free`). A host with a
+  free-route catalogue MUST resolve `free` from it; a host without one
+  MUST refuse to start the lens and surface the refusal. Budgets:
+  `budget.max_llm_calls_per_pass` and `budget.max_cost_usd_per_day`
+  (optional); hitting one mid-window stops the pass and replays later.
+- **No secrets.** Token values, keys and credentialed URLs are dropped
+  at the filter, before any distiller call, and never reach a prompt
+  or a memory file. Session ids and worktree branch names inside
+  records are identifiers, not secrets.
+- **Budget ownership.** The operator owns a budget reset; the host
+  records spend and MUST NOT reset silently.
+
+### 6. Host surface
+
+Hosts implementing AIP-68 MUST expose (MCP tool surface suggested):
+
+| Tool | Purpose |
+|---|---|
+| `session_clerk_list` | list installed clerks (both doctypes) |
+| `session_clerk_run` | dispatch a clerk's pass (steward triage or secretary pass) over an optional subject filter |
+| `session_wrapup_plan` / `session_wrapup_apply` | (already shipped) dry-run / apply verdicts across sessions |
+| `session_evidence` | read-only evidence pack for steward inference (< 5 KB/session) |
+
+The `agentproto clerk <slug> [analyze] [act]` CLI verb is the shipshape
+UX on the reference implementation (`agentproto steward`).
+
+## Rationale
+
+- **One AIP, two doctypes.** The steward and secretary independently
+  solved the same problem, recovering durable state from session
+  lifetime, with different write targets. Their contracts (trigger
+  discipline, never-wake, incremental cursor, dedup, budget) are
+  byte-for-byte the same, and a split spec would duplicate them. The
+  registry-of-views pattern (single workspace, multiple doctypes) lets
+  the core be normative once.
+- **A new AIP, not an amendment to AIP-46.** AIP-46's Session model is
+  Final-grade and intentionally scopes out derived-outcome policy and
+  context maintenance. Amending it would grow an already-huge doc and
+  couple session transport (`what a session is`) with session hygiene
+  (`who mops up after runs`). A separate AIP that REQUIRES AIP-46 keeps
+  the layering clean and lets both doctypes evolve independently of the
+  transport.
+- **Origin policy is structural, not heuristic.** Fail-safe direction:
+  every ambiguous ownership case defaults to flag-only. Closing a
+  human's session costs more than keeping one session alive 24 extra
+  hours.
+- **Closing is the harder side.** The verdict vocabulary and the
+  remaining-work check both bias toward not closing: a judge error
+  yields `active`, not a crash-verdict; a merged worktree does not
+  imply done; the ask ladder gives low-confidence candidates an escape.
+- **The quote guard exists because distillers hallucinate.** Free-tier
+  extractors are the budget, and hallucination is the risk; requiring
+  every fact to quote its own turn verbatim (normalized comparison)
+  makes a fact falsifiable against the transcript.
+- **Cursor holds on cap.** Merging "unread turns burned" into
+  "cursor committed" would make budget-limited passes silently lossy -
+  rejected; the cursor commits only what was actually read.
+
+## Reference Implementation
+
+- **Steward:** shipped, at
+  [`packages/apps/session-steward`](https://github.com/agentproto/ts/tree/main/packages/apps/session-steward)
+ , the `agentproto steward` CLI verb, `classify`/`analyze`/`act`
+  workflows, the `session_wrapup_plan` / `session_wrapup_apply` /
+  `session_evidence` tools, the origin policy and rules engine. No
+  AIP yet; this document is its first spec.
+- **Secretary:** reference at
+  [`agentik-studio/projects/pygmalion/packages/core/src/memory/`](https://github.com/agentik-studio/agentik-studio/tree/main/projects/pygmalion/packages/core/src/memory)
+  (incremental pass `conversation/pass.ts`, triggers
+  `conversation/triggers.ts`, lens `conversation/lens.ts`, per-source
+  dedup in `conversation/sources.ts`, handoff writer `memory/handoff/`),
+  currently brain-only, generalization planned per the Pygmalion plan
+  `projects/pygmalion/docs/plans/PLAN-SECRETAIRE-AGENTS.md`.
+- **Parser/validator:** to be extracted; the steward app already ships
+  zod schemas for verdicts, rules file, and evidence packs.
+
+## Backwards Compatibility
+
+Not applicable (new spec). Points of graceful coexistence:
+
+- A session without a clerk declaration gets NO ambient clerk: with
+  neither STEWARD.md nor SECRETARY.md under its subject, no behaviour
+  fires.
+- Existing `agentproto steward` users see their exact behavior now
+  spec'd at AIP level; the rules file, verdict vocabulary and CLI stay
+  unchanged.
+- The Pygmalion brain secretary keeps its existing on-disk cursor and
+  pass shape, which this AIP re-uses as-is for agents (new dirs
+  <pygmalion>/memory/agents/<slug>/; no migration of the brain cursor).
+- Unknown frontmatter keys and unknown lens ids warn; they never
+  hard-fail a clerk.
+
+## Security Considerations
+
+- **Attribution.** A clerk writes files (STATE/HANDOFF/facts) that a
+  session later READS as context. Anything a clerk writes must go
+  through the host's normal write policy, be visibly attributed to the
+  clerk (never to the human or to the watched agent), and be safe to
+  regression-test off (a clerk failure must not poison future context).
+- **Secrets.** No secret value reaches a clerk's prompt or store:
+  filtered BEFORE any distill call. Identifier-only records (session
+  ids, branch names, sandbox ids) are allowed as they need human
+  disambiguation.
+- **Prompt injection.** A transcript is attacker-controlled input to a
+  clerk distiller that plans writes elsewhere. Guards: quoted-verbatim
+  facts only (falsifiable), no direct instructions trust from turn
+  content, promotion behind the host write policy, lens model runs
+  read-only by construction.
+- **Wake abuse.** The ask ladder is the only inbound wake and is
+  bounded; `fyi` subscriptions cannot wake a session. A clerk prompting
+  a session outside the ask ladder MUST be refused by hosts.
+- **Denial of service.** A single-flight + debounce core means a
+  burst of events collapses; a run journal means a stale run cannot
+  double-apply; `act` re-checks freshness before applying.
+- **Privacy.** A clerk's subject filter confines it to declared agents;
+  a user-lens fact source MUST be the human's own turns; relays cross
+  referenced by `relayedFrom`, not by copying the human's words
+  forward.
