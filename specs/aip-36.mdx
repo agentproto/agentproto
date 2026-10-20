@@ -5,6 +5,7 @@ aip: 36
 status: Review
 type: Schema
 created: 2026-05-02
+updated: 2026-10-20
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 35]
 discussions-to: https://github.com/agentproto/agentproto/discussions/36
@@ -240,6 +241,8 @@ sandbox:
 | `mastra-modal` | `@mastra/modal` | persistent w/ pause/resume | Long-lived sessions. |
 | `mastra-daytona` | `@mastra/daytona` | persistent | Dev-environments. |
 | `mastra-blaxel` | `@mastra/blaxel` | per-call | Cloud isolation. |
+| `e2b` | `@agentproto/sandbox-e2b` | persistent w/ pause/resume | Direct E2B integration. |
+| `computer` | `@agentproto/sandbox-computer` | persistent w/ pause/resume | Self-hosted microVM fleet behind a controller. Shared box per v1.2; egress pool per v1.3. |
 | `node-permission` | Node `--permission` subprocess + optional bwrap | per-invocation | Per-tool grants for workspace-authored code. |
 
 Hosts MAY register additional providers (e.g. `flyio-machines`,
@@ -292,7 +295,30 @@ config:
 config:
   workspace: string
   api_key_ref: string
+
+# e2b
+config:
+  template: string               # e2b template id
+  api_key_ref: string            # SECRETS.md ref for the provider API key
+
+# computer
+config:
+  template: string               # microVM image / template id
+  cpus: number                   # vCPUs per sandbox
+  memoryMiB: number              # memory budget per sandbox
+  rootDiskMiB: number            # root disk size
+  ttlSeconds: number             # provider-side maximum lifetime
+  maxSessions: number            # max sessions sharing one box (v1.2)
+  egress: string[]               # host allowlist; same semantics as network.egress
+  egressIp: string               # shared | auto | dedicated | <slot id> (v1.3)
+  cliVersion: string             # agentproto CLI version installed in the box at boot
 ```
+
+All credentials in these shapes are SECRETS.md refs, never inline
+values. For `computer`, config-level `egress` and `egressIp` map onto
+`network.egress` and `network.egressIp`; the `network` block is the
+portable form. Config-level `cpus` and `memoryMiB` map onto
+`limits.cpus` and `limits.memoryMb`.
 
 ### `defineSandbox` standard signature
 
@@ -311,6 +337,7 @@ interface SandboxDefinition {
     timeoutMs?:  number
     memoryMb?:   number
     cpuMs?:      number
+    cpus?:       number   // vCPUs, may be fractional (v1.3)
   }
   env?: {
     auth?:            { ref?: string; state?: { env?: string[] } }
@@ -321,6 +348,7 @@ interface SandboxDefinition {
   extraPorts?: number[]
   network?: {
     egress: string[]
+    egressIp?: "shared" | "auto" | "dedicated" | string   // v1.3
   }
   lifecycle?: {
     pauseAfterIdleMs?:        number
@@ -640,3 +668,140 @@ The host emits the following events (reserved names, no namespace):
 | `sandbox:detached` | a session leaves the attachment list |
 | `sandbox:destroy-scheduled` | a deferred destroy is armed (case (a) `keep-<N>` or case (b)) — cancelled by a new attachment |
 | `sandbox:destroyed` | the box has been destroyed (or paused) |
+
+---
+
+## Amendment v1.3: egress address, host capacity, provider registry (2026-10-20)
+
+Amendment v1.3 covers three operational concerns that show up once
+sandboxes run on a finite, shared fleet: which public source address
+outbound traffic uses, whether a host has room to admit the sandbox,
+and which providers a host may register. Like v1.2, everything below
+is GENERIC across providers. The reference implementation is the
+self-hosted microVM provider `computer`, but no rule below depends on
+it.
+
+### 1. Egress address (`network.egressIp`)
+
+`network.egressIp` is optional and selects the public source address
+that the sandbox's outbound traffic uses.
+
+```yaml
+sandbox:
+  network:
+    egress: ["api.openai.com"]
+    egressIp: shared        # shared | auto | dedicated | <slot id>
+```
+
+| Value | Meaning |
+|---|---|
+| `shared` (default) | The host's default address, shared with other sandboxes on that host. |
+| `auto` | One address from the host's pool, least used. It MAY still be shared with other sandboxes. |
+| `dedicated` | An address from the pool used by no other sandbox for this sandbox's whole life. Refused if none is free. |
+| `<slot id>` | A specific pool slot (string matching `/^[a-z0-9]{1,8}$/`). The sandbox is placed on that slot; the slot MAY be shared with other non-dedicated sandboxes. |
+
+Rules:
+
+- The address is fixed for the sandbox's life. It is kept across
+  pause/resume and host restart, and freed when the sandbox is
+  destroyed (deleted).
+- A fork does not inherit it. A fork starts from the default (`shared`)
+  unless it declares its own value.
+- A provider with no address pool MUST refuse any value other than
+  `shared` with a typed error (`sandbox_egress_pool_unavailable`). It
+  MUST NOT silently fall back to `shared`.
+- `dedicated` with no free address fails with
+  `sandbox_egress_pool_exhausted`.
+- A slot already held by a dedicated sandbox fails with
+  `sandbox_egress_slot_dedicated`.
+- `auto` never picks a slot held by a dedicated sandbox. When every slot
+  is dedicated, `auto` fails with `sandbox_egress_pool_exhausted`.
+- Only `dedicated` grants exclusivity. A requested slot id MAY be shared
+  with other non-dedicated sandboxes.
+
+Rationale: tenant isolation, attribution of outbound calls to a
+specific sandbox, and keeping one sandbox's reputation (for example an
+address that has been rate-limited or blocked) from affecting other
+sandboxes.
+
+Non-normative: `egressIp` is for isolation and attribution. It MUST
+NOT be used to evade third-party rate limits or terms of service.
+
+### 2. Assigned address on the booted sandbox
+
+A provider that assigns an address reports it on the booted sandbox:
+
+```ts
+interface BootedSandbox {
+  // ...
+  egressIp?: { id: string; publicIp: string } | null
+}
+```
+
+`id` is the pool slot id when one is assigned. `publicIp` is the public
+source address that outbound traffic uses. The field is absent or
+`null` when the provider does not track an address (for example a
+provider whose only mode is the host default).
+
+### 3. Host capacity
+
+Providers that place sandboxes on finite hosts SHOULD admit a sandbox
+only if its declared memory and cpus fit the host's remaining budget.
+If they do not fit, the provider MUST refuse before any resource is
+created, with a typed error:
+
+```ts
+{
+  code: "sandbox_capacity"
+  resource: "memory" | "cpus"
+  requested: number
+  available: number
+  retryAfterMs: number
+}
+```
+
+`retryAfterMs` is the provider's estimate of when capacity may free up.
+Consumers SHOULD retry with backoff or pick another host.
+
+`limits` in `SandboxDefinition` gains `cpus` alongside `memoryMb`:
+
+```ts
+limits?: {
+  timeoutMs?: number
+  memoryMb?:  number
+  cpuMs?:     number
+  cpus?:      number   // vCPUs, may be fractional
+}
+```
+
+Provider config-level `cpus` and `memoryMiB` fields map onto
+`limits.cpus` and `limits.memoryMb`. When both are present, the
+declared limit is what the admission check uses.
+
+### 4. Provider registry
+
+The following rows are added to the provider set in §Provider
+enumerated set; the existing mastra rows remain.
+
+| `provider` | Implementation | Lifecycle | Notes |
+|---|---|---|---|
+| `e2b` | `@agentproto/sandbox-e2b` | persistent w/ pause/resume | Direct E2B integration. |
+| `computer` | `@agentproto/sandbox-computer` | persistent w/ pause/resume | Self-hosted microVM fleet behind a controller. Shared box per v1.2; egress pool per v1.3. |
+
+Their config shapes live in §Provider config shapes next to the mastra
+ones. For `computer`:
+
+```yaml
+config:
+  template: string               # microVM image / template id
+  cpus: number                   # vCPUs per sandbox
+  memoryMiB: number              # memory budget per sandbox
+  rootDiskMiB: number            # root disk size
+  ttlSeconds: number             # provider-side maximum lifetime
+  maxSessions: number            # max sessions sharing one box (v1.2)
+  egress: string[]               # host allowlist; same semantics as network.egress
+  egressIp: string               # shared | auto | dedicated | <slot id> (v1.3)
+  cliVersion: string             # agentproto CLI version installed in the box at boot
+```
+
+Credentials are SECRETS.md refs only, never inline values.
