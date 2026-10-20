@@ -311,7 +311,7 @@ config:
   maxSessions: number            # max sessions sharing one box (v1.2)
   egress: string[]               # host allowlist; same semantics as network.egress
   egressIp: string               # shared | auto | dedicated | <slot id> (v1.3)
-  cliVersion: string             # pinned controller / CLI version
+  cliVersion: string             # agentproto CLI version installed in the box at boot
 ```
 
 All credentials in these shapes are SECRETS.md refs, never inline
@@ -698,12 +698,13 @@ sandbox:
 | `shared` (default) | The host's default address, shared with other sandboxes on that host. |
 | `auto` | One address from the host's pool, least used. It MAY still be shared with other sandboxes. |
 | `dedicated` | An address from the pool used by no other sandbox for this sandbox's whole life. Refused if none is free. |
-| `<slot id>` | A specific pool slot (string matching `/^[a-z0-9]{1,8}$/`), used exclusively by this sandbox for its whole life. |
+| `<slot id>` | A specific pool slot (string matching `/^[a-z0-9]{1,8}$/`). The sandbox is placed on that slot; the slot MAY be shared with other non-dedicated sandboxes. |
 
 Rules:
 
 - The address is fixed for the sandbox's life. It is kept across
-  pause/resume and host restart, and freed on stop.
+  pause/resume and host restart, and freed when the sandbox is
+  destroyed (deleted).
 - A fork does not inherit it. A fork starts from the default (`shared`)
   unless it declares its own value.
 - A provider with no address pool MUST refuse any value other than
@@ -713,8 +714,10 @@ Rules:
   `sandbox_egress_pool_exhausted`.
 - A slot already held by a dedicated sandbox fails with
   `sandbox_egress_slot_dedicated`.
-- A requested slot id is exclusive for the sandbox's life, so it behaves
-  like `dedicated` once acquired.
+- `auto` never picks a slot held by a dedicated sandbox. When every slot
+  is dedicated, `auto` fails with `sandbox_egress_pool_exhausted`.
+- Only `dedicated` grants exclusivity. A requested slot id MAY be shared
+  with other non-dedicated sandboxes.
 
 Rationale: tenant isolation, attribution of outbound calls to a
 specific sandbox, and keeping one sandbox's reputation (for example an
@@ -798,7 +801,7 @@ config:
   maxSessions: number            # max sessions sharing one box (v1.2)
   egress: string[]               # host allowlist; same semantics as network.egress
   egressIp: string               # shared | auto | dedicated | <slot id> (v1.3)
-  cliVersion: string             # pinned controller / CLI version
+  cliVersion: string             # agentproto CLI version installed in the box at boot
 ```
 
 Credentials are SECRETS.md refs only, never inline values.
