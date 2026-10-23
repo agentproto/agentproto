@@ -149,7 +149,7 @@
         },
         "scope": {
           "type": "string",
-          "description": "Per what? `user`, `workspace`, `org`, `session`, `auth-profile`, host-specific."
+          "description": "Per what? `user`, `workspace`, `org`, `session`, `auth-profile`, host-specific. For `spend-usd`, `session` aggregates over the session lineage (successor declared via `succeeds`, or continue-fresh handoff); `auth-profile` is the hard cap across all sessions."
         },
         "per": {
           "enum": ["second", "minute", "hour", "day"],
@@ -158,7 +158,7 @@
         "window": {
           "type": "string",
           "pattern": "^P(?=.)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+(?:\\.\\d+)?S)?)?$",
-          "description": "Rolling window as an ISO-8601 duration, e.g. `PT5H` or `P7D`. Mutually exclusive with `per` (added 2026-10-23)."
+          "description": "Rolling window as an ISO-8601 duration, e.g. `PT5H` or `P7D`. ISO-8601 is canonical; a host MAY accept shorthand input (`5h`, `7d`) but MUST normalize before storing or evaluating. Mutually exclusive with `per` (added 2026-10-23)."
         },
         "applies_to": {
           "type": "array",
