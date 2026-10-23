@@ -1239,7 +1239,9 @@ conformance check can tell a host extension from an unspecified field.
 
 `SpawnAgentRequest` gains `config?`, `preset?` and `policy?` (see the
 updated interface in §SpawnAgentRequest). The `Session` record gains
-`config` (the resolved config as applied, `fallback` included),
+`config` (the resolved config as applied, `fallback` included; when the
+request named `model: "selector:<id>"`, `config.model` is the concrete
+member chosen and `configSources.model` names the selector),
 `configSources` (for each axis, the layer that produced it:
 `"manifest" | "host" | "definition" | "preset" | "request" | "fallback"`)
 and `fallbackStep` (the index of the overlay in effect, absent on the base
@@ -1357,8 +1359,9 @@ When a turn fails with a `FailureClass`, the host:
 
 1. retries the same config up to `retry.maxRetries` times when the class is
    in `retry.on` (never after a tool call unless `retryAfterToolCalls`);
-2. when `model` is a `selector:<id>`, moves to the selector's next eligible
-   member, in the selector's declared order;
+2. when the requested `model` was a `selector:<id>`, moves to the
+   selector's next eligible member, picked by the selector's `rotation`
+   ([AIP-43](/docs/aip-43) §Saved selectors), re-resolved at this step;
 3. walks `fallback` from the step after `fallbackStep`: for each overlay,
    merges it over the **base** config (the spawn's resolved config, not the
    previous step), skips it when the result is not eligible, and applies the
@@ -1387,6 +1390,14 @@ interrupted before the step is applied.
   (configs without credential material).
 - An exhausted chain leaves the session idle with the last failure. It MUST
   NOT loop over the chain again.
+
+**Resolving a selector.** A selector is resolved when a model is bound
+(spawn, restart, handoff, fallback step), never in the middle of a session:
+editing it does not move a running session. Each candidate member is
+checked as a concrete model id (eligibility, then `model:invoke` with the
+member as scope); the first that passes is used and recorded. A selector
+that does not resolve refuses the spawn (`selector_unresolvable`) and makes
+a fallback step ineligible.
 
 **Selectors are not AIP-57 chains.** An [AIP-57](/docs/aip-57) chain
 spreads conversations across candidates by a sticky hash, per request, with
