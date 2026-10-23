@@ -6,8 +6,9 @@ status: Draft
 type: Standards Track
 created: 2026-10-23
 author: Jeremy André <jeremy@agentik.net>
-requires: [19, 29, 38, 39, 45, 46, 67]
+requires: [19, 29, 37, 38, 39, 43, 45, 67]
 discussions-to: https://github.com/agentproto/agentproto/discussions
+resources: ./resources/aip-69/draft
 layer: primitives
 package: "@agentproto/auth"
 ---
@@ -19,9 +20,10 @@ package: "@agentproto/auth"
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Standards Track |
-| Requires | [AIP-19](/docs/aip-19), [AIP-29](/docs/aip-29), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-45](/docs/aip-45), [AIP-46](/docs/aip-46), [AIP-67](/docs/aip-67) |
+| Requires | [AIP-19](/docs/aip-19), [AIP-29](/docs/aip-29), [AIP-37](/docs/aip-37), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-43](/docs/aip-43), [AIP-45](/docs/aip-45), [AIP-67](/docs/aip-67) |
 | Created | 2026-10-23 |
 | Package | `@agentproto/auth` |
+| Resources | [`./resources/aip-69`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-69/draft): `AuthProfile.schema.json` |
 
 ## Abstract
 
@@ -94,12 +96,17 @@ interface AuthProfile {
 - `routes` exists because one credential can be enrolled on more than one
   endpoint (a key valid on both a subscription route and a pay-as-you-go
   route of the same vendor). Absent means `[endpoint]`.
-- Exactly one of `credentialRef` and `source` MUST be present.
-  `credentialRef` SHOULD be an [AIP-19](/docs/aip-19) secret slug when the
-  host keeps an AIP-19 inventory; how the credential was first obtained is
-  the harness's [AIP-29](/docs/aip-29) `auth.login` flow. `source` names a
-  credential the harness refreshes itself (for example a CLI's own OAuth
-  login) and that the host reads fresh at spawn.
+- At most one of `credentialRef` and `source` is present:
+  - `credentialRef`: a credential the host stores. It SHOULD be an
+    [AIP-19](/docs/aip-19) secret slug when the host keeps an AIP-19
+    inventory; how it was first obtained is the harness's
+    [AIP-29](/docs/aip-29) `auth.login` flow.
+  - `source`: a credential the host resolves fresh at spawn from a named
+    source it does not store (a harness's own OAuth login such as
+    `claude-code-oauth`, an environment variable such as `env:OPENAI_API_KEY`).
+  - neither: an **ambient** credential, read by the harness itself from its
+    own login state. The host cannot fingerprint it; it MUST show the
+    profile as ambient and MUST NOT claim a fingerprint for it.
 - `subaccount` pins one wallet of a multi-wallet account. Each pinned
   sub-account is its own profile, so quota (AIP-67), spend and policy are
   per sub-account.
@@ -123,7 +130,10 @@ profile `p` is **eligible** when all hold:
    resource policy, allows (section 3).
 
 Rules 1 to 3 MUST be evaluated without I/O. `M` comes from the adapter's
-[AIP-45](/docs/aip-45) manifest (see Open Questions). A spawn that names a
+[AIP-45](/docs/aip-45) manifest when it declares presentable methods per
+route (see Open Questions); until AIP-45 has that field, from a
+host-maintained table per adapter, which the host MUST expose read-only so
+a refusal can be explained. A spawn that names a
 profile which is not eligible MUST be refused before the harness starts,
 with a refusal code (`auth_profile_ineligible`) and the failed rule; a host
 MUST NOT silently substitute another profile.
@@ -152,15 +162,19 @@ What an implementation used to express with ad hoc fields maps as follows:
 
 | ad hoc field | AIP-38 form |
 |---|---|
-| per-profile model allow-list (`models: { mode: "allow", ids }`) | grants `{ effect: allow, actions: [model:invoke], scope: <id> }`, one per id, in a policy whose default is deny for `model:invoke` |
-| per-profile spend cap (`costBudget`) | a `spend-usd` limit with `scope: "auth-profile"` and a rolling `window` |
+| per-profile model allow-list (`models: { mode: "allow", ids }`) | a resource policy with `default: deny`, one grant `{ principal: "*", actions: [auth-profile:use] }`, and one grant `{ principal: "*", actions: [{ action: model:invoke, scope: <id> }] }` per id |
+| `models: { mode: "all" }` or no `models` | no resource policy for `model:invoke` (the subject policy alone decides) |
+| per-profile spend cap (`costBudget`, `scope: "profile"`) | a `spend-usd` limit with `scope: "auth-profile"` and a rolling ISO-8601 `window` (`"5h"` becomes `"PT5H"`) |
 | "only this team may use the company key" | a grant of `auth-profile:use` to that principal |
 | "never this model on this key" | `{ effect: deny, actions: [model:invoke], scope: <id> }` |
 
-A host MAY keep a short form (`models: string[]`) in its configuration
-surface. It MUST evaluate it exactly as the AIP-38 grants above, and it MUST
-report decisions in the AIP-38 decision record, so an audit consumer sees
-one vocabulary.
+A host MAY keep these short forms (`models`, `costBudget`) in its
+configuration surface. It MUST evaluate them exactly as the AIP-38 forms
+above, and it MUST report decisions in the AIP-38 decision record, so an
+audit consumer sees one vocabulary. Note one behaviour change for spend
+caps: an AIP-38 `spend-usd` limit refuses the next `model:invoke` once the
+window is exceeded, where the reference implementation's `costBudget` only
+reported an overage at turn end.
 
 A nested session (AIP-46 delegation) inherits no right to its parent's
 profiles: `auth-profile:use` is evaluated for the child's own subject policy,
@@ -182,10 +196,17 @@ this AIP becomes its owner. Its meaning is unchanged: AIP-46 amortises
 Headroom (how much of a window is left) is [AIP-67](/docs/aip-67), keyed by
 the same `profileRef`.
 
-A profile with `subscription` bills sessions in `billingMode: "subscription"`
-(AIP-46); a profile without it bills in `"api"`. Whether a given model costs
-anything on a given endpoint is catalog data ([AIP-43](/docs/aip-43)), not a
-property of the profile.
+The session's `billingMode` (AIP-46) is derived, never declared on the
+profile:
+
+- `"subscription"` when the profile has a `subscription`;
+- otherwise `"free"` when the catalog ([AIP-43](/docs/aip-43)) prices the
+  session's model at zero on the profile's endpoint;
+- otherwise `"api"`.
+
+`windows[].kind` names a provider-defined window (`5h`, `weekly`), not a
+duration: its length and reset are the provider's. Durations elsewhere
+(AIP-38 limit windows) are ISO-8601.
 
 ### 5. Surface
 
@@ -196,7 +217,7 @@ CLI):
 |---|---|---|
 | `auth_profile_list` | optional `endpoint` filter | profiles, each with a **fingerprint** of the credential, never the value |
 | `auth_profile_create` / `auth_profile_update` | a profile, plus the credential when creating | the stored profile (no secret) |
-| `auth_profile_delete` | `id` | refused while a live session is bound to it |
+| `auth_profile_delete` | `id`, `force?` | refused while a live session is bound to it, or while a session preset, a fallback overlay or a policy names it (unless `force`) |
 | `auth_profile_set_enabled` | `id`, `enabled` | the stored profile |
 
 - A read MUST NOT reveal credential material, in any field, log line or
@@ -205,6 +226,9 @@ CLI):
   (AIP-19 vault, OS keychain) and keep only `credentialRef` in the profile.
 - Changes MUST be applied to new bindings only. A live session keeps the
   profile it was bound with until it is restarted (AIP-46).
+- A reference to a profile that no longer exists (a forced delete) makes
+  the referring config ineligible. A host MUST NOT substitute another
+  profile for it.
 
 ### 6. Events
 
@@ -297,5 +321,7 @@ amendment.
 - [AIP-29 CLI](/docs/aip-29): how a harness logs in
 - [AIP-38 POLICY](/docs/aip-38): the rules attached to a profile
 - [AIP-39 ACTION](/docs/aip-39): `auth-profile:use`, `model:invoke`
-- [AIP-46 AGENT-SESSIONS](/docs/aip-46): session binding and amortisation
+- [AIP-46 AGENT-SESSIONS](/docs/aip-46): session binding, amortisation,
+  session config (informative: AIP-46 depends on this AIP, not the
+  reverse)
 - [AIP-67 QUOTA](/docs/aip-67): headroom per profile
