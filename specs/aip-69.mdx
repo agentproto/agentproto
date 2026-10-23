@@ -1,6 +1,6 @@
 ---
 title: "AIP-69: AUTH-PROFILE, authprofile/v1 (a named reference to the credential that pays for a session)"
-description: "A runtime primitive for the account a session bills or authenticates through: a named, adapter-independent reference to a credential on one billing endpoint, never the secret. Fixes the AuthProfile document (endpoint, method, credential reference, sub-account, subscription), the eligibility predicate that decides which profiles can serve a given harness and route, the profile as an AIP-38 resource (which models it may serve, who may use it, how much it may spend), and the read surface. Referenced by AIP-46 sessions, AIP-67 quota and AIP-38 policy."
+description: "A runtime primitive for the account a session bills or authenticates through: a named, harness-independent reference to a credential on one billing endpoint, never the secret. Fixes the AuthProfile document (endpoint, method, credential reference, sub-account, subscription), the eligibility predicate that decides which profiles can serve a given harness and route, the profile as an AIP-38 resource (which models it may serve, who may use it, how much it may spend), and the read surface. Referenced by AIP-46 sessions, AIP-67 quota and AIP-38 policy."
 aip: 69
 status: Draft
 type: Standards Track
@@ -29,7 +29,7 @@ package: "@agentproto/auth"
 
 An **auth profile** is the account a session runs on: a named reference to a
 credential that authenticates against one **billing endpoint** (a provider
-API, a gateway, a subscription), plus what the operator declares about it.
+API, a gateway, a subscription), plus what the user declares about it.
 It is never the secret.
 
 This AIP defines:
@@ -48,7 +48,7 @@ a credential is obtained and stored. This AIP is the document they point to.
 
 ## Motivation
 
-A host that runs agent CLIs juggles several accounts per vendor: a Claude
+A host that runs harnesses juggles several accounts per vendor: a Claude
 subscription and a Claude API key, three sub-organizations of one gateway,
 a free tier and a paid tier of the same key. The questions a host must answer
 on every spawn are about the account, not about the model:
@@ -119,8 +119,8 @@ host configuration, never in a workspace or a repository.
 
 ### 2. Eligibility
 
-A host resolves a session's `(adapter, route, model)` to a billing endpoint
-`E` and the set `M` of methods the adapter can present on that route. A
+A host resolves a session's `(harness, route, model)` to a billing endpoint
+`E` and the set `M` of methods the harness can present on that route. A
 profile `p` is **eligible** when all hold:
 
 1. `p.disabled` is not `true`;
@@ -129,10 +129,10 @@ profile `p` is **eligible** when all hold:
 4. the AIP-38 evaluation of `model:invoke` on that model, against `p`'s
    resource policy, allows (section 3).
 
-Rules 1 to 3 MUST be evaluated without I/O. `M` comes from the adapter's
+Rules 1 to 3 MUST be evaluated without I/O. `M` comes from the harness's
 [AIP-45](/docs/aip-45) manifest when it declares presentable methods per
 route (see Open Questions); until AIP-45 has that field, from a
-host-maintained table per adapter, which the host MUST expose read-only so
+host-maintained table per harness, which the host MUST expose read-only so
 a refusal can be explained. A spawn that names a
 profile which is not eligible MUST be refused before the harness starts,
 with a refusal code (`auth_profile_ineligible`) and the failed rule; a host
@@ -140,14 +140,14 @@ MUST NOT silently substitute another profile.
 
 When a spawn names no profile, the host MAY pick one: it MUST pick only among
 eligible profiles the subject may use (`auth-profile:use`, section 3), in an
-order the operator can see and configure, and MUST record the chosen
+order the user can see and configure, and MUST record the chosen
 `profileRef` on the session.
 
 ### 3. The profile as a policy resource
 
 An auth profile is an [AIP-38](/docs/aip-38) **resource**. Its `policy` is a
 resource policy, evaluated together with the subject's policy (the AIP-42
-agent's `policy`, the operator's) under AIP-38's resource and subject rule:
+agent's `policy`, the user's) under AIP-38's resource and subject rule:
 both must allow when both exist; a profile without `policy` defers to the
 subject policy alone.
 
@@ -288,7 +288,7 @@ document never had the secret to leak.
   them, and MUST NOT copy the secret out of its original store without that
   consent.
 - **Sub-account identifiers** can be sensitive (organization ids). Hosts
-  SHOULD treat them like profile metadata, visible to the operator only.
+  SHOULD treat them like profile metadata, visible to the user only.
 
 ## Reference Implementation
 
@@ -302,9 +302,9 @@ amendment.
 
 ## Open Questions
 
-1. **Presentable methods in AIP-45.** Eligibility rule 3 needs each adapter
+1. **Presentable methods in AIP-45.** Eligibility rule 3 needs each harness
    to declare which methods it can present per route. The reference
-   implementation projects this from the adapter package; AIP-45 has no
+   implementation projects this from the harness package; AIP-45 has no
    field for it. Proposal: an AIP-45 `auth.methods: { [route]: method[] }`
    block, in a small AIP-45 amendment.
 2. **AIP-19 access grants.** AIP-19 has its own `access` grant list
