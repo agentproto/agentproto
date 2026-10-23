@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentproto.sh/schemas/aip-43/Selector.schema.json",
   "title": "AIP-43 saved Selector",
-  "description": "A named, ordered, declarative selection over one registry family (2026-10-23 saved-selectors amendment). Host-specific keys MUST be prefixed x-.",
+  "description": "A named, ordered, declarative selection over one registry family (2026-10-23 saved-selectors amendment). Host-specific keys on the Selector object MUST be prefixed x-; clause kinds are closed except family clauses.",
   "type": "object",
   "required": [
     "id",
@@ -79,6 +79,10 @@
         "least-recently-limited"
       ],
       "default": "priority"
+    },
+    "revision": {
+      "type": "string",
+      "description": "Content digest of this revision, set by the host on save."
     }
   },
   "$defs": {
@@ -134,7 +138,34 @@
             "exists": {
               "type": "boolean"
             }
-          }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "eq"
+              ]
+            },
+            {
+              "required": [
+                "in"
+              ]
+            },
+            {
+              "required": [
+                "lte"
+              ]
+            },
+            {
+              "required": [
+                "gte"
+              ]
+            },
+            {
+              "required": [
+                "exists"
+              ]
+            }
+          ]
         },
         {
           "type": "object",
@@ -164,6 +195,49 @@
               }
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "id"
+                ]
+              },
+              {
+                "required": [
+                  "tag"
+                ]
+              },
+              {
+                "required": [
+                  "capability"
+                ]
+              },
+              {
+                "required": [
+                  "selector"
+                ]
+              },
+              {
+                "required": [
+                  "all"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "kind": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A clause kind registered by the selector's family; its meaning is the family's expansion."
+            }
+          },
+          "additionalProperties": true
         }
       ]
     }
