@@ -1,7 +1,7 @@
-# AIP-45 AGENT-CLI.md — examples
+# AIP-45 HARNESS.md — examples
 
 Reference manifests, one per supported protocol arm. All validate
-against [`./AGENT-CLI.schema.json`](./AGENT-CLI.schema.json).
+against [`./HARNESS.schema.json`](./HARNESS.schema.json).
 
 ## ACP arm — Hermes Agent
 
@@ -107,7 +107,7 @@ without an ACP server (today).
 ---
 name: goose
 id: goose
-description: Block's Goose — open-source agent CLI with MCP-based extensions. Driven via MCP-over-stdio; tool calls flow as MCP tool invocations rather than ACP session/update events. Translated to AIP-45 stream events at the protocol-arm boundary.
+description: Block's Goose — open-source harness with MCP-based extensions. Driven via MCP-over-stdio; tool calls flow as MCP tool invocations rather than ACP session/update events. Translated to AIP-45 stream events at the protocol-arm boundary.
 version: 0.1.0
 bin: goose
 install:
@@ -153,7 +153,7 @@ custom protocol. The manifest names an NPM adapter implementing
 ---
 name: gemini-cli
 id: gemini-cli
-description: Google's Gemini CLI — REPL-style agent CLI. Driven via a node-pty wrapper that parses prompts and streams completions; bridged to AIP-45 stream events through a proprietary adapter package.
+description: Google's Gemini CLI — REPL-style harness. Driven via a node-pty wrapper that parses prompts and streams completions; bridged to AIP-45 stream events through a proprietary adapter package.
 version: 0.1.0
 bin: gemini
 install:
@@ -232,7 +232,7 @@ tags: [claude-code, anthropic, acp, coding]
 
 Every example MUST satisfy:
 
-1. The schema at `./AGENT-CLI.schema.json`
+1. The schema at `./HARNESS.schema.json`
 2. Cross-field rules: `protocol=acp ⇒ acp ref present`,
    `protocol=mcp ⇒ mcp block present`, `protocol=proprietary ⇒ adapter
    present`, `session.mode=resumable ⇒ capabilities.resumable: true`

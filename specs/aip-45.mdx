@@ -1,6 +1,6 @@
 ---
-title: "AIP-45: AGENT-CLI.md — agentcli-interactive/v1 (interactive agent CLI manifest)"
-description: A markdown + frontmatter format for declaring an interactive agent CLI — a long-running, bidirectional, agent-as-process binary like Hermes Agent, Claude Code, OpenCode, Goose, or Gemini CLI — and how to install, spawn, and converse with it. Layers over AIP-29 (CLI.md) for install/version/auth blocks and AIP-44 (ACP.md) for the session/wire model when protocol=acp; falls back to MCP or proprietary protocols via a discriminator.
+title: "AIP-45: HARNESS (harness/v1): interactive harness manifest"
+description: A markdown + frontmatter format for declaring an interactive harness — a long-running, bidirectional, agent-as-process binary like Hermes Agent, Claude Code, OpenCode, Goose, or Gemini CLI — and how to install, spawn, and converse with it. Layers over AIP-29 (CLI.md) for install/version/auth blocks and AIP-44 (ACP.md) for the session/wire model when protocol=acp; falls back to MCP or proprietary protocols via a discriminator.
 aip: 45
 status: Review
 type: Schema
@@ -17,17 +17,17 @@ package: "@agentproto/driver-agent-cli"
 | Field | Value |
 |---|---|
 | AIP | 45 |
-| Title | AGENT-CLI.md — agentcli-interactive/v1 (interactive agent CLI manifest) |
+| Title | HARNESS (harness/v1): interactive harness manifest |
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
 | Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-29](/docs/aip-29) (CLI), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP) |
 | Reference Impl | [`@agentproto/driver-agent-cli`](https://github.com/agentproto/ts/tree/main/packages/driver/agent-cli) |
-| Resources | [`./resources/aip-45`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md), [`AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/AGENT-CLI.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) |
+| Resources | [`./resources/aip-45`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md), [`HARNESS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/HARNESS.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) |
 
 ## Abstract
 
-`AGENT-CLI.md` packages an **interactive agent CLI** — a binary that
+`HARNESS.md` packages an **interactive harness** — a binary that
 hosts an agent loop (Hermes, Claude Code, OpenCode, Goose, Gemini CLI)
 and converses bidirectionally with a client over stdio or a similar
 duplex channel. Each manifest declares how to install, version-check,
@@ -38,7 +38,7 @@ wire shape.
 AIP-45 is a sibling, not a rival, of [AIP-29](/docs/aip-29). AIP-29
 remains the home for **tool CLIs** — `gh`, `stripe`, `kubectl`,
 `ffmpeg` — whose semantics are one-shot `cmd → output`. AIP-45 covers
-**agent CLIs** whose semantics are persistent sessions with streamed
+**harnesses** whose semantics are persistent sessions with streamed
 turn events. The two share the install / version / auth / sandbox
 substrate via JSON Schema `$ref`, so a future "tool CLI that has both
 modes" can carry both manifests without duplication.
@@ -63,10 +63,10 @@ Linux, headless servers, Modal/Daytona sandboxes).
 AIP-45 factors the integration shape into a single declarative file
 plus a single TypeScript runner (`@agentproto/driver-agent-cli`), the
 same way AIP-29 factors tool-CLI integration. The discriminator means
-new agent CLIs join the catalog by writing a manifest, not by writing
+new harnesses join the catalog by writing a manifest, not by writing
 runner code.
 
-The companion observation: agent CLIs converge on **ACP**. Hermes,
+The companion observation: harnesses converge on **ACP**. Hermes,
 Claude Code, OpenCode, Cursor all speak it. Treating ACP as the
 default while leaving room for MCP (Goose), proprietary REPLs
 (Gemini CLI today), and headless one-shot CLIs driven `print`-style
@@ -81,7 +81,7 @@ This section uses RFC 2119 keywords (MUST / SHOULD / MAY).
 A manifest is **AIP-45-conformant** iff:
 
 1. Its frontmatter validates against
-   [`./resources/aip-45/draft/AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft).
+   [`./resources/aip-45/draft/HARNESS.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft).
 2. Its `install`, `version_check`, `auth` blocks satisfy AIP-29's
    schemas (referenced via `$ref`).
 3. When `protocol: "acp"`, the binary's ACP server satisfies the
@@ -109,7 +109,7 @@ A manifest is **AIP-45-conformant** iff:
 ### Frontmatter
 
 The full schema lives in
-[`./resources/aip-45/draft/AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft).
+[`./resources/aip-45/draft/HARNESS.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft).
 Top-level fields (informative summary):
 
 | Field | Required | Description |
@@ -482,19 +482,19 @@ with the pending step list.
 
 **Why a sibling of AIP-29, not an extension.** AIP-29's central
 abstraction is `commands` — a tree mapping subcommand paths to
-TOOL.md refs. An agent CLI has no commands tree (or a degenerate
+TOOL.md refs. A harness has no commands tree (or a degenerate
 one with one entry, "talk"). Stretching `commands` to model
 session-based interaction would either make AIP-29 schema bloat or
 make `commands` ambiguous. A sibling spec keeps both clean.
 
 **Why a `protocol` discriminator, not separate AIPs per protocol.**
 The install / version / auth / sandbox / capabilities / session
-fields are 90% of an agent-CLI manifest. Splitting per protocol
+fields are 90% of a harness manifest. Splitting per protocol
 would force four near-duplicate schemas and four runners. One
 runner with four protocol arms keeps the integration surface one
 package.
 
-**Why a declarative `print` arm.** A whole class of agent CLIs
+**Why a declarative `print` arm.** A whole class of harnesses
 (Claude Code's `--print`, mastracode) are best driven headless: one
 subprocess per turn, events on stdout. Giving them a dedicated arm
 keeps them out of the `proprietary` arm — which exists for
@@ -523,7 +523,7 @@ ship one renderer.
 ## Reference Implementation
 
 [`@agentproto/driver-agent-cli`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/driver/agent-cli)
-— TypeScript runner that loads an `AGENT-CLI.md` manifest, applies
+— TypeScript runner that loads a `HARNESS.md` manifest, applies
 the sandbox + auth, spawns the binary, dispatches to the protocol
 arm, and emits normalised stream events.
 
@@ -545,9 +545,9 @@ Draft phase; spec changes propagate through `scaffold-aip` regen.
 
 ## Backward compatibility
 
-Not applicable — first agentproto AIP for interactive agent CLIs.
-AIP-29 stays correct for tool CLIs; AIP-45 covers the agent-CLI case
-that AIP-29 wasn't designed for.
+Not applicable — first agentproto AIP for interactive harnesses.
+AIP-29 stays correct for tool CLIs; AIP-45 covers the harness case
+that AIP-29 wasn't designed for. `AGENT-CLI.md` is accepted as a legacy file name ([AIP-70](/docs/aip-70)).
 
 ## Security considerations
 
@@ -581,10 +581,10 @@ adds the bidirectional-protocol surface.
 
 - [AIP-29 — CLI.md](/docs/aip-29) — tool CLIs (one-shot `cmd → output`); shares install/version/auth blocks via `$ref`
 - [AIP-44 — ACP.md](/docs/aip-44) — wire protocol when `protocol: acp`
-- [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime that consumes an agent CLI via the optional `runtime: { kind: "agent-cli" }` binding
+- [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime that consumes a harness via the optional `runtime: { kind: "agent-cli" }` binding
 - [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth surface
 - [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox profile
-- [`./AGENT-CLI.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — JSON Schema validator
+- [`./HARNESS.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — JSON Schema validator
 - [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) — Hermes (acp), Goose (mcp), Gemini CLI (proprietary)
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md) — implementer's guide

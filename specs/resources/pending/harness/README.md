@@ -2,7 +2,7 @@
 
 `HARNESS.schema.json` in this directory was previously misfiled at
 `specs/resources/aip-52/draft/HARNESS.schema.json`. AIP-52 is
-[ADAPTER](/docs/aip-52) (`FrameworkAdapter` — the outward bridge from
+[BRIDGE](/docs/aip-52) (`FrameworkAdapter` — the outward bridge from
 an agentproto handle into a foreign framework); its prose never
 mentions a Harness, and its frontmatter never claims a `resources:`
 directory. The schema landed in that path by naming-convention
@@ -17,8 +17,8 @@ covered by any existing AIP:
 - It is explicitly **not** a subtype of [AIP-42](/docs/aip-42) AGENT
   (see the schema's own `$comment`) — a Harness *has* agents, it
   isn't one.
-- [AIP-45](/docs/aip-45) AGENT-CLI covers installing and talking to an
-  **external agent CLI binary** as a subprocess (Claude Code, Hermes,
+- [AIP-45](/docs/aip-45) HARNESS covers installing and talking to an
+  **external harness binary** as a subprocess (Claude Code, Hermes,
   …) — a different `HarnessAdapter` sense entirely (see AIP-52
   §Terminology reconciliation), not this in-process, multi-mode
   conversational state machine.

@@ -59,7 +59,7 @@ Agentproto needs ACP for two payoffs that pull in opposite directions:
 
 - **Inbound (client side)** — an AIP-9 operator should be drivable via
   any ACP-speaking subprocess agent. AIP-45
-  [`AGENT-CLI.md`](/docs/aip-45) declares which subprocess to spawn;
+  [`HARNESS.md`](/docs/aip-45) declares which subprocess to spawn;
   AIP-44 specifies how that subprocess is talked to.
 - **Outbound (server side)** — an AIP-9 operator should be exposable as
   an ACP server so any ACP-speaking IDE can connect into it. This
@@ -67,7 +67,7 @@ Agentproto needs ACP for two payoffs that pull in opposite directions:
   free, without an extension per IDE.
 
 A single AIP for *the protocol primitive* — sitting beside AIP-45
-(agent-CLI manifest) and AIP-9 (operator runtime) — keeps both flows
+(harness manifest) and AIP-9 (operator runtime) — keeps both flows
 in one place.
 
 This AIP intentionally **does not redefine ACP**. The wire-protocol
@@ -260,7 +260,7 @@ extension key.
 **Why Core, not Schema.** AIP-44 specifies a runtime contract (how
 operators participate in a wire protocol), not a file format. Per
 AIP-1 lifecycle: Core for protocols/runtimes, Schema for file formats.
-The companion AIP-45 (`AGENT-CLI.md`) is Schema.
+The companion AIP-45 (`HARNESS.md`) is Schema.
 
 **Why a `tier` shorthand.** Capability negotiation in raw ACP is a
 flat map of booleans. Most runtimes fall into three buckets;
@@ -345,7 +345,7 @@ flows through tool-call invocation, which AIP-7 governs.
 - [`agentclientprotocol/typescript-sdk`](https://github.com/agentclientprotocol/typescript-sdk) — `AgentSideConnection`, `ClientSideConnection`
 - [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime contract; `metadata.aip44.operator` references this
 - [AIP-7 — GOVERNANCE.md](/docs/aip-7) — audit + approval gating
-- [AIP-45 — AGENT-CLI.md](/docs/aip-45) — interactive agent CLI manifest; uses AIP-44 when `protocol: acp`
+- [AIP-45 — HARNESS.md](/docs/aip-45) — interactive harness manifest; uses AIP-44 when `protocol: acp`
 - [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary inherited by `kind: client` adapters
 - [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox profile for `tier: sandboxed`
 - [`./ACP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-44/draft) — JSON Schema validator

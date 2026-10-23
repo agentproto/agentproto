@@ -1,5 +1,5 @@
 ---
-title: "AIP-52: ADAPTER — agentadapter/v1 (outward framework bridge)"
+title: "AIP-52: BRIDGE (bridge/v1): outward framework bridge"
 description: The outward mirror of AIP-30 DRIVER — the contract for projecting an agentproto handle (TOOL, AGENT, PROCESSOR) into a foreign framework runtime (Mastra, AI SDK, LangChain, a CLI) so it runs as a native citizen there. Names the pattern, fixes conformance rules (frontmatter precedence, schema fidelity, degradation reporting, no credentials), and canonizes the existing resources/ADAPTER.md implementer-guide convention.
 aip: 52
 status: Review
@@ -15,7 +15,7 @@ package: "@agentproto/mastra"
 | Field | Value |
 |---|---|
 | AIP | 52 |
-| Title | ADAPTER — agentadapter/v1 (outward framework bridge) |
+| Title | BRIDGE (bridge/v1): outward framework bridge |
 | Status | Draft |
 | Type | Standards Track |
 | Domain | adapters.sh |
@@ -25,20 +25,20 @@ package: "@agentproto/mastra"
 
 ## Abstract
 
-`agentadapter/v1` names and fixes the contract for an **adapter**: a
+`bridge/v1` names and fixes the contract for a **bridge**: a
 code-level bridge that projects an agentproto handle — a
 [TOOL (AIP-14)](/docs/aip-14), an [AGENT (AIP-42)](/docs/aip-42), a
 [PROCESSOR (AIP-51)](/docs/aip-51) — **outward** into a foreign framework
 runtime (Mastra today, the AI SDK next, LangChain / a bare CLI later) so
 our definition runs as a **native citizen** of that host.
 
-An adapter is the **outward mirror of [AIP-30 DRIVER](/docs/aip-30)**.
-DRIVER binds an abstract TOOL *inward* to a backend we call; ADAPTER
+A bridge is the **outward mirror of [AIP-30 DRIVER](/docs/aip-30)**.
+DRIVER binds an abstract TOOL *inward* to a backend we call; BRIDGE
 exposes our definition *outward* to a host that calls us. The two are the
 opposite directions of one binding seam, which is why this AIP shares
 `layer: drivers` with AIP-30.
 
-This is a **code contract, not a doctype.** An adapter is a function
+This is a **code contract, not a doctype.** A bridge is a function
 `(handle, hostResolvers) → native host artifact`; there is deliberately
 **no `ADAPTER.md` manifest** in v1 (see [Non-goals](#non-goals) — a manifest
 carrying install and auth lifecycle would recreate DRIVER). The AIP names
@@ -47,13 +47,13 @@ fidelity, **no credentials**, identity preservation, composition-not-mutation
 — and canonizes the existing `resources/aip-NN/draft/ADAPTER.md`
 implementer-guide convention.
 
-## The DRIVER/ADAPTER mirror
+## The DRIVER/BRIDGE mirror
 
-The whole design follows from one figure. DRIVER and ADAPTER are the two
+The whole design follows from one figure. DRIVER and BRIDGE are the two
 directions across the same binding seam between an agentproto definition
 and the outside world:
 
-| | DRIVER ([AIP-30](/docs/aip-30)) | ADAPTER (AIP-52) |
+| | DRIVER ([AIP-30](/docs/aip-30)) | BRIDGE (AIP-52) |
 |---|---|---|
 | direction | **inward** — bind an abstract TOOL to a backend we call | **outward** — expose our definition to a host that calls us |
 | consumes | a TOOL contract + a concrete backend (cli / http / mcp / sdk) | a `defineX`-produced handle (TOOL / AGENT / PROCESSOR) |
@@ -65,7 +65,7 @@ and the outside world:
 
 Read across a row and the symmetry holds: same seam, opposite direction,
 and the credential column is where they are kept **disjoint** — a DRIVER
-holds secrets because it dials out on our behalf; an adapter holds none
+holds secrets because it dials out on our behalf; a bridge holds none
 because the host, not us, owns the runtime it hands the artifact to.
 
 ## Motivation
@@ -100,7 +100,7 @@ name or a contract. Four problems compound while it stays anonymous:
 
 4. **The credential boundary is unstated.** Nothing today says an outward
    bridge MUST NOT collect or forward credentials. Without that line, a
-   Mastra adapter and a provider registry drift toward each other until
+   Mastra bridge and a provider registry drift toward each other until
    one grows an auth flow and the primitives fuse.
 
 Prior art: this is the same move MCP servers, LangChain `Tool`
@@ -110,24 +110,24 @@ series instead of living in wrapper code.
 
 ## Design principles
 
-1. **Adapter is DRIVER's mirror, not a new axis.** Every rule here is
+1. **Bridge is DRIVER's mirror, not a new axis.** Every rule here is
    either the mirror image of an AIP-30 rule (frontmatter precedence,
    input validation at the contract layer) or the one rule the mirror
    *adds* because the direction reversed (no credentials). When in doubt
-   about an adapter's behaviour, ask what the corresponding DRIVER rule
+   about a bridge's behaviour, ask what the corresponding DRIVER rule
    is and flip the direction.
 
-2. **An adapter is code, not a manifest.** DRIVER earns a `.md` doctype
+2. **A bridge is code, not a manifest.** DRIVER earns a `.md` doctype
    because it declares install/auth/sandbox state a host must persist and
-   enforce. An adapter declares none of that — it is a pure projection
+   enforce. A bridge declares none of that — it is a pure projection
    function. Giving it a manifest would hand it a credential surface and
    recreate DRIVER. v1 defines the function shape and stops.
 
-3. **The handle is authoritative; the host bends to it.** An adapter
+3. **The handle is authoritative; the host bends to it.** A bridge
    reads a `defineX` handle and produces a host artifact. On any conflict
    between what the handle declares and what host-side configuration says,
    the handle's frontmatter wins (mirror of
-   [AIP-30 principle 8](/docs/aip-30)). The adapter never edits the
+   [AIP-30 principle 8](/docs/aip-30)). The bridge never edits the
    handle to fit the host.
 
 4. **Lossy projection is loud.** A host framework whose type system can't
@@ -135,11 +135,11 @@ series instead of living in wrapper code.
    in a degradation report, never silently dropped
    (see [rule 2](#2-contract-fidelity)).
 
-5. **No credentials, ever.** The single line that keeps ADAPTER disjoint
+5. **No credentials, ever.** The single line that keeps BRIDGE disjoint
    from provider registries and from DRIVER. An outward bridge exposes a
    definition; it does not authenticate anyone. Credentials live in
    DRIVER ([AIP-30](/docs/aip-30) / [AIP-19](/docs/aip-19)) and in
-   provider registries, never in an adapter.
+   provider registries, never in a bridge.
 
 6. **Identity survives the crossing.** The agentproto slug MUST be
    recoverable from the produced host artifact, stored under a
@@ -152,7 +152,7 @@ series instead of living in wrapper code.
 
 ### Definition
 
-An **adapter** is a function of the shape
+A **bridge** is a function of the shape
 
 ```ts
 type Adapter<Handle, HostArtifact> = (
@@ -170,13 +170,13 @@ object of the target host**: a Mastra `createTool` input, a
 
 `hostResolvers` is how the host injects *its* runtime seams (how to
 actually invoke a tool, how to reach a model, how to resolve a workspace
-ref) without the adapter reaching for credentials or global state. An
-adapter is otherwise pure and side-effect-free at construction time
+ref) without the bridge reaching for credentials or global state. An
+bridge is otherwise pure and side-effect-free at construction time
 (mirror of [AIP-30 rule 9](/docs/aip-30), "no I/O at module load").
 
 ### Naming convention
 
-An adapter is named for the `(host, doctype)` pair it projects, using one
+A bridge is named for the `(host, doctype)` pair it projects, using one
 of three verbs by artifact shape:
 
 | Verb | Use when the host artifact is… | Example |
@@ -190,7 +190,7 @@ part, so a reader can find every projection into a given host by grep.
 
 ### Conformance rules
 
-A conforming adapter MUST satisfy all five rules. Rules 1, 2, and 5 are
+A conforming bridge MUST satisfy all five rules. Rules 1, 2, and 5 are
 the mirror images of AIP-30's discipline (cite
 [AIP-30 § Conformance rules](/docs/aip-30#conformance-rules) and
 [`resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md));
@@ -200,7 +200,7 @@ rules 3 and 4 are the two the reversed direction adds.
 
 When the host framework offers a way to override a field the handle
 already declares in its frontmatter (a display name, a description, a
-schema), and the two disagree, the adapter MUST surface a **warning
+schema), and the two disagree, the bridge MUST surface a **warning
 naming the field** and prefer the handle's value. This is the verbatim
 mirror of [AIP-30 rule 2](/docs/aip-30#conformance-rules): the definition
 is authoritative; host overrides are for behaviour the definition doesn't
@@ -208,12 +208,12 @@ cover, never for redefining identity.
 
 #### 2. Contract fidelity
 
-Input and output schemas MUST project **losslessly**, or the adapter MUST
+Input and output schemas MUST project **losslessly**, or the bridge MUST
 surface a **named degradation** — it MUST NOT silently drop a constraint
 the host can't express. Concretely, when the target host's type system
 cannot represent a refinement the handle declares (a string `format`, a
 numeric bound, a `mutates` / approval flag, an enum the host flattens to
-`string`), the adapter emits a degradation entry of the shape:
+`string`), the bridge emits a degradation entry of the shape:
 
 ```ts
 type Degradation = {
@@ -229,25 +229,25 @@ degradation list may treat the projection as exact.
 
 #### 3. No credentials
 
-**Adapters MUST NOT collect, store, request, or forward credentials of
+**Bridges MUST NOT collect, store, request, or forward credentials of
 any kind** — no API keys, tokens, cookies, OAuth flows, or secret
-material. An adapter projects a definition outward; it never
+material. A bridge projects a definition outward; it never
 authenticates. Credentials belong to DRIVERs
 ([AIP-30](/docs/aip-30) / [AIP-19 SECRETS](/docs/aip-19)) — which dial out
 on our behalf and therefore hold secrets — and to credentialed provider
 registries such as
 [`@agentproto/provider-kit`](https://github.com/agentproto/ts/tree/main/packages/provider-kit).
-This is the normative line that keeps ADAPTER **disjoint** from a provider
+This is the normative line that keeps BRIDGE **disjoint** from a provider
 registry: the moment a bridge grows an auth surface it has stopped being
-an adapter and become a DRIVER. A host that needs the artifact to reach an
+a bridge and become a DRIVER. A host that needs the artifact to reach an
 authenticated backend obtains those credentials through its own DRIVER /
-registry path and injects the *result* via `hostResolvers`; the adapter
+registry path and injects the *result* via `hostResolvers`; the bridge
 sees a resolver callback, never a secret.
 
 #### 4. Identity preservation
 
 The agentproto slug of the source handle MUST remain recoverable from the
-produced host artifact. The adapter MUST write it under a host-namespaced
+produced host artifact. The bridge MUST write it under a host-namespaced
 metadata key — `metadata.<host>.agentprotoSlug` or the host's idiomatic
 equivalent — mirroring the `metadata.<host>.…` convention DRIVER uses and
 the `mastra.…` / `langchain.…` namespaced-key convention already present
@@ -256,12 +256,12 @@ non-conforming: identity round-trips.
 
 #### 5. Composition, not mutation
 
-An adapter MAY **compose** sibling primitives into one host artifact — for
+A bridge MAY **compose** sibling primitives into one host artifact — for
 example folding a [PROCESSOR (AIP-51)](/docs/aip-51) transform chain
 together with a hook (veto/tripwire) chain into a single Mastra
 Input/Output Processor — but it MUST NOT **mutate** the handles it
 consumes. The handle is read-only input; composition happens in the
-artifact the adapter builds, not by editing the definition. This mirrors
+artifact the bridge builds, not by editing the definition. This mirrors
 the DRIVER discipline that `implements[]` narrows a contract without
 rewriting it.
 
@@ -281,20 +281,20 @@ filename is the same word.
 
 This AIP deliberately does **not** define:
 
-1. **No `ADAPTER.md` manifest doctype in v1.** Adapters are code, not
+1. **No `ADAPTER.md` manifest doctype in v1.** Bridges are code, not
    installable manifests. A manifest carrying an install/auth lifecycle
-   would hand the adapter a credential surface and a persisted-state
+   would hand the bridge a credential surface and a persisted-state
    contract — i.e. it would **recreate DRIVER**. If a future need for a
-   declarative adapter descriptor emerges it will be argued on its own
+   declarative bridge descriptor emerges it will be argued on its own
    merits in a later revision; v1 fixes the function contract and stops.
    (The `resources/aip-NN/draft/ADAPTER.md` files are implementer
    *guides*, not a manifest schema — see
    [Terminology reconciliation](#terminology-reconciliation).)
 
-2. **No adapter registry.** This AIP does not define a catalog of
-   adapters. A host that wants to enumerate its projections MAY use the
+2. **No bridge registry.** This AIP does not define a catalog of
+   bridges. A host that wants to enumerate its projections MAY use the
    generic [REGISTRY (AIP-43)](/docs/aip-43) primitive over whatever
-   handles it exposes; ADAPTER adds no registry shape of its own.
+   handles it exposes; BRIDGE adds no registry shape of its own.
 
 3. **No runtime for AIP-51/52.** The concrete Mastra / AI SDK bridges are
    reference implementations, not part of this normative contract.
@@ -310,8 +310,8 @@ the word:
 
 | Type | Sense / what it binds | Example AIP | Example package |
 |---|---|---|---|
-| `HarnessAdapter` | adapter over an **agent CLI** — wraps an agent CLI (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
-| `FrameworkAdapter` | adapter into a **foreign framework** — projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/mastra` |
+| `HarnessAdapter` | adapter over a **harness** — wraps a harness (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
+| `FrameworkAdapter` | bridge into a **foreign framework** — projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/mastra` |
 | `ServiceAdapter` | adapter to a **backend service** — routes a declared kind to a concrete backend: settlement rails, tunnel, sandbox, eval-reporter providers | [AIP-49](/docs/aip-49) | `@agentproto/provider-kit` |
 
 AIP-52 means the second sense: `FrameworkAdapter`, the outward framework
@@ -357,9 +357,9 @@ them:
    `@agentproto/adapter-kit`) — a DIFFERENT thing.** This package is a
    **credentialed provider/backend registry**: a creds store, a setup
    ledger, supported/available/ready status, `list_*` / `setup_*` tooling,
-   and a setup wizard, shared across the agent-CLI, tunnel, connector, and
-   eval-reporter families. It is **not** the framework-bridge adapter this
-   AIP defines — it holds credentials, which an adapter
+   and a setup wizard, shared across the harness, tunnel, connector, and
+   eval-reporter families. It is **not** the framework bridge this
+   AIP defines — it holds credentials, which a bridge
    ([rule 3](#3-no-credentials)) never does. It was renamed precisely to
    stop this conflation; the internal `Adapter*` vocabulary it keeps
    refers to *its own* catalog members (some of which are credentialed
@@ -385,7 +385,7 @@ elsewhere; the rename is the fix.
   artifact ([rule 5](#5-composition-not-mutation), composition not
   mutation).
 
-**`@agentproto/tool`** — `toMastraTool` is the canonical `to…` adapter:
+**`@agentproto/tool`** — `toMastraTool` is the canonical `to…` bridge:
 a [TOOL (AIP-14)](/docs/aip-14) handle → a Mastra `createTool` input, with
 the agentproto slug preserved under a `mastra.…` namespaced metadata key
 ([rule 4](#4-identity-preservation)).
@@ -393,7 +393,7 @@ the agentproto slug preserved under a `mastra.…` namespaced metadata key
 **AI SDK (second target, stubbed).** The projection table for the Vercel
 AI SDK — `toAISDKTool` (`tool()` from `ai`), a `buildAISDKAgent`
 equivalent — is named here as the next target. Its per-host guide will
-land as `resources/aip-52/draft/ADAPTER.md`. The AI SDK's JSON-schema tool
+land as `resources/aip-52/draft/BRIDGE.md`. The AI SDK's JSON-schema tool
 inputs are the canonical example of [rule 2](#2-contract-fidelity)'s
 degradation reporting: constraints agentproto expresses that the AI SDK
 flattens become named degradations, not silent drops.
@@ -402,9 +402,11 @@ flattens become named degradations, not silent drops.
 
 Not applicable — this AIP introduces a new spec. It names a pattern that
 already exists in shipped code (`@agentproto/mastra`,
-`@agentproto/tool`) and fixes a contract around it; the existing adapters
-are the reference implementation and do not change shape. The one prior
-overload it resolves is the `@agentproto/provider-kit` rename (see
+`@agentproto/tool`) and fixes a contract around it; the existing bridges
+are the reference implementation and do not change shape. This AIP was
+named ADAPTER until 2026-10-23 ([AIP-70](/docs/aip-70)); `adapter` remains
+readable as a legacy alias. The one prior overload it resolves is the
+`@agentproto/provider-kit` rename (see
 [Terminology reconciliation](#terminology-reconciliation), sense 3), which
 is non-breaking (the old package name resolves via a deprecated
 re-export shim to `@agentproto/provider-kit`).
@@ -414,23 +416,23 @@ re-export shim to `@agentproto/provider-kit`).
 [`@agentproto/mastra`](https://github.com/agentproto/ts/tree/main/packages/mastra)
 is the reference implementation: `buildMastraAgent`,
 `makeQueryKnowledgeTool`, and `makePlaybookOverlayProcessor` are conforming
-adapters for the AGENT, TOOL, and PROCESSOR doctypes respectively, and
-`@agentproto/tool`'s `toMastraTool` is the canonical TOOL adapter. The AI
-SDK adapter and its `resources/aip-52/draft/ADAPTER.md` implementer guide
+bridges for the AGENT, TOOL, and PROCESSOR doctypes respectively, and
+`@agentproto/tool`'s `toMastraTool` is the canonical TOOL bridge. The AI
+SDK bridge and its `resources/aip-52/draft/BRIDGE.md` implementer guide
 are planned follow-up work.
 
 ## Security Considerations
 
-The security posture of an adapter is defined mostly by what it is
+The security posture of a bridge is defined mostly by what it is
 forbidden to do:
 
 - **No credential surface.** [Rule 3](#3-no-credentials) makes it
-  non-conforming for an adapter to collect, store, or forward
+  non-conforming for a bridge to collect, store, or forward
   credentials. This is a security invariant, not just a layering one: an
   outward bridge that grew an auth flow would become an
   un-audited credential path outside the DRIVER / SECRETS
   ([AIP-19](/docs/aip-19)) machinery that exists precisely to govern
-  secrets. Reviewers MUST reject any adapter that touches secret material.
+  secrets. Reviewers MUST reject any bridge that touches secret material.
 
 - **Silent fidelity loss is a security bug.** [Rule 2](#2-contract-fidelity)
   requires that a constraint the host can't express be reported, not
@@ -439,10 +441,10 @@ forbidden to do:
   turns a checked contract into an unchecked one inside the host runtime.
   The degradation report is the audit trail that a projection is exact.
 
-- **Untrusted host, read-only handle.** An adapter runs inside a foreign
+- **Untrusted host, read-only handle.** A bridge runs inside a foreign
   framework it does not control. [Rule 5](#5-composition-not-mutation)
   keeps the source handle read-only, so a compromised or buggy host
-  cannot use the adapter as a vector to mutate the agentproto definition;
+  cannot use the bridge as a vector to mutate the agentproto definition;
   the worst a hostile host does is misuse the artifact it was handed,
   which is bounded by the (credential-free) resolvers the host itself
   injected.
@@ -452,15 +454,15 @@ forbidden to do:
 - [AIP-30 — DRIVER](/docs/aip-30) — the inward mirror; every conformance
   rule here is AIP-30's discipline reflected or the one rule the reversed
   direction adds
-- [AIP-14 — TOOL](/docs/aip-14) — the abstract contract a TOOL adapter
+- [AIP-14 — TOOL](/docs/aip-14) — the abstract contract a TOOL bridge
   projects outward
-- [AIP-42 — AGENT](/docs/aip-42) — the runnable agent an AGENT adapter
+- [AIP-42 — AGENT](/docs/aip-42) — the runnable agent an AGENT bridge
   projects (`buildMastraAgent`)
 - [AIP-51 — PROCESSOR](/docs/aip-51) — the I/O transform primitive a
-  PROCESSOR adapter projects (`makePlaybookOverlayProcessor`)
-- [AIP-19 — SECRETS](/docs/aip-19) — where credentials live; an adapter
+  PROCESSOR bridge projects (`makePlaybookOverlayProcessor`)
+- [AIP-19 — SECRETS](/docs/aip-19) — where credentials live; a bridge
   never touches this surface
 - [AIP-43 — REGISTRY](/docs/aip-43) — the generic catalog a host MAY use
-  to enumerate its adapters (this AIP defines no registry of its own)
+  to enumerate its bridges (this AIP defines no registry of its own)
 - [`resources/aip-30/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-30/draft/ADAPTER.md)
   — the implementer-guide convention this AIP canonizes
