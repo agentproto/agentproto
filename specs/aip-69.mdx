@@ -17,7 +17,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/lifecycle
 | AIP | 69 (provisional, editors assign the final number) |
 | Title | ACTION-HOOKS - hooks/v1 |
 | Status | Draft |
-| Type | Standards Track |
+| Type | Core |
 | Requires | [AIP-37](/docs/aip-37), [AIP-39](/docs/aip-39), [AIP-41](/docs/aip-41), [AIP-42](/docs/aip-42), [AIP-45](/docs/aip-45), [AIP-60](/docs/aip-60) |
 | Created | 2026-10-23 |
 | Package | `@agentproto/lifecycle` |
@@ -241,12 +241,24 @@ prompt submission would add the wrong cost and lifecycle.
 
 ## Reference Implementation
 
-The reference contract is `hooks/v1` in
+The `hooks/v1` contract is targeted at
 [`@agentproto/lifecycle`](https://github.com/agentproto/ts/tree/main/packages/lifecycle).
-The AIP-45 adapter capability projection and native Codex and Claude Code
-bridges are tracked as follow-up work in the same repository. Until those
-bridges ship, a capability is absent and the host MUST NOT claim native
-ownership.
+That package is vocabulary-only today: it does not yet carry the AIP-37
+harness extension events or the `hooks/v1` types. Adding them, the AIP-45
+adapter capability projection, and the native Codex and Claude Code bridges
+are follow-up work in the same repository. Until those bridges ship, a
+capability is absent and the host MUST NOT claim native ownership.
+
+## Security Considerations
+
+Section 8 is normative. In short: native hook code runs with the harness
+process's authority, so a binding is an execution grant and not only a
+routing rule. A host that projects a binding into a native hook inherits the
+harness's trust prompts, and a host that runs it as the fallback owner
+inherits the AIP-39 approval class and the AIP-41 identity checks of the
+target action. Payload redaction applies to receipts and logs, not only to
+the wire. A capability declaration never substitutes for an OS or sandbox
+boundary: a blocking native hook is a policy aid, not a security perimeter.
 
 ## Reference mapping
 
