@@ -6,7 +6,7 @@ status: Draft
 type: Standards Track
 created: 2026-10-23
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 42, 43, 46, 57]
+requires: [1, 2, 37, 42, 43, 46, 57]
 discussions-to: https://github.com/agentproto/agentproto/discussions
 layer: runtime
 package: "@agentproto/runtime"
@@ -115,7 +115,7 @@ type PolicyVerdict =
 - `block` always wins. When `allow` is present, a model outside every allowed
   list is refused, uncataloged ids included (fail closed).
 - A session without a policy MAY use any model its account's curation
-  permits ([AIP-50](/docs/aip-50) auth profile model allow-list).
+  permits (§3.1).
 - The policy is stored on the session descriptor and MUST be checked, with one
   function, at every point where a session's model is set or changes: spawn
   (after every merge layer, explicit fields included), live model switch,
@@ -132,6 +132,27 @@ interface Target {
   access?: { profileRef: string }           // account; omitted = harness default
 }
 ```
+
+#### 3.1 Account (minimal, until an AUTH-PROFILE AIP exists)
+
+`access.profileRef` names a host **account**: a credential the host holds
+(API key, subscription, sub-organization), never the secret itself. This AIP
+relies on three facts about it and nothing more:
+
+```ts
+interface AccountView {
+  profileRef: string
+  enabled: boolean
+  models: { mode: "all" } | { mode: "allow"; ids: string[] }   // curation
+}
+```
+
+A model outside the account curation is never used on that account, whatever
+the policy says. [AIP-50](/docs/aip-50) is server authentication and does not
+cover accounts; a dedicated AIP SHOULD later define the full account document,
+and this section then defers to it.
+
+#### 3.2 Eligibility
 
 A target is **eligible** when its harness is installed, its account exists and
 is enabled, and at least one model (the `model`, or a member of `list`) passes
@@ -176,15 +197,24 @@ reaches the next eligible one:
 
 | from to | transition | conversation |
 |---|---|---|
-| same harness, same account, other model | live model switch | kept |
-| same harness, other account | restart with the new access | kept when the harness can resume, else hand-off |
-| other harness | continue-fresh hand-off ([AIP-46](/docs/aip-46)) | summarized hand-off |
+| same harness, same account, other model | **switch**: change the model of the running session | kept |
+| same harness, other account | **restart**: stop the process, start it again with the new access, resume the conversation | kept when the harness can resume, else hand-off |
+| other harness | **hand-off**: start a new session on the target, seeded with a bounded summary and the working tree of the old one; the old one ends | summarized |
+
+These three operations are defined here only by their outcome. They are
+[AIP-46](/docs/aip-46) session lifecycle operations that AIP-46 does not yet
+name; an AIP-46 amendment SHOULD define them (inputs, refusal results, what is
+carried over), and this table then refers to it.
 
 - Every step MUST pass the session policy (§2).
 - A failure that is not classified (a tool error, a user interrupt) MUST NOT
   trigger a fallback.
 - Each step MUST be recorded on the session (from, to, transition, failure
-  code) and surfaced to the session owner.
+  code) and emitted as a host lifecycle event (`agentproto:session-fallback`,
+  [AIP-37](/docs/aip-37) host-namespaced), so reactions and audits see it
+  like any other event.
+- The policy check at spawn is one input of the host's spawn admission
+  decision, not a separate gate.
 - A model that failed with `rate_limited` or `quota_exhausted` enters a
   host-wide cooldown; ineligibility in §3 reads it.
 - An exhausted chain leaves the session idle with the last failure; it MUST
@@ -255,7 +285,7 @@ harnesses and preset v2: to follow this AIP.
 
 - [AIP-42 AGENT](/docs/aip-42): `ModelRef`
 - [AIP-43 REGISTRY](/docs/aip-43): the catalog lists select from
+- [AIP-37 LIFECYCLE](/docs/aip-37): event vocabulary
 - [AIP-45 AGENT-CLI](/docs/aip-45): harness manifests
 - [AIP-46 AGENT-SESSIONS](/docs/aip-46): session lifecycle, restart, continue-fresh
-- [AIP-50 AUTH](/docs/aip-50): accounts and model curation
 - [AIP-57 MODEL-ROUTING](/docs/aip-57): per-request resolution
