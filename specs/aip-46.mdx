@@ -686,7 +686,7 @@ user never asked for.
 
 ```ts
 {
-  /** AIP-45 adapter slug: WHICH CLI runs. Required unless `config` or
+  /** AIP-45 harness slug: which harness runs. Required unless `config` or
    *  `preset` supplies it. */
   adapter: string
   /** AIP-42 AGENT ref — WHAT it runs (prompt, skills, delegates_to,
@@ -709,7 +709,7 @@ user never asked for.
   /** Free-text label for the descriptor. */
   label?: string
   /** How the harness runs (2026-10-23, §Session config). `adapter` above
-   *  MAY be omitted when `config.adapter` or the preset supplies it; when
+   *  MAY be omitted when `config.harness` or the preset supplies it; when
    *  both are set they MUST be equal. */
   config?: SessionConfig
   /** A session preset id (§Session config, Session presets). */
@@ -1189,8 +1189,8 @@ allow and block rules and spend ceilings live, not in the config.
 
 ```ts
 interface SessionConfig {
-  /** AIP-45 adapter slug. Same value as SpawnAgentRequest.adapter. */
-  adapter?: string
+  /** AIP-45 harness slug. Same value as SpawnAgentRequest.adapter. */
+  harness?: string
   /** A model id (possibly an AIP-57 virtual key), or `selector:<id>`: an
    *  ordered, saved selector over the AIP-43 model registry. */
   model?: string
@@ -1237,6 +1237,10 @@ The JSON Schema is
 A host-specific key outside the axes above MUST be prefixed `x-`, so a
 conformance check can tell a host extension from an unspecified field.
 
+The `harness` axis was named `adapter` in earlier drafts. `adapter` is
+accepted as a legacy alias of `harness`, and `SpawnAgentRequest` keeps
+accepting `adapter`.
+
 `SpawnAgentRequest` gains `config?`, `preset?` and `policy?` (see the
 updated interface in §SpawnAgentRequest). The `Session` record gains
 `config` (the resolved config as applied, `fallback` included; when the
@@ -1269,7 +1273,7 @@ reaches a running session.
 | `effort` | `live` when the harness exposes it as a session option, else `restart` |
 | `posture` | `live` when the harness has a native mode switch (ACP `session/set_mode`), else `restart` |
 | `contextProfile`, `route`, `access`, `options` | `restart` |
-| `adapter` | `handoff` |
+| `harness` | `handoff` |
 
 A model change that moves to another route or endpoint is a `restart`
 because the route is part of the process environment: applying it live
@@ -1295,7 +1299,7 @@ Surface (MCP, with HTTP mirrors):
 | tool | input | behaviour |
 |---|---|---|
 | `agent_set_model`, `agent_set_effort`, `agent_set_posture` | `{sessionId, value}` | live change of one axis. When the change is not `live` on this session, MUST NOT apply and MUST return `{applied: false, requires: "restart" \| "handoff", suggestedOverride: ConfigOverlay}`. Never throws on a refusal. |
-| `session_restart` | `{sessionId, config?: ConfigOverlay}` | restart transition. When the overlay changes `adapter`, MUST refuse with `requires: "handoff"`. |
+| `session_restart` | `{sessionId, config?: ConfigOverlay}` | restart transition. When the overlay changes `harness`, MUST refuse with `requires: "handoff"`. |
 | `session_continue_fresh` | `{sessionId, config?: ConfigOverlay}` | handoff transition. Returns the new session. |
 
 #### Layers and precedence
@@ -1303,14 +1307,14 @@ Surface (MCP, with HTTP mirrors):
 The resolved config is built axis by axis (each axis replaced whole by the
 highest layer that sets it), lowest precedence first:
 
-1. `manifest`: the adapter manifest's defaults ([AIP-45](/docs/aip-45)
+1. `manifest`: the harness manifest's defaults ([AIP-45](/docs/aip-45)
    `models.default`, default mode);
-2. `host`: host defaults for that adapter;
+2. `host`: host defaults for that harness;
 3. `definition`: the bound [AIP-42](/docs/aip-42) agent's `model`, then,
    above it, the bound [AIP-9](/docs/aip-9) operator's `runtime.config`
    (its `mode` projected onto `posture` or `contextProfile`, then its
    `options`, `options.model` mapping to `model`);
-4. `preset`: the session preset whose `defaultFor` names the adapter, then
+4. `preset`: the session preset whose `defaultFor` names the harness, then
    the named preset, after its `extends` chain is applied;
 5. `request`: explicit fields of the spawn request.
 
@@ -1328,8 +1332,8 @@ interface SessionPreset {
   /** Other session presets applied first, left to right. A missing target
    *  or a cycle is an error at save time. */
   extends?: string[]
-  /** Applied (layer 4) to every spawn on this adapter that names no other
-   *  preset. At most one preset per adapter. */
+  /** Applied (layer 4) to every spawn on this harness that names no other
+   *  preset. At most one preset per harness. */
   defaultFor?: string
   /** AIP-42 agent bound when the request names none. */
   agent?: string
@@ -1349,7 +1353,7 @@ composition).
   `agent` is a requested agent like any other: when the caller is a
   session, it MUST pass §Delegation's spawn gate.
 - A session preset is host configuration owned by the user. It is a
-  different thing from an AIP-45 gateway preset (`presets` in an adapter
+  different thing from an AIP-45 gateway preset (`presets` in a harness
   manifest, which declares a backend endpoint); the two are kept apart by
   their qualifier.
 
@@ -1367,8 +1371,8 @@ When a turn fails with a `FailureClass`, the host:
    previous step), skips it when the result is not eligible, and applies the
    first eligible one.
 
-A merged config is **eligible** when its adapter is installed, its auth
-profile is eligible for `(adapter, route, model)` ([AIP-69](/docs/aip-69)
+A merged config is **eligible** when its harness is installed, its auth
+profile is eligible for `(harness, route, model)` ([AIP-69](/docs/aip-69)
 §Eligibility), its `(model, profileRef)` pair is not in a cooldown, and
 policy allows it (next section).
 
@@ -1415,7 +1419,7 @@ Using the [AIP-39](/docs/aip-39) standard runtime actions:
 
 | moment | actions evaluated (all must allow) |
 |---|---|
-| spawn (after all layers) | `session:spawn` (scope: adapter), `auth-profile:use` (scope: profile), `model:invoke` (scope: model) |
+| spawn (after all layers) | `session:spawn` (scope: harness), `auth-profile:use` (scope: profile), `model:invoke` (scope: model) |
 | live change | `session:configure` (scope: axis), plus `model:invoke` when the model changes |
 | restart or handoff with an overlay | the spawn set, on the new config |
 | every fallback step | the set of the transition the step performs |
