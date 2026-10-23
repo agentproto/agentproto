@@ -57,6 +57,23 @@ jobs:
         continue-on-error: true
         run: node scripts/check-aip-refs.mjs .
 
+  check-names:
+    name: Canonical names (AIP-70)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: The check catches what it claims to catch
+        run: node scripts/self-test-names.mjs
+
+      - name: Every AIP matches specs/names.json, or its deviation is pending
+        # Ratchet: a deviation missing from `pending` fails (new drift), and
+        # a pending id that no longer deviates fails too (remove it, so the
+        # fix cannot be undone silently).
+        run: node scripts/check-names.mjs .
+
   lint-specs:
     name: Lint AIP frontmatter
     runs-on: ubuntu-latest

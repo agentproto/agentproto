@@ -1,0 +1,313 @@
+{
+  "$comment": "AIP-70 GLOSSARY vocabulary. `terms`: one meaning per term, its owning AIP, and what it never means. `deprecated`: aliases reported by scripts/check-names.mjs (report only).",
+  "version": 1,
+  "terms": [
+    {
+      "term": "harness",
+      "means": "an agent binary driven by a host (Claude Code, OpenCode, Codex, Hermes) and its manifest",
+      "owner": 70,
+      "neverMeans": "a bridge into a foreign framework; a session preset",
+      "futureOwner": 45,
+      "via": "the AIP-45 rename (P1)"
+    },
+    {
+      "term": "bridge",
+      "means": "the projection of an agentproto handle into a foreign framework (Mastra, AI SDK)",
+      "owner": 70,
+      "neverMeans": "the agent binary",
+      "futureOwner": 52,
+      "via": "the AIP-52 rename (P1)"
+    },
+    {
+      "term": "driver",
+      "means": "an inward bridge from agentproto to an external API, CLI, MCP server or SDK",
+      "owner": 30,
+      "neverMeans": "a harness"
+    },
+    {
+      "term": "operator",
+      "means": "an agent holding a role in an organization",
+      "owner": 9,
+      "neverMeans": "the human who controls a host"
+    },
+    {
+      "term": "user",
+      "means": "the human who owns and controls a host and its sessions",
+      "owner": 70,
+      "neverMeans": "an AIP-9 operator"
+    },
+    {
+      "term": "session",
+      "means": "one running (or ended) harness invocation managed by a host",
+      "owner": 46,
+      "neverMeans": "a terminal, a browser instance, an ACP wire session (say \"ACP session\")"
+    },
+    {
+      "term": "session config",
+      "means": "how a session runs: harness, model, effort, posture, context, route, auth profile, retry, fallback",
+      "owner": 70,
+      "neverMeans": "a permission",
+      "futureOwner": 46,
+      "via": "agentproto/agentproto#89"
+    },
+    {
+      "term": "session preset",
+      "means": "a named, saved session config",
+      "owner": 70,
+      "neverMeans": "a gateway; a harness manifest",
+      "futureOwner": 46,
+      "via": "agentproto/agentproto#89"
+    },
+    {
+      "term": "gateway",
+      "means": "a backend endpoint a harness can be pointed at (Anthropic-compatible, OpenAI-compatible)",
+      "owner": 45,
+      "neverMeans": "a preset"
+    },
+    {
+      "term": "auth profile",
+      "means": "a named reference to the credential a session bills or authenticates through",
+      "owner": 70,
+      "neverMeans": "a context setting; a browser identity",
+      "futureOwner": 69,
+      "via": "agentproto/agentproto#87"
+    },
+    {
+      "term": "vendor",
+      "means": "the builder of a model (the `vendor` in a `vendor/product` model id)",
+      "owner": 70,
+      "neverMeans": "who bills",
+      "futureOwner": 43,
+      "via": "agentproto/agentproto#90"
+    },
+    {
+      "term": "endpoint",
+      "means": "the party that serves and bills a model",
+      "owner": 70,
+      "neverMeans": "the model builder",
+      "futureOwner": 69,
+      "via": "agentproto/agentproto#87"
+    },
+    {
+      "term": "route",
+      "means": "the billing path a model is reached through (an `@<route>` suffix on a model id)",
+      "owner": 70,
+      "neverMeans": "an AIP-57 resolution target",
+      "futureOwner": 43,
+      "via": "agentproto/agentproto#90"
+    },
+    {
+      "term": "policy",
+      "means": "an AIP-38 access document: grants, limits, requirements",
+      "owner": 38,
+      "neverMeans": "a completion check, a retry rule, settings"
+    },
+    {
+      "term": "gate",
+      "means": "a check that passes or fails at a boundary: the delegation spawn gate of AIP-46, a completion check, a review verdict",
+      "owner": 70,
+      "neverMeans": "a policy",
+      "futureOwner": null,
+      "via": "the AIP-46 split (SESSION)"
+    },
+    {
+      "term": "posture",
+      "means": "what a session may do without asking (plan, accept-edits, bypass, read-only)",
+      "owner": 70,
+      "neverMeans": "a harness mode",
+      "futureOwner": 46,
+      "via": "agentproto/agentproto#89"
+    },
+    {
+      "term": "mode",
+      "means": "a harness-native, mutually exclusive operation profile declared in an AIP-45 manifest",
+      "owner": 45,
+      "neverMeans": "posture; a session lifetime; how a session is billed (billing basis); an action"
+    },
+    {
+      "term": "role",
+      "means": "an AIP-47 organizational role (intent, never permission)",
+      "owner": 47,
+      "neverMeans": "an access role; a position; a model slot"
+    },
+    {
+      "term": "access role",
+      "means": "a permission tier of a human or agent (owner, admin, editor, viewer; for sessions, executor and supervisor)",
+      "owner": 47,
+      "neverMeans": "an AIP-47 role"
+    },
+    {
+      "term": "position",
+      "means": "a seat in an organization that one operator holds at a time",
+      "owner": 47,
+      "neverMeans": "a role"
+    },
+    {
+      "term": "model slot",
+      "means": "a logical model name resolved per host (review.small, judge.session)",
+      "owner": 70,
+      "neverMeans": "an AIP-47 role",
+      "futureOwner": 57,
+      "via": "an AIP-57 amendment"
+    },
+    {
+      "term": "selector",
+      "means": "a saved, ordered, declarative selection over a registry family",
+      "owner": 70,
+      "neverMeans": "a function predicate",
+      "futureOwner": 43,
+      "via": "agentproto/agentproto#90"
+    },
+    {
+      "term": "registry",
+      "means": "the in-memory catalog of handles of one family",
+      "owner": 43,
+      "neverMeans": "a data catalog"
+    },
+    {
+      "term": "catalog",
+      "means": "the data a family's registry serves (model prices, context sizes)",
+      "owner": 70,
+      "neverMeans": "the registry primitive",
+      "futureOwner": 43,
+      "via": "agentproto/agentproto#90"
+    },
+    {
+      "term": "pack",
+      "means": "an AIP-64 installable capability bundle",
+      "owner": 64,
+      "neverMeans": "an AIP-57 routing table"
+    },
+    {
+      "term": "routing table",
+      "means": "an AIP-57 map from a keyspace to targets",
+      "owner": 57,
+      "neverMeans": "a pack"
+    },
+    {
+      "term": "runtime",
+      "means": "the AIP-48 multi-agent execution kernel",
+      "owner": 48,
+      "neverMeans": "the host daemon"
+    },
+    {
+      "term": "host",
+      "means": "the daemon that runs sessions, runs and their state on a machine",
+      "owner": 70,
+      "neverMeans": "a model endpoint"
+    },
+    {
+      "term": "workspace",
+      "means": "an AIP-34 workspace node, including the `x.workspace` doctypes",
+      "owner": 34,
+      "neverMeans": "a run's scratch directory"
+    },
+    {
+      "term": "run directory",
+      "means": "the scratch directory a run gets",
+      "owner": 70,
+      "neverMeans": "a workspace",
+      "futureOwner": 58,
+      "via": "an AIP-58 amendment"
+    },
+    {
+      "term": "terminal",
+      "means": "a PTY process driven through a host",
+      "owner": 70,
+      "neverMeans": "a session; the end state of a lifecycle (say \"end state\")",
+      "futureOwner": null,
+      "via": "a TERMINAL AIP"
+    },
+    {
+      "term": "browser instance",
+      "means": "one running browser driven through AIP-63",
+      "owner": 63,
+      "neverMeans": "a session"
+    },
+    {
+      "term": "browser identity",
+      "means": "a saved browser login state",
+      "owner": 70,
+      "neverMeans": "an auth profile",
+      "futureOwner": 63,
+      "via": "an AIP-63 amendment"
+    }
+  ],
+  "deprecated": [
+    {
+      "alias": "agent CLI",
+      "use": "harness",
+      "pattern": "\\bagent[- ]CLIs?\\b"
+    },
+    {
+      "alias": "adapter slug",
+      "use": "harness slug",
+      "pattern": "\\badapter slugs?\\b"
+    },
+    {
+      "alias": "human operator",
+      "use": "user",
+      "pattern": "\\bhuman operators?\\b"
+    },
+    {
+      "alias": "gateway preset",
+      "use": "gateway",
+      "pattern": "\\bgateway presets?\\b"
+    },
+    {
+      "alias": "completion policy",
+      "use": "gate",
+      "pattern": "\\bcompletion polic(?:y|ies)\\b"
+    },
+    {
+      "alias": "session policy",
+      "use": "session settings",
+      "pattern": "\\bsession polic(?:y|ies)\\b"
+    },
+    {
+      "alias": "context profile",
+      "use": "context (session config axis)",
+      "pattern": "\\bcontextProfile\\b|\\bcontext profiles?\\b"
+    },
+    {
+      "alias": "decision profile",
+      "use": "decision tier",
+      "pattern": "\\bdecision profiles?\\b"
+    },
+    {
+      "alias": "browser profile",
+      "use": "browser identity",
+      "pattern": "\\bbrowser profiles?\\b"
+    },
+    {
+      "alias": "model role",
+      "use": "model slot",
+      "pattern": "\\bmodel roles?\\b"
+    },
+    {
+      "alias": "model provider",
+      "use": "vendor (builder) or endpoint (billing)",
+      "pattern": "\\bmodel providers?\\b"
+    },
+    {
+      "alias": "per-run workspace",
+      "use": "run directory",
+      "pattern": "\\bper-run workspaces?\\b"
+    },
+    {
+      "alias": "terminal session",
+      "use": "terminal",
+      "pattern": "\\bterminal sessions?\\b"
+    },
+    {
+      "alias": "billing mode",
+      "use": "billing basis",
+      "pattern": "\\bbilling ?mode\\b"
+    },
+    {
+      "alias": "session.mode",
+      "use": "session.lifetime",
+      "pattern": "\\bsession\\.mode\\b"
+    }
+  ]
+}
