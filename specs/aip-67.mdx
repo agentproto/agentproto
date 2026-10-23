@@ -1,5 +1,5 @@
 ---
-title: "AIP-67: QUOTA — quota/v1 (a comparable headroom signal for inference spend)"
+title: "AIP-67: QUOTA (quota/v1): a comparable headroom signal for inference spend"
 description: "A runtime primitive that answers one question — how much headroom is left on an auth profile — with one comparable shape and an honest provenance label. Fixes the QuotaStatus / QuotaWindow / QuotaCredits data model, the required `basis` provenance semantics (provider / probe / observed / estimated), a QuotaReader contract whose failures resolve to undefined instead of throwing, AIP-43 registry registration via defineQuotaReader, and one read surface (MCP tool, HTTP mirror, CLI command) keyed by auth profile rather than by session. Pure: a read MUST be side-effect-free and non-billable."
 aip: 67
 status: Draft
@@ -15,7 +15,7 @@ package: "@agentproto/model-intel"
 | Field | Value |
 |---|---|
 | AIP | 67 (provisional, editors assign the final number) |
-| Title | QUOTA — quota/v1 (a comparable headroom signal for inference spend) |
+| Title | QUOTA (quota/v1): a comparable headroom signal for inference spend |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Standards Track |
