@@ -407,7 +407,7 @@ Its family clauses and their expansions:
 |---|---|
 | `{ kind: "model", value }` | `{ id: value }` |
 | `{ kind: "tag", value }` | `{ tag: value }` |
-| `{ kind: "provider", value }` | `{ capability: "vendor", eq: value }` (the reference implementation's name for the builder) |
+| `{ kind: "provider", value }` | `{ capability: "vendor", eq: value }` (`provider` is a legacy alias of `vendor`, the reference implementation's name for the builder) |
 | `{ kind: "priceTier" \| "kind" \| "variant", value }` | `{ capability: <that name>, eq: value }` |
 | `{ kind: "price", maxInPer1M?, maxOutPer1M? }` | `{ all: [ { capability: "pricing.inputPer1M", lte: maxInPer1M }, { capability: "pricing.outputPer1M", lte: maxOutPer1M } ] }`, keeping only the bounds given; with no bound, `{ capability: "pricing.inputPer1M", exists: true }` |
 | `{ kind: "context", min }` | `{ capability: "contextWindow", gte: min }` |
