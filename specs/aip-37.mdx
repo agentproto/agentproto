@@ -121,7 +121,7 @@ runtime, but MUST NOT fire the same logical occurrence twice.
 
 The portable names describe semantics, not vendor callback identifiers. A
 harness adapter maps native names such as `PreCompact` or `SubagentStop` to
-these events under [AIP-69](/docs/aip-69). Unsupported events are treated as
+these events under [AIP-71](/docs/aip-71). Unsupported events are treated as
 never firing, per the open-enumeration rule.
 
 #### Tool / command lifecycle
@@ -251,7 +251,7 @@ payloads, which this AIP does not specify.
 - [AIP-35 STORAGE.md](/docs/aip-35) — `sync.{pull,commit,push}.on` consumes events
 - [AIP-36 SANDBOX.md](/docs/aip-36) — `lifecycle.{destroy_on,pause_on}` consumes events
 - [AIP-26 CODE.md](/docs/aip-26) — `identity.refresh_on` consumes events
-- [AIP-69 action hooks](/docs/aip-69) — portable hook paths and native harness bridges
+- [AIP-71 action hooks](/docs/aip-71) — portable hook paths and native harness bridges
 - [AIP-58 RUN](/docs/aip-58) — registers the `run.*` / `step.*` names
 
 ### Sandbox box lifecycle (added 2026-10-18, per AIP-36 v1.2)

@@ -283,7 +283,7 @@ capabilities:
   multimodal: boolean      # accepts non-text input
   resumable: boolean       # supports session/load semantics
   bidirectional: boolean   # may emit agent-prompt
-  hooks:                   # optional AIP-69 native-hook bridge declaration
+  hooks:                   # optional AIP-71 native-hook bridge declaration
     - event: tool-call     # portable AIP-37 event
       native_event: PreToolUse
       path: admission
@@ -292,13 +292,13 @@ capabilities:
 ```
 
 `capabilities.hooks` is an open list of native bridge declarations defined by
-[AIP-69](/docs/aip-69). It advertises what the adapter can project into the
+[AIP-71](/docs/aip-71). It advertises what the adapter can project into the
 harness before boot. It does not enable a hook, install user code, or grant a
 permission by itself.
 
 When `protocol: "acp"`, protocol capabilities MUST be a subset of the ACP
 capabilities the bound AIP-44 manifest declares; the runner enforces this at
-load time. `hooks` is a harness-extension capability under AIP-69, not an ACP
+load time. `hooks` is a harness-extension capability under AIP-71, not an ACP
 wire capability, and is therefore excluded from that subset check.
 
 ### Modes
