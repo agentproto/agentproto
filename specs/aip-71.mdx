@@ -1,26 +1,24 @@
 ---
 aip: 71
-title: "AIP-71: ACTION-HOOKS, hooks/v1 (portable action hooks and native harness bridges)"
+title: "AIP-71: ACTION-HOOKS (action-hooks/v1): portable action hooks and native harness bridges"
 description: "Defines three hook paths over AIP-37 lifecycle events and AIP-39 actions, plus a native-first adapter bridge contract that uses harness hooks when available and a host runtime fallback otherwise without double execution."
 author: Jeremy André <jeremy@agentik.net>
 status: Draft
 type: Core
 created: 2026-10-23
-requires: [37, 39, 41, 42, 45, 60]
+requires: [37, 38, 39, 41, 42, 45, 60]
 layer: primitives
-package: "@agentproto/lifecycle"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/lifecycle
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 ---
 
 | Field | Value |
 |---|---|
 | AIP | 71 (provisional, editors assign the final number) |
-| Title | ACTION-HOOKS, hooks/v1 |
+| Title | ACTION-HOOKS (action-hooks/v1): portable action hooks and native harness bridges |
 | Status | Draft |
 | Type | Core |
-| Requires | [AIP-37](/docs/aip-37), [AIP-39](/docs/aip-39), [AIP-41](/docs/aip-41), [AIP-42](/docs/aip-42), [AIP-45](/docs/aip-45), [AIP-60](/docs/aip-60) |
+| Requires | [AIP-37](/docs/aip-37), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-41](/docs/aip-41), [AIP-42](/docs/aip-42), [AIP-45](/docs/aip-45), [AIP-60](/docs/aip-60) |
 | Created | 2026-10-23 |
-| Package | `@agentproto/lifecycle` |
 
 ## Abstract
 
@@ -33,7 +31,8 @@ session maintenance.
 
 AIP-71 defines one portable contract over both layers. It has three paths:
 
-- **admission**, a synchronous allow or deny before a host-owned action;
+- **admission**, a synchronous decision before a host-owned action, layered
+  on top of AIP-38 authorization;
 - **lifecycle**, a non-blocking event emitted after a transition;
 - **reaction**, an AIP-37 event bound to an AIP-39 action.
 
@@ -67,13 +66,33 @@ The key words MUST, MUST NOT, SHOULD and MAY are interpreted as described in
 
 | Path | Timing | Result | Default delivery |
 |---|---|---|---|
-| `admission` | Before a host-owned action starts | synchronous allow or deny | in-process |
+| `admission` | Before a host-owned action starts | synchronous `allow`, `deny`, `reuse` or `defer` | in-process |
 | `lifecycle` | After a state transition | no blocking result | best effort |
 | `reaction` | After an event is accepted | invoke an AIP-39 action | best effort |
 
 The paths MUST remain distinct. A lifecycle observer cannot retroactively deny
 an action. A reaction cannot be treated as synchronous admission merely
 because one harness happens to run its callback inline.
+
+#### Admission and authorization
+
+Whether a subject may perform an action at all is an
+[AIP-38](/docs/aip-38) policy decision over the AIP-39 action id, for example
+the runtime actions `session:spawn`, `session:prompt` and `session:control`
+in the AIP-39 runtime-actions amendment. An admission hook MUST NOT grant
+what AIP-38 denies: it runs only after policy allows the action, and it can
+only narrow the outcome.
+
+Besides `allow` and `deny`, a host-owned admission hook MAY return:
+
+- `reuse`: an existing target already satisfies the request, and the host
+  returns it instead of starting a new one;
+- `defer`: the host holds the request and retries it later.
+
+Both depend on live runtime state, such as a session already running the same
+task or a full provisioning queue, which a static policy cannot express. A
+native harness hook can express only `allow` and `deny`. `reuse` and `defer`
+are therefore always host-owned.
 
 ### 2. Portable event and action references
 
@@ -214,7 +233,8 @@ chooses fail-closed behavior.
 An implementation conforms to AIP-71 when it:
 
 1. preserves the three hook paths and their timing;
-2. accepts AIP-37 event refs and AIP-39 action refs;
+2. accepts AIP-37 event refs and AIP-39 action refs, and leaves
+   authorization to AIP-38;
 3. reports native support rather than guessing it;
 4. assigns one owner per binding and prevents local double execution;
 5. preserves harness trust boundaries;
@@ -229,6 +249,11 @@ capability because only that adapter can prove what its harness supports. The
 owner decision belongs here because neither vocabulary alone can prevent a
 native callback and a host observer from executing the same binding twice.
 
+Authorization stays in AIP-38 because a second allow and deny language would
+let a hook contradict a policy. What AIP-38 cannot express is a decision that
+depends on live state, so admission is the narrow place where a host may
+reuse or defer.
+
 A single universal callback was rejected. Admission, observation and reaction
 have different timing and failure semantics. Treating them as one mechanism
 would either make lifecycle emission blocking or make policy admission
@@ -241,13 +266,17 @@ prompt submission would add the wrong cost and lifecycle.
 
 ## Reference Implementation
 
-The `hooks/v1` contract is targeted at
-[`@agentproto/lifecycle`](https://github.com/agentproto/ts/tree/main/packages/lifecycle).
-That package is vocabulary-only today: it does not yet carry the AIP-37
-harness extension events or the `hooks/v1` types. Adding them, the AIP-45
-adapter capability projection, and the native Codex and Claude Code bridges
-are follow-up work in the same repository. Until those bridges ship, a
-capability is absent and the host MUST NOT claim native ownership.
+The reference implementation is the daemon runtime in
+[`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime),
+which already holds the session event bus, the semantic permission hooks and
+the routine registrar that this AIP generalizes. The event names live in
+[`@agentproto/lifecycle`](https://github.com/agentproto/ts/tree/main/packages/lifecycle)
+(AIP-37), which is vocabulary-only today and does not yet carry the harness
+extension events. Adding those events, the AIP-45 adapter capability
+projection, and the native Codex and Claude Code bridges are follow-up work in
+the same repository. This AIP defines no package of its own. Until those
+bridges ship, a capability is absent and the host MUST NOT claim native
+ownership.
 
 ## Security Considerations
 
