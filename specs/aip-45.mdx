@@ -124,7 +124,7 @@ Top-level fields (informative summary):
 | `install` | Yes | Array of install methods (AIP-29 `$ref`) |
 | `version_check` | Yes | Version detection (AIP-29 `$ref`) |
 | `setup` | No | Post-install configuration steps (AIP-29 `$ref`) — daemons, bind-time prompts, OAuth, external pickers |
-| `auth` | No | Auth surface (AIP-29 `$ref`) |
+| `auth` | No | Auth surface (AIP-29 `$ref`), plus an optional `methods` map listing the credential methods the harness can present per route. See § Presentable auth methods per route. |
 | `sandbox` | Yes | Sandbox profile (AIP-36 `$ref`) |
 | `confinedReadPaths` | No | READ-only paths an OS-confined spawn needs to boot (e.g. the CLI's own global config files under `$HOME`, which the sandbox denies). See § Sandbox integration. |
 | `protocol` | Yes | `acp` \| `mcp` \| `proprietary` \| `print` |
@@ -134,7 +134,7 @@ Top-level fields (informative summary):
 | `print` | When `protocol=print` | Inline print surface config (optional — Claude Code defaults when omitted) |
 | `session` | No | Session policy: mode, idle_timeout_ms, max_turns |
 | `models` | No | Model routing: default, allowed, env-mapped. Each `allowed` entry is a bare id string (provider unstated — the projector MUST NOT guess one) or `{ id, provider?, mode? }`: `id` is unchanged on the wire, `provider` is the ProviderPreset id (or direct provider) that serves and bills the model, `mode` is this adapter's mode id that routes to `provider`. |
-| `presets` | No | Gateway presets (Anthropic/OpenAI-compatible backends) this adapter can drive. See [Presets](#presets). |
+| `gateways` | No | Gateway endpoints (Anthropic/OpenAI-compatible backends) this adapter can be pointed at. Formerly `presets`, which remains a legacy alias. See § Gateways. |
 | `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |
 | `modes` | No | Mutually-exclusive operation modes (e.g. claude-code's `plan` / `accept-edits` / `bypass-permissions`). One active per turn. |
 | `options` | No | Independent typed knobs (model, max-turns, auto, ...). Multiple may be active per turn. |
@@ -370,27 +370,35 @@ Hosts MUST validate `OPERATOR.runtime.config.options.<id>` against the
 matching option's type / enum / bounds before spawn. Unknown ids are a
 hard load-time error.
 
-### Presets
+### Gateways (added 2026-10-23)
 
-`presets` is OPTIONAL. Each entry declares a gateway preset — a backend an
-Anthropic/OpenAI-compatible client can front — so the provider-preset
-catalog surfaces adapter-contributed presets alongside the built-in
-registry. The catalog dedupes by `id`; an adapter-declared `id` that
-collides with a built-in is ignored in favour of the built-in.
+> **Draft AIP-45 amendment** (2026-10-23). *Normative identifiers (field names, literals, tool names) are English and final.*
+
+`gateways` is OPTIONAL. Each entry declares a gateway endpoint, a backend
+an Anthropic/OpenAI-compatible client can front, so the gateway catalog
+surfaces adapter-contributed gateways alongside the built-in registry.
+The field was named `presets` before this amendment, because "preset" now
+means a saved session configuration (AIP-70 GLOSSARY,
+[agentproto/agentproto#91](https://github.com/agentproto/agentproto/pull/91)).
+`presets` remains accepted as a legacy alias with the same fields. A
+manifest MUST NOT carry both `gateways` and `presets`.
+
+The catalog dedupes by `id`; an adapter-declared `id` that collides with
+a built-in is ignored in favour of the built-in.
 
 | Field | Required | Description |
 |---|---|---|
-| `id` | Yes | Stable preset id. SHOULD equal the mode id when the adapter projects this preset as a mode. |
+| `id` | Yes | Stable gateway id. SHOULD equal the mode id when the adapter projects this gateway as a mode. |
 | `label` | Yes | Human label for the catalog UI. |
-| `schemaFlavor` | Yes | `anthropic` \| `openai` — selects which adapter family can consume the preset. |
+| `schemaFlavor` | Yes | `anthropic` \| `openai`. Selects which adapter family can consume the gateway. |
 | `baseUrl` | Yes | Base URL the client hits. |
 | `keyEnv` | Yes | Conventional env var holding the provider's API key. Catalog status is derived from its presence in the daemon's environment (`ready` vs `available`). |
 | `description` | No | Free text. |
-| `scrubEnv` | No | Env vars to scrub when the preset is active. Not surfaced to catalog clients. |
+| `scrubEnv` | No | Env vars to scrub when the gateway is active. Not surfaced to catalog clients. |
 | `defaultModel` | No | Conventional default model id for this provider. |
 | `homepage` | No | Homepage/docs URL for the catalog UI. |
 
-A preset carries no adapter projection (`env` / `env_unset` / `bin_args`);
+A gateway carries no adapter projection (`env` / `env_unset` / `bin_args`);
 that stays in `modes` / `options`.
 
 ### Continuation
@@ -451,6 +459,61 @@ schema verbatim: `ref` to an AIP-19 SECRETS.md, `state.{paths,env}`,
 `login.cmd`, `refresh.cmd`, `expiry`. The runner resolves secrets via
 `@agentproto/secrets` and passes them to the subprocess via
 `sandbox.env.set` (never argv, never logs).
+
+### Presentable auth methods per route (added 2026-10-23)
+
+> **Draft AIP-45 amendment** (2026-10-23). *Normative identifiers (field names, literals, tool names) are English and final.*
+
+`auth` MAY carry a `methods` block mapping each route the harness can be
+pointed at to the credential methods it can present on that route:
+
+```yaml
+auth:
+  methods:
+    <route>: ["api-key" | "oauth-bearer" | <string>, ...]
+```
+
+The route key is a billing route: the harness's default route or one of
+its `gateways[].id`. The value lists every method the harness accepts on
+that route, in no priority order. `api-key` and `oauth-bearer` are the
+two normative values; any other string is reserved for a future method
+and hosts MUST treat an unknown value as unsupported rather than as a
+wildcard. A route key not declared here has no presentable methods, so a
+host MUST NOT point the harness at it.
+
+The consumer is the host. The auth profile primitive (proposed in
+[agentproto/agentproto#87](https://github.com/agentproto/agentproto/issues/87))
+describes a credential and the method it presents. Before a session
+starts, the host selects an auth profile only if that profile's method
+appears in `auth.methods` for the session's route. If the method is
+absent, the host MUST fall back to a profile that matches, or refuse to
+start the session; it MUST NOT present a credential the harness cannot
+consume on that route.
+
+When `auth.methods` is absent, the host falls back to its own
+per-harness table of presentable methods. In that case the host MUST be
+able to show that table to the operator, so the choice of method per
+route stays inspectable even without a manifest declaration.
+
+```yaml
+# Claude Code: the direct Anthropic route accepts either method; an
+# OpenAI-compatible gateway accepts an API key only.
+auth:
+  methods:
+    anthropic: [oauth-bearer, api-key]
+    openai-compatible: [api-key]
+gateways:
+  - id: anthropic
+    label: Anthropic
+    schemaFlavor: anthropic
+    baseUrl: https://api.anthropic.com
+    keyEnv: ANTHROPIC_API_KEY
+  - id: openai-compatible
+    label: OpenAI-compatible gateway
+    schemaFlavor: openai
+    baseUrl: https://gateway.example.com/v1
+    keyEnv: OPENAI_API_KEY
+```
 
 ### Setup surface
 
@@ -548,6 +611,21 @@ Draft phase; spec changes propagate through `scaffold-aip` regen.
 Not applicable — first agentproto AIP for interactive agent CLIs.
 AIP-29 stays correct for tool CLIs; AIP-45 covers the agent-CLI case
 that AIP-29 wasn't designed for.
+
+### The 2026-10-23 presentable auth methods amendment (draft)
+
+`auth.methods` is OPTIONAL. A manifest that omits it keeps working: the
+host falls back to its own per-harness table of presentable methods and
+MUST be able to show that table. A manifest that adds it gains stricter
+route matching, since a host then selects an auth profile only when the
+profile's method is listed for the session's route.
+
+### The 2026-10-23 gateways rename amendment (draft)
+
+`gateways` replaces `presets` with identical entry fields. `presets`
+stays accepted as a legacy alias, so existing manifests load unchanged; a
+manifest MUST NOT carry both fields. Consumers that read `presets` SHOULD
+read `gateways` first and fall back to `presets`.
 
 ## Security considerations
 
