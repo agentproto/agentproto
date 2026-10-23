@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-agency
 title: Author an agency workspace (AIP-8)
 description:
@@ -324,8 +324,8 @@ Authoring ends with the files written.
 ## See also
 
 - [AIP-8 — agentagencies/v1 spec](/docs/aip-8)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6) — company / role substrate
-- [AIP-7 — agentgovernance/v1](/docs/aip-7) — signatures, audit log, policies
+- [AIP-6 — company/v1](/docs/aip-6) — company / role substrate
+- [AIP-7 — governance/v1](/docs/aip-7) — signatures, audit log, policies
 - [AIP-15 — WORKFLOW.md spec](/docs/aip-15) — procedures are workflow-shaped
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide for hosts
 - [`./EXAMPLES.md`](./EXAMPLES.md) — reference workspace patterns

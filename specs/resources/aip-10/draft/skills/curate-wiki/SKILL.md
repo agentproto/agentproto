@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: curate-wiki
 title: Curate an agentknowledge/v1 wiki (AIP-10)
 description:
@@ -307,7 +307,7 @@ regenerated `_index.md`, and the appended `_log.md`.
 - [AIP-1 — agent.json](/docs/aip-1)
 - [AIP-2 — capability surface](/docs/aip-2)
 - [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-6 — company/v1](/docs/aip-6)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [`../../ADAPTER.md`](../../ADAPTER.md) — implementer's guide for hosts (entry,

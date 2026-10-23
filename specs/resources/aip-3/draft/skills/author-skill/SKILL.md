@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-skill
 title: Author a SKILL.md (AIP-3)
 description:
@@ -80,7 +80,7 @@ conventional shape, mirroring the AIP authorship style.
 
 ### 2. Pin the schema version
 
-Set `schema: skills/v1`. This is normative; the host's parser dispatches on it.
+Set `schema: skill/v1`. This is normative; the host's parser dispatches on it.
 A skill with a missing or unknown `schema` value MUST be rejected by the
 adapter, so always declare it explicitly.
 
@@ -189,7 +189,7 @@ npx ajv validate -s ./SKILL.schema.json -d ./SKILL.md
 
 Fix every error before declaring success. Specifically check:
 
-- `schema: skills/v1` is present.
+- `schema: skill/v1` is present.
 - `name` matches the kebab-case pattern.
 - Every input has a non-empty `description`.
 - Tags are lowercase kebab-case.

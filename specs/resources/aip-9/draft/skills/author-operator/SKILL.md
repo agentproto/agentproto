@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-operator
 title: Author an OPERATOR.md (AIP-9)
 description:
@@ -321,7 +321,7 @@ written.
 - [AIP-3 — SKILL.md](/docs/aip-3) — skills the operator wires in
 - [AIP-14 — TOOL.md](/docs/aip-14) — tools the operator wires in
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6) — file representation
+- [AIP-6 — company/v1](/docs/aip-6) — file representation
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide for hosts
 - [`./EXAMPLES.md`](./EXAMPLES.md) — reference OPERATOR.md files (minimal,
   with-tools, with-skills, with-workflow, governed, specialised, composing)

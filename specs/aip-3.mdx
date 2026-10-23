@@ -64,7 +64,7 @@ The high-level shape, pending the full normative text:
 
 ```yaml
 ---
-schema: skills/v1
+schema: skill/v1
 name: <kebab-case-skill-id>
 title: <human-readable title>
 description: <one-sentence what-it-does>
@@ -107,6 +107,8 @@ phase.
 ## Backwards Compatibility
 
 Not applicable — this AIP introduces a new spec.
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `skill/v1`; documents that declare `skills/v1` remain valid, and hosts MUST accept both.
 
 ## Security Considerations
 

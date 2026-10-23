@@ -28,7 +28,7 @@ package: "@agentproto/company"
 
 ## Abstract
 
-`agentcompanies/v1` is an open file-format standard for representing the
+`company/v1` is an open file-format standard for representing the
 structural primitives of an AI company — the company itself, its roles,
 its objectives, its operators — as a set of markdown-with-frontmatter and
 JSON files in a filesystem-first, vendor-neutral package. Any git
@@ -49,7 +49,7 @@ databases. That makes:
 - **Composition** ad-hoc: governance specs (AIP-7) and operational specs
   (AIP-8) have no shared substrate to extend.
 
-agentcompanies/v1 fixes this by making the company *a folder of files*.
+company/v1 fixes this by making the company *a folder of files*.
 Git is the version control. The filesystem is the database. Adapters
 project these files into vendor-specific databases when needed.
 
@@ -88,10 +88,10 @@ The company manifest's `structure` block enumerates the org chart:
   accept both; when both are present, `positions` wins. Writers SHOULD
   emit `positions`.
 
-Common conventions adopted by all `agentcompanies/v1` files:
+Common conventions adopted by all `company/v1` files:
 
 - **Markdown canonical** with YAML frontmatter
-- **`schema: agentcompanies/v1`** field on every doctype
+- **`schema: company/v1`** field on every doctype
 - **Slug-based references**, never database IDs
 - **Vendor-specific extensions** under `metadata.<vendor>.*`
 - **Git-native**: any repository hosting these files is a valid company
@@ -114,6 +114,8 @@ emerges through AIP-8 (agencies engine).
 
 Not applicable — first AIP-numbered version. If the upstream spec
 revs to v2, AIP-6 stays at v1 and a new AIP supersedes it.
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `company/v1`; documents that declare `agentcompanies/v1` remain valid, and hosts MUST accept both.
 
 ## Security Considerations
 

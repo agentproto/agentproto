@@ -1,4 +1,4 @@
-# AIP-48 examples — agentruntimes/v1 worked manifests
+# AIP-48 examples — runtime/v1 worked manifests
 
 Five compositions over the same seven ports. Each one is a complete manifest;
 the kernel sees nothing except the port adapters it resolves from `kind`.
@@ -10,7 +10,7 @@ The cut-1 / cut-2 reference. No network. A markdown journal at
 sub-agents act as participants.
 
 ```yaml
-schema: agentruntimes/v1
+schema: runtime/v1
 kind: MultiAgentRuntime
 id: local-dev-swarm
 participants:
@@ -41,7 +41,7 @@ live Guilde conversation as a first-class operator. Humans + Mastra operators
 + this CLI session share one thread.
 
 ```yaml
-schema: agentruntimes/v1
+schema: runtime/v1
 kind: MultiAgentRuntime
 id: guilde-bridge
 participants:
@@ -75,7 +75,7 @@ Mastra operator) plus the conversation's human members, all coordinated via
 the same dispatcher.
 
 ```yaml
-schema: agentruntimes/v1
+schema: runtime/v1
 kind: MultiAgentRuntime
 id: guilde-mixed
 participants:
@@ -108,7 +108,7 @@ When mentions aren't enough — e.g. routing by skill tags rather than display
 name.
 
 ```yaml
-schema: agentruntimes/v1
+schema: runtime/v1
 kind: MultiAgentRuntime
 id: capability-routed
 participants:
@@ -142,7 +142,7 @@ A runtime hosted inside a Guilde server process — no CLI involvement. Same
 manifest shape, different adapter wiring.
 
 ```yaml
-schema: agentruntimes/v1
+schema: runtime/v1
 kind: MultiAgentRuntime
 id: guilde-autonomous
 participants:

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-intent
 title: Author an INTENT.md (AIP-28)
 description:

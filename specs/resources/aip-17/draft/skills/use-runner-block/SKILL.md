@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: use-runner-block
 title: Wire the AIP-17 runner block into a new manifest format
 description:

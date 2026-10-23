@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-canvas
 title: Author a canvakit template (AIP-5)
 description:

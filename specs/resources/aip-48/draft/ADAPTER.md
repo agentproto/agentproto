@@ -1,6 +1,6 @@
 # AIP-48 — Adapter implementation guide
 
-Each of the seven ports in `agentruntimes/v1` is an interface that an adapter
+Each of the seven ports in `runtime/v1` is an interface that an adapter
 implements. The reference kernel `@agentproto/agent-runtime` ships one
 adapter per port; this guide is for authors of additional adapters.
 

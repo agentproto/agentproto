@@ -1,5 +1,5 @@
 ---
-schema: presence/v1
+schema: workspace.presence/v1
 name: shopbot-presence
 title: ShopBot public presence
 description: >-

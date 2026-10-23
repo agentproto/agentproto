@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-governance
 title: Author governance artifacts (AIP-7)
 description:
@@ -113,7 +113,7 @@ policy's required signers all signed.
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "signature",
   "artifact": "<artifact-slug-or-path>",
   "decision": "approve",
@@ -154,7 +154,7 @@ chain is empty, start at 0.
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "audit-event",
   "seq": 42,
   "ts": "2026-04-28T10:12:00.000Z",
@@ -247,7 +247,7 @@ the host's runtime autonomy is higher, the policy escalates.
 
 ```md
 ---
-schema: agentgovernance/v1
+schema: governance/v1
 doctype: policy
 slug: external-send
 version: 1.0.0

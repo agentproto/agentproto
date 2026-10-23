@@ -23,7 +23,7 @@ and shadow don't matter.
 
 ```md
 ---
-schema: designkit/v1
+schema: design/v1
 kit: paper-light
 title: Paper Light
 description:
@@ -77,7 +77,7 @@ spacing, radius, shadows, motion. This is the shape most product surfaces want.
 
 ```md
 ---
-schema: designkit/v1
+schema: design/v1
 kit: modern-minimal
 title: Modern Minimal
 description:
@@ -179,7 +179,7 @@ block carries only the tokens that change.
 
 ```md
 ---
-schema: designkit/v1
+schema: design/v1
 kit: studio
 title: Studio
 description:
@@ -273,7 +273,7 @@ Internal brand kit, not published to the public registry. License is
 
 ```md
 ---
-schema: designkit/v1
+schema: design/v1
 kit: acme-brand-2026
 title: Acme Brand 2026
 description:
@@ -358,7 +358,7 @@ parent. Composition depth is limited to 3 by the adapter contract.
 
 ```md
 ---
-schema: designkit/v1
+schema: design/v1
 kit: modern-minimal-teal-night
 title: Modern Minimal — Teal Night
 description:
@@ -422,7 +422,7 @@ features (CSS variable prefixes, Tailwind plugin hints, asset pinning).
 
 ```md
 ---
-schema: designkit/v1
+schema: design/v1
 kit: brutalist-mono
 title: Brutalist Mono
 description:

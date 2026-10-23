@@ -1,6 +1,6 @@
 ---
 title: "AIP-62: REVIEW.md: agentreview/v1 (attested verdicts over a content range)"
-description: "Names the review — a declared set of command and agent checks run over a frozen git range and folded into a `pass | block | incomplete` verdict — as a first-class primitive, and fixes the attestation that binds that verdict to the exact manifest and content it is about. Specifies the REVIEW.md manifest (`kind: review`; `target`, `checks`, `bindings`, `uses`, `verdict`, and every cross-field rule), reusable review packs (`kind: review-pack`) with their trust rules and the `agentproto-pack-digest/v1` digest, the execution model (prepare before the range freezes, parallel bounded lanes, the trinary fold in which `incomplete` is never a pass), the `agentproto.review.attestation/v1` document, the ledger key and cache rule, ssh-ed25519 signing over canonical JSON, delta composition via `composedFrom`, and the step-by-step verification algorithm."
+description: "Names the review — a declared set of command and agent checks run over a frozen git range and folded into a `pass | block | incomplete` verdict — as a first-class primitive, and fixes the attestation that binds that verdict to the exact manifest and content it is about. Specifies the REVIEW.md manifest (`kind: review`; `target`, `checks`, `bindings`, `uses`, `verdict`, and every cross-field rule), reusable review packs (`kind: review-pack`) with their trust rules and the `review.pack-digest/v1` digest, the execution model (prepare before the range freezes, parallel bounded lanes, the trinary fold in which `incomplete` is never a pass), the `review.attestation/v1` document, the ledger key and cache rule, ssh-ed25519 signing over canonical JSON, delta composition via `composedFrom`, and the step-by-step verification algorithm."
 aip: 62
 status: Review
 type: Schema
@@ -38,12 +38,12 @@ the exact content it is about. This AIP fixes:
   `uses` list that imports reusable packs, and every cross-field rule a
   conformant parser enforces;
 - the **review pack** manifest (`kind: review-pack`), how a pack is
-  resolved and trusted, and the **`agentproto-pack-digest/v1`** digest that
+  resolved and trusted, and the **`review.pack-digest/v1`** digest that
   travels in a signed attestation;
 - the **execution model**: `prepare` runs before the range freezes, lanes
   run in parallel and every lane is bounded, and the fold is trinary, so
   a lane that could not produce a result can never turn into a pass;
-- the **`agentproto.review.attestation/v1`** document, its canonical JSON
+- the **`review.attestation/v1`** document, its canonical JSON
   form, and the **ledger** key `(repoRemote, manifestSha, binding,
   rangeSha)` under which verdicts are stored and served from cache;
 - **signing** (ssh-ed25519 via `ssh-keygen -Y`, namespace
@@ -460,14 +460,14 @@ Agent checks from an untrusted pack need no opt-in; they execute no
 pack-authored code, but they do read a pack-authored rubric (§Security
 considerations).
 
-#### Pack digest (`agentproto-pack-digest/v1`)
+#### Pack digest (`review.pack-digest/v1`)
 
 The digest binds a pack's checks to the bytes that define them. Its record
 is `PackDigest = { ref, id, version, alg, sha256 }`:
 
 - `ref` is the `uses[].pack` string as written;
 - `id` and `version` come from the pack's own REVIEW.md;
-- `alg` is the literal `agentproto-pack-digest/v1`. It names the **recipe**
+- `alg` is the literal `review.pack-digest/v1`. It names the **recipe**
   the digest was computed under, not the hash function; it exists so a
   future recipe is never compared against this one as if they were the same;
 - `sha256` is computed as follows.
@@ -757,7 +757,7 @@ An attestation is a JSON document:
 
 | Field | Type | Description |
 |---|---|---|
-| `schema` | `"agentproto.review.attestation/v1"` | Required. A verifier MUST reject a document with another value. |
+| `schema` | `"review.attestation/v1"` | Required. A verifier MUST reject a document with another value. |
 | `runId` | string | Required. `review-<uuid>`. |
 | `reviewId` | string | Required. The REVIEW.md `id`. |
 | `manifestSha` | hex sha256 | Required. SHA-256 of the REVIEW.md source bytes. |
@@ -1018,7 +1018,7 @@ A conformant verifier performs, in order:
    it attests. Not found is a distinct outcome.
 4. **Verify the attestation** against the expectation, collecting every
    problem found:
-   - `schema` is `agentproto.review.attestation/v1`;
+   - `schema` is `review.attestation/v1`;
    - `rangeSha` equals the SHA-256 of `<baseSha>..<headSha>` recomputed from
      `target`;
    - `verdict` equals the fold of `lanes` with the default quorum (a
@@ -1115,7 +1115,7 @@ members are as in `EXAMPLES.md`):
 
 ```json
 {
-  "schema": "agentproto.review.attestation/v1",
+  "schema": "review.attestation/v1",
   "reviewId": "my-repo",
   "binding": "default",
   "target": { "repoRemote": "github.com/example/my-repo", "baseSha": "…", "headSha": "…" },
@@ -1153,7 +1153,7 @@ behavior shipped in `@agentproto/review`, `@agentproto/runtime`, and
 `@agentproto/cli`, including signing, composition, and packs.
 
 The attestation evolves additively within
-`agentproto.review.attestation/v1`: `attestor.signature`, `packs`,
+`review.attestation/v1`: `attestor.signature`, `packs`,
 `requester`, `pr`, `lanes[].model`, `lanes[].composedFrom`, and now
 `decision`, were added after the first release as optional members without
 changing the `schema` value, and a document without them remains valid. A
@@ -1176,11 +1176,13 @@ correct `verdict` by recomputing the fold (§Verification step 4), and only
 a consumer that inspects individual lane statuses for its own purposes
 needs to know the new value.
 
-A digest recipe change MUST bump `alg` (`agentproto-pack-digest/v2`). A
+A digest recipe change MUST bump `alg` (`review.pack-digest/v2`). A
 verifier that meets an unknown `alg` MUST refuse to compare.
 
 The `git-range` target is the only target kind in v1; further kinds are an
 additive `kind` value (§Open questions).
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema ids are `review.attestation/v1` and `review.pack-digest/v1`; documents that declare `agentproto.review.attestation/v1` or `agentproto-pack-digest/v1` remain valid, and hosts MUST accept both.
 
 ## Security considerations
 
@@ -1330,7 +1332,7 @@ which would define shared fetch, pin, digest, and trust semantics over the
 expected to subsume the pack loader; a review pack would then be one
 artifact family under it. This AIP does not design that AIP. Until it
 exists, the pack rules above are normative for `uses[]`, and
-`agentproto-pack-digest/v1` remains the digest an attestation records.
+`review.pack-digest/v1` remains the digest an attestation records.
 
 ### AIP-7 GOVERNANCE
 

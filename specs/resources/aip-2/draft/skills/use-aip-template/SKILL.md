@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: use-aip-template
 title: Fill out the AIP template
 description:

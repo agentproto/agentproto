@@ -2,7 +2,7 @@
 
 This document is the implementer's guide for any runtime, framework, or language
 that wants to **emit, store, and verify** AIP-7
-[`agentgovernance/v1`](/docs/aip-7) artifacts: signatures, audit entries, and
+[`governance/v1`](/docs/aip-7) artifacts: signatures, audit entries, and
 policies. It is normative for the parts marked MUST and informative for the
 parts marked SHOULD.
 
@@ -736,7 +736,7 @@ These are runtime-policy concerns and stay out of the spec on purpose.
 
 ## See also
 
-- [AIP-7 — agentgovernance/v1 spec](/docs/aip-7)
+- [AIP-7 — governance/v1 spec](/docs/aip-7)
 - [AIP-9 — agentoperators/v1](/docs/aip-9) — `executor` / `escalateTo` resolver
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — `knowledge:` binding, sibling
   KNOWLEDGE.md pattern
