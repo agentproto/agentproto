@@ -103,7 +103,8 @@ embedding.
 5. **Most-restrictive wins on conflicts.** When composed policies
    disagree, the more restrictive answer wins. `default: deny`
    beats `default: allow`. A grant cannot be silently overridden
-   by a later policy unless that policy explicitly revokes.
+   by a later policy unless that policy explicitly denies it
+   (`effect: deny`, added 2026-10-23).
 
 6. **Conditions are pluggable.** A grant MAY carry conditions
    (`during-business-hours`, `mfa-recent`, `ip-range`). Hosts
@@ -168,6 +169,7 @@ case-sensitive.
 ```yaml
 grants:
   - principal: <identity-ref>          # AIP-23 identity-ref scheme
+    effect: allow                       # optional, "allow" | "deny" (default: allow)
     actions:                            # array of action refs
       - { action: <action-ref> }
       - { action: <action-ref>, scope?: <string> }    # narrow grant
@@ -177,6 +179,9 @@ grants:
     granted_by: <identity-ref>          # optional, audit metadata
     revoked: <boolean>                  # optional, soft-revoke marker
 ```
+
+`effect` defaults to `allow`. A grant with `effect: deny` is an
+explicit deny; see [§Explicit deny](#explicit-deny-added-2026-10-23).
 
 Each `principal` is an [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive)
 in any of its forms (inline / ref / file).
@@ -291,6 +296,7 @@ interface PolicyDefinition {
 
 interface Grant {
   principal:    IdentityRef
+  effect?:      "allow" | "deny"        // default "allow"
   actions:      Array<{ action: ActionRef; scope?: string }>
   conditions?:  Condition[]
   ttlSeconds?:  number
@@ -320,11 +326,14 @@ interface Requirement {
    evaluated as `default: deny`. Hosts SHOULD warn when `default: allow`
    is declared (audit-significant choice).
 
-2. **Compose by union of grants + most-restrictive on default and
-   requirements.** When N policies compose, the agent's effective
-   permissions are the union of all grants. The default decision is
-   `deny` if ANY composed policy declares `default: deny`. All
-   requirements from all policies apply (ANDed).
+2. **Compose by union of allow grants, explicit deny override, and
+   most-restrictive on default and requirements.** When N policies
+   compose, the agent's effective permissions are the union of all
+   grants with `effect: allow`. A matching grant with `effect: deny`
+   wins over any allow, in any composed policy, regardless of which
+   policy declares it. The default decision is `deny` if ANY composed
+   policy declares `default: deny`. All requirements from all policies
+   apply (ANDed).
 
 3. **Wildcards in actions resolve at evaluation time.**
    `actions: [{ action: "storage:*" }]` at grant time is checked
@@ -356,16 +365,105 @@ audit hooks. The decision record carries:
 ```ts
 interface PolicyDecisionRecord {
   decision:    "allow" | "deny"
-  reason:      "no-grant" | "condition-failed" | "requirement-failed" | "limit-exceeded" | "explicit-revoke" | "ttl-expired" | "matched-grant"
+  reason:      "no-grant" | "condition-failed" | "requirement-failed" | "limit-exceeded" | "explicit-revoke" | "explicit-deny" | "ttl-expired" | "matched-grant"
   principal:   IdentityRef
   action:      ActionRef
   grantId?:    string
-  policyChain: Array<{ source: "inline" | { ref: string } | { file: string }; layer: number }>
+  policyChain: Array<{
+    source: "inline" | { ref: string } | { file: string }
+    layer: number
+    attachment: "subject" | "resource"
+  }>
   evaluatedAt: string                   // ISO 8601
 }
 ```
 
 This record is what audit consumers ingest, not raw POLICY.md.
+
+### Explicit deny (added 2026-10-23)
+
+> **Draft — AIP-38 amendment** (2026-10-23). *Normative identifiers
+> (field names, literals, reason strings) are English and final.*
+
+**Problem.** `default: deny` plus positive grants can express "only X",
+but not "everything the group allows except X". IAM solved this with an
+explicit deny that outranks any allow. This amendment adds the same
+primitive without changing the meaning of a policy that does not use it.
+
+A grant gains an optional `effect` field:
+
+```yaml
+grants:
+  - principal: "group://contractors"
+    effect: deny
+    actions:
+      - { action: "model:invoke", scope: "selector:frontier-models" }
+```
+
+- `effect?: "allow" | "deny"`, default `"allow"`.
+- A **matching** deny wins over any allow, in any composed policy and
+  at any layer. "Matching" is the usual (principal, action, scope,
+  conditions, TTL) test: a deny only applies where its own conditions
+  hold and its TTL is not expired.
+- `revoked: true` still disables a grant. Revocation is not a deny: a
+  revoked grant contributes nothing, while an active deny actively
+  removes a permission.
+- The decision record reports `reason: "explicit-deny"` when a deny is
+  the reason an action was refused.
+
+### Resource and subject policies (added 2026-10-23)
+
+Policy can be attached at two points:
+
+- **Subject policy**: bound to the principal. An [AIP-42](/docs/aip-42)
+  agent's `policy` field and an operator's own `policy` are subject
+  policies.
+- **Resource policy**: embedded in the resource itself, using the
+  resource-owning AIP's `policy:` block. Examples: a sandbox, a
+  storage, an auth profile.
+
+When both a subject policy and a resource policy exist for an action,
+the action is allowed only when BOTH evaluate to allow. Neither can
+relax the other: the effective decision is the intersection of the two
+decisions, and an explicit deny in either one wins. When no resource
+policy exists, the subject policy alone decides, which is exactly the
+pre-amendment behaviour.
+
+Every policy consulted is recorded in the decision record's
+`policyChain`, with `attachment: "subject" | "resource"` and its
+`layer` in the composition order. A resource policy that cannot be
+loaded fails closed (deny), with `reason: "no-grant"`.
+
+### Scope matching (added 2026-10-23)
+
+A grant's `scope` narrows which instances of an action it covers. A
+host MUST match it as follows:
+
+1. **Exact string**: the scope equals the requested scope.
+2. **`*` glob suffix**: a scope ending in `*` matches any requested
+   scope sharing the prefix (a lone `*` matches every scope). A `*` in
+   any other position is not a wildcard.
+3. **`selector:<id>`**: the requested scope is a member of the set
+   resolved from the saved selector named `<id>`. Selector resolution
+   is defined by a later [AIP-43](/docs/aip-43) amendment. Matching is
+   membership in the resolved set and MUST fail closed (deny) when the
+   selector cannot be resolved.
+4. **No `scope`**: the grant matches every scope of that action.
+
+Scope vocabularies are action-specific. The standard runtime actions
+define theirs in [AIP-39 §Standard runtime
+actions](/docs/aip-39#standard-runtime-actions-added-2026-10-23).
+
+### Delegation ceiling (added 2026-10-23)
+
+A nested principal never holds more than its parent. The effective
+grants of a child are the **intersection** of its own policy with its
+parent's effective policy: a grant the parent lacks is unavailable to
+the child, and a deny that applies to the parent applies to the child
+too. This is the generic form of the rule [AIP-46](/docs/aip-46)
+already states for delegation and spawn: a child policy can narrow,
+never widen. Hosts MUST evaluate the ceiling before creating the
+nested principal, not rely on the child to enforce it.
 
 ## Example — standalone POLICY.md
 
@@ -451,6 +549,20 @@ policy:
   `default: deny` PLUS host policy fallback (typically: workspace owner
   has all permissions, others have none).
 
+### The 2026-10-23 explicit-deny-and-composition amendment (draft)
+
+A policy with no `effect` evaluates exactly as before: every grant is
+an allow, grants compose by union, and `default` still decides when no
+grant matches. Explicit deny only changes an outcome where a matching
+deny exists, and no pre-amendment policy can contain one. Resource and
+subject policies are opt-in: a resource with no `policy:` block is
+decided by the subject policy alone, as before. A grant with no `scope`
+still matches every scope of its action. The only additions are new
+optional fields (`effect`, `attachment` in the decision record) and two
+new reason values (`explicit-deny`, plus scope/selector failures that
+report as `no-grant`), all of which a pre-amendment consumer treats as
+absent or unknown.
+
 ## Security considerations
 
 POLICY.md is **declarative**: a malicious manifest can grant itself
@@ -476,9 +588,9 @@ unless the parent explicitly opts into delegation.
    ships breaking changes, do dependent workspaces auto-fail or
    auto-upgrade? Likely: pin via `.workspace-lock.json`.
 
-2. **Negative grants (explicit deny).** Currently grants are positive
-   only. A "deny Bob commits even though group says yes" pattern would
-   need explicit deny grants. Defer until concrete need.
+2. **Negative grants (explicit deny).** Resolved by the 2026-10-23
+   amendment: a grant carries `effect: "deny"` and a matching deny wins
+   over any allow. See [§Explicit deny](#explicit-deny-added-2026-10-23).
 
 3. **Policy mutation audit.** When POLICY.md is edited, who's allowed
    and who reviews? Recursive — POLICY governs POLICY edits.

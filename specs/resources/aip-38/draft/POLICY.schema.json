@@ -68,6 +68,11 @@
           "$ref": "#/$defs/identityRefEntry",
           "description": "AIP-23 identity-ref. Schemes: operator://, user://, org://, guild://, bot://, group://, role://, *."
         },
+        "effect": {
+          "enum": ["allow", "deny"],
+          "default": "allow",
+          "description": "Grant effect. A matching `deny` wins over any allow in any composed policy (added 2026-10-23). Default `allow`."
+        },
         "actions": {
           "type": "array",
           "minItems": 1,
