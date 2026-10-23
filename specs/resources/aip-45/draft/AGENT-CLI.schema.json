@@ -117,7 +117,7 @@
     "gateways": {
       "type": "array",
       "items": { "$ref": "#/$defs/preset" },
-      "description": "AIP-45 gateway endpoints this adapter can be pointed at (Anthropic/OpenAI-compatible backends). Merged into the gateway catalog (agentproto presets list / list_provider_presets) alongside the built-in registry, deduped by id (built-in wins on collision). Lets an external adapter surface a gateway the built-in registry doesn't know about. Replaces the legacy `presets` field; a manifest MUST NOT carry both."
+      "description": "AIP-45 gateway endpoints this harness can be pointed at (Anthropic/OpenAI-compatible backends). Merged into the gateway catalog (agentproto presets list / list_provider_presets) alongside the built-in registry, deduped by id (built-in wins on collision). Lets an external harness surface a gateway the built-in registry doesn't know about. Replaces the legacy `presets` field; a manifest MUST NOT carry both."
     },
     "presets": {
       "type": "array",
@@ -266,7 +266,7 @@
         },
         "methods": {
           "type": "object",
-          "description": "Optional map from billing route to the credential methods the harness can present on that route. A route is the harness's default route or one of gateways[].id. A host selects an auth profile only if the profile's method appears in this list for the session's route. Absent: the host falls back to its own per-harness table and MUST be able to show it.",
+          "description": "Optional map from billing route to the credential methods the harness can present on that route. A route key is one of gateways[].id, or the reserved key `default` for the route the harness uses when no gateway is selected. A host selects an auth profile only if the profile's method appears in this list for the session's route. Absent: the host falls back to its own per-harness table and MUST be able to show it.",
           "additionalProperties": {
             "type": "array",
             "minItems": 1,
@@ -461,16 +461,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "label", "schemaFlavor", "baseUrl", "keyEnv"],
-      "description": "A gateway preset this adapter can drive — a backend an Anthropic/OpenAI-compatible client can front. Declared in the manifest so the catalog surfaces adapter-contributed presets alongside the built-in registry. No adapter projection (env/env_unset/bin_args) here; that stays in modes/options.",
+      "description": "A gateway this harness can be pointed at: a backend an Anthropic/OpenAI-compatible client can front. Declared in the manifest so the catalog surfaces harness-contributed gateways alongside the built-in registry. No harness projection (env/env_unset/bin_args) here; that stays in modes/options.",
       "properties": {
         "id": {
           "type": "string",
           "minLength": 1,
-          "description": "Stable preset id. SHOULD equal the mode id if the adapter projects this preset as a mode. Catalog dedupes built-in vs adapter-declared by id; an adapter-declared id colliding with a built-in is ignored in favor of the built-in (registry is source of truth for canonical providers)."
+          "description": "Stable gateway id. SHOULD equal the mode id if the harness projects this gateway as a mode. Catalog dedupes built-in vs harness-declared by id; a harness-declared id colliding with a built-in is ignored in favor of the built-in (registry is source of truth for canonical providers)."
         },
         "label": { "type": "string", "minLength": 1, "description": "Human label for the catalog UI." },
         "description": { "type": "string" },
-        "schemaFlavor": { "enum": ["anthropic", "openai"], "description": "API schema flavor — selects which adapter family can consume the preset." },
+        "schemaFlavor": { "enum": ["anthropic", "openai"], "description": "API schema flavor: selects which harness family can consume the gateway." },
         "baseUrl": { "type": "string", "minLength": 1, "description": "Base URL the client hits." },
         "keyEnv": {
           "type": "string",
