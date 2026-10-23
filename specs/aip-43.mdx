@@ -9,6 +9,7 @@ author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/registry
 discussions-to: https://github.com/agentproto/agentproto/discussions/43
+resources: ./resources/aip-43/draft
 layer: primitives
 package: "@agentproto/registry"
 ---
@@ -207,6 +208,215 @@ names if discovery is enabled). `keyBy` is required when the handle
 type doesn't expose a recognisable id field; `createDoctype`-built
 handles default to the rules in [Identity](#identity).
 
+### Saved selectors (added 2026-10-23)
+
+> **Draft AIP-43 amendment** (2026-10-23). *Normative identifiers
+> (field names, literals, tool names) are English and final.*
+
+**Problem.** `lookup(predicate)` takes a function. A function cannot be
+saved by a user, sent over MCP, referenced from a policy, or shown in a
+picker. Hosts that needed a named, reusable selection ("every model priced
+at zero", "these three models in this order", "every tool that writes to
+the network") each invented a private format: the reference
+implementation has one for models only, and the older code paths it
+replaced each hard-coded their own predicate (an id suffix check, a
+literal list). [AIP-38](/docs/aip-38) grants (`scope: "selector:<id>"`)
+and [AIP-46](/docs/aip-46) session configs (`model: "selector:<id>"`) now
+reference selectors by id, so the format needs one definition.
+
+A **saved selector** is the declarative, serializable form of `lookup`:
+a named, ordered selection over one registry family, stored by the host
+as user data.
+
+#### The `Selector` document
+
+JSON Schema:
+[`resources/aip-43/draft/Selector.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-43/draft/Selector.schema.json).
+
+```ts
+interface Selector {
+  /** Unique on the host across all families: /^[a-z0-9][a-z0-9-]{0,62}$/ */
+  id: string
+  /** The registry family it selects from: "model", "tool", "skill", ...
+   *  Fixed for the life of the id. */
+  family: string
+  label?: string
+  /** Handles matching ANY clause are selected. */
+  include?: Clause[]
+  /** Handles matching ANY clause are removed. Wins over include and ids. */
+  exclude?: Clause[]
+  /** Explicit pins (see Identity). A pin need not be registered. */
+  ids?: string[]
+  /** Default "listed". */
+  order?: "listed" | { by: string; direction?: "asc" | "desc" } | string
+  /** How a consumer that uses one member at a time picks the next one.
+   *  Default "priority". */
+  rotation?: "priority" | "round-robin" | "least-recently-limited"
+  /** Content digest of this revision, set by the host on save. */
+  revision?: string
+}
+
+type Clause =
+  | { id: string }                       // an id, or a `*`-suffix glob
+  | { tag: string }                      // member of capabilities.tags
+  | { capability: string                 // dot path into capabilities;
+      eq?: unknown; in?: unknown[]       //   at least one comparator
+      lte?: number; gte?: number; exists?: boolean }
+  | { selector: string }                 // members of another selector
+  | { all: Clause[] }                    // conjunction
+  | { kind: string; [k: string]: unknown }  // a family clause (below)
+```
+
+- A `capability` clause MUST carry at least one comparator; several
+  comparators must all hold. A missing capability matches only
+  `exists: false`.
+- `id` globs follow [AIP-38](/docs/aip-38) §Scope matching: `*` is a
+  wildcard only as a suffix.
+- A `selector` clause MUST name a selector of the same family. A cycle, an
+  unknown selector, or a family mismatch is an error at save time.
+- **Family clauses.** A family MAY register clause kinds (`{ kind, ... }`)
+  whose meaning is defined by an expansion into the generic clauses above.
+  A host stores a family clause as written; `explain` reports it as written.
+  An unregistered `kind` is an error at save time. Apart from family
+  clauses, the clause set is closed.
+- An `order` string MUST name an order the family declares; anything else
+  is an error at save time.
+- `selector_save` MUST refuse to change the `family` of an existing id.
+
+#### Identity
+
+A family MAY declare an **expansion** `expand(id) → canonical ids`: the
+registered ids a spelling denotes (alias resolution, a route suffix such as
+`@openrouter` stripped, a bare id denoting every registered id whose last
+segment it is). Expansion is one-way and deterministic. Members are kept as
+canonical ids; a pin that expands to nothing is kept as written.
+
+- `has(selectorId, id)` is true when any id in `expand(id)` (or `id` itself
+  when it expands to nothing) is a member. It MUST give the same answer as
+  `resolve`, and SHOULD be answerable without expanding the whole selector.
+- An exclude removes a member when the member, or any id its subject
+  expands to, matches. A model excluded by its canonical id therefore stays
+  excluded when addressed through an alias or a route suffix.
+- Capability, tag and family clauses cannot match an id that no registered
+  handle carries. An unregistered pin is removed only by an `{ id }`
+  exclude that matches it, or by a `{ selector }` exclude whose members
+  include it.
+
+#### Resolution and order
+
+`resolve(selectorId)` returns an ordered, de-duplicated list of ids:
+
+1. include clauses in their declared order, each contributing matching
+   handles in registry insertion order; then `ids` pins in their declared
+   order; the first occurrence of a member keeps its position;
+2. exclude clauses remove members;
+3. `order` re-sorts: `"listed"` keeps step 1's order; `{ by, direction }`
+   sorts on a capability path (default ascending; members missing the
+   capability sort last; ties keep step 1's order); a string names an order
+   the family declares (the model family declares `cheapest`,
+   `largest-context`, `newest`).
+
+`explain(selectorId)` returns, for each member, the clause or pin that
+included it.
+
+A resolution reflects the registry and the selector at the moment it is
+computed. Consumers decide **when** they resolve, and their AIP says so:
+
+- a policy check ([AIP-38](/docs/aip-38)) resolves at evaluation time;
+- a session ([AIP-46](/docs/aip-46)) resolves when it binds a model (spawn,
+  restart, handoff, a fallback step) and records the concrete member it
+  chose. Editing a selector never changes the model of a running session
+  by itself.
+
+**Selectors are grant-side and config-side only.** A request always names
+a concrete id. A consumer that holds `selector:<id>` (a session config)
+resolves it, evaluates each candidate member as a concrete id (policy,
+eligibility), and uses and records the first one that passes. A host MUST
+NOT pass the literal `selector:<id>` as the requested scope of an action.
+
+`rotation` tells such a consumer how to pick the next member when the
+current one fails: `priority` takes the next member in order;
+`round-robin` continues after the member used last by any consumer of that
+selector on the host; `least-recently-limited` prefers the member whose
+most recent rate or quota limit, for the account in use, is oldest
+(members never limited first).
+
+#### Selectors referenced by policy
+
+A selector named in an AIP-38 grant is part of that grant's meaning:
+adding a member widens every grant that allows it, and narrows every grant
+that denies it.
+
+- Saving or deleting a selector that any AIP-38 policy references is a
+  **policy change**: the host MUST require the authority it requires to
+  edit that policy, and MUST record it as a governance event
+  ([AIP-7](/docs/aip-7)) with the old and new `revision`.
+- An AIP-38 decision that matched through a selector SHOULD record the
+  selector id and `revision` in its decision record.
+- A host MAY lock a seed that one of its built-in policies references: a
+  locked seed can be copied, not edited or deleted.
+
+#### Storage, seeds and surface
+
+Selectors are host configuration owned by the user, stored outside any
+workspace or repository. The registry primitive stays in-memory; the
+selector store is the host's.
+
+- A host MAY ship **seed selectors** (for example `zero-cost`: the model
+  family members whose input and output list prices are both 0). An
+  unlocked seed is ordinary data: the user can edit it, and the host MUST
+  NOT re-impose its default over a user edit.
+- Deleting a selector MUST be refused while another selector, a session
+  preset, a live session's config or a policy known to the host references
+  it, unless forced. A reference that no longer resolves is an error, and
+  each consumer's AIP defines the outcome (AIP-38: deny; AIP-46: the spawn
+  is refused, a fallback step is skipped).
+- Surface (MCP, with HTTP and CLI mirrors):
+
+| verb | input | output |
+|---|---|---|
+| `selector_save` | a `Selector` | the stored selector with its new `revision`; refuses a cycle, an unknown or cross-family `selector` clause, an unregistered family clause or order, a family change, an invalid id |
+| `selector_list` | optional `family` | selectors |
+| `selector_delete` | `id`, `force?` | refused while referenced, unless `force` |
+| `selector_resolve` | `id` | `explain(id)`: members in order, each with the clause or pin that included it |
+
+A host MAY expose family-scoped aliases of these verbs (for example
+`model_list_save` for `family: "model"`); they MUST behave as the generic
+verb with the family fixed.
+
+#### Model family conventions
+
+The model family is the registry consumers reference most (AIP-38
+`model:invoke` scopes, AIP-46 `model`). Its handles SHOULD carry these
+capabilities so selectors stay portable across hosts:
+
+| capability | meaning |
+|---|---|
+| `vendor` | the model builder (the `vendor` of a `vendor/product` id) |
+| `kind` | `llm`, `embedding`, `image`, ... |
+| `contextWindow` | input context size in tokens |
+| `pricing.inputPer1M`, `pricing.outputPer1M` | public list price in USD |
+| `priceTier` | a coarse price band the catalog assigns |
+| `variant` | route-identity variant (for example `free`) |
+| `addedAt` | ISO-8601 date the model entered the catalog |
+| `tags` | includes `price:zero` when both list prices are 0 |
+
+Its family clauses and their expansions:
+
+| family clause | expansion |
+|---|---|
+| `{ kind: "model", value }` | `{ id: value }` |
+| `{ kind: "tag", value }` | `{ tag: value }` |
+| `{ kind: "provider", value }` | `{ capability: "vendor", eq: value }` (`provider` is a legacy alias of `vendor`, the reference implementation's name for the builder) |
+| `{ kind: "priceTier" \| "kind" \| "variant", value }` | `{ capability: <that name>, eq: value }` |
+| `{ kind: "price", maxInPer1M?, maxOutPer1M? }` | `{ all: [ { capability: "pricing.inputPer1M", lte: maxInPer1M }, { capability: "pricing.outputPer1M", lte: maxOutPer1M } ] }`, keeping only the bounds given; with no bound, `{ capability: "pricing.inputPer1M", exists: true }` |
+| `{ kind: "context", min }` | `{ capability: "contextWindow", gte: min }` |
+| `{ kind: "list", id }` | `{ selector: id }` |
+
+Price is catalog data like any other capability. A selector such as
+`zero-cost` is where a user, or a host's built-in policy, names "free
+models"; no host code tests prices to decide what a session may use.
+
 ## Why not just use a Map?
 
 Three reasons:
@@ -234,6 +444,23 @@ voluntary refactor. Handles produced by `defineStorage` / `defineSandbox`
 / `defineExtension` / `defineOperator` are already in the shape the
 registry expects (the universal `createDoctype` handle), so adoption
 is one `register(handle)` call per existing handle.
+
+### The 2026-10-23 saved-selectors amendment (draft)
+
+§Saved selectors is additive. `register`, `get`, `list` and `lookup` are
+unchanged, and a host with no selector store is fully conforming for every
+consumer that does not reference `selector:<id>`. A consumer that does
+reference one (an AIP-38 scope, an AIP-46 `model`) on a host without
+selectors gets a resolution error, which AIP-38 treats as a deny.
+
+The reference implementation's model lists (`ModelList`, `model_list_*`
+tools, `~/.agentproto/model-lists.json`) are saved selectors of
+`family: "model"`, and their selector kinds (`model`, `tag`, `provider`,
+`priceTier`, `kind`, `variant`, `price`, `context`, `list`) are the model family
+clauses of §Model family conventions, stored as written. Two behaviours
+move: the `zero-cost` seed, which the implementation restores on every
+load, becomes a locked seed (same effect, now declared), and edits of a
+selector referenced by a policy become audited policy changes.
 
 ## Reference implementation
 
@@ -266,3 +493,5 @@ refusal, capability-lookup correctness, discovery-hook idempotency.
   a sandbox registry catalogs.
 - [AIP-40 — EXTENSION.md](/docs/aip-40) — `defineExtension` whose
   handles a workspace-extension registry catalogs.
+- [AIP-38 POLICY](/docs/aip-38) and [AIP-46 AGENT-SESSIONS](/docs/aip-46):
+  the consumers of `selector:<id>` (informative).
