@@ -77,8 +77,8 @@ form:
 |---|---|---|
 | title | `AIP-<n>: <NAME> (<name>/v<N>): <summary>`; process AIPs without a spec id: `AIP-<n>: <NAME>: <summary>` | `AIP-38: POLICY (policy/v1): composable access policy` |
 | spec id | `<name>/v<N>`, `N` the major version of the AIP | `work/v2` |
-| document schema ids (`schema:` and JSON Schema `const`) | `<name>/v<N>`, or `<name>.<kind>/v<N>` when the AIP defines several documents | `knowledge.entry/v1` |
-| document file, when the AIP defines one | `<NAME>.md` | `POLICY.md` |
+| document schema ids (`schema:` and JSON Schema `const`) | `<name>/v<N>`, or `<name>.<kind>/v<N>` (one level) when the AIP defines several documents | `knowledge.entry/v1` |
+| document file, when the AIP defines one | `<NAME>.md`; an AIP defining several documents names each `<KIND>.md` and lists them as `files` | `POLICY.md`; AIP-68: `STEWARD.md`, `SECRETARY.md` |
 | package | `@agentproto/<name>`; driver family: `@agentproto/driver-<name>` | `@agentproto/policy` |
 | define function | `define<Name>` in PascalCase | `definePolicy` |
 | tools | `<name>_<verb>` (or a documented sub-resource, `<name>_<resource>_<verb>`) | `session_restart` |
@@ -99,18 +99,22 @@ form:
 
 ### 2. The registry and the check
 
-`specs/names.json` lists, for every AIP: `aip`, `name`, `specId`, `file`,
-`package`, `define`, `layer`, `supersededBy`. It describes the **target**,
+`specs/names.json` lists, for every AIP: `aip`, `name`, `specId`, `file`
+or `files`, `package`, `define`, `layer`, `supersededBy`. It describes the **target**,
 not the current state. Its `pending` array lists the deviations that exist
 today, by id (`aip-38:title`, `aip-46:package`, `aip-34:schema:presence`).
 
 `scripts/check-names.mjs` (CI, blocking):
 
 - fails on a registry error: a spec without an entry, an entry without a
-  spec, a duplicate active name or spec id, an unknown layer, a `file` that
-  is not `<NAME>.md`;
-- computes the deviations (title, superseded status, package, layer, schema
-  ids under `resources/aip-<n>/`);
+  spec, a duplicate active name or spec id, an unknown layer, an entry whose
+  own fields break section 1 (name format, `specId`, `define`, `package`,
+  `file` or `files`), a glossary term or alias missing from the tables of
+  this AIP;
+- computes the deviations: title, superseded status, package, layer, and
+  every schema id (JSON `"const"` or a `schema:` line) in the AIP's own text
+  and in any file under `resources/aip-<n>/`, keyed by the file it appears
+  in, so fixing one occurrence cannot hide another;
 - fails on a deviation absent from `pending` (new drift), and on a pending
   id that no longer deviates (fixed: it must leave the list, so it cannot
   return);
@@ -134,41 +138,43 @@ this table renders it.
 
 | term | means | owner | never means |
 |---|---|---|---|
-| **harness** | an agent binary driven by a host (Claude Code, OpenCode, Codex, Hermes) and its manifest | [AIP-45](/docs/aip-45) | a bridge into a foreign framework; a session preset |
-| **bridge** | the projection of an agentproto handle into a foreign framework (Mastra, AI SDK) | [AIP-52](/docs/aip-52) | the agent binary |
+| **harness** | an agent binary driven by a host (Claude Code, OpenCode, Codex, Hermes) and its manifest | AIP-70, then AIP-45 (the AIP-45 rename (P1)) | a bridge into a foreign framework; a session preset |
+| **bridge** | the projection of an agentproto handle into a foreign framework (Mastra, AI SDK) | AIP-70, then AIP-52 (the AIP-52 rename (P1)) | the agent binary |
 | **driver** | an inward bridge from agentproto to an external API, CLI, MCP server or SDK | [AIP-30](/docs/aip-30) | a harness |
 | **operator** | an agent holding a role in an organization | [AIP-9](/docs/aip-9) | the human who controls a host |
-| **user** | the human who owns and controls a host and its sessions | [AIP-70](/docs/aip-70) | an AIP-9 operator |
+| **user** | the human who owns and controls a host and its sessions | AIP-70 | an AIP-9 operator |
 | **session** | one running (or ended) harness invocation managed by a host | [AIP-46](/docs/aip-46) | a terminal, a browser instance, an ACP wire session (say "ACP session") |
-| **session config** | how a session runs: harness, model, effort, posture, context, route, auth profile, retry, fallback | [AIP-46](/docs/aip-46) | a permission |
-| **session preset** | a named, saved session config | [AIP-46](/docs/aip-46) | a gateway; a harness manifest |
+| **session config** | how a session runs: harness, model, effort, posture, context, route, auth profile, retry, fallback | AIP-70, then AIP-46 (agentproto/agentproto#89) | a permission |
+| **session preset** | a named, saved session config | AIP-70, then AIP-46 (agentproto/agentproto#89) | a gateway; a harness manifest |
 | **gateway** | a backend endpoint a harness can be pointed at (Anthropic-compatible, OpenAI-compatible) | [AIP-45](/docs/aip-45) | a preset |
-| **auth profile** | a named reference to the credential a session bills or authenticates through | [AIP-69](/docs/aip-69) | a context setting; a browser identity |
-| **vendor** | the builder of a model (the `vendor` in `vendor/product`) | [AIP-43](/docs/aip-43) | who bills |
-| **endpoint** | the party that serves and bills a model | [AIP-69](/docs/aip-69) | the model builder |
-| **route** | the billing path a model is reached through (`@openrouter`) | [AIP-43](/docs/aip-43) | an AIP-57 resolution target |
+| **auth profile** | a named reference to the credential a session bills or authenticates through | AIP-70, then AIP-69 (agentproto/agentproto#87) | a context setting; a browser identity |
+| **vendor** | the builder of a model (the `vendor` in a `vendor/product` model id) | AIP-70, then AIP-43 (agentproto/agentproto#90) | who bills |
+| **endpoint** | the party that serves and bills a model | AIP-70, then AIP-69 (agentproto/agentproto#87) | the model builder |
+| **route** | the billing path a model is reached through (an `@<route>` suffix on a model id) | AIP-70, then AIP-43 (agentproto/agentproto#90) | an AIP-57 resolution target |
 | **policy** | an AIP-38 access document: grants, limits, requirements | [AIP-38](/docs/aip-38) | a completion check, a retry rule, settings |
-| **gate** | a check run at a session boundary that passes or fails (shell gate, review) | [AIP-46](/docs/aip-46) | a policy |
-| **posture** | what a session may do without asking (plan, accept-edits, bypass, read-only) | [AIP-46](/docs/aip-46) | a harness mode |
-| **mode** | a harness-native, mutually exclusive operation profile declared in an AIP-45 manifest | [AIP-45](/docs/aip-45) | posture; lifetime; an action |
+| **gate** | a check that passes or fails at a boundary: the delegation spawn gate of AIP-46, a completion check, a review verdict | AIP-70, until the AIP-46 split (SESSION) | a policy |
+| **posture** | what a session may do without asking (plan, accept-edits, bypass, read-only) | AIP-70, then AIP-46 (agentproto/agentproto#89) | a harness mode |
+| **mode** | a harness-native, mutually exclusive operation profile declared in an AIP-45 manifest | [AIP-45](/docs/aip-45) | posture; a session lifetime; how a session is billed (billing basis); an action |
 | **role** | an AIP-47 organizational role (intent, never permission) | [AIP-47](/docs/aip-47) | an access role; a position; a model slot |
 | **access role** | a permission tier of a human or agent (owner, admin, editor, viewer; for sessions, executor and supervisor) | [AIP-47](/docs/aip-47) | an AIP-47 role |
 | **position** | a seat in an organization that one operator holds at a time | [AIP-47](/docs/aip-47) | a role |
-| **model slot** | a logical model name resolved per host (review.small, judge.session) | [AIP-57](/docs/aip-57) | an AIP-47 role |
-| **selector** | a saved, ordered, declarative selection over a registry family | [AIP-43](/docs/aip-43) | a function predicate |
+| **model slot** | a logical model name resolved per host (review.small, judge.session) | AIP-70, then AIP-57 (an AIP-57 amendment) | an AIP-47 role |
+| **selector** | a saved, ordered, declarative selection over a registry family | AIP-70, then AIP-43 (agentproto/agentproto#90) | a function predicate |
 | **registry** | the in-memory catalog of handles of one family | [AIP-43](/docs/aip-43) | a data catalog |
-| **catalog** | the data a family's registry serves (model prices, context sizes) | [AIP-43](/docs/aip-43) | the registry primitive |
+| **catalog** | the data a family's registry serves (model prices, context sizes) | AIP-70, then AIP-43 (agentproto/agentproto#90) | the registry primitive |
 | **pack** | an AIP-64 installable capability bundle | [AIP-64](/docs/aip-64) | an AIP-57 routing table |
 | **routing table** | an AIP-57 map from a keyspace to targets | [AIP-57](/docs/aip-57) | a pack |
 | **runtime** | the AIP-48 multi-agent execution kernel | [AIP-48](/docs/aip-48) | the host daemon |
-| **host** | the daemon that runs sessions, runs and their state on a machine | [AIP-70](/docs/aip-70) | a model endpoint |
+| **host** | the daemon that runs sessions, runs and their state on a machine | AIP-70 | a model endpoint |
 | **workspace** | an AIP-34 workspace node, including the `x.workspace` doctypes | [AIP-34](/docs/aip-34) | a run's scratch directory |
-| **run directory** | the scratch directory a run gets | [AIP-58](/docs/aip-58) | a workspace |
-| **terminal** | a PTY process driven through a host | [AIP-46](/docs/aip-46) | a session |
+| **run directory** | the scratch directory a run gets | AIP-70, then AIP-58 (an AIP-58 amendment) | a workspace |
+| **terminal** | a PTY process driven through a host | AIP-70, until a TERMINAL AIP | a session; the end state of a lifecycle (say "end state") |
 | **browser instance** | one running browser driven through AIP-63 | [AIP-63](/docs/aip-63) | a session |
-| **browser identity** | a saved browser login state | [AIP-63](/docs/aip-63) | an auth profile |
+| **browser identity** | a saved browser login state | AIP-70, then AIP-63 (an AIP-63 amendment) | an auth profile |
 
-`user` and `host` are owned by this AIP until an AIP defines them.
+A term whose owner column reads "AIP-70, then AIP-n" is owned by this AIP
+until AIP-n (or the named change) defines it; the row then moves to that
+owner. `user` and `host` are owned by this AIP until an AIP defines them.
 
 ### 4. Deprecated aliases
 
@@ -187,6 +193,8 @@ this table renders it.
 | model provider | vendor (builder) or endpoint (billing) |
 | per-run workspace | run directory |
 | terminal session | terminal |
+| billing mode | billing basis |
+| session.mode | session.lifetime |
 
 An alias stays readable during the transition. New text MUST use the
 replacement. Implementations MAY keep a deprecated field or tool name as an
@@ -240,8 +248,8 @@ in this repository.
 ## Open Questions
 
 1. Tool names of sub-resources: `session_artifact_add` (resource, then
-   sub-resource, then verb) is allowed by section 1; whether deeper nesting
-   is allowed is left open.
+   sub-resource, then verb) is allowed by section 1; deeper nesting is not,
+   like schema kinds (one level).
 2. Packages that implement several AIPs of one family (the auth provider
    and auth profile code share `@agentproto/auth` today): split, or allow a
    declared family package.

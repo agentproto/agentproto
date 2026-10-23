@@ -10,8 +10,11 @@
  *   superseded  frontmatter `status: Superseded` and `supersededBy` disagree
  *   package     frontmatter `package:` differs from the entry's `package`
  *   layer       frontmatter `layer:` differs from the entry's `layer`
- *   schema:<id> a `"const": "<id>/vN"` in `specs/resources/aip-<n>/**` whose
- *               name is neither `<specName>` nor `<specName>.<kind>`
+ *   schema:<id>:<file>  a schema id whose name is neither `<specName>` nor
+ *               `<specName>.<kind>` (one level), found as a JSON `"const"`
+ *               or a `schema:` line in `specs/aip-<n>.mdx` or in any file
+ *               under `specs/resources/aip-<n>/`; keyed by file so fixing
+ *               one occurrence cannot hide another
  *
  * The check is a ratchet. `names.json` `pending` lists the deviations known
  * today. A deviation that is not pending FAILS (new drift), and a pending
@@ -21,7 +24,11 @@
  *
  * Registry errors always fail and cannot be made pending: a spec with no
  * entry, an entry with no spec, a duplicate active name or specId, an unknown
- * layer, a `file` that is not `<NAME>.md`.
+ * layer, and any entry whose own fields break the AIP-70 naming rules (name
+ * format, specId, define, package, file or files).
+ *
+ * The GLOSSARY AIP must render every term and deprecated alias of
+ * `glossary.json` as a table row (registry error otherwise).
  *
  * Deprecated vocabulary (`specs/resources/aip-70/draft/glossary.json`,
  * `deprecated[].pattern`) is reported as counts per spec. It never fails:
@@ -63,9 +70,7 @@ for (const entry of registry.aips) {
   if (!registry.layers.includes(entry.layer)) {
     errors.push(`${rel(NAMES)}: aip ${entry.aip} has unknown layer "${entry.layer}"`)
   }
-  if (entry.file && entry.file !== `${entry.name}.md`) {
-    errors.push(`${rel(NAMES)}: aip ${entry.aip} file "${entry.file}" is not "${entry.name}.md"`)
-  }
+  for (const problem of shapeProblems(entry)) errors.push(`${rel(NAMES)}: aip ${entry.aip} ${problem}`)
   if (!specs.includes(entry.aip)) errors.push(`${rel(NAMES)}: aip ${entry.aip} has no specs/aip-${entry.aip}.mdx`)
   if (entry.supersededBy) continue
   for (const [key, map] of [["name", activeNames], ["specId", activeSpecIds]]) {
@@ -76,6 +81,37 @@ for (const entry of registry.aips) {
     }
     map.set(value, entry.aip)
   }
+}
+
+function pascal(name) {
+  return name
+    .split("-")
+    .map((w) => w[0] + w.slice(1).toLowerCase())
+    .join("")
+}
+
+// AIP-70 section 1, applied to the registry entry itself.
+function shapeProblems(entry) {
+  const out = []
+  if (!/^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$/.test(entry.name ?? "")) out.push(`name "${entry.name}" is not UPPER-CASE-WORDS`)
+  const lower = (entry.name ?? "").toLowerCase()
+  if (entry.specId && !new RegExp(`^${lower}/v\\d+$`).test(entry.specId)) {
+    out.push(`specId "${entry.specId}" is not "${lower}/v<N>"`)
+  }
+  if (entry.define && entry.define !== `define${pascal(entry.name)}`) {
+    out.push(`define "${entry.define}" is not "define${pascal(entry.name)}"`)
+  }
+  if (entry.package) {
+    const allowed = [`@agentproto/${lower}`]
+    if (entry.layer === "drivers") allowed.push(`@agentproto/driver-${lower}`)
+    if (!allowed.includes(entry.package)) out.push(`package "${entry.package}" is not ${allowed.map((a) => `"${a}"`).join(" or ")}`)
+  }
+  if (entry.file && entry.files) out.push("has both file and files")
+  if (entry.file && entry.file !== `${entry.name}.md`) out.push(`file "${entry.file}" is not "${entry.name}.md"`)
+  for (const f of entry.files ?? []) {
+    if (!/^[A-Z][A-Z0-9-]*\.md$/.test(f)) out.push(`files entry "${f}" is not "<KIND>.md"`)
+  }
+  return out
 }
 
 function frontmatter(text) {
@@ -89,21 +125,51 @@ function frontmatter(text) {
   return out
 }
 
-function schemaConsts(dir) {
+const CONST_RE = /"const"\s*:\s*"([a-z][a-z0-9.-]*)\/v\d+"/g
+const SCHEMA_LINE_RE = /^\s*["']?schema["']?\s*:\s*["']?([a-z][a-z0-9.-]*)\/v\d+/
+
+function schemaIdsIn(file) {
   const found = []
+  const lines = readFileSync(file, "utf8").split("\n")
+  // Line index of the closing fence of a leading `---` frontmatter, or -1.
+  const fmEnd = lines[0] === "---" ? lines.indexOf("---", 1) : -1
+  lines.forEach((line, i) => {
+    const frontmatter = i > 0 && i < fmEnd
+    for (const m of line.matchAll(CONST_RE)) found.push({ file, line: i + 1, name: m[1], frontmatter })
+    const y = line.match(SCHEMA_LINE_RE)
+    if (y) found.push({ file, line: i + 1, name: y[1], frontmatter })
+  })
+  return found
+}
+
+// A resource file named like another AIP's document (`SKILL.md` shipped
+// with AIP-6) is a document of THAT AIP: the schema ids in its frontmatter
+// are checked against that AIP's names; its body (examples about the AIP
+// that ships it) stays with the shipping AIP.
+const ownerByFile = new Map()
+for (const entry of registry.aips) {
+  if (entry.supersededBy) continue
+  for (const f of [entry.file, ...(entry.files ?? [])].filter(Boolean)) ownerByFile.set(f, entry)
+}
+
+// Canonical schema names of every active AIP: an id matching one of them is
+// a legitimate cross-reference (AIP-20 storing `collection.item` documents).
+const canonicalSchema = (name) =>
+  registry.aips.some((e) => {
+    if (e.supersededBy || !e.specId) return false
+    const base = e.specId.split("/")[0]
+    return name === base || (name.startsWith(`${base}.`) && !name.slice(base.length + 1).includes("."))
+  })
+
+function schemaIds(n) {
+  const found = schemaIdsIn(join(SPEC_DIR, `aip-${n}.mdx`))
+  const dir = join(SPEC_DIR, "resources", `aip-${n}`)
   if (!existsSync(dir)) return found
   const walk = (d) => {
     for (const e of readdirSync(d)) {
       const p = join(d, e)
       if (statSync(p).isDirectory()) walk(p)
-      else if (e.endsWith(".json")) {
-        const lines = readFileSync(p, "utf8").split("\n")
-        lines.forEach((line, i) => {
-          for (const m of line.matchAll(/"const"\s*:\s*"([a-z][a-z0-9.-]*)\/v\d+"/g)) {
-            found.push({ file: p, line: i + 1, name: m[1] })
-          }
-        })
-      }
+      else if (/\.(json|md|mdx|ya?ml)$/.test(e)) found.push(...schemaIdsIn(p))
     }
   }
   walk(dir)
@@ -142,10 +208,14 @@ for (const n of specs) {
     if (layer?.value !== entry.layer) {
       deviate(`aip-${n}:layer`, `${rel(path)}:${layer?.line ?? 1}`, `layer should be "${entry.layer}"`)
     }
-    const specName = entry.specId?.split("/")[0]
-    for (const c of schemaConsts(join(SPEC_DIR, "resources", `aip-${n}`))) {
-      if (!specName || c.name === specName || c.name.startsWith(`${specName}.`)) continue
-      deviate(`aip-${n}:schema:${c.name}`, `${rel(c.file)}:${c.line}`, `schema "${c.name}" should be "${specName}" or "${specName}.<kind>"`)
+    for (const c of schemaIds(n)) {
+      if (canonicalSchema(c.name)) continue
+      const base = c.file.split(/[\\/]/).pop()
+      const owner = (c.frontmatter && base !== `aip-${n}.mdx` && ownerByFile.get(base)) || entry
+      const specName = owner.specId?.split("/")[0]
+      if (!specName) continue
+      const where = relative(SPEC_DIR, c.file)
+      deviate(`aip-${owner.aip}:schema:${c.name}:${where}`, `${rel(c.file)}:${c.line}`, `schema "${c.name}" should be "${specName}" or "${specName}.<kind>" (AIP-${owner.aip})`)
     }
   }
 }
@@ -155,6 +225,11 @@ const pending = new Set(registry.pending ?? [])
 const fresh = [...deviations.keys()].filter((id) => !pending.has(id)).sort()
 const fixed = [...pending].filter((id) => !deviations.has(id)).sort()
 
+if (WRITE && errors.length) {
+  for (const e of errors) console.error(e)
+  console.error("registry errors: refusing to write pending")
+  process.exit(1)
+}
 if (WRITE) {
   registry.pending = [...deviations.keys()].sort()
   writeFileSync(NAMES, `${JSON.stringify(registry, null, 2)}\n`)
@@ -164,10 +239,21 @@ if (WRITE) {
   for (const id of fixed) errors.push(`${rel(NAMES)}: pending "${id}" no longer deviates; remove it`)
 }
 
-// Deprecated vocabulary: report only.
+// Deprecated vocabulary: report only. The GLOSSARY AIP must render it all.
 let deprecatedHits = 0
 if (existsSync(GLOSSARY)) {
   const glossary = JSON.parse(readFileSync(GLOSSARY, "utf8"))
+  const glossaryEntry = registry.aips.find((e) => e.name === "GLOSSARY")
+  if (glossaryEntry && !WRITE) {
+    const path = join(SPEC_DIR, `aip-${glossaryEntry.aip}.mdx`)
+    const lines = readFileSync(path, "utf8").split("\n")
+    for (const t of glossary.terms ?? []) {
+      if (!lines.some((l) => l.startsWith(`| **${t.term}** |`))) errors.push(`${rel(path)}: no table row for term "${t.term}" of ${rel(GLOSSARY)}`)
+    }
+    for (const d of glossary.deprecated ?? []) {
+      if (!lines.some((l) => l.startsWith(`| ${d.alias} | ${d.use} |`))) errors.push(`${rel(path)}: no table row for deprecated "${d.alias}" of ${rel(GLOSSARY)}`)
+    }
+  }
   for (const d of glossary.deprecated ?? []) {
     const re = new RegExp(d.pattern, "gi")
     const counts = []
