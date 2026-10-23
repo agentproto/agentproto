@@ -608,6 +608,186 @@ multi-user signer identity (a host with one local user MAY use a fixed
 signer such as `user:local`, and a multi-user host MUST carry the real
 identity of the deciding human), and linking requests to a work board.
 
+### Runtime approvals engine (added 2026-10-23)
+
+> **Draft AIP-7 amendment** (2026-10-23). *Normative identifiers (field names, literals, tool names) are English and final.*
+
+This subsection profiles the reference runtime implementation of the
+`approval-request` doctype defined in
+[Approval requests](#approval-requests-approval-request). It adds no new
+outcome format: an approve is the same `signature`, a deny is the same
+`audit-event`, and both enter the workspace's existing hash-chained log.
+
+#### Record and persistence
+
+A runtime record carries the fields of [Record shape](#record-shape):
+`id`, `kind`, `title`, `preview`, `payloadHash`, `status`, `requestedBy`,
+the optional `taskId` and `appId`, `channels`, `requestedAt`, the optional
+`expiresAt`, and, once set, `decision` and `consumedAt`. A host MUST persist
+the record as an `approval-request` document, with `doctype` set, and MUST
+NOT omit `doctype` from an artifact it exports for another host to verify.
+`id` is opaque and stable; the reference runtime's `apr_` prefix is an
+implementation detail, not a wire requirement.
+
+The record and the pinned payload live together at
+`<scope>/approvals/<id>/request.json` and
+`<scope>/approvals/<id>/payload.json`. A host SHOULD write both with an
+atomic temporary-file-and-rename step, and MUST reload persisted records at
+boot so that a `pending` request survives a restart with its state intact.
+A malformed record MAY be ignored on load; a runtime-internal audit
+directory MAY be skipped when scanning for requests.
+
+#### Payload binding
+
+An approval approves exactly one payload. At `approval_request` time the
+host computes the canonical JSON string described in
+[Payload pinning and canonicalisation](#payload-pinning-and-canonicalisation),
+persists that string as `payload.json` (UTF-8, no trailing newline), and
+records its lowercase hex SHA-256 as `payloadHash`. The payload artifact is
+what the human approves. The `preview` is display-only, is not covered by
+the hash, and MUST NOT be used as evidence of what was approved.
+
+An approve MUST sign the payload artifact itself, so the resulting
+signature's `documentHash` equals the request's `payloadHash` by
+construction. A host MUST NOT record an approve whose signature covers any
+other bytes. `approval_consume` re-computes the canonical hash of the
+supplied payload; a difference is rejected as `payload_mismatch` and the
+request stays `approved` rather than being consumed on a different payload.
+
+#### Expiry and single consumption
+
+`expiresAt` is optional. When it is present and has passed, a `pending`
+request becomes `expired` on the next read or decision attempt. A host MAY
+expire lazily this way instead of running a background sweep, but it MUST
+NOT accept a decision after `expiresAt`. A request without `expiresAt` never
+expires.
+
+Consumption is a one-time, requester-bound transition. The host MUST reject
+a consume unless the caller is the original requester, unless the status is
+`approved`, and unless the supplied payload hashes to `payloadHash`. It then
+sets the status to `consumed` and records `consumedAt`. The check, the state
+change, and the persistence MUST happen without interleaving, so a second
+consume, or a consume racing a decision, cannot both succeed. `denied`,
+`expired`, and `consumed` are terminal.
+
+#### Channels as host-defined delivery
+
+`channels` lists the concrete human mechanisms allowed to decide a request.
+A host MUST reject a decision that arrives on a channel not listed on that
+request. A channel is enabled only when the host has configured its gate;
+an unconfigured channel MUST be omitted from every new request and its
+decision endpoint MUST refuse every call. No channel may be reachable
+through a tool that a model can call.
+
+**`web_click`.** The host exposes one browser decision endpoint. It accepts
+a request only if the request carries the host's bearer credential AND its
+`Origin` header exactly matches an entry in a configured allowlist. A
+missing, `null`, or unlisted `Origin` is refused before the credential is
+examined. An empty allowlist turns the channel off. The signature's
+`signedUrlToken` is a fresh random nonce per decision.
+
+**`ui_card`.** The card is a UI resource whose HTML is produced on every
+read, and each read mints a fresh one-time ticket: at least 32 random bytes,
+base64url, embedded only in that HTML. The host stores only the ticket's
+hash and gives it a short TTL (10 minutes RECOMMENDED); minting a new ticket
+supersedes any earlier ticket for the request. The card's decide action is
+declared app-only (`_meta.ui.visibility` of `["app"]`), and both the action
+and the resource are served only on a connection dedicated to human-facing
+clients. That connection MUST be refused when it carries the identity of an
+agent session. The host compares the ticket to the stored hash in constant
+time and burns the ticket on any attempt, valid or not, before doing
+anything asynchronous. The ticket MUST NOT appear in any tool result, tool
+definition, log, signature, or audit event; for a card approve,
+`signedUrlToken` holds the ticket hash, never the ticket.
+
+**`telegram`.** A host MAY relay a chat button tap through a trusted bot
+bridge. A Telegram webhook callback carries no browser `Origin`, so the
+host's gate is a single shared bearer secret held only by the bridge;
+absent that secret, the channel is off and its decision endpoint refuses
+every call. The bridge, not the engine, binds the tap to the right chat and
+request before calling the host, and the host treats that authenticated
+callback as a human decision. The decision uses the same
+`ApprovalDecideEvidence` shape and the same `click_through` signing method
+as `web_click`. The bot secret and any raw callback credential MUST NOT
+appear in a tool result, log, signature, or audit event.
+
+A host MAY declare further channels, such as a signed link, without changing
+the state machine, provided each one satisfies the human channel rule above.
+
+#### Four verbs
+
+Only four operations are model-callable:
+
+| Tool | Operation |
+|---|---|
+| `approval_request` | Create a `pending` request over a pinned payload. |
+| `approval_get` | Read one request's current state by `id`. |
+| `approval_wait` | Wait, bounded, until the request leaves `pending` or the timeout elapses, then return the current state. A host SHOULD cap the wait at 45 seconds. |
+| `approval_consume` | Atomically consume an `approved` request once, after re-hashing the supplied payload and checking the requester. |
+
+None of these verbs may move a request out of `pending`. A wait that returns
+`pending` means the timeout elapsed, not that the request was decided. The
+card decide action is not one of these verbs: it is app-only, served on the
+dedicated human surface, and MUST NOT be offered to a model. Tool results
+for the four verbs MUST NOT contain card tickets, bearer credentials, bot
+secrets, or any other value that would let a caller decide.
+
+#### Audit and signature linkage
+
+An approve produces a `signature` over the payload artifact with
+`documentHash` equal to `payloadHash`, `decision: "approve"`,
+`signerKind: "user"`, and `method: "click_through"`. Its evidence has
+`kind: "click_through"`, the deciding client's `ipAddress` and `userAgent`
+as observed by the host, and a `signedUrlToken` unique to that decision (the
+ticket hash for a card decision). The request's `decision.signaturePath` is
+written only after the signature exists, and the approve's audit event lists
+that path in `signatures[]`. A verifier that sees `approved` without a
+`signaturePath` MUST treat the signature as still being written, not as an
+unsigned approval.
+
+A deny appends an `audit-event` with action `approval.denied` and no
+signature. Its `subject` is `{ "kind": "approval", "ref": "<id>" }` and its
+`input` carries the `approvalId` and the deciding `channel`. Both outcomes
+append to the workspace's hash-chained `audit-log.jsonl`, so a third-party
+verifier can walk the chain and find either a signature over exactly
+`payloadHash` or a denial with no signature.
+
+A single-user host MAY use a fixed signer such as `user:local`; a
+multi-user host MUST carry the real identity of the deciding human.
+
+#### Open questions
+
+- **Doctype versus runtime record.** The implementation draft states that
+  an `ApprovalRequest` is "NOT a new doctype" and is the daemon's own
+  record. AIP-7 defines `approval-request` as a doctype with a `doctype`
+  field, and this amendment follows AIP-7. The reference runtime currently
+  persists `request.json` without `doctype` or `$schema`. Should a
+  runtime-internal record be allowed to omit them, or must every exported
+  request be a conforming `approval-request` document?
+- **Deny audit-event shape.** The implementation calls `recordAuditEvent`
+  with an `entityType: "approval"`, an `entityId` pointing at
+  `<id>/payload.json`, and a `payload` containing `approvalId` and
+  `channel`. AIP-7's deny model uses `subject` and `input` instead. This
+  amendment follows AIP-7; the implementation needs a field mapping or a
+  change before its deny events match the normative shape.
+- **Telegram conformance.** The implementation draft treats `telegram` as
+  a channel the runtime gates with a shared bot secret. This amendment adds
+  it to the channel enum and describes it as a host-defined delivery
+  mechanism. Should `telegram` be a normative conformance requirement like
+  `web_click` and `ui_card`, and what identity does the bot bridge attest
+  beyond possession of the shared secret?
+- **Signer identity.** The implementation hardcodes `user:local` and lists
+  multi-user identity as a follow-up. AIP-7 permits a fixed signer only in a
+  single-user host and requires the real identity in a multi-user host.
+  This amendment follows AIP-7; how a `telegram` decision carries that
+  identity remains open.
+- **Human-channel framing.** The implementation draft says AIP-7 did not
+  specify who may trigger a signing method. AIP-7 now specifies the human
+  channel rule, the `web_click` and `ui_card` requirements, and the
+  card-surface split. Those existing rules take precedence over the draft's
+  framing; this amendment adds the runtime profile and the `telegram`
+  channel without weakening them.
+
 ## Rationale
 
 *To be authored. Defend: hash-chained append-only over signed snapshots,
