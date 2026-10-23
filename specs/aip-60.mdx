@@ -1,5 +1,5 @@
 ---
-title: "AIP-60: SENTINEL: watch and notify (subjects, events, providers, and the inbox delivery contract)"
+title: "AIP-60: SENTINEL (sentinel/v1): subjects, events, providers, and the inbox delivery contract"
 description: "Names the sentinel, a persistent watch over a subject (`github:owner/repo#42`, `github:owner/repo`, a `*`-prefixed prefix match) that delivers matching events into a session's AIP-46 inbox until a stop condition holds, as a first-class daemon primitive. Fixes the SentinelSpec (`match`, `until`, `target`, `provider`, `group`, `label`), the CloudEvents 1.0 SentinelEvent envelope with its subject hierarchy and `terminal` flag, the provider interface (capabilities, create/attach/cancel/status, poll/ack, parseInbound, readiness) and the three shipped providers (`local-gh`, `webhook`, `agentpush`) with their capability declarations and auto-selection order, the poll runtime (15s/60s adaptive cadence, persisted per-sentinel dedup, at-least-once delivery, dead-session resume and parking), the push ingress route `POST /inbound/sentinel-<hookKey>`, the delivery urgencies (`fyi`, `next-turn`, `steer`, `interrupt`), the MCP tool surface (`sentinel_watch`, `sentinel_list`, `sentinel_unwatch`, `sentinel_poll_now`, `list_sentinel_adapters`, `setup_sentinel_provider`), the daemon-HTTP `/sentinels` routes, the `agentproto sentinel` CLI, and PR auto-link."
 aip: 60
 status: Draft
@@ -16,7 +16,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Field | Value |
 |---|---|
 | AIP | 60 (provisional, editors assign the final number) |
-| Title | SENTINEL: watch and notify |
+| Title | SENTINEL (sentinel/v1): subjects, events, providers, and the inbox delivery contract |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Schema |
