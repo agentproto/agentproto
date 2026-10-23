@@ -136,11 +136,12 @@
       "type": "object",
       "required": ["kind", "value"],
       "additionalProperties": true,
+      "not": { "required": ["per", "window"] },
       "properties": {
         "kind": {
           "type": "string",
           "minLength": 1,
-          "description": "Limit kind. Standard: `max-concurrent-sandboxes`, `rate-tool-calls`, `max-egress-bytes-per-day`. Host-extensible."
+          "description": "Limit kind. Standard: `max-concurrent-sandboxes`, `rate-tool-calls`, `max-egress-bytes-per-day`, `spend-usd`. Host-extensible."
         },
         "value": {
           "type": "number",
@@ -148,11 +149,16 @@
         },
         "scope": {
           "type": "string",
-          "description": "Per what? `user`, `workspace`, `org`, host-specific."
+          "description": "Per what? `user`, `workspace`, `org`, `session`, `auth-profile`, host-specific."
         },
         "per": {
           "enum": ["second", "minute", "hour", "day"],
-          "description": "For rate-style limits."
+          "description": "For rate-style limits. Mutually exclusive with `window`."
+        },
+        "window": {
+          "type": "string",
+          "pattern": "^P(?=.)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+(?:\\.\\d+)?S)?)?$",
+          "description": "Rolling window as an ISO-8601 duration, e.g. `PT5H` or `P7D`. Mutually exclusive with `per` (added 2026-10-23)."
         },
         "applies_to": {
           "type": "array",

@@ -160,7 +160,7 @@ case-sensitive.
 | `default` | enum | `"deny"` | Default decision when no grant matches: `"allow"` \| `"deny"`. `"deny"` strongly recommended. |
 | `grants` | array | `[]` | Access grants. See `grant` schema below. |
 | `defaults` | object | `{}` | Per-block behavioural defaults (e.g. `defaults.sandbox.network_egress: []`). Keys are AIP block names (`storage`, `sandbox`, `secrets`, `code`). Values are partial block configs. |
-| `limits` | array | `[]` | Resource limits. Each `{ kind, value, scope?, applies_to? }`. |
+| `limits` | array | `[]` | Resource limits. Each `{ kind, value, scope?, per? \| window?, applies_to? }`. |
 | `requirements` | array | `[]` | Cross-cutting must-haves. Each `{ kind, applies_to: [<action-ref>...] , ... condition fields }`. |
 | `metadata` | object | `{}` | Free-form, namespaced. |
 
@@ -223,7 +223,15 @@ limits:
 
   - kind: "max-egress-bytes-per-day"
     value: 10000000
+
+  - kind: "spend-usd"
+    value: 25                           # USD ceiling over the window
+    window: "PT5H"                      # rolling 5-hour window
+    scope: "session"                    # "session" | "auth-profile"
 ```
+
+`per` and `window` are mutually exclusive: a limit declares at most one.
+See [§Rolling limit windows and spend limits](#rolling-limit-windows-and-spend-limits-added-2026-10-23).
 
 #### Requirement schema
 
@@ -308,8 +316,9 @@ interface Grant {
 interface Limit {
   kind:         string                  // host-extensible
   value:        number
-  scope?:       string                  // "user" | "workspace" | "org" | host-specific
+  scope?:       string                  // "user" | "workspace" | "org" | "session" | "auth-profile" | host-specific
   per?:         string                  // "second" | "minute" | "hour" | "day"
+  window?:      string                  // rolling ISO-8601 duration, e.g. "PT5H" | "P7D"; XOR per
   appliesTo?:   ActionRef[]
 }
 
@@ -464,6 +473,40 @@ too. This is the generic form of the rule [AIP-46](/docs/aip-46)
 already states for delegation and spawn: a child policy can narrow,
 never widen. Hosts MUST evaluate the ceiling before creating the
 nested principal, not rely on the child to enforce it.
+
+### Rolling limit windows and spend limits (added 2026-10-23)
+
+`Limit.per` only names a fixed unit (`second`, `minute`, `hour`, `day`).
+Many real ceilings are rolling and longer, such as "25 USD in the last
+5 hours" or "1000 calls in the last 7 days". A `Limit` therefore gains
+an optional `window`:
+
+- `window?: string`, an ISO-8601 duration (`"PT5H"`, `"P7D"`). It is a
+  **rolling** window measured back from evaluation time, not a calendar
+  bucket.
+- `per` and `window` are **mutually exclusive**. A limit declaring both
+  is invalid. A limit declaring neither is a static cap (for example
+  `max-concurrent-sandboxes`).
+
+One standard limit kind is registered:
+
+```yaml
+limits:
+  - kind: spend-usd
+    value: 25              # USD ceiling
+    window: PT5H           # over the rolling window
+    scope: session         # "session" | "auth-profile"
+```
+
+- `kind: "spend-usd"`: `value` is a USD ceiling accumulated over
+  `window` for the given `scope`.
+- `scope` is `"session"` (spend attributed to one session) or
+  `"auth-profile"` (spend attributed to one auth profile). Hosts MAY
+  support both.
+- Exceeding the ceiling **denies new `model:invoke`** actions and the
+  decision is reported (`reason: "limit-exceeded"`). It never kills a
+  running turn: an in-flight inference completes, and only the next
+  invocation is refused.
 
 ## Example — standalone POLICY.md
 
