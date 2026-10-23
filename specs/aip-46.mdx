@@ -1353,9 +1353,9 @@ composition).
   `agent` is a requested agent like any other: when the caller is a
   session, it MUST pass §Delegation's spawn gate.
 - A session preset is host configuration owned by the user. It is a
-  different thing from an AIP-45 gateway preset (`presets` in a harness
-  manifest, which declares a backend endpoint); the two are kept apart by
-  their qualifier.
+  different thing from an AIP-45 gateway (`gateways`, formerly `presets`,
+  in a harness manifest, which declares a backend endpoint; renamed in
+  [agentproto/agentproto#98](https://github.com/agentproto/agentproto/pull/98)).
 
 #### Fallback
 
