@@ -305,8 +305,10 @@ amendment.
 1. **Presentable methods in AIP-45.** Eligibility rule 3 needs each harness
    to declare which methods it can present per route. The reference
    implementation projects this from the harness package; AIP-45 has no
-   field for it. Proposal: an AIP-45 `auth.methods: { [route]: method[] }`
-   block, in a small AIP-45 amendment.
+   field for it. Proposed in
+   [agentproto/agentproto#98](https://github.com/agentproto/agentproto/pull/98):
+   an AIP-45 `auth.methods: { [route]: method[] }` block, with the reserved
+   route key `default` for the harness's own route.
 2. **AIP-19 access grants.** AIP-19 has its own `access` grant list
    (role, user, tool, workflow, workspace). It predates AIP-38 and overlaps
    it. Out of scope here; worth aligning separately.
