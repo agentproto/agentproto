@@ -391,7 +391,7 @@ This record is what audit consumers ingest, not raw POLICY.md.
 
 ### Explicit deny (added 2026-10-23)
 
-> **Draft — AIP-38 amendment** (2026-10-23). *Normative identifiers
+> **Draft AIP-38 amendment** (2026-10-23). *Normative identifiers
 > (field names, literals, reason strings) are English and final.*
 
 **Problem.** `default: deny` plus positive grants can express "only X",
@@ -601,10 +601,10 @@ deny exists, and no pre-amendment policy can contain one. Resource and
 subject policies are opt-in: a resource with no `policy:` block is
 decided by the subject policy alone, as before. A grant with no `scope`
 still matches every scope of its action. The only additions are new
-optional fields (`effect`, `attachment` in the decision record) and two
-new reason values (`explicit-deny`, plus scope/selector failures that
-report as `no-grant`), all of which a pre-amendment consumer treats as
-absent or unknown.
+optional fields (`effect`, `window`, `attachment` in the decision
+record) and one new reason value (`explicit-deny`; an unresolvable
+selector reports as `no-grant`), all of which a pre-amendment consumer
+treats as absent or unknown.
 
 ## Security considerations
 
