@@ -392,7 +392,7 @@ capabilities so selectors stay portable across hosts:
 
 | capability | meaning |
 |---|---|
-| `provider` | the model builder |
+| `vendor` | the model builder (the `vendor` of a `vendor/product` id) |
 | `kind` | `llm`, `embedding`, `image`, ... |
 | `contextWindow` | input context size in tokens |
 | `pricing.inputPer1M`, `pricing.outputPer1M` | public list price in USD |
@@ -407,7 +407,8 @@ Its family clauses and their expansions:
 |---|---|
 | `{ kind: "model", value }` | `{ id: value }` |
 | `{ kind: "tag", value }` | `{ tag: value }` |
-| `{ kind: "provider" \| "priceTier" \| "kind" \| "variant", value }` | `{ capability: <that name>, eq: value }` |
+| `{ kind: "provider", value }` | `{ capability: "vendor", eq: value }` (the reference implementation's name for the builder) |
+| `{ kind: "priceTier" \| "kind" \| "variant", value }` | `{ capability: <that name>, eq: value }` |
 | `{ kind: "price", maxInPer1M?, maxOutPer1M? }` | `{ all: [ { capability: "pricing.inputPer1M", lte: maxInPer1M }, { capability: "pricing.outputPer1M", lte: maxOutPer1M } ] }`, keeping only the bounds given; with no bound, `{ capability: "pricing.inputPer1M", exists: true }` |
 | `{ kind: "context", min }` | `{ capability: "contextWindow", gte: min }` |
 | `{ kind: "list", id }` | `{ selector: id }` |
