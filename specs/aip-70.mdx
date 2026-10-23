@@ -1,0 +1,260 @@
+---
+title: "AIP-70: GLOSSARY (glossary/v1): canonical names and vocabulary for every AIP"
+description: "One name per AIP, used the same way in its title, its schema ids, its package, its define function and its tool names; one meaning per term across the specs and the reference implementation. Fixes the naming rules, the names.json registry and the ratchet check that enforces it, the vocabulary with the senses each term must not take, and the deprecated aliases with their replacements."
+aip: 70
+status: Draft
+type: Meta
+created: 2026-10-23
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2]
+resources: ./resources/aip-70/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions
+layer: process
+---
+
+| Field | Value |
+|---|---|
+| AIP | 70 (provisional, editors assign the final number) |
+| Title | GLOSSARY (glossary/v1) |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Meta |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Created | 2026-10-23 |
+| Resources | [`specs/names.json`](https://github.com/agentproto/agentproto/blob/main/specs/names.json), [`glossary.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-70/draft/glossary.json), `scripts/check-names.mjs` |
+
+## Abstract
+
+This AIP gives every AIP **one name** and every recurring term **one
+meaning**.
+
+1. **Naming rules**: an AIP's name is used, in a fixed form, in its title,
+   its schema ids, its document file, its package, its `define` function
+   and its tool names.
+2. **The registry** `specs/names.json`: the canonical names of every AIP,
+   plus the list of known deviations, checked by `scripts/check-names.mjs`
+   as a ratchet (a new deviation fails; a fixed one must leave the list).
+3. **The vocabulary** (`glossary.json`): each term with its meaning, its
+   owning AIP and the senses it must not take; and the deprecated aliases
+   with their replacements.
+
+## Motivation
+
+A snapshot of the corpus and of the reference implementation (2026-10-23)
+found:
+
+- an AIP carries up to seven names (title name, title spec name, schema id,
+  package, define function, code `SPEC_NAME`, tool prefix) and they rarely
+  agree: AIP-11 is LESSON in its title, `agentlearning/v1` in its title spec
+  name, `learning/v1` in its schema and `agentlesson/v1` in code;
+- six title formats, an AIP with no name (66) and one with no `AIP-n:`
+  prefix (50);
+- packages named after something else than their AIP (51 in `redaction`,
+  52 in `mastra`, 61 in `llm-endpoint`, 67 in `model-intel`), and one
+  package carrying five AIPs;
+- about fifteen overloaded terms. The binary a host drives is an "agent
+  CLI" in AIP-45, an `adapter` in AIP-46 and a `harness` in code; `operator`
+  is an agent in AIP-9 and a human in AIP-46; `profile`, `preset`, `policy`
+  and `mode` each carry five or six meanings.
+
+Every one of these is a place where a reader, a reviewer or an agent picks
+the wrong meaning. Names drift because nothing checks them. This AIP writes
+them down once and makes the check mechanical.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as
+described in [AIP-1](/docs/aip-1).
+
+### 1. Naming rules
+
+Every AIP has a **NAME**: uppercase ASCII words joined by `-`
+(`POLICY`, `MODEL-ROUTING`, `CLOUD-AGENT`). Singular, unless the document
+is inherently a set (`SECRETS`). From the NAME, with `name` its lowercase
+form:
+
+| artefact | form | example |
+|---|---|---|
+| title | `AIP-<n>: <NAME> (<name>/v<N>): <summary>`; process AIPs without a spec id: `AIP-<n>: <NAME>: <summary>` | `AIP-38: POLICY (policy/v1): composable access policy` |
+| spec id | `<name>/v<N>`, `N` the major version of the AIP | `work/v2` |
+| document schema ids (`schema:` and JSON Schema `const`) | `<name>/v<N>`, or `<name>.<kind>/v<N>` (one level) when the AIP defines several documents | `knowledge.entry/v1` |
+| document file, when the AIP defines one | `<NAME>.md`; an AIP defining several documents names each `<KIND>.md` and lists them as `files` | `POLICY.md`; AIP-68: `STEWARD.md`, `SECRETARY.md` |
+| package | `@agentproto/<name>`; driver family: `@agentproto/driver-<name>` | `@agentproto/policy` |
+| define function | `define<Name>` in PascalCase | `definePolicy` |
+| tools | `<name>_<verb>` (or a documented sub-resource, `<name>_<resource>_<verb>`) | `session_restart` |
+| layer | one of `process`, `primitives`, `capabilities`, `identity`, `coordination`, `memory`, `surfaces`, `drivers`, `host` | |
+
+- The `agent` prefix is not used in names, spec ids or schema ids. The
+  schema ids already in use mostly lack it (`policy/v1`, `role/v1`,
+  `agent/v1`); titles and code that carry it (`agentpolicy/v1`) are
+  deviations.
+- The `host` layer holds the AIPs of a machine that runs agents: sessions,
+  runs, sentinels, inference endpoints, decisions, cloud agents, quota and
+  auth profiles.
+- An external standard MAY fix a document file name (AIP-50 follows the
+  `auth.md` standard); the AIP NAME then follows the file (`AUTH`).
+- A superseded AIP keeps its number and its registered name. It is exempt
+  from the uniqueness rule (its successor carries the name forward) and from
+  the package and layer checks.
+
+### 2. The registry and the check
+
+`specs/names.json` lists, for every AIP: `aip`, `name`, `specId`, `file`
+or `files`, `package`, `define`, `layer`, `supersededBy`. It describes the **target**,
+not the current state. Its `pending` array lists the deviations that exist
+today, by id (`aip-38:title`, `aip-46:package`, `aip-34:schema:presence`).
+
+`scripts/check-names.mjs` (CI, blocking):
+
+- fails on a registry error: a spec without an entry, an entry without a
+  spec, a duplicate active name or spec id, an unknown layer, an entry whose
+  own fields break section 1 (name format, `specId`, `define`, `package`,
+  `file` or `files`), a glossary term or alias missing from the tables of
+  this AIP;
+- computes the deviations: title, superseded status, package, layer, and
+  every schema id (JSON `"const"` or a `schema:` line) in the AIP's own text
+  and in any file under `resources/aip-<n>/`, keyed by the file it appears
+  in, so fixing one occurrence cannot hide another;
+- fails on a deviation absent from `pending` (new drift), and on a pending
+  id that no longer deviates (fixed: it must leave the list, so it cannot
+  return);
+- reports the deprecated aliases of section 4 per spec, without failing.
+
+A new AIP MUST add its entry to `names.json` in the PR that adds it, and
+MUST NOT add itself to `pending`.
+
+Implementations SHOULD run the same comparison on their side: a package's
+name, its `SPEC_NAME` (or equivalent) and its tool prefixes against the
+registry. For the reference implementation this is a check in
+agentproto/ts, reading `names.json` from the canonical specs checkout its
+CI already uses.
+
+### 3. Vocabulary
+
+One meaning per term. The owning AIP defines the term; every other AIP
+uses it in that meaning only. The machine-readable form is
+[`glossary.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-70/draft/glossary.json);
+this table renders it.
+
+| term | means | owner | never means |
+|---|---|---|---|
+| **harness** | an agent binary driven by a host (Claude Code, OpenCode, Codex, Hermes) and its manifest | AIP-70, then AIP-45 (the AIP-45 rename (P1)) | a bridge into a foreign framework; a session preset |
+| **bridge** | the projection of an agentproto handle into a foreign framework (Mastra, AI SDK) | AIP-70, then AIP-52 (the AIP-52 rename (P1)) | the agent binary |
+| **driver** | an inward bridge from agentproto to an external API, CLI, MCP server or SDK | [AIP-30](/docs/aip-30) | a harness |
+| **operator** | an agent holding a role in an organization | [AIP-9](/docs/aip-9) | the human who controls a host |
+| **user** | the human who owns and controls a host and its sessions | AIP-70 | an AIP-9 operator |
+| **session** | one running (or ended) harness invocation managed by a host | [AIP-46](/docs/aip-46) | a terminal, a browser instance, an ACP wire session (say "ACP session") |
+| **session config** | how a session runs: harness, model, effort, posture, context, route, auth profile, retry, fallback | AIP-70, then AIP-46 (agentproto/agentproto#89) | a permission |
+| **session preset** | a named, saved session config | AIP-70, then AIP-46 (agentproto/agentproto#89) | a gateway; a harness manifest |
+| **gateway** | a backend endpoint a harness can be pointed at (Anthropic-compatible, OpenAI-compatible) | [AIP-45](/docs/aip-45) | a preset |
+| **auth profile** | a named reference to the credential a session bills or authenticates through | AIP-70, then AIP-69 (agentproto/agentproto#87) | a context setting; a browser identity |
+| **vendor** | the builder of a model (the `vendor` in a `vendor/product` model id) | AIP-70, then AIP-43 (agentproto/agentproto#90) | who bills |
+| **endpoint** | the party that serves and bills a model | AIP-70, then AIP-69 (agentproto/agentproto#87) | the model builder |
+| **route** | the billing path a model is reached through (an `@<route>` suffix on a model id) | AIP-70, then AIP-43 (agentproto/agentproto#90) | an AIP-57 resolution target |
+| **policy** | an AIP-38 access document: grants, limits, requirements | [AIP-38](/docs/aip-38) | a completion check, a retry rule, settings |
+| **gate** | a check that passes or fails at a boundary: the delegation spawn gate of AIP-46, a completion check, a review verdict | AIP-70, until the AIP-46 split (SESSION) | a policy |
+| **posture** | what a session may do without asking (plan, accept-edits, bypass, read-only) | AIP-70, then AIP-46 (agentproto/agentproto#89) | a harness mode |
+| **mode** | a harness-native, mutually exclusive operation profile declared in an AIP-45 manifest | [AIP-45](/docs/aip-45) | posture; a session lifetime; how a session is billed (billing basis); an action |
+| **role** | an AIP-47 organizational role (intent, never permission) | [AIP-47](/docs/aip-47) | an access role; a position; a model slot |
+| **access role** | a permission tier of a human or agent (owner, admin, editor, viewer; for sessions, executor and supervisor) | [AIP-47](/docs/aip-47) | an AIP-47 role |
+| **position** | a seat in an organization that one operator holds at a time | [AIP-47](/docs/aip-47) | a role |
+| **model slot** | a logical model name resolved per host (review.small, judge.session) | AIP-70, then AIP-57 (an AIP-57 amendment) | an AIP-47 role |
+| **selector** | a saved, ordered, declarative selection over a registry family | AIP-70, then AIP-43 (agentproto/agentproto#90) | a function predicate |
+| **registry** | the in-memory catalog of handles of one family | [AIP-43](/docs/aip-43) | a data catalog |
+| **catalog** | the data a family's registry serves (model prices, context sizes) | AIP-70, then AIP-43 (agentproto/agentproto#90) | the registry primitive |
+| **pack** | an AIP-64 installable capability bundle | [AIP-64](/docs/aip-64) | an AIP-57 routing table |
+| **routing table** | an AIP-57 map from a keyspace to targets | [AIP-57](/docs/aip-57) | a pack |
+| **runtime** | the AIP-48 multi-agent execution kernel | [AIP-48](/docs/aip-48) | the host daemon |
+| **host** | the daemon that runs sessions, runs and their state on a machine | AIP-70 | a model endpoint |
+| **workspace** | an AIP-34 workspace node, including the `x.workspace` doctypes | [AIP-34](/docs/aip-34) | a run's scratch directory |
+| **run directory** | the scratch directory a run gets | AIP-70, then AIP-58 (an AIP-58 amendment) | a workspace |
+| **terminal** | a PTY process driven through a host | AIP-70, until a TERMINAL AIP | a session; the end state of a lifecycle (say "end state") |
+| **browser instance** | one running browser driven through AIP-63 | [AIP-63](/docs/aip-63) | a session |
+| **browser identity** | a saved browser login state | AIP-70, then AIP-63 (an AIP-63 amendment) | an auth profile |
+
+A term whose owner column reads "AIP-70, then AIP-n" is owned by this AIP
+until AIP-n (or the named change) defines it; the row then moves to that
+owner. `user` and `host` are owned by this AIP until an AIP defines them.
+
+### 4. Deprecated aliases
+
+| alias | use |
+|---|---|
+| agent CLI | harness |
+| adapter slug | harness slug |
+| human operator | user |
+| gateway preset | gateway |
+| completion policy | gate |
+| session policy | session settings |
+| context profile | context (session config axis) |
+| decision profile | decision tier |
+| browser profile | browser identity |
+| model role | model slot |
+| model provider | vendor (builder) or endpoint (billing) |
+| per-run workspace | run directory |
+| terminal session | terminal |
+| billing mode | billing basis |
+| session.mode | session.lifetime |
+
+An alias stays readable during the transition. New text MUST use the
+replacement. Implementations MAY keep a deprecated field or tool name as an
+alias that behaves exactly like its replacement, and SHOULD say when it will
+be removed.
+
+### 5. Changing a name or a term
+
+A new term, a new meaning or a rename is a change to this AIP first: the
+glossary row (and `names.json` entry) lands in the same PR as the spec text
+that uses it. A term used in two AIPs with two meanings is a defect of the
+corpus, fixed by renaming one of them here.
+
+## Rationale
+
+**Why a registry and a ratchet, not a big-bang rename.** About a hundred
+deviations exist today. Fixing them in one PR would mix renames that need
+review (a package split) with trivial ones (a title). The ratchet freezes
+the drift at today's level, lets each fix land on its own, and makes every
+fix permanent.
+
+**Why drop the `agent` prefix.** The validated schema ids already lack it;
+the prefix only lived in titles and in some code constants, where it made
+`agentagent/v1` and `agentagencies/v2`.
+
+**Why `harness`.** It is the name the reference implementation converged
+on (descriptor field, tools, presets), it has no other meaning in the
+corpus, and it frees `adapter` and `driver`, which each had a second sense.
+
+## Backwards Compatibility
+
+This AIP changes no wire format. The renames it calls for land as separate
+PRs (titles and schema ids in the specs, then packages, constants, fields
+and tools in implementations), each removing its ids from `pending`. A
+renamed schema id or tool keeps its old spelling as an accepted alias until
+the major version that removes it.
+
+## Security Considerations
+
+None directly. Ambiguous vocabulary has caused security mistakes in this
+corpus before (AIP-47 had to separate role from access role so that a job
+title never grants access); keeping one meaning per term is a precondition
+for reviewing policy text correctly.
+
+## Reference Implementation
+
+`specs/names.json`, `specs/resources/aip-70/draft/glossary.json`,
+`scripts/check-names.mjs` and its self-test `scripts/self-test-names.mjs`
+in this repository.
+
+## Open Questions
+
+1. Tool names of sub-resources: `session_artifact_add` (resource, then
+   sub-resource, then verb) is allowed by section 1; deeper nesting is not,
+   like schema kinds (one level).
+2. Packages that implement several AIPs of one family (the auth provider
+   and auth profile code share `@agentproto/auth` today): split, or allow a
+   declared family package.
+
+## See also
+
+- [AIP-1](/docs/aip-1): process
+- [AIP-2](/docs/aip-2): the template whose title convention this replaces

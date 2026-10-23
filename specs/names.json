@@ -1,0 +1,703 @@
+{
+  "$comment": "Canonical names of every AIP (AIP-70 GLOSSARY, Naming rules). Checked by scripts/check-names.mjs. `pending` lists the known deviations still to fix; the check fails on a new deviation and on a pending entry that is already fixed.",
+  "version": 1,
+  "layers": [
+    "process",
+    "primitives",
+    "capabilities",
+    "identity",
+    "coordination",
+    "memory",
+    "surfaces",
+    "drivers",
+    "host"
+  ],
+  "aips": [
+    {
+      "aip": 1,
+      "name": "PROCESS",
+      "layer": "process"
+    },
+    {
+      "aip": 2,
+      "name": "TEMPLATE",
+      "layer": "process"
+    },
+    {
+      "aip": 3,
+      "name": "SKILL",
+      "specId": "skill/v1",
+      "file": "SKILL.md",
+      "package": "@agentproto/skill",
+      "define": "defineSkill",
+      "layer": "capabilities"
+    },
+    {
+      "aip": 4,
+      "name": "DESIGN",
+      "specId": "design/v1",
+      "file": "DESIGN.md",
+      "package": "@agentproto/design",
+      "define": "defineDesign",
+      "layer": "surfaces"
+    },
+    {
+      "aip": 5,
+      "name": "CANVAKIT",
+      "specId": "canvakit/v1",
+      "file": "CANVAKIT.md",
+      "package": "@agentproto/canvakit",
+      "define": "defineCanvakit",
+      "layer": "surfaces"
+    },
+    {
+      "aip": 6,
+      "name": "COMPANY",
+      "specId": "company/v1",
+      "file": "COMPANY.md",
+      "package": "@agentproto/company",
+      "define": "defineCompany",
+      "layer": "coordination"
+    },
+    {
+      "aip": 7,
+      "name": "GOVERNANCE",
+      "specId": "governance/v1",
+      "file": "GOVERNANCE.md",
+      "package": "@agentproto/governance",
+      "define": "defineGovernance",
+      "layer": "coordination"
+    },
+    {
+      "aip": 8,
+      "name": "AGENCY",
+      "specId": "agency/v1",
+      "file": "AGENCY.md",
+      "layer": "coordination",
+      "supersededBy": 21
+    },
+    {
+      "aip": 9,
+      "name": "OPERATOR",
+      "specId": "operator/v1",
+      "file": "OPERATOR.md",
+      "package": "@agentproto/operator",
+      "define": "defineOperator",
+      "layer": "identity"
+    },
+    {
+      "aip": 10,
+      "name": "KNOWLEDGE",
+      "specId": "knowledge/v1",
+      "file": "KNOWLEDGE.md",
+      "package": "@agentproto/knowledge",
+      "define": "defineKnowledge",
+      "layer": "memory"
+    },
+    {
+      "aip": 11,
+      "name": "LESSON",
+      "specId": "lesson/v1",
+      "file": "LESSON.md",
+      "package": "@agentproto/lesson",
+      "define": "defineLesson",
+      "layer": "memory"
+    },
+    {
+      "aip": 12,
+      "name": "PLAYBOOK",
+      "specId": "playbook/v1",
+      "file": "PLAYBOOK.md",
+      "package": "@agentproto/playbook",
+      "define": "definePlaybook",
+      "layer": "memory"
+    },
+    {
+      "aip": 13,
+      "name": "WORK",
+      "specId": "work/v1",
+      "file": "WORK.md",
+      "layer": "coordination",
+      "supersededBy": 20
+    },
+    {
+      "aip": 14,
+      "name": "TOOL",
+      "specId": "tool/v1",
+      "file": "TOOL.md",
+      "package": "@agentproto/tool",
+      "define": "defineTool",
+      "layer": "capabilities"
+    },
+    {
+      "aip": 15,
+      "name": "WORKFLOW",
+      "specId": "workflow/v1",
+      "file": "WORKFLOW.md",
+      "package": "@agentproto/workflow",
+      "define": "defineWorkflow",
+      "layer": "capabilities"
+    },
+    {
+      "aip": 16,
+      "name": "IO",
+      "specId": "io/v1",
+      "file": "IO.md",
+      "package": "@agentproto/io",
+      "define": "defineIo",
+      "layer": "primitives"
+    },
+    {
+      "aip": 17,
+      "name": "RUNNER",
+      "specId": "runner/v1",
+      "file": "RUNNER.md",
+      "package": "@agentproto/runner",
+      "define": "defineRunner",
+      "layer": "primitives"
+    },
+    {
+      "aip": 18,
+      "name": "COLLECTION",
+      "specId": "collection/v1",
+      "file": "COLLECTION.md",
+      "package": "@agentproto/collection",
+      "define": "defineCollection",
+      "layer": "primitives"
+    },
+    {
+      "aip": 19,
+      "name": "SECRETS",
+      "specId": "secrets/v1",
+      "file": "SECRETS.md",
+      "package": "@agentproto/secrets",
+      "define": "defineSecrets",
+      "layer": "primitives"
+    },
+    {
+      "aip": 20,
+      "name": "WORK",
+      "specId": "work/v2",
+      "file": "WORK.md",
+      "package": "@agentproto/work",
+      "define": "defineWork",
+      "layer": "coordination"
+    },
+    {
+      "aip": 21,
+      "name": "AGENCY",
+      "specId": "agency/v2",
+      "file": "AGENCY.md",
+      "package": "@agentproto/agency",
+      "define": "defineAgency",
+      "layer": "coordination"
+    },
+    {
+      "aip": 22,
+      "name": "OFFICE",
+      "specId": "office/v1",
+      "file": "OFFICE.md",
+      "package": "@agentproto/office",
+      "define": "defineOffice",
+      "layer": "coordination"
+    },
+    {
+      "aip": 23,
+      "name": "IDENTITY",
+      "specId": "identity/v1",
+      "file": "IDENTITY.md",
+      "package": "@agentproto/identity",
+      "define": "defineIdentity",
+      "layer": "identity"
+    },
+    {
+      "aip": 24,
+      "name": "ASSEMBLY",
+      "specId": "assembly/v1",
+      "file": "ASSEMBLY.md",
+      "package": "@agentproto/assembly",
+      "define": "defineAssembly",
+      "layer": "coordination"
+    },
+    {
+      "aip": 25,
+      "name": "PERSONA",
+      "specId": "persona/v1",
+      "file": "PERSONA.md",
+      "package": "@agentproto/persona",
+      "define": "definePersona",
+      "layer": "identity"
+    },
+    {
+      "aip": 26,
+      "name": "CODE",
+      "specId": "code/v2",
+      "file": "CODE.md",
+      "package": "@agentproto/code",
+      "define": "defineCode",
+      "layer": "surfaces"
+    },
+    {
+      "aip": 27,
+      "name": "REF",
+      "file": "REF.md",
+      "layer": "primitives",
+      "supersededBy": 54
+    },
+    {
+      "aip": 28,
+      "name": "INTENT",
+      "specId": "intent/v1",
+      "file": "INTENT.md",
+      "package": "@agentproto/intent",
+      "define": "defineIntent",
+      "layer": "capabilities"
+    },
+    {
+      "aip": 29,
+      "name": "CLI",
+      "specId": "cli/v1",
+      "file": "CLI.md",
+      "package": "@agentproto/driver-cli",
+      "layer": "drivers"
+    },
+    {
+      "aip": 30,
+      "name": "DRIVER",
+      "specId": "driver/v1",
+      "file": "DRIVER.md",
+      "package": "@agentproto/driver",
+      "layer": "drivers"
+    },
+    {
+      "aip": 31,
+      "name": "HTTP",
+      "specId": "http/v1",
+      "file": "HTTP.md",
+      "package": "@agentproto/driver-http",
+      "layer": "drivers"
+    },
+    {
+      "aip": 32,
+      "name": "MCP",
+      "specId": "mcp/v1",
+      "file": "MCP.md",
+      "package": "@agentproto/driver-mcp",
+      "layer": "drivers"
+    },
+    {
+      "aip": 33,
+      "name": "SDK",
+      "specId": "sdk/v1",
+      "file": "SDK.md",
+      "package": "@agentproto/driver-sdk",
+      "layer": "drivers"
+    },
+    {
+      "aip": 34,
+      "name": "WORKSPACE",
+      "specId": "workspace/v2",
+      "file": "WORKSPACE.md",
+      "package": "@agentproto/workspace",
+      "define": "defineWorkspace",
+      "layer": "surfaces"
+    },
+    {
+      "aip": 35,
+      "name": "STORAGE",
+      "specId": "storage/v1",
+      "file": "STORAGE.md",
+      "package": "@agentproto/storage",
+      "define": "defineStorage",
+      "layer": "primitives"
+    },
+    {
+      "aip": 36,
+      "name": "SANDBOX",
+      "specId": "sandbox/v1",
+      "file": "SANDBOX.md",
+      "package": "@agentproto/sandbox",
+      "define": "defineSandbox",
+      "layer": "primitives"
+    },
+    {
+      "aip": 37,
+      "name": "LIFECYCLE",
+      "specId": "lifecycle/v1",
+      "file": "LIFECYCLE.md",
+      "package": "@agentproto/lifecycle",
+      "layer": "primitives"
+    },
+    {
+      "aip": 38,
+      "name": "POLICY",
+      "specId": "policy/v1",
+      "file": "POLICY.md",
+      "package": "@agentproto/policy",
+      "define": "definePolicy",
+      "layer": "primitives"
+    },
+    {
+      "aip": 39,
+      "name": "ACTION",
+      "specId": "action/v1",
+      "file": "ACTION.md",
+      "package": "@agentproto/action",
+      "define": "defineAction",
+      "layer": "primitives"
+    },
+    {
+      "aip": 40,
+      "name": "EXTENSION",
+      "specId": "extension/v1",
+      "file": "EXTENSION.md",
+      "package": "@agentproto/extension",
+      "define": "defineExtension",
+      "layer": "process"
+    },
+    {
+      "aip": 41,
+      "name": "ROUTINE",
+      "specId": "routine/v1",
+      "file": "ROUTINE.md",
+      "package": "@agentproto/routine",
+      "define": "defineRoutine",
+      "layer": "primitives"
+    },
+    {
+      "aip": 42,
+      "name": "AGENT",
+      "specId": "agent/v1",
+      "file": "AGENT.md",
+      "package": "@agentproto/agent",
+      "define": "defineAgent",
+      "layer": "identity"
+    },
+    {
+      "aip": 43,
+      "name": "REGISTRY",
+      "specId": "registry/v1",
+      "package": "@agentproto/registry",
+      "layer": "primitives"
+    },
+    {
+      "aip": 44,
+      "name": "ACP",
+      "specId": "acp/v1",
+      "file": "ACP.md",
+      "package": "@agentproto/acp",
+      "define": "defineAcp",
+      "layer": "drivers"
+    },
+    {
+      "aip": 45,
+      "name": "HARNESS",
+      "specId": "harness/v1",
+      "file": "HARNESS.md",
+      "package": "@agentproto/harness",
+      "define": "defineHarness",
+      "layer": "drivers"
+    },
+    {
+      "aip": 46,
+      "name": "SESSION",
+      "specId": "session/v1",
+      "package": "@agentproto/session",
+      "layer": "host"
+    },
+    {
+      "aip": 47,
+      "name": "ROLE",
+      "specId": "role/v1",
+      "file": "ROLE.md",
+      "package": "@agentproto/role",
+      "define": "defineRole",
+      "layer": "coordination"
+    },
+    {
+      "aip": 48,
+      "name": "RUNTIME",
+      "specId": "runtime/v1",
+      "package": "@agentproto/runtime",
+      "layer": "coordination"
+    },
+    {
+      "aip": 49,
+      "name": "WALLET",
+      "specId": "wallet/v1",
+      "package": "@agentproto/wallet",
+      "layer": "primitives"
+    },
+    {
+      "aip": 50,
+      "name": "AUTH",
+      "specId": "auth/v1",
+      "file": "AUTH.md",
+      "package": "@agentproto/auth",
+      "define": "defineAuth",
+      "layer": "capabilities"
+    },
+    {
+      "aip": 51,
+      "name": "PROCESSOR",
+      "specId": "processor/v1",
+      "package": "@agentproto/processor",
+      "layer": "primitives"
+    },
+    {
+      "aip": 52,
+      "name": "BRIDGE",
+      "specId": "bridge/v1",
+      "package": "@agentproto/bridge",
+      "layer": "drivers"
+    },
+    {
+      "aip": 53,
+      "name": "APP",
+      "specId": "app/v1",
+      "file": "APP.md",
+      "package": "@agentproto/app",
+      "define": "defineApp",
+      "layer": "surfaces"
+    },
+    {
+      "aip": 54,
+      "name": "REF",
+      "specId": "ref/v1",
+      "package": "@agentproto/ref",
+      "define": "defineRef",
+      "layer": "primitives"
+    },
+    {
+      "aip": 55,
+      "name": "PRODUCT",
+      "specId": "product/v1",
+      "package": "@agentproto/product",
+      "define": "defineProduct",
+      "layer": "primitives"
+    },
+    {
+      "aip": 56,
+      "name": "DOCTYPE",
+      "specId": "doctype/v1",
+      "package": "@agentproto/doctype",
+      "layer": "primitives"
+    },
+    {
+      "aip": 57,
+      "name": "MODEL-ROUTING",
+      "specId": "model-routing/v1",
+      "package": "@agentproto/model-routing",
+      "layer": "primitives"
+    },
+    {
+      "aip": 58,
+      "name": "RUN",
+      "specId": "run/v1",
+      "package": "@agentproto/run",
+      "layer": "host"
+    },
+    {
+      "aip": 59,
+      "name": "PAIRING",
+      "specId": "pairing/v1",
+      "package": "@agentproto/pairing",
+      "layer": "identity"
+    },
+    {
+      "aip": 60,
+      "name": "SENTINEL",
+      "specId": "sentinel/v1",
+      "package": "@agentproto/sentinel",
+      "layer": "host"
+    },
+    {
+      "aip": 61,
+      "name": "INFERENCE-ENDPOINT",
+      "specId": "inference-endpoint/v1",
+      "package": "@agentproto/inference-endpoint",
+      "layer": "host"
+    },
+    {
+      "aip": 62,
+      "name": "REVIEW",
+      "specId": "review/v1",
+      "file": "REVIEW.md",
+      "package": "@agentproto/review",
+      "define": "defineReview",
+      "layer": "primitives"
+    },
+    {
+      "aip": 63,
+      "name": "BROWSER",
+      "specId": "browser/v1",
+      "file": "BROWSER.md",
+      "package": "@agentproto/driver-browser",
+      "layer": "drivers"
+    },
+    {
+      "aip": 64,
+      "name": "PACK",
+      "specId": "pack/v1",
+      "file": "PACK.md",
+      "package": "@agentproto/pack",
+      "define": "definePack",
+      "layer": "primitives"
+    },
+    {
+      "aip": 65,
+      "name": "DECISION",
+      "specId": "decision/v1",
+      "file": "DECISION.md",
+      "package": "@agentproto/decision",
+      "layer": "host"
+    },
+    {
+      "aip": 66,
+      "name": "CLOUD-AGENT",
+      "specId": "cloud-agent/v1",
+      "package": "@agentproto/cloud-agent",
+      "layer": "host"
+    },
+    {
+      "aip": 67,
+      "name": "QUOTA",
+      "specId": "quota/v1",
+      "package": "@agentproto/quota",
+      "layer": "host"
+    },
+    {
+      "aip": 68,
+      "name": "CLERK",
+      "specId": "clerk/v1",
+      "package": "@agentproto/clerk",
+      "layer": "memory",
+      "files": [
+        "STEWARD.md",
+        "SECRETARY.md"
+      ]
+    },
+    {
+      "aip": 69,
+      "name": "AUTH-PROFILE",
+      "specId": "auth-profile/v1",
+      "layer": "primitives"
+    },
+    {
+      "aip": 70,
+      "name": "GLOSSARY",
+      "specId": "glossary/v1",
+      "layer": "process"
+    },
+    {
+      "aip": 71,
+      "name": "ACTION-HOOKS",
+      "specId": "action-hooks/v1",
+      "layer": "primitives"
+    }
+  ],
+  "pending": [
+    "aip-11:schema:learning:aip-11.mdx",
+    "aip-11:schema:learning:resources/aip-11/draft/EXAMPLES.md",
+    "aip-11:schema:learning:resources/aip-11/draft/LESSON.schema.json",
+    "aip-11:schema:learning:resources/aip-11/draft/skills/author-lesson/SKILL.md",
+    "aip-12:schema:playbooks:aip-12.mdx",
+    "aip-12:schema:playbooks:resources/aip-12/draft/EXAMPLES.md",
+    "aip-12:schema:playbooks:resources/aip-12/draft/PLAYBOOK.schema.json",
+    "aip-12:schema:playbooks:resources/aip-12/draft/skills/author-playbook/SKILL.md",
+    "aip-16:schema:skills:resources/aip-16/draft/EXAMPLES.md",
+    "aip-21:package",
+    "aip-34:schema:agentproto-lock:resources/aip-34/draft/LOCK.schema.json",
+    "aip-34:schema:presence:aip-34.mdx",
+    "aip-34:schema:presence:resources/aip-34/draft/PRESENCE.example.md",
+    "aip-34:schema:presence:resources/aip-34/draft/PRESENCE.schema.json",
+    "aip-34:schema:workspace-export:aip-34.mdx",
+    "aip-34:schema:workspace-export:resources/aip-34/draft/EXPORT.schema.json",
+    "aip-34:schema:workspace-types:aip-34.mdx",
+    "aip-34:schema:workspace-types:resources/aip-34/draft/TYPES.schema.json",
+    "aip-3:schema:skills:aip-3.mdx",
+    "aip-3:schema:skills:resources/aip-1/draft/skills/propose-aip/SKILL.md",
+    "aip-3:schema:skills:resources/aip-10/draft/skills/author-knowledge/SKILL.md",
+    "aip-3:schema:skills:resources/aip-10/draft/skills/curate-wiki/SKILL.md",
+    "aip-3:schema:skills:resources/aip-11/draft/skills/author-lesson/SKILL.md",
+    "aip-3:schema:skills:resources/aip-12/draft/skills/author-playbook/SKILL.md",
+    "aip-3:schema:skills:resources/aip-14/draft/skills/author-tool/SKILL.md",
+    "aip-3:schema:skills:resources/aip-15/draft/skills/author-workflow/SKILL.md",
+    "aip-3:schema:skills:resources/aip-16/draft/skills/use-io-blocks/SKILL.md",
+    "aip-3:schema:skills:resources/aip-17/draft/skills/use-runner-block/SKILL.md",
+    "aip-3:schema:skills:resources/aip-18/draft/skills/author-collection/SKILL.md",
+    "aip-3:schema:skills:resources/aip-19/draft/skills/author-secrets/SKILL.md",
+    "aip-3:schema:skills:resources/aip-2/draft/skills/use-aip-template/SKILL.md",
+    "aip-3:schema:skills:resources/aip-20/draft/skills/author-work-workspace/SKILL.md",
+    "aip-3:schema:skills:resources/aip-21/draft/skills/author-agency-workspace/SKILL.md",
+    "aip-3:schema:skills:resources/aip-22/draft/skills/author-office-workspace/SKILL.md",
+    "aip-3:schema:skills:resources/aip-23/draft/skills/author-identity-workspace/SKILL.md",
+    "aip-3:schema:skills:resources/aip-24/draft/skills/author-assembly-workspace/SKILL.md",
+    "aip-3:schema:skills:resources/aip-25/draft/skills/author-persona/SKILL.md",
+    "aip-3:schema:skills:resources/aip-26/draft/skills/use-code-block/SKILL.md",
+    "aip-3:schema:skills:resources/aip-28/draft/skills/author-intent/SKILL.md",
+    "aip-3:schema:skills:resources/aip-29/draft/skills/author-cli/SKILL.md",
+    "aip-3:schema:skills:resources/aip-3/draft/EXAMPLES.md",
+    "aip-3:schema:skills:resources/aip-3/draft/SKILL.schema.json",
+    "aip-3:schema:skills:resources/aip-3/draft/skills/author-skill/SKILL.md",
+    "aip-3:schema:skills:resources/aip-30/draft/skills/author-driver/SKILL.md",
+    "aip-3:schema:skills:resources/aip-31/draft/skills/author-http/SKILL.md",
+    "aip-3:schema:skills:resources/aip-32/draft/skills/author-mcp/SKILL.md",
+    "aip-3:schema:skills:resources/aip-33/draft/skills/author-sdk/SKILL.md",
+    "aip-3:schema:skills:resources/aip-4/draft/skills/author-design/SKILL.md",
+    "aip-3:schema:skills:resources/aip-5/draft/skills/author-canvas/SKILL.md",
+    "aip-3:schema:skills:resources/aip-6/draft/skills/author-company/SKILL.md",
+    "aip-3:schema:skills:resources/aip-7/draft/skills/author-governance-workspace/SKILL.md",
+    "aip-3:schema:skills:resources/aip-7/draft/skills/author-governance/SKILL.md",
+    "aip-3:schema:skills:resources/aip-9/draft/skills/author-operator/SKILL.md",
+    "aip-45:package",
+    "aip-45:title",
+    "aip-46:layer",
+    "aip-46:package",
+    "aip-46:title",
+    "aip-48:package",
+    "aip-48:schema:agentruntimes:aip-48.mdx",
+    "aip-48:schema:agentruntimes:resources/aip-48/draft/EXAMPLES.md",
+    "aip-48:schema:agentruntimes:resources/aip-48/draft/MultiAgentRuntime.schema.json",
+    "aip-48:title",
+    "aip-4:schema:designkit:aip-4.mdx",
+    "aip-4:schema:designkit:resources/aip-4/draft/DESIGN.schema.json",
+    "aip-4:schema:designkit:resources/aip-4/draft/EXAMPLES.md",
+    "aip-51:package",
+    "aip-52:package",
+    "aip-52:title",
+    "aip-53:package",
+    "aip-56:package",
+    "aip-58:layer",
+    "aip-58:package",
+    "aip-59:package",
+    "aip-59:title",
+    "aip-60:layer",
+    "aip-60:package",
+    "aip-61:layer",
+    "aip-61:package",
+    "aip-61:title",
+    "aip-62:schema:agentproto-pack-digest:resources/aip-62/draft/ATTESTATION.schema.json",
+    "aip-62:schema:agentproto.review.attestation:aip-62.mdx",
+    "aip-62:schema:agentproto.review.attestation:resources/aip-62/draft/ATTESTATION.schema.json",
+    "aip-62:schema:agentproto.review.attestation:resources/aip-62/draft/EXAMPLES.md",
+    "aip-63:schema:browser-recording:resources/aip-63/draft/RECORDING.schema.json",
+    "aip-63:schema:browser-recording:resources/aip-63/draft/examples/recording-sample/manifest.json",
+    "aip-65:layer",
+    "aip-65:package",
+    "aip-66:layer",
+    "aip-66:package",
+    "aip-66:title",
+    "aip-67:layer",
+    "aip-67:package",
+    "aip-68:title",
+    "aip-69:package",
+    "aip-69:title",
+    "aip-6:schema:agentcompanies:resources/aip-6/draft/COMPANY.schema.json",
+    "aip-6:schema:agentcompanies:resources/aip-6/draft/EXAMPLES.md",
+    "aip-6:schema:agentcompanies:resources/aip-6/draft/skills/author-company/SKILL.md",
+    "aip-7:schema:agentgovernance:resources/aip-7/draft/EXAMPLES.md",
+    "aip-7:schema:agentgovernance:resources/aip-7/draft/GOVERNANCE.schema.json",
+    "aip-7:schema:agentgovernance:resources/aip-7/draft/skills/author-governance/SKILL.md"
+  ]
+}
