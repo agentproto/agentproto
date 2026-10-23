@@ -11,10 +11,16 @@
         "^x-": {}
       },
       "properties": {
+        "harness": {
+          "type": "string",
+          "minLength": 1,
+          "description": "AIP-45 harness slug."
+        },
         "adapter": {
           "type": "string",
           "minLength": 1,
-          "description": "AIP-45 adapter slug."
+          "deprecated": true,
+          "description": "Legacy alias of `harness` (AIP-70). A config MUST NOT carry both."
         },
         "model": {
           "type": "string",
@@ -90,6 +96,12 @@
           "type": "object",
           "description": "Harness-native AIP-45 options, validated against the harness manifest."
         }
+      },
+      "not": {
+        "required": [
+          "harness",
+          "adapter"
+        ]
       }
     },
     "FailureClass": {
@@ -110,10 +122,16 @@
         "^x-": {}
       },
       "properties": {
+        "harness": {
+          "type": "string",
+          "minLength": 1,
+          "description": "AIP-45 harness slug."
+        },
         "adapter": {
           "type": "string",
           "minLength": 1,
-          "description": "AIP-45 adapter slug."
+          "deprecated": true,
+          "description": "Legacy alias of `harness` (AIP-70). A config MUST NOT carry both."
         },
         "model": {
           "type": "string",
@@ -219,6 +237,12 @@
             "$ref": "#/$defs/ConfigOverlay"
           }
         }
+      },
+      "not": {
+        "required": [
+          "harness",
+          "adapter"
+        ]
       }
     },
     "SessionPreset": {
