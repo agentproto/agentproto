@@ -39,11 +39,11 @@
             {
               "type": "object",
               "required": [
-                "harnessMode"
+                "harnessModeId"
               ],
               "additionalProperties": false,
               "properties": {
-                "harnessMode": {
+                "harnessModeId": {
                   "type": "string",
                   "minLength": 1
                 }
@@ -56,8 +56,21 @@
           "minLength": 1
         },
         "route": {
-          "type": "string",
-          "minLength": 1
+          "type": "object",
+          "required": [
+            "gateway"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "gateway": {
+              "type": "string",
+              "minLength": 1
+            },
+            "baseUrl": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
         },
         "access": {
           "type": "object",
@@ -125,11 +138,11 @@
             {
               "type": "object",
               "required": [
-                "harnessMode"
+                "harnessModeId"
               ],
               "additionalProperties": false,
               "properties": {
-                "harnessMode": {
+                "harnessModeId": {
                   "type": "string",
                   "minLength": 1
                 }
@@ -142,8 +155,21 @@
           "minLength": 1
         },
         "route": {
-          "type": "string",
-          "minLength": 1
+          "type": "object",
+          "required": [
+            "gateway"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "gateway": {
+              "type": "string",
+              "minLength": 1
+            },
+            "baseUrl": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
         },
         "access": {
           "type": "object",
@@ -180,6 +206,10 @@
             "maxRetries": {
               "type": "integer",
               "minimum": 0
+            },
+            "retryAfterToolCalls": {
+              "type": "boolean",
+              "default": false
             }
           }
         },
@@ -228,6 +258,9 @@
         },
         "config": {
           "$ref": "#/$defs/SessionConfig"
+        },
+        "policy": {
+          "description": "AIP-38 PolicyRef (inline, ref or file)."
         }
       }
     }
