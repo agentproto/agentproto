@@ -1,0 +1,301 @@
+---
+title: "AIP-69: AUTH-PROFILE, authprofile/v1 (a named reference to the credential that pays for a session)"
+description: "A runtime primitive for the account a session bills or authenticates through: a named, adapter-independent reference to a credential on one billing endpoint, never the secret. Fixes the AuthProfile document (endpoint, method, credential reference, sub-account, subscription), the eligibility predicate that decides which profiles can serve a given harness and route, the profile as an AIP-38 resource (which models it may serve, who may use it, how much it may spend), and the read surface. Referenced by AIP-46 sessions, AIP-67 quota and AIP-38 policy."
+aip: 69
+status: Draft
+type: Standards Track
+created: 2026-10-23
+author: Jeremy André <jeremy@agentik.net>
+requires: [19, 29, 38, 39, 45, 46, 67]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+layer: primitives
+package: "@agentproto/auth"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 69 (provisional, editors assign the final number) |
+| Title | AUTH-PROFILE, authprofile/v1 |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Standards Track |
+| Requires | [AIP-19](/docs/aip-19), [AIP-29](/docs/aip-29), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-45](/docs/aip-45), [AIP-46](/docs/aip-46), [AIP-67](/docs/aip-67) |
+| Created | 2026-10-23 |
+| Package | `@agentproto/auth` |
+
+## Abstract
+
+An **auth profile** is the account a session runs on: a named reference to a
+credential that authenticates against one **billing endpoint** (a provider
+API, a gateway, a subscription), plus what the operator declares about it.
+It is never the secret.
+
+This AIP defines:
+
+1. the **AuthProfile** document;
+2. **eligibility**: which profiles can serve a given harness, route and model;
+3. the profile as an [AIP-38](/docs/aip-38) **resource**: which models it may
+   serve, who may use it, how much it may spend;
+4. the **read and write surface**, which never returns credential material.
+
+Three AIPs already depend on this concept without owning it:
+[AIP-46](/docs/aip-46) binds a session to a profile (`access.profileRef`) and
+amortises a subscription over it, [AIP-67](/docs/aip-67) reads quota keyed by
+`profileRef`, and [AIP-29](/docs/aip-29) / [AIP-19](/docs/aip-19) describe how
+a credential is obtained and stored. This AIP is the document they point to.
+
+## Motivation
+
+A host that runs agent CLIs juggles several accounts per vendor: a Claude
+subscription and a Claude API key, three sub-organizations of one gateway,
+a free tier and a paid tier of the same key. The questions a host must answer
+on every spawn are about the account, not about the model:
+
+- which accounts can pay for this harness on this route?
+- may this session use that account at all?
+- which models is that account allowed to serve?
+- how much has it spent in the window, and how much is left?
+
+Today the answers are spread over four documents (AIP-46 §Access profile for
+amortisation, AIP-67 for quota, AIP-29 for login, AIP-19 for secret storage)
+and the reference implementation grew a richer shape than any of them
+(sub-accounts, extra routes, per-profile model allow-lists, per-profile
+spend caps, enable/disable). Each of those additions invented its own rule
+(an allow-list field, a budget field) next to AIP-38, which is the access
+primitive. This AIP gives the account one owner and routes its rules
+through AIP-38.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as
+described in [AIP-1](/docs/aip-1).
+
+### 1. AuthProfile
+
+```ts
+interface AuthProfile {
+  id:            string            // stable, unique on the host; the `profileRef` others use
+  label?:        string            // human name ("work OpenRouter")
+  endpoint:      string            // the billing endpoint the credential authenticates against
+  routes?:       string[]          // other billing endpoints the SAME credential is enrolled on
+  method:        "api-key" | "oauth-bearer" | (string & {})
+  credentialRef?: string           // opaque handle into the host's credential store
+  source?:       string            // a self-refreshing credential source; exclusive with credentialRef
+  subaccount?:   { kind: string; id: string; name?: string }   // org / workspace / project pin
+  subscription?: Subscription      // a flat-rate plan behind the credential (section 4)
+  policy?:       PolicyRef         // AIP-38 resource policy (section 3)
+  disabled?:     boolean           // skipped by eligibility when true
+  origin?:       string            // provenance when imported from a harness or env; informational
+}
+```
+
+- `endpoint` names **who bills**, not who built the model: an OpenRouter
+  key serving a z-ai model has `endpoint: "openrouter"`.
+- `routes` exists because one credential can be enrolled on more than one
+  endpoint (a key valid on both a subscription route and a pay-as-you-go
+  route of the same vendor). Absent means `[endpoint]`.
+- Exactly one of `credentialRef` and `source` MUST be present.
+  `credentialRef` SHOULD be an [AIP-19](/docs/aip-19) secret slug when the
+  host keeps an AIP-19 inventory; how the credential was first obtained is
+  the harness's [AIP-29](/docs/aip-29) `auth.login` flow. `source` names a
+  credential the harness refreshes itself (for example a CLI's own OAuth
+  login) and that the host reads fresh at spawn.
+- `subaccount` pins one wallet of a multi-wallet account. Each pinned
+  sub-account is its own profile, so quota (AIP-67), spend and policy are
+  per sub-account.
+- `method` is how the credential is presented. It is a facet of the
+  profile, not of the session: "subscription" versus "API key" is not a
+  session property.
+
+A profile document MUST NOT contain credential material. Profiles live in
+host configuration, never in a workspace or a repository.
+
+### 2. Eligibility
+
+A host resolves a session's `(adapter, route, model)` to a billing endpoint
+`E` and the set `M` of methods the adapter can present on that route. A
+profile `p` is **eligible** when all hold:
+
+1. `p.disabled` is not `true`;
+2. `p.endpoint == E` or `E ∈ p.routes`;
+3. `p.method ∈ M`;
+4. the AIP-38 evaluation of `model:invoke` on that model, against `p`'s
+   resource policy, allows (section 3).
+
+Rules 1 to 3 MUST be evaluated without I/O. `M` comes from the adapter's
+[AIP-45](/docs/aip-45) manifest (see Open Questions). A spawn that names a
+profile which is not eligible MUST be refused before the harness starts,
+with a refusal code (`auth_profile_ineligible`) and the failed rule; a host
+MUST NOT silently substitute another profile.
+
+When a spawn names no profile, the host MAY pick one: it MUST pick only among
+eligible profiles the subject may use (`auth-profile:use`, section 3), in an
+order the operator can see and configure, and MUST record the chosen
+`profileRef` on the session.
+
+### 3. The profile as a policy resource
+
+An auth profile is an [AIP-38](/docs/aip-38) **resource**. Its `policy` is a
+resource policy, evaluated together with the subject's policy (the AIP-42
+agent's `policy`, the operator's) under AIP-38's resource and subject rule:
+both must allow when both exist; a profile without `policy` defers to the
+subject policy alone.
+
+The actions involved are the [AIP-39](/docs/aip-39) standard runtime actions:
+
+| action | scope | asked when |
+|---|---|---|
+| `auth-profile:use` | the profile id | a session is bound to the profile (spawn, restart, fallback) |
+| `model:invoke` | the model id, glob, or `selector:<id>` | the session's model is set or changes while bound to the profile |
+
+What an implementation used to express with ad hoc fields maps as follows:
+
+| ad hoc field | AIP-38 form |
+|---|---|
+| per-profile model allow-list (`models: { mode: "allow", ids }`) | grants `{ effect: allow, actions: [model:invoke], scope: <id> }`, one per id, in a policy whose default is deny for `model:invoke` |
+| per-profile spend cap (`costBudget`) | a `spend-usd` limit with `scope: "auth-profile"` and a rolling `window` |
+| "only this team may use the company key" | a grant of `auth-profile:use` to that principal |
+| "never this model on this key" | `{ effect: deny, actions: [model:invoke], scope: <id> }` |
+
+A host MAY keep a short form (`models: string[]`) in its configuration
+surface. It MUST evaluate it exactly as the AIP-38 grants above, and it MUST
+report decisions in the AIP-38 decision record, so an audit consumer sees
+one vocabulary.
+
+A nested session (AIP-46 delegation) inherits no right to its parent's
+profiles: `auth-profile:use` is evaluated for the child's own subject policy,
+bounded by the parent's (AIP-38 delegation ceiling). A child MUST NOT be able
+to bind a profile its parent could not.
+
+### 4. Subscription
+
+```ts
+interface Subscription {
+  monthlyUsd: number                // declared plan price, major units
+  windows?: Array<{ kind: "5h" | "weekly" | (string & {}); limit?: number }>
+}
+```
+
+This is the block AIP-46 §Access profile introduced for cost amortisation;
+this AIP becomes its owner. Its meaning is unchanged: AIP-46 amortises
+`monthlyUsd` over the profile's usage, and the `windows` feed that formula.
+Headroom (how much of a window is left) is [AIP-67](/docs/aip-67), keyed by
+the same `profileRef`.
+
+A profile with `subscription` bills sessions in `billingMode: "subscription"`
+(AIP-46); a profile without it bills in `"api"`. Whether a given model costs
+anything on a given endpoint is catalog data ([AIP-43](/docs/aip-43)), not a
+property of the profile.
+
+### 5. Surface
+
+A conforming host exposes, through its usual projections (MCP tool, HTTP,
+CLI):
+
+| verb | input | output |
+|---|---|---|
+| `auth_profile_list` | optional `endpoint` filter | profiles, each with a **fingerprint** of the credential, never the value |
+| `auth_profile_create` / `auth_profile_update` | a profile, plus the credential when creating | the stored profile (no secret) |
+| `auth_profile_delete` | `id` | refused while a live session is bound to it |
+| `auth_profile_set_enabled` | `id`, `enabled` | the stored profile |
+
+- A read MUST NOT reveal credential material, in any field, log line or
+  error message. A fingerprint is a short, non-reversible digest.
+- A write that stores a credential MUST write it to the credential store
+  (AIP-19 vault, OS keychain) and keep only `credentialRef` in the profile.
+- Changes MUST be applied to new bindings only. A live session keeps the
+  profile it was bound with until it is restarted (AIP-46).
+
+### 6. Events
+
+Binding, refusing and unbinding a profile are host lifecycle events
+([AIP-37](/docs/aip-37), host-namespaced), carrying `profileRef`, the
+session id and, on refusal, the eligibility rule or the AIP-38 decision
+record. They never carry credential material.
+
+## Rationale
+
+**Why a primitive and not a field of AIP-46.** Sessions are not the only
+consumer: quota (AIP-67) reads per profile, spend caps aggregate per
+profile across sessions, and policy needs a resource to attach to. A
+session refers to a profile; it does not contain one.
+
+**Why `endpoint` and not `provider`.** AIP-46's first draft used
+`provider`. In practice the party that bills (a gateway, a subscription)
+is often not the model builder, and every eligibility bug seen in the
+reference implementation came from conflating the two.
+
+**Why model allow-lists are policy.** An allow-list on a key is an access
+rule on a resource. Expressing it as a profile field gave the
+implementation a second, weaker access engine (no deny, no audit record,
+no delegation ceiling). AIP-38 already has all three.
+
+**Why no secret in the document.** Profiles are listed, diffed, shown in
+pickers and sent to other processes. The only safe design is one where the
+document never had the secret to leak.
+
+## Backward Compatibility
+
+- AIP-46 §Access profile's `authProfiles[]` entries map one to one: `id`
+  unchanged, `provider` becomes `endpoint`, `auth` (an AIP-29 auth ref)
+  becomes the `credentialRef` or `source` the host resolves from it,
+  `subscription` unchanged. AIP-46 will point to this AIP for the document
+  and keep the amortisation formula.
+- AIP-67's `QuotaProfile` projection (`profileRef`, `endpoint`, `method`,
+  `credentialRef`) is a subset of this document; nothing changes there.
+- A host whose profiles have no `policy` behaves as before: the subject
+  policy alone decides.
+- The reference implementation's `models` and `costBudget` fields keep
+  working as host short forms, evaluated as AIP-38 grants and limits.
+
+## Security Considerations
+
+- **Credential isolation.** Section 1 forbids credential material in the
+  document; section 5 forbids it in reads, logs and errors. A fingerprint
+  lets a user tell two keys apart without either being revealed.
+- **No silent substitution.** Section 2 forbids replacing an ineligible
+  named profile with another one. Billing a different account than the one
+  the user named is the most expensive failure this AIP can cause.
+- **Delegation ceiling.** A child session cannot reach a parent's paid
+  account unless the policy grants it; spawning is not a way to borrow a
+  credential.
+- **Imported credentials.** A host that discovers credentials (a harness's
+  login, environment variables) MUST ask before creating a profile from
+  them, and MUST NOT copy the secret out of its original store without that
+  consent.
+- **Sub-account identifiers** can be sensitive (organization ids). Hosts
+  SHOULD treat them like profile metadata, visible to the operator only.
+
+## Reference Implementation
+
+`@agentproto/auth` (agentproto/ts): `profile-types.ts` (`AuthProfile`,
+`ModelCuration`, `CostBudget`, `SubaccountPin`), `profile-store.ts`
+(`~/.agentproto/auth-profiles.json`), `eligibility.ts`
+(`eligibleProfiles`, `methodsPresentable`), `subaccounts.ts`. The `models`
+and `costBudget` short forms are evaluated outside AIP-38 today; moving them
+onto the AIP-38 evaluator is follow-up work tracked with the AIP-38
+amendment.
+
+## Open Questions
+
+1. **Presentable methods in AIP-45.** Eligibility rule 3 needs each adapter
+   to declare which methods it can present per route. The reference
+   implementation projects this from the adapter package; AIP-45 has no
+   field for it. Proposal: an AIP-45 `auth.methods: { [route]: method[] }`
+   block, in a small AIP-45 amendment.
+2. **AIP-19 access grants.** AIP-19 has its own `access` grant list
+   (role, user, tool, workflow, workspace). It predates AIP-38 and overlaps
+   it. Out of scope here; worth aligning separately.
+3. **Default profile order.** Section 2 lets a host pick a profile when none
+   is named. Should the order be a field here (`priority`), or stay in the
+   session config (AIP-46 amendment) as an ordered fallback? The current
+   draft leaves it to the session config.
+
+## See also
+
+- [AIP-19 SECRETS](/docs/aip-19): where the credential lives
+- [AIP-29 CLI](/docs/aip-29): how a harness logs in
+- [AIP-38 POLICY](/docs/aip-38): the rules attached to a profile
+- [AIP-39 ACTION](/docs/aip-39): `auth-profile:use`, `model:invoke`
+- [AIP-46 AGENT-SESSIONS](/docs/aip-46): session binding and amortisation
+- [AIP-67 QUOTA](/docs/aip-67): headroom per profile
