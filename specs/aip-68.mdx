@@ -1,6 +1,6 @@
 ---
 aip: 68
-title: "AIP-68: STEWARD.md + SECRETARY.md: agentclerk/v1 (out-of-band session clerks: triage and memory lenses)"
+title: "AIP-68: CLERK (clerk/v1): out-of-band session clerks (STEWARD.md, SECRETARY.md): triage and memory lenses"
 description: "Names the clerk, an out-of-band process that watches daemon sessions' transcripts and lifecycle events and maintains durable STATE about them without ever waking the watched session, as one workspace of two composable doctypes: STEWARD.md (`agentsteward/v1`), the session-triage profile that classifies sessions into verdicts (done / abandoned / blocked / needs-input / active) and applies AIP-46 outcomes (mark-complete, mark-failed, close-abandoned...) under an origin policy that never closes a human's session; and SECRETARY.md (`agentsecretary/v1`), the memory-secretary profile that runs LLM distill lenses (session, project, user, company) over raw transcripts toward a two-level store (per-agent local, promoted shared), with per-source cursors, anti-rebound debounces, dedup by origin, and free-tier model budgets."
 author: Jeremy André <jeremy@agentik.net>
 status: Draft
@@ -15,7 +15,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/apps/session-stewa
 | Field | Value |
 |---|---|
 | AIP | 68 |
-| Title | STEWARD.md + SECRETARY.md: agentclerk/v1 (out-of-band session clerks) |
+| Title | CLERK (clerk/v1): out-of-band session clerks (STEWARD.md, SECRETARY.md): triage and memory lenses |
 | Status | Draft |
 | Type | Schema |
 | Domain | clerk.sh |
@@ -502,6 +502,8 @@ Not applicable (new spec). Points of graceful coexistence:
   <pygmalion>/memory/agents/<slug>/; no migration of the brain cursor).
 - Unknown frontmatter keys and unknown lens ids warn; they never
   hard-fail a clerk.
+
+This AIP was titled STEWARD.md + SECRETARY.md until 2026-10-23 ([AIP-70](/docs/aip-70)).
 
 ## Security Considerations
 

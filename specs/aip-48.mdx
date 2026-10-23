@@ -1,5 +1,5 @@
 ---
-title: "AIP-48: MULTI_AGENT_RUNTIME — agentruntimes/v1 (composable multi-agent execution kernel)"
+title: "AIP-48: RUNTIME (runtime/v1): composable multi-agent execution kernel"
 description: A declarative manifest format and reference kernel for multi-agent runtimes — seven swappable ports (participants, substrate, dispatcher, lifecycle, state, effectors, provisioning) composed under a single manifest. One declarative kit produces both a private local-journal swarm and a Guilde-bridged conversation participant, with no kernel changes. Sibling to AIP-9 OPERATOR (which describes one participant) — AIP-48 describes how participants execute together.
 aip: 48
 status: Review
@@ -17,7 +17,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/agent-runtime
 | Field | Value |
 |---|---|
 | AIP | 48 |
-| Title | MULTI_AGENT_RUNTIME — agentruntimes/v1 (composable multi-agent execution kernel) |
+| Title | RUNTIME (runtime/v1): composable multi-agent execution kernel |
 | Status | Draft |
 | Type | Core |
 | Domain | runtimes.sh |
@@ -281,6 +281,10 @@ turn():
 
 The loop above is intentionally minimal — every degree of freedom is in the
 adapters, not the kernel.
+
+## Backwards Compatibility
+
+This AIP was titled MULTI_AGENT_RUNTIME until 2026-10-23 ([AIP-70](/docs/aip-70)).
 
 ## Reference implementation
 

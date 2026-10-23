@@ -1,5 +1,5 @@
 ---
-title: "AIP-66: Managed cloud agents (the `cloud:<vendor>` execution target)"
+title: "AIP-66: CLOUD-AGENT (cloud-agent/v1): managed cloud agents, the `cloud:<vendor>` execution target"
 description: "Names a third execution target for an agent session, next to the host and an AIP-36 sandbox: a managed cloud agent, where the vendor owns both the machine and the harness and no agentproto daemon runs inside. Fixes the vendor to harness binding, the repo-source rule (a git remote and ref, never an uploaded working tree), the spawn fields a host refuses for this target, the 1:1 session identity and re-attach rule, the lifecycle verbs (start, prompt, observe, stop, pull), usage reporting, and credential handling. Informative appendix: the Anthropic Claude Code cloud mapping."
 aip: 66
 status: Draft
@@ -15,7 +15,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/adapters/claude-code-cloud
 | Field | Value |
 |---|---|
 | AIP | 66 (provisional, editors assign the final number) |
-| Title | Managed cloud agents: the `cloud:<vendor>` execution target |
+| Title | CLOUD-AGENT (cloud-agent/v1): managed cloud agents, the `cloud:<vendor>` execution target |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Core |
@@ -242,6 +242,10 @@ hardlinked objects, which section 3 makes moot.
   merges it into `meta.cloud`. On resume, it reads the id from
   `meta.cloud`, or from the file if the merge never happened, and passes it
   to ACP `session/load`.
+
+## Backwards Compatibility
+
+This AIP was titled Managed cloud agents until 2026-10-23 ([AIP-70](/docs/aip-70)).
 
 ## Security considerations
 

@@ -20,7 +20,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Schema |
-| Requires | [AIP-1](/docs/aip-1) (process), [AIP-46](/docs/aip-46) (AGENT-SESSIONS: the inbox a matched event is delivered into, and the session liveness, resume, and parent semantics delivery relies on) |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-46](/docs/aip-46) (SESSION: the inbox a matched event is delivered into, and the session liveness, resume, and parent semantics delivery relies on) |
 | Composes with | [AIP-41](/docs/aip-41) (SCHEDULE: the `routine` target kind, a frozen shape with no delivery implementation yet), [AIP-62](/docs/aip-62) (REVIEW: the PR auto-linker is the natural companion to a review that opens a pull request) |
 | Created | 2026-09-29 |
 | Package | `@agentproto/runtime` (sentinel store, runtime, providers, tools, ingress, auto-link); `@agentproto/provider-kit` (adapter catalog, list and setup tool plumbing); `@agentproto/cli` (`agentproto sentinel` verbs) |
@@ -828,7 +828,7 @@ reads it back automatically.
 
 ## Connecting to other AIPs
 
-### AIP-46 AGENT-SESSIONS: the delivery surface
+### AIP-46 SESSION: the delivery surface
 
 Delivery is an [AIP-46](/docs/aip-46) inbox message: `relation:
 "system"`, `kind: "notice"`, an urgency from the AIP-46 set, and a
@@ -883,7 +883,7 @@ sugar uses.
 - [AIP-1](/docs/aip-1): process, RFC 2119
 - [AIP-10](/docs/aip-10): ids and slugs; the `sen_<ulid>` id shape
 - [AIP-41](/docs/aip-41): SCHEDULE; the frozen `routine` target kind
-- [AIP-46](/docs/aip-46): AGENT-SESSIONS; the inbox, urgencies, and
+- [AIP-46](/docs/aip-46): SESSION; the inbox, urgencies, and
   session liveness delivery builds on
 - [AIP-62](/docs/aip-62): REVIEW; the PR-URL parsing shared with the
   `prUrl` sugar and the auto-link case

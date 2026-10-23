@@ -20,7 +20,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Status | Draft |
 | Type | Schema |
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-2](/docs/aip-2) (template), [AIP-15](/docs/aip-15) (WORKFLOW: the `decide` step and the `suspend` semantics a human rung relies on), [AIP-57](/docs/aip-57) (MODEL-ROUTING: an `llm` rung names its model through a role) |
-| Composes with | [AIP-62](/docs/aip-62) (REVIEW: a decision picks the review binding), [AIP-7](/docs/aip-7) (GOVERNANCE: the human rung's delivery channel), [AIP-61](/docs/aip-61) (INFERENCE: what "local" means for exposure classes), [AIP-16](/docs/aip-16) (IO: the reserved `extract` schema) |
+| Composes with | [AIP-62](/docs/aip-62) (REVIEW: a decision picks the review binding), [AIP-7](/docs/aip-7) (GOVERNANCE: the human rung's delivery channel), [AIP-61](/docs/aip-61) (INFERENCE-ENDPOINT: what "local" means for exposure classes), [AIP-16](/docs/aip-16) (IO: the reserved `extract` schema) |
 | Created | 2026-10-11 |
 | Package | `@agentproto/runtime` (engine, judges, registry, record store, tools); `@agentproto/workflow-runtime` (the `decide` step); `@agentproto/cli` (`agentproto decide`) |
 
@@ -772,7 +772,7 @@ three amendments, each filed and reviewed separately:
   call, and is never routed through a ladder — see AIP-62 §Placement.
 - **AIP-7 GOVERNANCE:** delivery and authentication channel for human
   rungs.
-- **AIP-61 INFERENCE:** defines `local` for exposure; `local-only`
+- **AIP-61 INFERENCE-ENDPOINT:** defines `local` for exposure; `local-only`
   narrows every rung to `local`.
 
 ## Open questions
@@ -790,4 +790,4 @@ three amendments, each filed and reviewed separately:
 
 - [AIP-15 WORKFLOW](/docs/aip-15), [AIP-57 MODEL-ROUTING](/docs/aip-57),
   [AIP-62 REVIEW](/docs/aip-62), [AIP-7 GOVERNANCE](/docs/aip-7),
-  [AIP-61 INFERENCE](/docs/aip-61), [AIP-16 IO](/docs/aip-16).
+  [AIP-61 INFERENCE-ENDPOINT](/docs/aip-61), [AIP-16 IO](/docs/aip-16).
