@@ -461,7 +461,7 @@ host MUST match it as follows:
    forms for the session actions.
 4. **`selector:<id>`**: the requested scope is a member of the set
    resolved from the saved selector named `<id>`. Selector resolution
-   is defined by a later [AIP-43](/docs/aip-43) amendment. Matching is
+   is defined by [AIP-43 § Selectors referenced by policy](/docs/aip-43#selectors-referenced-by-policy). Matching is
    membership in the resolved set and MUST fail closed (deny) when the
    selector cannot be resolved.
 5. **No `scope`**: the grant matches every scope of that action.

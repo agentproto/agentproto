@@ -313,7 +313,7 @@ selects the account that pays or authenticates.
 | `auth-profile:use` | auth profile id |
 
 A scope MAY be a `selector:<id>` ref. The selector itself is defined by
-a later [AIP-43](/docs/aip-43) amendment: matching is membership in the
+[AIP-43 § Selectors referenced by policy](/docs/aip-43#selectors-referenced-by-policy): matching is membership in the
 resolved set, and evaluation fails closed when the selector cannot be
 resolved.
 
@@ -326,7 +326,7 @@ fresh session.
 **Ownership.** AIP-39 only declares these ids. The owning AIPs define
 the semantics and the evaluation points:
 [AIP-46](/docs/aip-46) for sessions (spawn, prompt, control,
-configure), the auth profile AIP for profiles, and
+configure), [AIP-69](/docs/aip-69) for profiles, and
 [AIP-43](/docs/aip-43) for selectors. A consumer MUST NOT read this
 table as a permission: the effective decision is still an AIP-38
 policy evaluation.
