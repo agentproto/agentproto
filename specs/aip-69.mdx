@@ -1,0 +1,261 @@
+---
+title: "AIP-69: SESSION-TARGETS, agentpreset/v1 (presets, model lists, model policy, cross-account and cross-harness fallback)"
+description: "A session runs on a target (harness, model or model list, account). A preset is a named spawn configuration carrying an ordered chain of targets and a model policy. On failure, a host walks the chain: switch model live, restart on another account, or hand off to another harness. Price, tier and 'free' are catalog data used by selectors, never concepts of this spec."
+aip: 69
+status: Draft
+type: Standards Track
+created: 2026-10-23
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 42, 43, 46, 57]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+layer: runtime
+package: "@agentproto/runtime"
+---
+
+| Field | Value |
+|---|---|
+| AIP | 69 |
+| Title | SESSION-TARGETS, agentpreset/v1 |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Standards Track |
+| Requires | [AIP-42](/docs/aip-42), [AIP-43](/docs/aip-43), [AIP-46](/docs/aip-46), [AIP-57](/docs/aip-57) |
+| Created | 2026-10-23 |
+| Package | `@agentproto/runtime` |
+
+## Abstract
+
+An [AIP-46](/docs/aip-46) agent session runs on a **target**: a harness, a
+model, and an account that pays for it. This AIP defines five documents and
+one algorithm:
+
+1. **ModelList**: a named, criteria-based set of models over the
+   [AIP-43](/docs/aip-43) catalog, with an order and a rotation strategy;
+2. **ModelPolicy**: allow and block over model lists, enforced at every model
+   change of a session;
+3. **Target**: `{ harness, model | list, access }`;
+4. **Preset**: a named spawn configuration with an ordered chain of targets,
+   a policy, and an optional "default for harness X" scope;
+5. **Fallback**: on a classified failure, the host moves the session to the
+   next eligible target, using the cheapest transition that reaches it
+   (live model switch, restart on another account, hand-off to another
+   harness).
+
+No concept in this AIP depends on price. "Free", "paid", "zero-cost" and tiers
+are catalog facts that a ModelList selector MAY match; a host MUST NOT hard-code
+a rule keyed on them.
+
+## Motivation
+
+The reference implementation grew these pieces without a spec, and they
+drifted:
+
+- two preset stores that overlap (`user presets`: a named bundle of spawn
+  fields; `harness presets`: account and model, one default per harness);
+- model rotation on failure that only works inside one account and one
+  harness, while restart-with-another-account and hand-off-to-another-harness
+  already exist as separate session verbs with no policy linking them;
+- several rules keyed on a "free" model notion (`-free` id suffix checks, a
+  "free session stays free" rotation rule, a free-only decision profile), each
+  written differently, none configurable by the user.
+
+The user need is simple: "use these models, in this order, on these accounts
+and harnesses, never these ones". That is data the user owns. This AIP makes
+it a document, so every host implements it the same way.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as
+described in [AIP-1](/docs/aip-1).
+
+### 1. ModelList
+
+```ts
+type ModelSelector =
+  | { kind: "model"; value: string }        // exact id or glob
+  | { kind: "provider"; value: string }
+  | { kind: "tag"; value: string }          // AIP-43 catalog tag, e.g. "price:zero"
+  | { kind: "price"; maxInPer1M?: number; maxOutPer1M?: number }
+  | { kind: "context"; min: number }
+  | { kind: "variant"; value: string }      // route-identity variant
+  | { kind: "list"; id: string }            // composition
+
+interface ModelList {
+  id: string                                // /^[a-z0-9][a-z0-9-]{0,62}$/
+  label?: string
+  include?: ModelSelector[]                 // OR
+  exclude?: ModelSelector[]                 // wins over include and ids
+  ids?: string[]                            // explicit pins, exact ids, catalog not required
+  order?: "listed" | "cheapest" | "largest-context" | "newest"
+  rotation?: "priority" | "round-robin" | "least-recently-limited"
+}
+```
+
+- Resolution yields an ordered, de-duplicated list of model ids. It is
+  re-evaluated on each use, so a catalog refresh or a list edit takes effect
+  on the next attempt.
+- A `list` selector that forms a cycle, or names an unknown list, is an error
+  at **save** time.
+- A host MAY ship seed lists (for example `zero-cost` selecting tag
+  `price:zero`). Seeds are ordinary lists: user-editable, never hard-coded
+  rules, and not deletable while referenced.
+
+### 2. ModelPolicy
+
+```ts
+interface ModelPolicy {
+  allow?: string[]                          // list ids
+  block?: string[]                          // list ids
+}
+type PolicyVerdict =
+  | { ok: true }
+  | { ok: false; code: "model_blocked" | "model_not_allowed" | "unknown_list"; reason: string }
+```
+
+- `block` always wins. When `allow` is present, a model outside every allowed
+  list is refused, uncataloged ids included (fail closed).
+- A session without a policy MAY use any model its account's curation
+  permits ([AIP-50](/docs/aip-50) auth profile model allow-list).
+- The policy is stored on the session descriptor and MUST be checked, with one
+  function, at every point where a session's model is set or changes: spawn
+  (after every merge layer, explicit fields included), live model switch,
+  restart, and every fallback step (§5). A refused live switch returns a
+  refusal result, never an exception.
+
+### 3. Target
+
+```ts
+interface Target {
+  harness: string                           // AIP-45 adapter slug
+  model?: string                            // exact id
+  list?: string                             // ModelList id; exclusive with `model`
+  access?: { profileRef: string }           // account; omitted = harness default
+}
+```
+
+A target is **eligible** when its harness is installed, its account exists and
+is enabled, and at least one model (the `model`, or a member of `list`) passes
+the account curation, the session policy, and is not in cooldown.
+
+### 4. Preset
+
+```ts
+interface Preset {
+  id: string
+  label: string
+  tags?: string[]
+  extends?: string[]                        // left to right; cycle = error
+  scope?: { defaultFor?: string }           // harness slug: applied when a spawn on that harness names no preset
+  spawn: Partial<AgentStartInput>           // posture, effort, skills, role, cwd, ...
+  targets?: Target[]                        // ordered; targets[0] is the primary
+  policy?: ModelPolicy
+}
+```
+
+- Precedence, lowest first: `defaultFor` preset of the harness, `extends`
+  chain, the named preset, explicit spawn fields. The policy is applied last
+  and is terminal: no layer can escape it.
+- At most one preset per harness has `scope.defaultFor`. This replaces a
+  separate "harness preset" document.
+- A host SHOULD offer `resolve <presetId> --explain`, printing the merged
+  spawn and the layer each field came from (same intent as AIP-57 §3
+  `source`).
+
+### 5. Fallback
+
+When a turn fails with a **classified** failure (`rate_limited`,
+`quota_exhausted`, `model_unavailable`, `auth_failed`, `harness_crashed`), the
+host walks the session's chain:
+
+1. remaining models of the current target's `list` (rotation strategy of the
+   list), then
+2. `targets[i+1...]` in order,
+
+skipping ineligible entries, and applies the **cheapest transition** that
+reaches the next eligible one:
+
+| from to | transition | conversation |
+|---|---|---|
+| same harness, same account, other model | live model switch | kept |
+| same harness, other account | restart with the new access | kept when the harness can resume, else hand-off |
+| other harness | continue-fresh hand-off ([AIP-46](/docs/aip-46)) | summarized hand-off |
+
+- Every step MUST pass the session policy (§2).
+- A failure that is not classified (a tool error, a user interrupt) MUST NOT
+  trigger a fallback.
+- Each step MUST be recorded on the session (from, to, transition, failure
+  code) and surfaced to the session owner.
+- A model that failed with `rate_limited` or `quota_exhausted` enters a
+  host-wide cooldown; ineligibility in §3 reads it.
+- An exhausted chain leaves the session idle with the last failure; it MUST
+  NOT loop.
+
+### 6. Relation to AIP-57
+
+AIP-57 resolves one request to a served model, purely, with no credentials.
+This AIP is session-scoped: it carries accounts, crosses harnesses and
+performs lifecycle actions, so it is deliberately outside AIP-57 §7. A
+target's model MAY be an AIP-57 virtual key; AIP-57 then selects within it,
+and this AIP only sees the failure.
+
+## Rationale
+
+**Why lists and not tiers.** A tier ("free") is one criterion among many and
+changes per provider and per week. A list with selectors expresses it as data
+(`tag: price:zero`) and also expresses everything else (context size, provider,
+pinned ids) with the same mechanism.
+
+**Why the policy is terminal.** Fallback is automatic. Without a terminal
+policy, an automatic step could move a session to a model or account the user
+never accepted, which is a billing surprise.
+
+**Why one preset document.** A harness default is a preset with a scope. Two
+stores invite two merge orders.
+
+**Why cheapest transition.** A live switch keeps the conversation and costs
+nothing; a hand-off loses detail. The host picks the least lossy step that
+reaches the target.
+
+## Backward Compatibility
+
+- Existing named presets map to `Preset` with `spawn` and, when they set a
+  model and access, a one-element `targets`.
+- Existing harness presets map to `Preset` with `scope.defaultFor`, `targets:
+  [{ harness, model: defaultModel, access: { profileRef } }]`. Hosts SHOULD
+  migrate on read, keep the old files as backups, and keep old tool names as
+  aliases.
+- Existing same-account rotation lists map to a `list` on the primary target.
+- Rules keyed on "free" map to `policy: { allow: ["zero-cost"] }` with the
+  `zero-cost` seed list. Default rotation applies only to sessions whose
+  model is in a host seed list, so current behavior is preserved without the
+  notion.
+
+## Security Considerations
+
+- **Policy at every model change.** A check at spawn only is bypassed by a
+  live switch, a restart or a fallback. §2 lists every point.
+- **Accounts are credentials.** A fallback to another account spends another
+  principal's budget. A host MUST only use accounts named in the session's
+  targets (or the harness default), never discover one at fallback time.
+- **Hand-off content.** A cross-harness hand-off sends a summary of the
+  conversation to another vendor. The preset author chooses that by listing
+  the target; a host MUST NOT add harnesses that are not in the chain.
+- **No loops.** §5 forbids cycling through an exhausted chain, which would
+  burn quota on every account in turn.
+
+## Reference Implementation
+
+`@agentproto/runtime` (agentproto/ts): model lists in
+`@agentproto/model-catalog/lists`, store and `model_list_*` tools, policy in
+`model-policy.ts`, enforcement in spawn, live model switch, restart and turn
+retry. In progress: agentproto/ts#2196. Fallback chain across accounts and
+harnesses and preset v2: to follow this AIP.
+
+## See also
+
+- [AIP-42 AGENT](/docs/aip-42): `ModelRef`
+- [AIP-43 REGISTRY](/docs/aip-43): the catalog lists select from
+- [AIP-45 AGENT-CLI](/docs/aip-45): harness manifests
+- [AIP-46 AGENT-SESSIONS](/docs/aip-46): session lifecycle, restart, continue-fresh
+- [AIP-50 AUTH](/docs/aip-50): accounts and model curation
+- [AIP-57 MODEL-ROUTING](/docs/aip-57): per-request resolution
