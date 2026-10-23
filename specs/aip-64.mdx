@@ -1,5 +1,5 @@
 ---
-title: "AIP-64: PACK.md, pack/v1 (the installable capability bundle: plugin, apps, knowledge, playbook, pricing)"
+title: "AIP-64: PACK (pack/v1): the installable capability bundle: plugin, apps, knowledge, playbook, pricing"
 description: "Names the pack, the commercial assemblage that ships a plugin (built inline from `./skills/` or merged from published `@agentproto/skill-pack-*` includes) together with zero or more AIP-53 apps, a knowledge workspace selection, an optional playbook to generate, legacy pricing data, and non-technical blockers, as a first-class doctype. Fixes the PACK.md frontmatter (`pack/v1`), every cross-field rule a conformant parser enforces, the two authoring paths (`definePack` and `parsePackManifest`) over one shared zod schema, the frozen `PackHandle` with its derived `status` (`planned | assembling | ready | gated`), the `aip://64/<name>[@version]` artifact-ref grammar and the git pin grammar reused from AIP-62, the `review.pack-digest/v1` content digest over the PACK.md and each declared app's APP.md source, and the installation contract (apps install through AIP-42 `app_install`, the plugin installs through the skill install verb, knowledge resolves at query time, the playbook generates on demand, and re-applying a pack replaces it, never duplicates it)."
 aip: 64
 status: Draft
@@ -16,7 +16,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/pack
 | Field | Value |
 |---|---|
 | AIP | 64 (provisional, editors assign the final number) |
-| Title | PACK.md, pack/v1 (the installable capability bundle) |
+| Title | PACK (pack/v1): the installable capability bundle: plugin, apps, knowledge, playbook, pricing |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Schema |

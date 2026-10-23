@@ -1,5 +1,5 @@
 ---
-title: "AIP-2: AIP Template"
+title: "AIP-2: TEMPLATE: the template every new AIP starts from"
 description: The template every new AIP starts from. Copy this file, change the frontmatter, and fill in the sections.
 aip: 2
 status: Final
@@ -14,7 +14,7 @@ layer: process
 | Field | Value |
 |---|---|
 | AIP | 2 |
-| Title | AIP Template |
+| Title | TEMPLATE: the template every new AIP starts from |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Final |
 | Type | Meta |
@@ -40,7 +40,7 @@ See [AIP-1](/docs/aip-1) for the full submission process and lifecycle.
 ```yaml
 ---
 aip: XXXX                                   # Editors assign — leave as XXXX
-title: <short, descriptive title>
+title: "AIP-XXXX: <NAME> (<name>/v1): <summary>"   # AIP-70 naming rules
 author: <Your Name <your@email>>
 status: Draft                                # Always start here
 type: Meta | Schema | Core                  # Pick exactly one
@@ -194,14 +194,17 @@ unit** — recursive across the family.
 
 ### Title convention recap
 
+Titles follow [AIP-70](/docs/aip-70) GLOSSARY, Naming rules:
+
 | AIP shape | Title format | Example |
 |---|---|---|
-| Single-doc | `<FILENAME>.md — <description>` | `TOOL.md — tool manifest format` |
-| Workspace | `<ROOT>.md — <namespace>/v<n> (<description>)` | `KNOWLEDGE.md — agentknowledge/v1 (LLM-maintained wiki)` |
+| Schema / Core | `AIP-<n>: <NAME> (<name>/v<N>): <summary>` | `AIP-14: TOOL (tool/v1): abstract agent contract` |
+| Meta (process, templates, conventions) | `AIP-<n>: <NAME>: <summary>` | `AIP-1: PROCESS: purpose and process of the AIP series` |
 
-This holds for every Schema and Core AIP. Meta AIPs (Process,
-Templates, Conventions) are exempt — their title may describe the
-process directly (e.g. `AIP-1: Purpose & Process`).
+`<NAME>` is the AIP's registered name in `specs/names.json`; `<name>/v<N>`
+is its spec id. A workspace AIP's document schemas are `<name>.<kind>/v<N>`
+(`knowledge.entry/v1`), but its title shows the spec id (`knowledge/v1`).
+`scripts/check-names.mjs` checks every title against the registry.
 
 ---
 
