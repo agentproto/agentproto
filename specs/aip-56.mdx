@@ -1,5 +1,5 @@
 ---
-title: "AIP-56: DOCTYPE — the `createDoctype` meta-factory for `defineX` constructors"
+title: "AIP-56: DOCTYPE (doctype/v1): the `createDoctype` meta-factory for `defineX` constructors"
 description: The shared invariant prologue behind every AIP `defineX` constructor. `createDoctype<TDef, THandle>(opts)` validates the identity against a default kebab/snake/dot pattern (overridable), validates description length (1–2000 by default, disableable), runs spec-specific `validate`, and returns a top-level `Object.freeze`d handle — with a canonical error prefix naming the constructor, doctype, and AIP. Includes `filterSerializable`, the pure projection of a validated definition to its YAML-serialisable subset.
 aip: 56
 status: Review
@@ -15,7 +15,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/define-doctype
 | Field | Value |
 |---|---|
 | AIP | 56 |
-| Title | DOCTYPE — the `createDoctype` meta-factory for `defineX` constructors |
+| Title | DOCTYPE (doctype/v1): the `createDoctype` meta-factory for `defineX` constructors |
 | Status | Draft |
 | Type | Schema |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |

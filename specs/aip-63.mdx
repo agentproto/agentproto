@@ -1,5 +1,5 @@
 ---
-title: "AIP-63: BROWSER.md, agentbrowser/v1 (browser provider manifest, instance lifecycle, profile consent)"
+title: "AIP-63: BROWSER (browser/v1): browser provider manifest, instance lifecycle, profile consent"
 description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state, and the `browser-recording/v1` artifact that makes what an agent did in a browser replayable.
 aip: 63
 status: Draft
@@ -17,7 +17,7 @@ package: "@agentproto/driver-browser"
 | Field | Value |
 |---|---|
 | AIP | 63 (provisional, editors assign the final number) |
-| Title | BROWSER.md, agentbrowser/v1 (browser provider manifest, instance lifecycle, profile consent) |
+| Title | BROWSER (browser/v1): browser provider manifest, instance lifecycle, profile consent |
 | Status | Draft |
 | Type | Schema |
 | Domain | drivers.sh |

@@ -6,7 +6,7 @@ status: Review
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 17, 19, 54, 36, 38, 42, 44, 45]
+requires: [1, 2, 9, 17, 19, 54, 36, 38, 39, 42, 44, 45, 57, 69]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: host
@@ -686,7 +686,8 @@ user never asked for.
 
 ```ts
 {
-  /** AIP-45 adapter slug — WHICH CLI runs. Required. */
+  /** AIP-45 harness slug: which harness runs. Required unless `config` or
+   *  `preset` supplies it. */
   adapter: string
   /** AIP-42 AGENT ref — WHAT it runs (prompt, skills, delegates_to,
    *  policy). Optional; absent ⇒ adapter default + no delegation.
@@ -707,6 +708,15 @@ user never asked for.
   prompt?: string
   /** Free-text label for the descriptor. */
   label?: string
+  /** How the harness runs (2026-10-23, §Session config). `adapter` above
+   *  MAY be omitted when `config.harness` or the preset supplies it; when
+   *  both are set they MUST be equal. */
+  config?: SessionConfig
+  /** A session preset id (§Session config, Session presets). */
+  preset?: string
+  /** An AIP-38 policy composed with the bound agent's; it can only narrow
+   *  (AIP-38 §Delegation ceiling). */
+  policy?: PolicyRef
 }
 ```
 
@@ -760,7 +770,7 @@ so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
-| `agent_start` | `{adapter, agent?, ground?, prompt?, label?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
+| `agent_start` | `{adapter, agent?, ground?, prompt?, label?, config?, preset?, policy?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
 | `agent_prompt` | `{sessionId, prompt}` | Fire-and-forget — call `agent_output` to read the reply. A delegation action (§Delegation). |
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
@@ -1065,16 +1075,19 @@ Invariants:
 
 #### Access profile and subscription
 
-A host declares an access profile per provider identity — the same
-identity as the auth surface of [AIP-29](/docs/aip-29) `auth` /
-[AIP-45](/docs/aip-45). The `subscription` block is optional and
-declarative:
+A host declares its accounts as [AIP-69](/docs/aip-69) auth profiles
+(*2026-10-23*: AIP-69 owns the document; the first draft of this section
+named the billing party `provider`, which AIP-69 calls `endpoint`, and its
+`auth` ref resolves to AIP-69's `credentialRef` or `source`). This section
+keeps only what amortisation needs, the optional and declarative
+`subscription` block:
 
 ```yaml
 authProfiles:
   - id: claude-sub
-    provider: anthropic
-    auth: auth/sales-claude           # AIP-29 auth ref (AIP-54)
+    endpoint: anthropic
+    method: oauth-bearer
+    source: claude-code-oauth         # or credentialRef: <AIP-19 secret slug>
     subscription:
       monthlyUsd: 200                 # plan actually paid
       windows:                        # amortisation windows (see Amortisation)
@@ -1138,6 +1151,289 @@ is the intended correction. Third-party consumers that read raw
 `costUsd` continue to receive it, with a clarified meaning: *marginal*
 cost.
 
+
+### Session config, presets and fallback (added 2026-10-23)
+
+> **Draft AIP-46 amendment** (2026-10-23). *Normative identifiers
+> (field names, literals, tool names) are English and final.*
+
+**Problem.** `SpawnAgentRequest` names three axes: which harness
+(`adapter`), what it runs (`agent`), where (`ground`). Every host also has
+to choose *how* the harness runs: which model, which account pays, which
+permission posture, which reasoning effort, which gateway route. Those
+choices are scattered: [AIP-42](/docs/aip-42) carries an authoring-time
+`model`, [AIP-9](/docs/aip-9) carries `runtime.config` in harness-native
+ids (`mode`, `options`), [AIP-45](/docs/aip-45) carries manifest defaults,
+and the reference implementation grew one flat field per choice on
+`agent_start`, two kinds of saved configurations and a retry rotation list.
+Nothing says which source wins, which choice can change on a live session,
+or what to do when the chosen model or account fails.
+
+This amendment adds one normalized carrier, `SessionConfig`, with:
+
+- the runtime axes and, for each, its **apply class** (how a change reaches
+  a live session);
+- the **layers** that produce it and their precedence;
+- **session presets**: named, saved configs;
+- **fallback**: an ordered list of config overlays walked on a classified
+  failure, each step applied with the least disruptive transition that is
+  valid;
+- the points where [AIP-38](/docs/aip-38) policy is evaluated.
+
+Configuration says what a session *wants*. Permission stays in AIP-38: a
+spawn MAY carry a `policy` that narrows the bound agent's policy (it can
+never widen it, AIP-38 §Delegation ceiling), and that is where model
+allow and block rules and spend ceilings live, not in the config.
+
+#### The `SessionConfig` carrier
+
+```ts
+interface SessionConfig {
+  /** AIP-45 harness slug. Same value as SpawnAgentRequest.adapter. */
+  harness?: string
+  /** A model id (possibly an AIP-57 virtual key), or `selector:<id>`: an
+   *  ordered, saved selector over the AIP-43 model registry. */
+  model?: string
+  /** Reasoning effort, one of the levels the harness declares for the
+   *  model. */
+  effort?: string
+  /** What the agent may do without asking. Canonical values, or a raw
+   *  harness mode id when no canonical value fits. */
+  posture?: "default" | "plan" | "accept-edits" | "bypass" | "read-only"
+          | { harnessModeId: string }
+  /** What enters context: an AIP-45 mode of `kind: "context"`. */
+  contextProfile?: string
+  /** Gateway or billing route. Normally derived from `model` through the
+   *  catalog; set only to override. `baseUrl` only for a custom gateway the
+   *  catalog cannot resolve. */
+  route?: { gateway: string; baseUrl?: string }
+  /** The account: an AIP-69 auth profile. */
+  access?: { profileRef: string }
+  /** Harness-native AIP-45 options not covered by an axis above. Validated
+   *  exactly like AIP-9 `runtime.config.options`. */
+  options?: Record<string, unknown>
+  /** Same-config retries before any fallback step. */
+  retry?: {
+    on: FailureClass[]
+    maxRetries?: number
+    /** Retry a turn that already ran a tool call. Default false: a turn
+     *  with side effects is not replayed. */
+    retryAfterToolCalls?: boolean
+  }
+  /** Ordered overlays tried on a classified failure (below). */
+  fallback?: ConfigOverlay[]
+}
+
+/** A patch over the base config. Axes it omits keep the base value. */
+type ConfigOverlay = Omit<SessionConfig, "retry" | "fallback">
+
+type FailureClass =
+  | "rate-limit" | "quota-exhausted" | "upstream-5xx" | "model-unavailable"
+  | "auth-failed" | "no-output-stall" | "harness-crashed"
+```
+
+The JSON Schema is
+[`resources/aip-46/draft/SessionConfig.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-46/draft/SessionConfig.schema.json).
+A host-specific key outside the axes above MUST be prefixed `x-`, so a
+conformance check can tell a host extension from an unspecified field.
+
+The `harness` axis was named `adapter` in earlier drafts. `adapter` is
+accepted as a legacy alias of `harness`, and `SpawnAgentRequest` keeps
+accepting `adapter`.
+
+`SpawnAgentRequest` gains `config?`, `preset?` and `policy?` (see the
+updated interface in §SpawnAgentRequest). The `Session` record gains
+`config` (the resolved config as applied, `fallback` included; when the
+request named `model: "selector:<id>"`, `config.model` is the concrete
+member chosen and `configSources.model` names the selector),
+`configSources` (for each axis, the layer that produced it:
+`"manifest" | "host" | "definition" | "preset" | "request" | "fallback"`)
+and `fallbackStep` (the index of the overlay in effect, absent on the base
+config).
+
+**What is not in the config.** `SessionConfig` covers how the harness
+runs. Other spawn inputs keep their own owners:
+
+| reference implementation field | owner |
+|---|---|
+| `skills`, `bundles`, `mcpServers`, `browser` | what the agent can use: the AIP-42 agent (`tools`, `skills`) or the spawn request; changing them is a `restart` |
+| `contextContinuity` | the context-continuity amendment of this AIP |
+| `costBudget`, `maxCostUsd`, a model allow or block list | AIP-38 limits and grants in the spawn `policy` (`spend-usd`, `model:invoke`) |
+| `sandbox`, `cloud`, `worktree` | placement: [AIP-36](/docs/aip-36), [AIP-66](/docs/aip-66) and §Workspaces; not changed by fallback |
+| `turnRetry.action: "migrate"` (move to another sandbox box) | placement; out of scope of fallback |
+
+#### Apply classes
+
+Every axis has an **apply class**: the least disruptive way a change to it
+reaches a running session.
+
+| axis | class |
+|---|---|
+| `model` | `live` when the harness can switch models in session (an ACP session config option or an equivalent its manifest declares) AND the new model resolves to the same route, endpoint and auth profile; otherwise `restart` |
+| `effort` | `live` when the harness exposes it as a session option, else `restart` |
+| `posture` | `live` when the harness has a native mode switch (ACP `session/set_mode`), else `restart` |
+| `contextProfile`, `route`, `access`, `options` | `restart` |
+| `harness` | `handoff` |
+
+A model change that moves to another route or endpoint is a `restart`
+because the route is part of the process environment: applying it live
+would keep the old credential and base URL, billing the wrong account.
+
+The class of a change is the highest class among the axes it modifies
+(`live` < `restart` < `handoff`). The three transitions:
+
+- **live**: the host applies the change to the running process; the
+  conversation is untouched.
+- **restart**: the host stops the process and starts it again on the same
+  session id with the new config, resuming the conversation through the
+  harness's `native-resume` continuation ([AIP-45](/docs/aip-45)
+  §Continuation). When the harness cannot resume, a restart is not possible
+  and the change is a handoff.
+- **handoff**: the host starts a new session with the new config on the
+  same `ground`, seeded with a bounded summary of the old one, declares it
+  the successor of the old session (live children are re-parented), and
+  ends the old one.
+
+Surface (MCP, with HTTP mirrors):
+
+| tool | input | behaviour |
+|---|---|---|
+| `agent_set_model`, `agent_set_effort`, `agent_set_posture` | `{sessionId, value}` | live change of one axis. When the change is not `live` on this session, MUST NOT apply and MUST return `{applied: false, requires: "restart" \| "handoff", suggestedOverride: ConfigOverlay}`. Never throws on a refusal. |
+| `session_restart` | `{sessionId, config?: ConfigOverlay}` | restart transition. When the overlay changes `harness`, MUST refuse with `requires: "handoff"`. |
+| `session_continue_fresh` | `{sessionId, config?: ConfigOverlay}` | handoff transition. Returns the new session. |
+
+#### Layers and precedence
+
+The resolved config is built axis by axis (each axis replaced whole by the
+highest layer that sets it), lowest precedence first:
+
+1. `manifest`: the harness manifest's defaults ([AIP-45](/docs/aip-45)
+   `models.default`, default mode);
+2. `host`: host defaults for that harness;
+3. `definition`: the bound [AIP-42](/docs/aip-42) agent's `model`, then,
+   above it, the bound [AIP-9](/docs/aip-9) operator's `runtime.config`
+   (its `mode` projected onto `posture` or `contextProfile`, then its
+   `options`, `options.model` mapping to `model`);
+4. `preset`: the session preset whose `defaultFor` names the harness, then
+   the named preset, after its `extends` chain is applied;
+5. `request`: explicit fields of the spawn request.
+
+[AIP-38](/docs/aip-38) policy is evaluated on the result. It never fills or
+changes an axis: it allows or refuses. A host SHOULD offer a way to print
+the resolved config with the layer of every axis.
+
+#### Session presets
+
+```ts
+interface SessionPreset {
+  id: string
+  label?: string
+  tags?: string[]
+  /** Other session presets applied first, left to right. A missing target
+   *  or a cycle is an error at save time. */
+  extends?: string[]
+  /** Applied (layer 4) to every spawn on this harness that names no other
+   *  preset. At most one preset per harness. */
+  defaultFor?: string
+  /** AIP-42 agent bound when the request names none. */
+  agent?: string
+  /** AIP-38 policy composed with the request's (both apply). */
+  policy?: PolicyRef
+  config: SessionConfig
+}
+```
+
+Merging a preset over another (an `extends` chain, or a preset over the
+lower layers): each axis of `config` is replaced whole, except `options`,
+merged key by key; `fallback` and `retry` are replaced whole; `tags` are a
+union; `agent` is replaced; `policy` entries accumulate (AIP-38
+composition).
+
+- An explicit `agent` in the request wins over the preset's. A preset's
+  `agent` is a requested agent like any other: when the caller is a
+  session, it MUST pass §Delegation's spawn gate.
+- A session preset is host configuration owned by the user. It is a
+  different thing from an AIP-45 gateway (`gateways`, formerly `presets`,
+  in a harness manifest, which declares a backend endpoint; renamed in
+  [agentproto/agentproto#98](https://github.com/agentproto/agentproto/pull/98)).
+
+#### Fallback
+
+When a turn fails with a `FailureClass`, the host:
+
+1. retries the same config up to `retry.maxRetries` times when the class is
+   in `retry.on` (never after a tool call unless `retryAfterToolCalls`);
+2. when the requested `model` was a `selector:<id>`, moves to the
+   selector's next eligible member, picked by the selector's `rotation`
+   ([AIP-43](/docs/aip-43) §Saved selectors), re-resolved at this step;
+3. walks `fallback` from the step after `fallbackStep`: for each overlay,
+   merges it over the **base** config (the spawn's resolved config, not the
+   previous step), skips it when the result is not eligible, and applies the
+   first eligible one.
+
+A merged config is **eligible** when its harness is installed, its auth
+profile is eligible for `(harness, route, model)` ([AIP-69](/docs/aip-69)
+§Eligibility), its `(model, profileRef)` pair is not in a cooldown, and
+policy allows it (next section).
+
+The transition of a step is the highest of the class its changed axes
+require and the class its failure requires: `harness-crashed` requires at
+least `restart` (there is no live process), and a `no-output-stall` is
+interrupted before the step is applied.
+
+- A failure that is not a `FailureClass` (a tool error, a user interrupt, a
+  policy refusal) MUST NOT trigger a step.
+- `rate-limit` and `quota-exhausted` put `(model, profileRef)` in a
+  host-wide cooldown; eligibility reads it, so concurrent sessions do not
+  all hit the same limit.
+- Steps only move forward. A successful step is sticky: later turns stay
+  on it, and a later failure continues from the next overlay. The session
+  never returns to an earlier step on its own.
+- Each step MUST be recorded on the session (`fallbackStep`) and emitted as
+  a `session:fallback` event carrying `{from, to, transition, failure}`
+  (configs without credential material).
+- An exhausted chain leaves the session idle with the last failure. It MUST
+  NOT loop over the chain again.
+
+**Resolving a selector.** A selector is resolved when a model is bound
+(spawn, restart, handoff, fallback step), never in the middle of a session:
+editing it does not move a running session. Each candidate member is
+checked as a concrete model id (eligibility, then `model:invoke` with the
+member as scope); the first that passes is used and recorded. A selector
+that does not resolve refuses the spawn (`selector_unresolvable`) and makes
+a fallback step ineligible.
+
+**Selectors are not AIP-57 chains.** An [AIP-57](/docs/aip-57) chain
+spreads conversations across candidates by a sticky hash, per request, with
+no credentials. A `selector:<id>` here is an ordered candidate list for one
+session: the first eligible member is used, the next ones are failover.
+When `model` names an AIP-57 virtual key, AIP-57 selects within it as
+usual, and this section only sees the failure.
+
+The reference implementation's `turnRetry.rotate` list is the special case
+of a fallback whose overlays only change `model`.
+
+#### Policy evaluation points
+
+Using the [AIP-39](/docs/aip-39) standard runtime actions:
+
+| moment | actions evaluated (all must allow) |
+|---|---|
+| spawn (after all layers) | `session:spawn` (scope: harness), `auth-profile:use` (scope: profile), `model:invoke` (scope: model) |
+| live change | `session:configure` (scope: axis), plus `model:invoke` when the model changes |
+| restart or handoff with an overlay | the spawn set, on the new config |
+| every fallback step | the set of the transition the step performs |
+| a caller other than the owner prompts, or interrupts, kills, restarts or hands off | `session:prompt` or `session:control` (scope: session id or label), in addition to any row above |
+
+Two refusal vocabularies, kept apart:
+
+- an AIP-69 eligibility failure (disabled profile, wrong endpoint, method
+  the harness cannot present) is `auth_profile_ineligible` with the failed
+  rule;
+- an AIP-38 denial is `{applied: false, reason: "policy:<code>: <detail>"}`
+  with the AIP-38 decision record.
+
+On spawn both are client errors (HTTP 400), never server errors.
 
 ## Rationale
 
@@ -1360,6 +1656,25 @@ or 0 under a subscription) now receives a normative meaning — marginal
 cost, never the basis of a quality-per-USD decision in `subscription`
 mode. There are no external users: the corrected reading replaces the
 old one with no deprecation window.
+
+### The 2026-10-23 session-config amendment (draft)
+
+§Session config, presets and fallback is additive: `config`, `preset`,
+`policy`, `Session.config`, `Session.configSources` and
+`Session.fallbackStep` are optional, and a spawn that sets none of them
+resolves exactly as before (manifest and host defaults). The reference
+implementation's flat `agent_start` fields (`model`, `access`, `posture`,
+`effort`, `contextProfile`, `route`, `turnRetry`, `presetId`) are the
+flattened form of `config`; hosts MAY keep accepting them and MUST treat a
+flat field and the same axis in `config` as one layer (the flat field wins
+when both are present). User presets and harness presets map to session
+presets (a harness preset is a session preset with `defaultFor`).
+`turnRetry.rotate` maps to `fallback` overlays on `model`;
+`turnRetry.action: "migrate"` has no mapping (placement is out of scope).
+`modelPolicy` and `costBudget` map to the spawn `policy` (AIP-38 grants on
+`model:invoke`, `spend-usd` limits); a `costBudget` that today trips a
+completion check at turn end becomes a limit that refuses the next
+`model:invoke`, a deliberate behaviour change.
 
 ## Security Considerations
 
