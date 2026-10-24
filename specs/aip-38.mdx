@@ -103,7 +103,8 @@ embedding.
 5. **Most-restrictive wins on conflicts.** When composed policies
    disagree, the more restrictive answer wins. `default: deny`
    beats `default: allow`. A grant cannot be silently overridden
-   by a later policy unless that policy explicitly revokes.
+   by a later policy unless that policy explicitly denies it
+   (`effect: deny`, added 2026-10-23).
 
 6. **Conditions are pluggable.** A grant MAY carry conditions
    (`during-business-hours`, `mfa-recent`, `ip-range`). Hosts
@@ -159,7 +160,7 @@ case-sensitive.
 | `default` | enum | `"deny"` | Default decision when no grant matches: `"allow"` \| `"deny"`. `"deny"` strongly recommended. |
 | `grants` | array | `[]` | Access grants. See `grant` schema below. |
 | `defaults` | object | `{}` | Per-block behavioural defaults (e.g. `defaults.sandbox.network_egress: []`). Keys are AIP block names (`storage`, `sandbox`, `secrets`, `code`). Values are partial block configs. |
-| `limits` | array | `[]` | Resource limits. Each `{ kind, value, scope?, applies_to? }`. |
+| `limits` | array | `[]` | Resource limits. Each `{ kind, value, scope?, per? \| window?, applies_to? }`. |
 | `requirements` | array | `[]` | Cross-cutting must-haves. Each `{ kind, applies_to: [<action-ref>...] , ... condition fields }`. |
 | `metadata` | object | `{}` | Free-form, namespaced. |
 
@@ -168,6 +169,7 @@ case-sensitive.
 ```yaml
 grants:
   - principal: <identity-ref>          # AIP-23 identity-ref scheme
+    effect: allow                       # optional, "allow" | "deny" (default: allow)
     actions:                            # array of action refs
       - { action: <action-ref> }
       - { action: <action-ref>, scope?: <string> }    # narrow grant
@@ -177,6 +179,9 @@ grants:
     granted_by: <identity-ref>          # optional, audit metadata
     revoked: <boolean>                  # optional, soft-revoke marker
 ```
+
+`effect` defaults to `allow`. A grant with `effect: deny` is an
+explicit deny; see [§Explicit deny](#explicit-deny-added-2026-10-23).
 
 Each `principal` is an [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive)
 in any of its forms (inline / ref / file).
@@ -218,7 +223,15 @@ limits:
 
   - kind: "max-egress-bytes-per-day"
     value: 10000000
+
+  - kind: "spend-usd"
+    value: 25                           # USD ceiling over the window
+    window: "PT5H"                      # rolling 5-hour window
+    scope: "session"                    # "session" | "auth-profile"
 ```
+
+`per` and `window` are mutually exclusive: a limit declares at most one.
+See [§Rolling limit windows and spend limits](#rolling-limit-windows-and-spend-limits-added-2026-10-23).
 
 #### Requirement schema
 
@@ -291,6 +304,7 @@ interface PolicyDefinition {
 
 interface Grant {
   principal:    IdentityRef
+  effect?:      "allow" | "deny"        // default "allow"
   actions:      Array<{ action: ActionRef; scope?: string }>
   conditions?:  Condition[]
   ttlSeconds?:  number
@@ -302,8 +316,9 @@ interface Grant {
 interface Limit {
   kind:         string                  // host-extensible
   value:        number
-  scope?:       string                  // "user" | "workspace" | "org" | host-specific
+  scope?:       string                  // "user" | "workspace" | "org" | "session" | "auth-profile" | host-specific
   per?:         string                  // "second" | "minute" | "hour" | "day"
+  window?:      string                  // rolling ISO-8601 duration, e.g. "PT5H" | "P7D"; XOR per
   appliesTo?:   ActionRef[]
 }
 
@@ -320,11 +335,14 @@ interface Requirement {
    evaluated as `default: deny`. Hosts SHOULD warn when `default: allow`
    is declared (audit-significant choice).
 
-2. **Compose by union of grants + most-restrictive on default and
-   requirements.** When N policies compose, the agent's effective
-   permissions are the union of all grants. The default decision is
-   `deny` if ANY composed policy declares `default: deny`. All
-   requirements from all policies apply (ANDed).
+2. **Compose by union of allow grants, explicit deny override, and
+   most-restrictive on default and requirements.** When N policies
+   compose, the agent's effective permissions are the union of all
+   grants with `effect: allow`. A matching grant with `effect: deny`
+   wins over any allow, in any composed policy, regardless of which
+   policy declares it. The default decision is `deny` if ANY composed
+   policy declares `default: deny`. All requirements from all policies
+   apply (ANDed).
 
 3. **Wildcards in actions resolve at evaluation time.**
    `actions: [{ action: "storage:*" }]` at grant time is checked
@@ -356,16 +374,162 @@ audit hooks. The decision record carries:
 ```ts
 interface PolicyDecisionRecord {
   decision:    "allow" | "deny"
-  reason:      "no-grant" | "condition-failed" | "requirement-failed" | "limit-exceeded" | "explicit-revoke" | "ttl-expired" | "matched-grant"
+  reason:      "no-grant" | "condition-failed" | "requirement-failed" | "limit-exceeded" | "explicit-revoke" | "explicit-deny" | "resource-policy-unavailable" | "ttl-expired" | "matched-grant"
   principal:   IdentityRef
   action:      ActionRef
   grantId?:    string
-  policyChain: Array<{ source: "inline" | { ref: string } | { file: string }; layer: number }>
+  policyChain: Array<{
+    source: "inline" | { ref: string } | { file: string }
+    layer: number
+    attachment: "subject" | "resource"
+  }>
   evaluatedAt: string                   // ISO 8601
 }
 ```
 
 This record is what audit consumers ingest, not raw POLICY.md.
+
+### Explicit deny (added 2026-10-23)
+
+> **Draft AIP-38 amendment** (2026-10-23). *Normative identifiers
+> (field names, literals, reason strings) are English and final.*
+
+**Problem.** `default: deny` plus positive grants can express "only X",
+but not "everything the group allows except X". IAM solved this with an
+explicit deny that outranks any allow. This amendment adds the same
+primitive without changing the meaning of a policy that does not use it.
+
+A grant gains an optional `effect` field:
+
+```yaml
+grants:
+  - principal: "group://contractors"
+    effect: deny
+    actions:
+      - { action: "model:invoke", scope: "selector:frontier-models" }
+```
+
+- `effect?: "allow" | "deny"`, default `"allow"`.
+- A **matching** deny wins over any allow, in any composed policy and
+  at any layer. "Matching" is the usual (principal, action, scope,
+  conditions, TTL) test: a deny only applies where its own conditions
+  hold and its TTL is not expired.
+- `revoked: true` still disables a grant. Revocation is not a deny: a
+  revoked grant contributes nothing, while an active deny actively
+  removes a permission.
+- The decision record reports `reason: "explicit-deny"` when a deny is
+  the reason an action was refused. It reports `reason:
+  "explicit-revoke"` when the only grants that would have matched are
+  revoked.
+
+### Resource and subject policies (added 2026-10-23)
+
+Policy can be attached at two points:
+
+- **Subject policy**: bound to the principal. An [AIP-42](/docs/aip-42)
+  agent's `policy` field and an operator's own `policy` are subject
+  policies.
+- **Resource policy**: embedded in the resource itself, using the
+  resource-owning AIP's `policy:` block. Examples: a sandbox, a
+  storage, an auth profile.
+
+When both a subject policy and a resource policy exist for an action,
+the action is allowed only when BOTH evaluate to allow. Neither can
+relax the other: the effective decision is the intersection of the two
+decisions, and an explicit deny in either one wins. When no resource
+policy exists, the subject policy alone decides, which is exactly the
+pre-amendment behaviour.
+
+Every policy consulted is recorded in the decision record's
+`policyChain`, with `attachment: "subject" | "resource"` and its
+`layer` in the composition order. A resource policy that cannot be
+loaded fails closed (deny), with `reason: "resource-policy-unavailable"`.
+
+### Scope matching (added 2026-10-23)
+
+A grant's `scope` narrows which instances of an action it covers. A
+host MUST match it as follows:
+
+1. **Exact string**: the scope equals the requested scope.
+2. **`*` glob suffix**: a scope ending in `*` matches any requested
+   scope sharing the prefix (a lone `*` matches every scope). A `*` in
+   any other position is not a wildcard.
+3. **Typed scope forms**: an action MAY define typed scope forms
+   `<kind>:<value>`. `label:<label>` matches when the operator-assigned
+   label of the target session equals `<label>`; `label:<prefix>*`
+   matches when that label begins with `<prefix>`. AIP-39 declares both
+   forms for the session actions.
+4. **`selector:<id>`**: the requested scope is a member of the set
+   resolved from the saved selector named `<id>`. Selector resolution
+   is defined by [AIP-43 § Selectors referenced by policy](/docs/aip-43#selectors-referenced-by-policy). Matching is
+   membership in the resolved set and MUST fail closed (deny) when the
+   selector cannot be resolved.
+5. **No `scope`**: the grant matches every scope of that action.
+
+Scope vocabularies are action-specific. The standard runtime actions
+define theirs in [AIP-39 §Standard runtime
+actions](/docs/aip-39#standard-runtime-actions-added-2026-10-23).
+
+### Delegation ceiling (added 2026-10-23)
+
+A nested principal never holds more authority than its parent. The
+ceiling is a decision rule, not an operation on grant sets. A request
+made by a nested principal is allowed only if BOTH of the following
+hold:
+
+1. It is allowed when evaluated for the child, using the child's
+   subject policy.
+2. It is allowed when re-evaluated with the parent as principal, using
+   the parent's subject policy, and this test repeats recursively up
+   the chain to the root principal.
+
+A refusal at any level denies the request. Re-evaluating with the
+parent as principal means the same action, scope, and conditions are
+tested, with the child's principal replaced by the parent's; a deny
+that applies to the parent therefore applies to the child. This is the
+generic form of the rule [AIP-46](/docs/aip-46) already states for
+delegation and spawn: a child policy can narrow, never widen. Hosts
+MUST evaluate the ceiling before creating the nested principal, not
+rely on the child to enforce it.
+
+### Rolling limit windows and spend limits (added 2026-10-23)
+
+`Limit.per` only names a fixed unit (`second`, `minute`, `hour`, `day`).
+Many real ceilings are rolling and longer, such as "25 USD in the last
+5 hours" or "1000 calls in the last 7 days". A `Limit` therefore gains
+an optional `window`:
+
+- `window?: string`, an ISO-8601 duration (`"PT5H"`, `"P7D"`). ISO-8601
+  is the canonical form everywhere in AIP-38. A host MAY accept
+  shorthand on input (`5h`, `7d`) but MUST normalize it to ISO-8601
+  before storing or evaluating. The window is **rolling**, measured
+  back from evaluation time, not a calendar bucket.
+- `per` and `window` are **mutually exclusive**. A limit declaring both
+  is invalid. A limit declaring neither is a static cap (for example
+  `max-concurrent-sandboxes`).
+
+One standard limit kind is registered:
+
+```yaml
+limits:
+  - kind: spend-usd
+    value: 25              # USD ceiling
+    window: PT5H           # over the rolling window
+    scope: session         # "session" | "auth-profile"
+```
+
+- `kind: "spend-usd"`: `value` is a USD ceiling accumulated over
+  `window` for the given `scope`.
+- `scope: "session"` aggregates spend over the session's lineage: a
+  successor declared via `succeeds`, or a continue-fresh handoff,
+  shares the bucket of the session it replaces, so a handoff does not
+  reset the cap.
+- `scope: "auth-profile"` is the hard cap: it aggregates spend across
+  all sessions that use the profile. Hosts MAY support both scopes.
+- Exceeding the ceiling **denies new `model:invoke`** actions and the
+  decision is reported (`reason: "limit-exceeded"`). It never kills a
+  running turn: an in-flight inference completes, and only the next
+  invocation is refused.
 
 ## Example — standalone POLICY.md
 
@@ -451,6 +615,23 @@ policy:
   `default: deny` PLUS host policy fallback (typically: workspace owner
   has all permissions, others have none).
 
+### The 2026-10-23 explicit-deny-and-composition amendment (draft)
+
+A policy with no `effect` evaluates exactly as before: every grant is
+an allow, grants compose by union, and `default` still decides when no
+grant matches. Explicit deny only changes an outcome where a matching
+deny exists, and no pre-amendment policy can contain one. Resource and
+subject policies are opt-in: a resource with no `policy:` block is
+decided by the subject policy alone, as before. A grant with no `scope`
+still matches every scope of its action. The only additions are new
+optional fields (`effect`, `window`, `attachment` in the decision
+record) and two new reason values (`explicit-deny` and
+`resource-policy-unavailable`; an unresolvable selector reports as
+`no-grant`), all of which a pre-amendment consumer treats as absent or
+unknown. The reference implementation stored the auth-profile spend
+scope as `"profile"`; migration MUST rewrite stored limits to
+`scope: "auth-profile"`.
+
 ## Security considerations
 
 POLICY.md is **declarative**: a malicious manifest can grant itself
@@ -476,9 +657,9 @@ unless the parent explicitly opts into delegation.
    ships breaking changes, do dependent workspaces auto-fail or
    auto-upgrade? Likely: pin via `.workspace-lock.json`.
 
-2. **Negative grants (explicit deny).** Currently grants are positive
-   only. A "deny Bob commits even though group says yes" pattern would
-   need explicit deny grants. Defer until concrete need.
+2. **Negative grants (explicit deny).** Resolved by the 2026-10-23
+   amendment: a grant carries `effect: "deny"` and a matching deny wins
+   over any allow. See [§Explicit deny](#explicit-deny-added-2026-10-23).
 
 3. **Policy mutation audit.** When POLICY.md is edited, who's allowed
    and who reviews? Recursive — POLICY governs POLICY edits.

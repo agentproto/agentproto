@@ -265,6 +265,72 @@ have known) or to `risk_level` (raising the floor) MUST bump major
 version. Implementors pinned to `^1.0.0` of an action MAY refuse to
 bind against `2.0.0` until they update.
 
+### Standard runtime actions (added 2026-10-23)
+
+> **Draft AIP-39 amendment** (2026-10-23). *Normative identifiers
+> (action ids, field names, literals) are English and final.*
+
+**Problem.** [AIP-38](/docs/aip-38) grants on ACTION ids, but the
+standard library only named storage and sandbox verbs. Runtime verbs
+had no declared home, so hosts invented ad-hoc access mechanisms
+instead of grants: a session prompt allowlist, a per-model allow/block
+list, an ad-hoc "use this account" check. This amendment declares the
+six runtime verbs as members of the standard library so AIP-38 can
+grant them like any other action.
+
+The entries live under `@agentik/actions/standard/`:
+
+| id | library entry | category | target_kind | mutates | risk_level | approval | semantics |
+|---|---|---|---|---|---|---|---|
+| `session:spawn` | `@agentik/actions/standard/session-spawn` | `runtime` | `session` | `["session:*"]` | 2 | `auto` | Start a new session. |
+| `session:prompt` | `@agentik/actions/standard/session-prompt` | `runtime` | `session` | `["session:conversation"]` | 1 | `auto` | Send a prompt or steer a running session someone else owns. |
+| `session:control` | `@agentik/actions/standard/session-control` | `runtime` | `session` | `["session:*"]` | 2 | `auto` | Interrupt, kill, restart, or hand off a session someone else owns. |
+| `session:configure` | `@agentik/actions/standard/session-configure` | `runtime` | `session` | `["session:config"]` | 1 | `auto` | Change a running session's config axis (`model`, `access`, `harness`, `posture`, `effort`, `route`, `contextProfile`). |
+| `model:invoke` | `@agentik/actions/standard/model-invoke` | `runtime` | `model` | `[]` | 2 | `auto` | Use a model for inference. |
+| `auth-profile:use` | `@agentik/actions/standard/auth-profile-use` | `runtime` | `auth-profile` | `[]` | 2 | `auto` | Bill or authenticate through an auth profile. |
+
+**Risk rationale.** `session:spawn` and `session:control` are risk 2:
+they create or change processes with the host's authority, which is an
+external side effect. `session:prompt` is risk 1: it writes to one
+session's conversation, and any spend it enables still needs
+`model:invoke`. `session:configure` is risk 1: it is a scoped write to
+one session's config, and any spend it enables still needs
+`model:invoke`. `model:invoke` and `auth-profile:use` are risk 2
+because both spend money: inference is billed and an auth profile
+selects the account that pays or authenticates.
+
+**Optional scope.** A grant MAY narrow any of these actions with
+`scope`, whose matching rules are defined in
+[AIP-38 §Scope matching](/docs/aip-38#scope-matching-added-2026-10-23):
+
+| id | scope |
+|---|---|
+| `session:spawn` | harness slug or agent ref |
+| `session:prompt` | session id, `label:<label>`, or `label:<prefix>*` |
+| `session:control` | session id, `label:<label>`, or `label:<prefix>*` |
+| `session:configure` | config axis name (`model`, `access`, `harness`, `posture`, `effort`, `route`, `contextProfile`) |
+| `model:invoke` | model id, `*`-suffix glob, or `selector:<id>` |
+| `auth-profile:use` | auth profile id |
+
+A scope MAY be a `selector:<id>` ref. The selector itself is defined by
+[AIP-43 § Selectors referenced by policy](/docs/aip-43#selectors-referenced-by-policy): matching is membership in the
+resolved set, and evaluation fails closed when the selector cannot be
+resolved.
+
+When a non-owner restarts or hands off a session with a config
+overlay, `session:control` is evaluated IN ADDITION to the spawn set
+implied by the overlay; both evaluations must allow (ANDed).
+`session:prompt` is evaluated the same way when steering starts a
+fresh session.
+
+**Ownership.** AIP-39 only declares these ids. The owning AIPs define
+the semantics and the evaluation points:
+[AIP-46](/docs/aip-46) for sessions (spawn, prompt, control,
+configure), [AIP-69](/docs/aip-69) for profiles, and
+[AIP-43](/docs/aip-43) for selectors. A consumer MUST NOT read this
+table as a permission: the effective decision is still an AIP-38
+policy evaluation.
+
 ## Composition pattern (`inline | ref | file`)
 
 Like every composable block in the AIP series, ACTION refs accept
@@ -472,6 +538,17 @@ Migration path:
 2. Update TOOL.md files with `implements: <action-ref>`.
 3. Update POLICY.md grants to use `{ action: "<ref>" }` form.
 4. Update INTENT/WORKFLOW similarly.
+
+### The 2026-10-23 runtime-actions amendment (draft)
+
+§Standard runtime actions is purely additive. It adds six entries to
+the standard library and names their categories, target kinds, side
+effects, risk levels, and scopes. An existing host that does not
+publish these actions is unaffected: no existing action id changes
+shape. A host that adopts the entries SHOULD map its existing ad-hoc
+grants onto these ids in its migration; it starts declaring verbs it
+previously enforced with ad-hoc mechanisms, and the ids are the only
+new contract.
 
 ## Security considerations
 
