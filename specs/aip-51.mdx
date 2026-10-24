@@ -7,10 +7,10 @@ type: Standards Track
 created: 2026-07-05
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 19, 43]
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/redaction
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/processor
 discussions-to: https://github.com/agentproto/agentproto/discussions/51
 layer: primitives
-package: "@agentproto/redaction"
+package: "@agentproto/processor"
 ---
 
 | Field | Value |
@@ -21,7 +21,7 @@ package: "@agentproto/redaction"
 | Type | Standards Track |
 | Domain | processor.agentproto.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-19](/docs/aip-19), [AIP-43](/docs/aip-43) |
-| Reference Impl | [`@agentproto/redaction`](https://github.com/agentproto/ts/tree/main/packages/redaction) |
+| Reference Impl | [`@agentproto/processor`](https://github.com/agentproto/ts/tree/main/packages/processor) |
 
 ## Abstract
 
@@ -34,7 +34,7 @@ output), or leaves the process (egress) — and chain: several
 processors compose into one, each one's output feeding the next.
 
 Redaction is the AIP's motivating instance, not its ceiling. The
-shipped `@agentproto/redaction` package already implements this shape
+shipped `@agentproto/redaction` package (now `@agentproto/processor`) already implements this shape
 under the names `Redactor` / `RedactionContext` / `chainRedactors`;
 this AIP generalizes that contract to `Processor` / `ProcessorContext`
 / `chain` so hash, sample, truncate, PII-detection, schema-coercion,
@@ -46,7 +46,7 @@ seam must resolve a redaction-capable chain, or explicitly opt out.
 
 ## Motivation
 
-`@agentproto/redaction` shipped as a leaf package so egress boundaries
+`@agentproto/redaction` (now `@agentproto/processor`) shipped as a leaf package so egress boundaries
 (loggers, telemetry sinks, session tracers) could depend on a single
 transform interface without pulling in a kernel. It solved redaction.
 It did not solve the broader problem sitting one layer up: **every
@@ -74,7 +74,7 @@ sit as sibling primitives: TOOL does work, AGENT orchestrates, and
 PROCESSOR transforms the values that flow between them.
 
 This AIP defines the generic contract and the built-in catalog. It
-does **not** define a new runtime package: `@agentproto/redaction`
+does **not** define a new runtime package: `@agentproto/processor`
 is both the reference implementation and, per the
 [Backward Compatibility](#backward-compatibility) section, the
 generalization target — `Redactor` becomes an alias for
@@ -85,7 +85,7 @@ generalization target — `Redactor` becomes an alias for
 ### Core type shape (normative)
 
 ```ts
-/** Recursive JSON value — same shape as @agentproto/redaction's JsonValue. */
+/** Recursive JSON value, same shape as @agentproto/processor's JsonValue. */
 type JsonValue =
   | string
   | number
@@ -140,7 +140,7 @@ classification of *seams*, not of the primitive (see
 
 ### Generalizes the shipped `Redactor`
 
-`@agentproto/redaction` (`ts/packages/redaction/src/types.ts`) already
+`@agentproto/processor` (`ts/packages/processor/src/types.ts`) already
 implements this shape under different names. The mapping is direct —
 field names carry over wherever the concept is unchanged:
 
@@ -161,7 +161,7 @@ then feeds the result to `b`, then to `c`.
 ### Built-in catalog
 
 The generic `Processor` type has no privileged built-ins. The catalog
-below is what `@agentproto/redaction` ships today, reframed as
+below is what `@agentproto/processor` ships today, reframed as
 catalog entries — none of them get special treatment from the type or
 from `chain`:
 
@@ -170,7 +170,7 @@ from `chain`:
 | `none` | — | Passthrough — returns the value unchanged. |
 | `deny-list` | `redaction` | Deep, immutable walk that masks a value whose object **key** matches a deny pattern (credentials, tokens, cookies, …). |
 | `truncate` | `size-limit` | Caps long strings and long arrays so oversized payloads don't cross the seam. |
-| `value-scan` | `redaction` | Deep walk that scans string **values** for well-known secret shapes (prefixed API keys, JWTs, PEM private keys, cloud tokens) and masks the match regardless of key. Complements `deny-list`, which only matches by key. **Shipped in v1** (`ts/packages/redaction/src/redactors.ts`, registered in `redaction/src/catalog.ts`) — not a future or v2 capability. |
+| `value-scan` | `redaction` | Deep walk that scans string **values** for well-known secret shapes (prefixed API keys, JWTs, PEM private keys, cloud tokens) and masks the match regardless of key. Complements `deny-list`, which only matches by key. **Shipped in v1** (`ts/packages/processor/src/redactors.ts`, registered in `processor/src/catalog.ts`); not a future or v2 capability. |
 | `chain` | — | Composes N catalog entries; the `secrets` composite (`deny-list` + `value-scan`) is the recommended default for egress. |
 
 A `ProcessorCatalogEntry` generalizes `RedactorCatalogEntry` the same
@@ -317,8 +317,8 @@ small and the invariant local to the one profile that needs it.
 
 **Why `value-scan` is a first-class built-in, not a future
 capability.** It's already shipped and registered in the redaction
-catalog (`ts/packages/redaction/src/redactors.ts`,
-`redaction/src/catalog.ts`) — describing it as anything but a current
+catalog (`ts/packages/processor/src/redactors.ts`,
+`processor/src/catalog.ts`), describing it as anything but a current
 v1 built-in would misstate the reference implementation's actual
 state.
 
@@ -333,14 +333,14 @@ runtime change:
 - `RedactionContext` → `ProcessorContext` (with `field` widened per
   the [mapping table](#generalizes-the-shipped-redactor) above).
 - `chainRedactors` → `chain` (identical reduce semantics).
-- `@agentproto/redaction`'s existing exports (`Redactor`,
+- `@agentproto/processor`'s existing exports (`Redactor`,
   `RedactionContext`, `chainRedactors`, `REDACTOR_CATALOG`,
   `resolveRedactor`, …) keep re-exporting unchanged — nothing that
-  imports from `@agentproto/redaction` today breaks.
+  imports from `@agentproto/processor` today breaks.
 
-Landing the `Redactor → Processor` alias, any `@agentproto/processor`
-package, and a Mastra processor bridge are follow-up runtime work in
-`ts/`, tracked separately from this spec PR.
+The `Redactor → Processor` alias remains follow-up runtime work in
+`ts/`, tracked separately from this spec PR. `@agentproto/processor`
+already ships the `Redactor` exports this AIP generalizes.
 
 ## Security Considerations
 
@@ -380,7 +380,7 @@ package, and a Mastra processor bridge are follow-up runtime work in
 ## Reference Implementation
 
 The canonical implementation is
-[`@agentproto/redaction`](https://github.com/agentproto/ts/tree/main/packages/redaction).
+[`@agentproto/processor`](https://github.com/agentproto/ts/tree/main/packages/processor).
 It currently ships the `Redactor` / `RedactionContext` / `chainRedactors`
 names this AIP generalizes, plus the `none`, `deny-list`, `truncate`,
 and `value-scan` built-ins and the `secrets` composite. The

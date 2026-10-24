@@ -9,9 +9,9 @@ updated: 2026-10-18
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42]
 resources: ./resources/aip-53/draft
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/app-kit
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/app
 layer: surfaces
-package: "@agentproto/app-kit"
+package: "@agentproto/app"
 ---
 
 | Field | Value |
@@ -23,7 +23,7 @@ package: "@agentproto/app-kit"
 | Domain | apps.sh |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-42](/docs/aip-42) (AGENT) |
 | Resources | [`./resources/aip-53`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft) — `ADAPTER.md`, `APP.schema.json` |
-| Reference Impl | [`@agentproto/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit) |
+| Reference Impl | [`@agentproto/app`](https://github.com/agentproto/ts/tree/main/packages/app) |
 
 ## Abstract
 
@@ -234,7 +234,7 @@ interface AppUiDefinition {
 `agents` MUST be a non-empty array UNLESS `ui` is present, in which case
 it MAY be empty or omitted entirely — a **UI-only app** ships a `ui`
 block and no agent behaviour, and is a first-class conforming app (this
-codifies `packages/app-kit/src/define-app.ts:49-52`'s shipped UI-only
+codifies `packages/app/src/define-app.ts:60-64`'s shipped UI-only
 carve-out, pinned by `define-app.test.ts`'s "UI-only apps (zero
 agents)" suite, and matches the five daemon builtin panels —
 `sessions-panel`, `agents-overview`, `bureau-sessions`, `session-story`,
@@ -267,10 +267,10 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
    empty or omitted `agents` array — is conforming. An app with zero
    agents AND no `ui` block is not a conforming `AppDefinition` —
    `defineApp` MUST refuse it. This rule codifies shipped behaviour:
-   `packages/app-kit/src/define-app.ts:49-52` accepts `(agents empty ||
+   `packages/app/src/define-app.ts:60-64` accepts `(agents empty ||
    omitted) && ui === undefined` as the only rejection case, its test
    suite pins UI-only apps as expected behaviour
-   (`packages/app-kit/src/__tests__/define-app.test.ts`, "UI-only apps
+   (`packages/app/src/__tests__/define-app.test.ts`, "UI-only apps
    (zero agents)"), and the five daemon builtin panels
    (`packages/apps/src/index.ts:14-20`) ship exactly that way.
 
@@ -1247,7 +1247,7 @@ installed-app-id form; the adapter form is untouched.
 
 The remainder of this section describes the original AIP: not applicable — this AIP introduces a new spec canonizing bundle,
 package, and UI-bridge conventions that already shipped as working code
-(`@agentproto/app-kit`'s `defineApp`/`emitApp`/`loadAppHandle`, the CLI's
+(`@agentproto/app`'s `defineApp`/`emitApp`/`loadAppHandle`, the CLI's
 `app pack`/`unpack`/`serve`/`build`/`dev` verbs, `@agentproto/app-client`'s
 `connectMcpApp`, and the daemon's `app_*` tool family). No prior AIP
 claimed the `app/v1` or `agentapp/v1` schema strings or the

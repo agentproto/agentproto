@@ -2,7 +2,7 @@
 
 Worked examples for the surfaces this AIP fixes. Every example round-trips
 against [`./APP.schema.json`](./APP.schema.json) and the reference
-implementation (`packages/app-kit`, `packages/runtime`).
+implementation (`packages/app`, `packages/runtime`).
 
 ## 1. A UI-only app (empty `agents`, `ui` present)
 

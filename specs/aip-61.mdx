@@ -9,8 +9,8 @@ author: Jeremy André <jeremy@agentik.net>
 requires: [1, 36, 45, 46]
 discussions-to: https://github.com/agentproto/agentproto/discussions/61
 layer: host
-package: "@agentproto/llm-endpoint"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/llm-endpoint
+package: "@agentproto/inference-endpoint"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/inference-endpoint
 ---
 
 | Field | Value |
@@ -23,7 +23,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/llm-endpoint
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX: the `SandboxProvider` shape this AIP mirrors, and the `network.egress` block §5 constrains), [AIP-45](/docs/aip-45) (HARNESS: the harness manifest the fit check reads a first-request weight from), [AIP-46](/docs/aip-46) (AGENT-SESSIONS: `agent_start`, the field this AIP extends) |
 | Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE: the audit log `local-only` per-request records land in), [AIP-58](/docs/aip-58) (RUN: `Spend` is the natural shape for billing an endpoint's `costPerHour`), [AIP-59](/docs/aip-59) (MOBILE PAIRING: one candidate control channel for an `operator-hosted`/`private` endpoint or a paired `device`) |
 | Created | 2026-09-27 |
-| Package | `@agentproto/llm-endpoint` (gateway, addressing, static registration); `@agentproto/runtime` ([AIP-46](/docs/aip-46)'s `agent_start`, extended here) |
+| Package | `@agentproto/inference-endpoint` (gateway, addressing, static registration); `@agentproto/runtime` ([AIP-46](/docs/aip-46)'s `agent_start`, extended here) |
 
 ## Abstract
 
@@ -618,7 +618,7 @@ generated id currently backs that pair.
 
 **Shipped today**, and what this AIP builds on rather than re-specifies:
 
-- `@agentproto/llm-endpoint` already implements §3.1's static registration
+- `@agentproto/inference-endpoint` already implements §3.1's static registration
   (`~/.agentproto/llm-endpoints.json`) and §3.3's `<endpoint>/<model>`
   transparent-routing form — every named entry becomes a routable
   `<id>/<model>` provider through the same dispatch path as its `forge`/
