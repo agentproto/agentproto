@@ -186,6 +186,13 @@ host-generated monotonic id. It MUST remain stable when the same native event
 is retried. This rule is local deduplication, not an exactly-once delivery
 claim.
 
+Every segment MUST be non-empty and MUST NOT contain whitespace or control
+characters. The session id, the event and the occurrence id MUST NOT contain
+`/`. The binding id is everything after the third `/`; it MAY itself contain
+`/`, for example a hierarchical id built from an agent id and an index, as long
+as each `/`-separated part is non-empty. This keeps the key parseable without
+escaping.
+
 ### 6. Delivery and failure
 
 - Admission runs synchronously and MUST have a finite timeout.
@@ -271,12 +278,16 @@ The reference implementation is the daemon runtime in
 which already holds the session event bus, the semantic permission hooks and
 the routine registrar that this AIP generalizes. The event names live in
 [`@agentproto/lifecycle`](https://github.com/agentproto/ts/tree/main/packages/lifecycle)
-(AIP-37), which is vocabulary-only today and does not yet carry the harness
-extension events. Adding those events, the AIP-45 harness capability
-declaration, and the native Codex and Claude Code hook projections are
-follow-up work in the same repository. This AIP defines no package of its own.
-Until those projections ship, a capability is absent and the host MUST NOT
-claim native ownership.
+(AIP-37), which carries the harness extension events and the hooks contract
+with its conformance fixtures. The AIP-45 `capabilities.hooks` declaration is
+typed in the agent-cli driver, reported by the harness and session capability
+surfaces, and declared today by the Codex and Claude Code adapters. The
+internal contract types (admission decisions and occurrence keys) are in
+`@agentproto/runtime`. The durable reaction receipts, the reaction runner and
+the native hook projections themselves are follow-up work in the same
+repository. This AIP defines no package of its own. Until a native projection
+ships for an event, the host MUST NOT claim native ownership of it, even where
+the harness declares the capability.
 
 ## Security Considerations
 
