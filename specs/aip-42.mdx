@@ -66,7 +66,7 @@ neither one canonical:
    no scan-and-register from a workspace.
 
 2. **As `agents/<role>/AGENT.md`** under
-   [AIP-6 `agentcompanies/v1`](/docs/aip-6) `kind: agent` doctype.
+   [AIP-6 `company/v1`](/docs/aip-6) `kind: agent` doctype.
    Limited to company contexts; field set ad-hoc; no formal spec.
 
 Five problems compound:
@@ -568,9 +568,9 @@ overridden. The agent's POLICY grants apply to the target.
 
 This AIP is purely additive:
 
-- [AIP-6](/docs/aip-6) `agentcompanies/v1` `kind: agent` (under
+- [AIP-6](/docs/aip-6) `company/v1` `kind: agent` (under
   `agents/<role>/AGENT.md`) remains supported. Loaders recognise both
-  `schema: agentcompanies/v1, kind: agent` (legacy) and
+  `schema: company/v1, kind: agent` (legacy) and
   `schema: agent/v1` (new). Migration is mechanical.
 - [AIP-9 OPERATOR](/docs/aip-9) is **re-pointed** to extend AGENT
   (per AIP-9 patch), but its file form (`operators/<slug>/OPERATOR.md`)
@@ -580,7 +580,7 @@ This AIP is purely additive:
 
 Migration path:
 1. Move `agents/<role>/AGENT.md` → `.agents/<slug>/AGENT.md`.
-2. Update frontmatter `schema: agentcompanies/v1, kind: agent` →
+2. Update frontmatter `schema: company/v1, kind: agent` →
    `schema: agent/v1`.
 3. Map `traits.*` / `capabilities[]` / `communicationStyle` from the
    old shape directly (same field names).

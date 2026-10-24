@@ -207,7 +207,7 @@ bump.
 | `sandbox` | object | (none) | Sandbox policy: inline / ref / file. See AIP-36. Optional — when absent, command-execution tools MUST be unavailable. |
 | `code` | object | (none) | Code policy: inline / ref / file. See AIP-26. Optional — when present, the workspace IS a code-workspace / repo (see "Workspace as repo" below). |
 | `work` | object | (none) | `{ inline: <WORK.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }` — [AIP-20](/docs/aip-20) WORK.md, same inline/ref/file union as `code`. A project node's status/board lives here, NOT in a flat status file: items are AIP-18 `ITEM.md` records under the collection(s) `work` declares. See "Node status: `work:`" below. |
-| `presence` | object | (none) | `{ inline: <PRESENCE.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }`. A `presence/v1` document: how this node speaks in public (audience, topics, forbidden words, channels, cadence, approval, gates). Same inline/ref/file union as `work`. The voice itself stays in the [AIP-25](/docs/aip-25) PERSONA.md the document names. See "Presence block: `presence:`" below. |
+| `presence` | object | (none) | `{ inline: <PRESENCE.md frontmatter body> }` \| `{ ref: <path or registry slug> }` \| `{ file: <path> }`. A `workspace.presence/v1` document: how this node speaks in public (audience, topics, forbidden words, channels, cadence, approval, gates). Same inline/ref/file union as `work`. The voice itself stays in the [AIP-25](/docs/aip-25) PERSONA.md the document names. See "Presence block: `presence:`" below. |
 | `identity` | object \| array | (none) | AIP-23 identity-ref block — default identity for all sub-blocks of this workspace. Sub-blocks (storage, sandbox, code) override. See [AIP-23 identity-ref](/docs/aip-23#identity-reference-block-cross-aip-composable-primitive). |
 | `wall` | enum | `"isolated"` | Visibility level: `"shared"` \| `"isolated"` \| `"sealed"` \| `"hard"`. See "The four wall levels" below. |
 | `includes` | array | `[]` | `{ ref: "ws://workspaces/<id>[#<subpath>]", mode: "read" \| "write" \| "append" }`. Consumer-side half of a door. Honoured only if the target ALSO exports to this id — see "Includes and exports". |
@@ -368,7 +368,7 @@ interface WorkspaceDefinition {
     or fire routines at a node whose effective status is `paused` or
     `archived`. See "Node status: active / paused / archived".
 
-15. **A declared `presence:` MUST resolve to a parseable `presence/v1`
+15. **A declared `presence:` MUST resolve to a parseable `workspace.presence/v1`
     document, and its effective (merged) form MUST name a `persona`.**
     `presence:` itself is optional; this rule only fires when it IS
     declared. A `presence.file` or `extends` path that escapes the tree
@@ -531,11 +531,11 @@ concurrently. `agentproto workspace check` reports the effective
 ### Node type registry: TYPES.md
 
 Exactly one `TYPES.md` per tree, at the root, `schema:
-"workspace-types/v1"`:
+"workspace.types/v1"`:
 
 ```yaml
 ---
-schema: workspace-types/v1
+schema: workspace.types/v1
 types:
   root:
     parents: []
@@ -626,7 +626,7 @@ cover a neighbouring part and none covers this one:
 | Limits and budgets | [AIP-38](/docs/aip-38) POLICY.md (`policy:`) | No notion of a channel, a topic or a published piece |
 | Approval requests and signatures | [AIP-7](/docs/aip-7) GOVERNANCE.md | No policy that names which pieces need approval and who approves |
 | Account credentials | [AIP-19](/docs/aip-19) SECRETS.md | No link between a secret and a channel |
-| Company-wide defaults | [AIP-6](/docs/aip-6) COMPANY.md (no brand or voice fields) | Company defaults travel as a parent `presence/v1` document through `extends` |
+| Company-wide defaults | [AIP-6](/docs/aip-6) COMPANY.md (no brand or voice fields) | Company defaults travel as a parent `workspace.presence/v1` document through `extends` |
 
 `presence:` adds no voice, no work tracking and no policy engine. It adds
 the one document that binds them for public speech, and it names the
@@ -637,7 +637,7 @@ persona instead of restating it.
 `presence:` is the same inline / ref / file union as `work:`. The
 document is markdown with YAML frontmatter, conventionally `PRESENCE.md`
 in a `presence/` folder next to the node's `WORKSPACE.md`. The schema is
-`PRESENCE.schema.json` (schema tag `presence/v1`) and a worked example is
+`PRESENCE.schema.json` (schema tag `workspace.presence/v1`) and a worked example is
 `PRESENCE.example.md`, both under `resources/aip-34/draft/`. The body is
 informational: hosts read only the frontmatter.
 
@@ -645,10 +645,10 @@ informational: hosts read only the frontmatter.
 
 | Field | Type | Description |
 |---|---|---|
-| `schema` | const `presence/v1` | Required. |
+| `schema` | const `workspace.presence/v1` | Required. |
 | `name`, `title`, `description`, `version` | strings | Required. `name` is kebab-case, 2 to 64 chars. |
 | `status` | enum | Required. `draft`, `active` or `paused`. |
-| `extends` | path | Relative path to a parent `presence/v1` document (for example company defaults). |
+| `extends` | path | Relative path to a parent `workspace.presence/v1` document (for example company defaults). |
 | `persona` | path or ws ref | The [AIP-25](/docs/aip-25) PERSONA.md that carries the voice. Required in the effective document. |
 | `audience` | object | `primary`, `pains[]`, `notTargeted[]`. |
 | `topics` | object | `pillars[]` (`id`, `title`, `angle`) and `exclude[]`. |
@@ -743,7 +743,7 @@ and the document, reduced to the fields that matter (the full version is
 
 ```yaml
 ---
-schema: presence/v1
+schema: workspace.presence/v1
 name: shopbot-presence
 title: ShopBot public presence
 description: How ShopBot speaks on LinkedIn and X.
@@ -765,13 +765,13 @@ gates:
 ### Tree-wide lockfile: agentproto.lock
 
 Plain YAML (no frontmatter, no body) at the tree root, `lockfile:
-"agentproto-lock/v1"`. Pins every [AIP-53](/docs/aip-53) app and
+"workspace.lock/v1"`. Pins every [AIP-53](/docs/aip-53) app and
 AIP-64 pack installed anywhere in the tree to an exact version, its
 source, the sha256 of the fetched artifact, which node it's attached
 to, and a **per-attach** data directory:
 
 ```yaml
-lockfile: agentproto-lock/v1
+lockfile: workspace.lock/v1
 generated: 2026-10-17T18:00:00Z
 apps:
   - id: "@agentik/seo-crew"
@@ -783,7 +783,7 @@ apps:
 packs:
   - name: "@pygmalion/staff"
     version: 0.1.0
-    digest: "agentproto-pack-digest/v1:…"
+    digest: "review.pack-digest/v1:…"
     attach: "@jeremy/root"
 ```
 
@@ -798,13 +798,13 @@ to path confinement (below) — hosts MUST reject a lock entry whose
 ### Sealed/hard digest: EXPORT.md
 
 The only file an ancestor of a `sealed` or `hard` node is allowed to
-read from it. `schema: "workspace-export/v1"` frontmatter (`from`,
+read from it. `schema: "workspace.export/v1"` frontmatter (`from`,
 `generated_at`, optional `generated_by`, `sections`), free-form prose
 body:
 
 ```yaml
 ---
-schema: workspace-export/v1
+schema: workspace.export/v1
 from: "@jeremy/perso"
 generated_at: 2026-10-17T07:00:00Z
 generated_by: coach
@@ -967,6 +967,8 @@ To migrate a host into the AIP-34 model:
 2. On read, prefer the manifest body over the row fields it
    covers.
 3. On row mutation, re-emit the manifest to keep them in sync.
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema ids are `workspace.lock/v1`, `workspace.presence/v1`, `workspace.export/v1`, and `workspace.types/v1`; documents that declare `agentproto-lock/v1`, `presence/v1`, `workspace-export/v1`, or `workspace-types/v1` remain valid, and hosts MUST accept both.
 
 ## Migrating from workspace/v1
 

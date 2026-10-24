@@ -13,10 +13,10 @@ and `defineInvoice` to agency authors. Authors themselves should read
 AIP-8 sits on top of two other specs. A conforming host MUST first implement, or
 compose with implementations of:
 
-- [AIP-6](/docs/aip-6) — `agentcompanies/v1` for `COMPANY.md`, `ROLE.md`,
+- [AIP-6](/docs/aip-6) — `company/v1` for `COMPANY.md`, `ROLE.md`,
   `OPERATOR.md`, `OBJECTIVE.md`. AIP-8 inherits all four and references roles +
   operators by slug.
-- [AIP-7](/docs/aip-7) — `agentgovernance/v1` for `signature`, `audit-event`,
+- [AIP-7](/docs/aip-7) — `governance/v1` for `signature`, `audit-event`,
   `policy`. Every contractual artifact in AIP-8 (`AGREEMENT.md`,
   `DELIVERABLE.md`, `INVOICE.md`) is gated through AIP-7's signature doctype,
   and every state transition emits an AIP-7 audit event.
@@ -338,8 +338,8 @@ These stay out of the spec on purpose.
 ## See also
 
 - [AIP-8 — agentagencies/v1 spec](/docs/aip-8)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
-- [AIP-7 — agentgovernance/v1](/docs/aip-7)
+- [AIP-6 — company/v1](/docs/aip-6)
+- [AIP-7 — governance/v1](/docs/aip-7)
 - [AIP-15 — WORKFLOW.md spec](/docs/aip-15) — procedures are workflow-shaped
 - [AIP-14 — TOOL.md spec](/docs/aip-14) — workflow steps invoke tools
 - [`./AGENCY.schema.json`](./AGENCY.schema.json) — manifest validator

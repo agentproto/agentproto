@@ -24,7 +24,7 @@ succeed; the lesson captures the _behaviour_, not the narrative.
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: cite-source-url-in-research-summaries
 title: Always cite the source URL inline when summarising third-party research.
 trigger:
@@ -79,7 +79,7 @@ Failure-only lessons are first-class. `success_count: 0`, `failure_count: 1`,
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: verify-page-id-before-load-more
 title: Verify the page identifier before clicking "Load More" twice in a row.
 trigger:
@@ -139,7 +139,7 @@ targets gate filters them out before tag scoring.
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: marketing-lead-shorten-subject-lines
 title:
   Keep email subject lines under 50 characters when drafting for the
@@ -198,7 +198,7 @@ role. Broader than Example 3 but still narrower than "all agents."
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: researcher-cross-check-numerical-claims
 title:
   Cross-check numerical claims against at least two independent sources before
@@ -263,7 +263,7 @@ disk for audit; retrieval excludes it by default.
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: prefer-batch-embed-over-loop-when-rate-limited
 title:
   Prefer batch embedding over per-item loops when the embedding endpoint is
@@ -327,7 +327,7 @@ directive.
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: include-context-block-in-tool-call-prompts
 title:
   Include the conversation context block in tool-call prompts — but not for
@@ -398,7 +398,7 @@ lesson bank looks like a few weeks in.
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: paginate-large-list-tools-by-default
 title:
   Paginate any list-returning tool by default; never request more than 50 items

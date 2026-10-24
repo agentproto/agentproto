@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-tool
 title: Author a TOOL.md (AIP-14)
 description:

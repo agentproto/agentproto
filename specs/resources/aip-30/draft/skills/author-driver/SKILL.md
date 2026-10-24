@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-driver
 title: Author a DRIVER.md (AIP-30)
 description:

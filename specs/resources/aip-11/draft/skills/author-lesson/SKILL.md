@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-lesson
 title: Author a LESSON.md (AIP-11)
 description:
@@ -171,7 +171,7 @@ Write `lessons/<slug>.md`:
 
 ```md
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: <kebab-slug>
 title: <imperative one-sentence title>
 trigger:

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-office-workspace
 title: Author a OFFICE.md (workspace root or view) for AIP-22
 description:
@@ -593,7 +593,7 @@ you are creating.
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — substrate this skill
   composes on
 - [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6) — predecessor (deprecated)
+- [AIP-6 — company/v1](/docs/aip-6) — predecessor (deprecated)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace AIP

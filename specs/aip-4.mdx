@@ -58,7 +58,7 @@ Sketch of the registry-layer additions:
 
 ```yaml
 ---
-schema: designkit/v1
+schema: design/v1
 kit: <kebab-case-kit-id>
 title: <human-readable name>
 author: <name>
@@ -99,6 +99,8 @@ bridge is the canonical interop point with AIP-5 (CANVAKIT.md).
 
 Not applicable — AIP-4 anchors a new registry. Any future breaking change
 to registry conventions will require a successor AIP (`replaces: 4`).
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `design/v1`; documents that declare `designkit/v1` remain valid, and hosts MUST accept both.
 
 ## Security Considerations
 

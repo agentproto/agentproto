@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-assembly-workspace
 title: Author an ASSEMBLY.md (workspace root or view) for AIP-24
 description:

@@ -31,7 +31,7 @@ Path:
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "signature",
   "artifact": "contract-2026-acme-renewal",
   "decision": "approve",
@@ -70,7 +70,7 @@ signature files attach to the same audit entry.
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "signature",
   "artifact": "deploy-prod-2026-04-28-002",
   "decision": "approve",
@@ -94,7 +94,7 @@ signature files attach to the same audit entry.
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "signature",
   "artifact": "deploy-prod-2026-04-28-002",
   "decision": "approve",
@@ -129,13 +129,13 @@ chain is stored at `workspace/audit/audit-log.jsonl` (one entry per line; shown
 formatted here for readability — real lines are unindented).
 
 ```jsonl
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":40,"ts":"2026-04-28T11:00:00.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.scheduled","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"e5f6...prior-hash...0a","hash":"7c1d...computed...3b","hashAlg":"sha256"}
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":41,"ts":"2026-04-28T11:01:30.000Z","actor":{"id":"host:governance","role":"system"},"action":"policy.resolved","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"policy":{"ref":"production-deploy","decision":"require-approval"},"prevHash":"7c1d...3b","hash":"9a4e...computed...d2","hashAlg":"sha256"}
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":42,"ts":"2026-04-28T11:02:15.000Z","actor":{"id":"morgan@example.com","role":"cfo"},"action":"signature.recorded","subject":{"kind":"signature","path":"./signatures/cfo-2026-04-28T11-02-15Z.signature.json"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/cfo-2026-04-28T11-02-15Z.signature.json"],"prevHash":"9a4e...d2","hash":"b8c1...computed...e7","hashAlg":"sha256"}
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":43,"ts":"2026-04-28T11:04:02.000Z","actor":{"id":"alex@example.com","role":"security"},"action":"signature.recorded","subject":{"kind":"signature","path":"./signatures/security-2026-04-28T11-04-02Z.signature.json"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/security-2026-04-28T11-04-02Z.signature.json"],"prevHash":"b8c1...e7","hash":"4d2a...computed...f9","hashAlg":"sha256"}
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":44,"ts":"2026-04-28T11:04:03.000Z","actor":{"id":"host:governance","role":"system"},"action":"approval.released","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/cfo-2026-04-28T11-02-15Z.signature.json","./signatures/security-2026-04-28T11-04-02Z.signature.json"],"prevHash":"4d2a...f9","hash":"6e8b...computed...a1","hashAlg":"sha256"}
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":45,"ts":"2026-04-28T11:05:00.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.started","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"6e8b...a1","hash":"3f7c...computed...b4","hashAlg":"sha256"}
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":46,"ts":"2026-04-28T11:08:42.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.completed","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"output":{"status":"green","durationMs":222000},"prevHash":"3f7c...b4","hash":"a5d9...computed...c8","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":40,"ts":"2026-04-28T11:00:00.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.scheduled","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"e5f6...prior-hash...0a","hash":"7c1d...computed...3b","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":41,"ts":"2026-04-28T11:01:30.000Z","actor":{"id":"host:governance","role":"system"},"action":"policy.resolved","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"policy":{"ref":"production-deploy","decision":"require-approval"},"prevHash":"7c1d...3b","hash":"9a4e...computed...d2","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":42,"ts":"2026-04-28T11:02:15.000Z","actor":{"id":"morgan@example.com","role":"cfo"},"action":"signature.recorded","subject":{"kind":"signature","path":"./signatures/cfo-2026-04-28T11-02-15Z.signature.json"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/cfo-2026-04-28T11-02-15Z.signature.json"],"prevHash":"9a4e...d2","hash":"b8c1...computed...e7","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":43,"ts":"2026-04-28T11:04:02.000Z","actor":{"id":"alex@example.com","role":"security"},"action":"signature.recorded","subject":{"kind":"signature","path":"./signatures/security-2026-04-28T11-04-02Z.signature.json"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/security-2026-04-28T11-04-02Z.signature.json"],"prevHash":"b8c1...e7","hash":"4d2a...computed...f9","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":44,"ts":"2026-04-28T11:04:03.000Z","actor":{"id":"host:governance","role":"system"},"action":"approval.released","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/cfo-2026-04-28T11-02-15Z.signature.json","./signatures/security-2026-04-28T11-04-02Z.signature.json"],"prevHash":"4d2a...f9","hash":"6e8b...computed...a1","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":45,"ts":"2026-04-28T11:05:00.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.started","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"6e8b...a1","hash":"3f7c...computed...b4","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":46,"ts":"2026-04-28T11:08:42.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.completed","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"output":{"status":"green","durationMs":222000},"prevHash":"3f7c...b4","hash":"a5d9...computed...c8","hashAlg":"sha256"}
 ```
 
 A verifier reading this chain:
@@ -160,7 +160,7 @@ Path: `policies/finance-write/POLICY.md`
 
 ```md
 ---
-schema: agentgovernance/v1
+schema: governance/v1
 doctype: policy
 slug: finance-write
 version: 1.0.0
@@ -213,7 +213,7 @@ Path: `policies/ad-spend-daily/POLICY.md`
 
 ```md
 ---
-schema: agentgovernance/v1
+schema: governance/v1
 doctype: policy
 slug: ad-spend-daily
 version: 1.0.0
@@ -270,7 +270,7 @@ Path: `policies/note-sync/POLICY.md`
 
 ```md
 ---
-schema: agentgovernance/v1
+schema: governance/v1
 doctype: policy
 slug: note-sync
 version: 1.0.0
@@ -334,7 +334,7 @@ workspace/
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "keyring",
   "keys": [
     {
@@ -361,7 +361,7 @@ workspace/
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "head-pointer",
   "chain": "audit/audit-log.jsonl",
   "headSeq": 46,
@@ -949,7 +949,7 @@ reproduces it by canonicalising the payload the requester originally supplied
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "approval-request",
   "id": "apr_7f3a9c21d04b8e6512aa",
   "kind": "deploy",
@@ -979,7 +979,7 @@ and appends to the audit chain.
 
 ```json
 {
-  "$schema": "agentgovernance/v1",
+  "$schema": "governance/v1",
   "doctype": "signature",
   "artifact": "approvals/apr_7f3a9c21d04b8e6512aa/payload.json",
   "documentHash": "53dd521908df11db6568342cd669d3190b617ff4c47ad819ae8620bd3ef40b2a",
@@ -1020,7 +1020,7 @@ hash of the ticket, never the ticket. The request then reads:
 Had the human denied, no signature is written. The chain gets one event:
 
 ```jsonl
-{"$schema":"agentgovernance/v1","doctype":"audit-event","seq":12,"ts":"2026-09-28T09:14:07.000Z","actor":{"id":"user:local"},"action":"approval.denied","subject":{"kind":"approval","ref":"apr_7f3a9c21d04b8e6512aa"},"input":{"approvalId":"apr_7f3a9c21d04b8e6512aa","channel":"ui_card"},"prevHash":"5e0c...prior-hash...9d","hash":"a17b...computed...42","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":12,"ts":"2026-09-28T09:14:07.000Z","actor":{"id":"user:local"},"action":"approval.denied","subject":{"kind":"approval","ref":"apr_7f3a9c21d04b8e6512aa"},"input":{"approvalId":"apr_7f3a9c21d04b8e6512aa","channel":"ui_card"},"prevHash":"5e0c...prior-hash...9d","hash":"a17b...computed...42","hashAlg":"sha256"}
 ```
 
 ### The consume
@@ -1102,7 +1102,7 @@ local credential can reach that surface.
 
 ## See also
 
-- [AIP-7 — agentgovernance/v1 spec](/docs/aip-7)
+- [AIP-7 — governance/v1 spec](/docs/aip-7)
 - [AIP-14 — TOOL.md](/docs/aip-14) — tool-side `approval: policy:<ref>`
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — workflow-side `kind: "approval"`
 - [`./SKILL.md`](./SKILL.md) — agent-side authoring skill

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-governance-workspace
 title: Author a GOVERNANCE.md (workspace root or view) for AIP-7
 description:
@@ -512,9 +512,9 @@ you are creating.
 
 ## See also
 
-- [AIP-7 — agentgovernance/v1 spec](/docs/aip-7)
+- [AIP-7 — governance/v1 spec](/docs/aip-7)
 - [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-6 — company/v1](/docs/aip-6)
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling KNOWLEDGE.md pattern
 - [AIP-13 — agentwork/v1](/docs/aip-13) — sibling WORK.md pattern

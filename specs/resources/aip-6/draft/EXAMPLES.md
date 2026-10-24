@@ -1,4 +1,4 @@
-# EXAMPLES.md — agentcompanies/v1 reference workspaces
+# EXAMPLES.md — company/v1 reference workspaces
 
 Reference workspaces exemplifying common shapes. Each example shows the relevant
 doctypes — `COMPANY.md`, one or more `ROLE.md`, and one or more `OBJECTIVE.md` —
@@ -33,7 +33,7 @@ pricewatch/
 
 ```md
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: company
 id: pricewatch
 name: Pricewatch
@@ -57,7 +57,7 @@ tags: [solo, pricing, saas]
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: role
 id: founder
 name: Founder
@@ -77,7 +77,7 @@ workflows: [onboarding-after-payment]
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: objective
 id: q3-pipeline
 name: Q3 Pipeline
@@ -114,7 +114,7 @@ acme-agency/
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: company
 id: acme-agency
 name: Acme Agency
@@ -133,7 +133,7 @@ structure:
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: role
 id: ops
 name: Operations Lead
@@ -154,7 +154,7 @@ workflows: [onboarding-after-payment]
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: objective
 id: retention-90
 name: Retention 90
@@ -211,7 +211,7 @@ founder
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: role
 id: sdr
 name: SDR
@@ -242,7 +242,7 @@ Top-level objective decomposes into child objectives. Both edges — `parent` an
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: objective
 id: annual-revenue
 name: Annual Revenue
@@ -262,7 +262,7 @@ key_results:
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: objective
 id: q3-pipeline
 name: Q3 Pipeline
@@ -297,7 +297,7 @@ bounded autonomy; `scope.capabilities` enforces it through AIP-7 governance.
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: role
 id: billing-bot
 name: Billing Bot
@@ -346,7 +346,7 @@ identical to a hand-authored doctype.
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: company
 id: helio
 name: Helio
@@ -422,7 +422,7 @@ helio-commercial/                   # forked from helio/
 
 ```yaml
 ---
-schema: agentcompanies/v1
+schema: company/v1
 doctype: company
 id: helio-commercial
 name: Helio Commercial
@@ -495,7 +495,7 @@ The post-merge `validate` catches:
 
 ## See also
 
-- [AIP-6 — agentcompanies/v1 spec](/docs/aip-6)
+- [AIP-6 — company/v1 spec](/docs/aip-6)
 - [AIP-7 — governance, capabilities, approval](/docs/aip-7)
 - [AIP-8 — agencies engine, operators](/docs/aip-8)
 - [AIP-14 — TOOL.md spec](/docs/aip-14)

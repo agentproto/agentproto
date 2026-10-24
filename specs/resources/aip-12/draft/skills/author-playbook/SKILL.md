@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-playbook
 title: Author a PLAYBOOK.md (AIP-12)
 description:
@@ -165,7 +165,7 @@ Author `PLAYBOOK.md`:
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: <kebab-id>
 title: <one sentence>
 targets:

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-workflow
 title: Author a WORKFLOW.md (AIP-15)
 description:
