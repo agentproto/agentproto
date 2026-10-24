@@ -1,7 +1,7 @@
 ---
 aip: 71
-title: "AIP-71: ACTION-HOOKS (action-hooks/v1): portable action hooks and native harness bridges"
-description: "Defines three hook paths over AIP-37 lifecycle events and AIP-39 actions, plus a native-first adapter bridge contract that uses harness hooks when available and a host runtime fallback otherwise without double execution."
+title: "AIP-71: ACTION-HOOKS (action-hooks/v1): portable action hooks and native harness projections"
+description: "Defines three hook paths over AIP-37 lifecycle events and AIP-39 actions, plus a native-first harness projection contract that uses harness hooks when available and a host runtime fallback otherwise without double execution."
 author: Jeremy André <jeremy@agentik.net>
 status: Draft
 type: Core
@@ -14,7 +14,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Field | Value |
 |---|---|
 | AIP | 71 (provisional, editors assign the final number) |
-| Title | ACTION-HOOKS (action-hooks/v1): portable action hooks and native harness bridges |
+| Title | ACTION-HOOKS (action-hooks/v1): portable action hooks and native harness projections |
 | Status | Draft |
 | Type | Core |
 | Requires | [AIP-37](/docs/aip-37), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-41](/docs/aip-41), [AIP-42](/docs/aip-42), [AIP-45](/docs/aip-45), [AIP-60](/docs/aip-60) |
@@ -36,7 +36,7 @@ AIP-71 defines one portable contract over both layers. It has three paths:
 - **lifecycle**, a non-blocking event emitted after a transition;
 - **reaction**, an AIP-37 event bound to an AIP-39 action.
 
-Adapters SHOULD project a binding into a native harness hook when they can do
+A harness SHOULD project a binding into one of its native hooks when it can do
 so faithfully. The host supplies the fallback when they cannot. Exactly one
 owner executes each logical binding.
 
@@ -50,12 +50,12 @@ There are two bad extremes:
 1. A host ignores native hooks and reimplements every seam above the harness.
    Timing becomes less precise and native admission or context injection is
    lost.
-2. Every adapter exposes its vendor's callback names directly. Agent manifests
+2. Every harness exposes its vendor's callback names directly. Agent manifests
    become harness-specific and cannot move between Codex, Claude Code and
    other runtimes.
 
-The bridge contract keeps portable intent in AIP configuration while leaving
-mechanism in the adapter that understands the harness.
+The projection contract keeps portable intent in AIP configuration while
+leaving mechanism in the harness that understands it.
 
 ## Specification
 
@@ -115,9 +115,9 @@ AIP-41 `schedule.kind: event` is the routine form of the same event-to-target
 relationship. Implementations MUST use the same resolver and execution rules
 for both surfaces rather than creating two reaction engines.
 
-### 3. Native hook bridge capability
+### 3. Native hook projection capability
 
-An AIP-45 adapter MAY declare native hook support under
+An AIP-45 harness MAY declare native hook support under
 `capabilities.hooks`. Each entry has this shape:
 
 ```ts
@@ -134,7 +134,7 @@ interface NativeHookCapability {
 
 - `event` MUST be the portable AIP-37 semantic event.
 - `native_event` is the harness callback identifier. It is descriptive and
-  adapter-owned; portable configuration MUST NOT reference it.
+  harness-owned; portable configuration MUST NOT reference it.
 - `path` states whether the native seam runs before an operation or observes a
   lifecycle transition.
 - `can_block` is true only when a successful native callback can prevent the
@@ -156,15 +156,15 @@ For every resolved binding, the host chooses exactly one owner:
 type HookOwner = "harness" | "host"
 ```
 
-The harness MAY own a binding only when its adapter declares a matching native
-capability whose timing and result semantics satisfy the binding. Otherwise
-the host owns it. A host MUST NOT silently downgrade a blocking admission hook
-to a non-blocking observer.
+The harness MAY own a binding only when its AIP-45 manifest declares a
+matching native capability whose timing and result semantics satisfy the
+binding. Otherwise the host owns it. A host MUST NOT silently downgrade a
+blocking admission hook to a non-blocking observer.
 
 The resolution order is:
 
 1. validate the portable event and action references;
-2. inspect the selected adapter's effective hook capabilities;
+2. inspect the selected harness's effective hook capabilities;
 3. choose `harness` only for a faithful native projection;
 4. otherwise choose `host` when the host implements the seam;
 5. otherwise mark the binding unsupported and do not run it.
@@ -217,10 +217,10 @@ Therefore:
 
 ### 8. Security and trust
 
-Native hook code executes with the harness process's authority. Adapters MUST
-preserve the harness's trust and configuration precedence rules. A host MUST
-NOT mark project-local hooks trusted on behalf of a user unless an explicit
-managed policy authorizes that behavior.
+Native hook code executes with the harness process's authority. Native hook
+projection MUST preserve the harness's trust and configuration precedence
+rules. A host MUST NOT mark project-local hooks trusted on behalf of a user
+unless an explicit managed policy authorizes that behavior.
 
 Hook inputs may contain prompts, tool arguments and filesystem paths. Logs and
 receipts MUST redact credentials and MUST NOT persist full sensitive payloads
@@ -244,10 +244,10 @@ An implementation conforms to AIP-71 when it:
 ## Rationale
 
 The portable event name belongs in AIP-37 because manifests and routines need
-one stable vocabulary. The native callback name belongs in the AIP-45 adapter
-capability because only that adapter can prove what its harness supports. The
-owner decision belongs here because neither vocabulary alone can prevent a
-native callback and a host observer from executing the same binding twice.
+one stable vocabulary. The native callback name belongs in the AIP-45 harness
+capability because only that harness can prove what it supports. The owner
+decision belongs here because neither vocabulary alone can prevent a native
+callback and a host observer from executing the same binding twice.
 
 Authorization stays in AIP-38 because a second allow and deny language would
 let a hook contradict a policy. What AIP-38 cannot express is a decision that
@@ -272,11 +272,11 @@ which already holds the session event bus, the semantic permission hooks and
 the routine registrar that this AIP generalizes. The event names live in
 [`@agentproto/lifecycle`](https://github.com/agentproto/ts/tree/main/packages/lifecycle)
 (AIP-37), which is vocabulary-only today and does not yet carry the harness
-extension events. Adding those events, the AIP-45 adapter capability
-projection, and the native Codex and Claude Code bridges are follow-up work in
-the same repository. This AIP defines no package of its own. Until those
-bridges ship, a capability is absent and the host MUST NOT claim native
-ownership.
+extension events. Adding those events, the AIP-45 harness capability
+declaration, and the native Codex and Claude Code hook projections are
+follow-up work in the same repository. This AIP defines no package of its own.
+Until those projections ship, a capability is absent and the host MUST NOT
+claim native ownership.
 
 ## Security Considerations
 
@@ -307,7 +307,7 @@ boundary: a blocking native hook is a policy aid, not a security perimeter.
 | `turn-end` | stop callback |
 
 The right column is illustrative. Native callback spelling and exact support
-remain adapter-owned.
+remain harness-owned.
 
 ## References
 
@@ -315,5 +315,5 @@ remain adapter-owned.
 - [AIP-39 actions](/docs/aip-39)
 - [AIP-41 routines](/docs/aip-41)
 - [AIP-42 agents](/docs/aip-42)
-- [AIP-45 agent CLI adapters](/docs/aip-45)
+- [AIP-45 harness manifests](/docs/aip-45)
 - [AIP-60 Sentinel](/docs/aip-60)
