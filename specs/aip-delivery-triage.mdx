@@ -181,8 +181,10 @@ The evaluation order is:
 2. producer rules, in a fixed order declared by the producer;
 3. the default rule.
 
-The default rule MUST NOT wake. When no other rule matches, it returns `fyi`.
-The ledger records `default` as the rule id for that case.
+When no other rule matches, the default rule returns `wake`. An event that no
+rule recognises is never silently demoted: demotion to `fyi` or `drop` is
+always the effect of a named rule. The ledger records `default` as the rule id
+for that case.
 
 A producer MAY additionally run an optional classifier after the rules have
 produced a result. The classifier:
@@ -216,7 +218,7 @@ Common fields, in this order:
 |---|---|---|
 | `ts` | string | RFC 3339 timestamp of triage. |
 | `source` | string | Producer token; `follow` and `sentinel` ship today. |
-| `applied` | boolean | `true` when the decision changed delivery, `false` in observation-only mode or when delivery was unchanged. |
+| `applied` | boolean | `true` when triage was in effect and the decision governed delivery (including a `wake` that matches the untriaged behaviour), `false` in observation-only mode. |
 | `decision` | string | `wake`, `fyi` or `drop`. |
 | `rule` | string | Rule id, or `default` when no rule matched. |
 
@@ -242,13 +244,16 @@ Sentinel lines add:
 
 The Sentinel producer uses the rule ids `terminal`, `coalesced-repeat` and
 `default`. `terminal` marks the always-wake floor. `coalesced-repeat`
-collapses a repeat that the producer has already delivered or deduplicated.
+marks an event whose coalesce key (producer-defined, for example an AIP-60 subject
+and type) was already seen for the same target within the producer's repeat
+window; it demotes the event to `fyi`. The reference implementation uses a
+10 minute window.
 `default` is the no-match rule.
 
 Example follow line:
 
 ```json
-{"ts":"2026-10-24T12:00:00.000Z","source":"follow","applied":true,"decision":"fyi","rule":"default","follower":"sess_follower","event":"turn-end","sessionId":"sess_child","label":"backend"}
+{"ts":"2026-10-24T12:00:00.000Z","source":"follow","applied":true,"decision":"wake","rule":"default","follower":"sess_follower","event":"turn-end","sessionId":"sess_child","label":"backend"}
 ```
 
 Example Sentinel line:
@@ -282,7 +287,11 @@ context further away. Instead, a digest for the same follower replaces the
 still-queued pending digest in place:
 
 - the queue position is unchanged;
-- the content is the newest digest;
+- the replacement MUST contain every event of the digest it replaces plus the
+  new events: replacing a digest never loses an event, it supersedes the old
+  text with a superset (the host keeps the pending digest's events until the
+  item is delivered or dropped, and MAY cap the retained events, reporting
+  how many were omitted);
 - `coalescedCount` on the pending item increments;
 - no second pending digest is appended for that follower.
 
