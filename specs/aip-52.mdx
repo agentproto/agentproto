@@ -7,9 +7,9 @@ type: Standards Track
 created: 2026-07-05
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 30, 42, 51]
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/mastra
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/bridge
 layer: drivers
-package: "@agentproto/mastra"
+package: "@agentproto/bridge"
 ---
 
 | Field | Value |
@@ -21,7 +21,7 @@ package: "@agentproto/mastra"
 | Domain | adapters.sh |
 | Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-30](/docs/aip-30) (DRIVER), [AIP-42](/docs/aip-42) (AGENT), [AIP-51](/docs/aip-51) (PROCESSOR) |
 | Mirror of | [AIP-30](/docs/aip-30) (DRIVER — the inward direction of the same binding seam) |
-| Reference Impl | [`@agentproto/mastra`](https://github.com/agentproto/ts/tree/main/packages/mastra) |
+| Reference Impl | [`@agentproto/bridge`](https://github.com/agentproto/ts/tree/main/packages/bridge) |
 
 ## Abstract
 
@@ -74,7 +74,7 @@ The registry already has [DRIVER (AIP-30)](/docs/aip-30) for binding an
 abstract tool *inward* to a runnable backend. The inverse direction —
 taking an agentproto handle and making it run inside *someone else's*
 framework — has shipped as real code three times
-(`@agentproto/mastra` projects `AGENT.md` into `new Agent({...})` from
+(`@agentproto/bridge`, formerly `@agentproto/mastra`, projects `AGENT.md` into `new Agent({...})` from
 `@mastra/core/agent`; `@agentproto/tool` exposes `toMastraTool`; the
 Mastra overlay ships a real Input/Output Processor) but has never had a
 name or a contract. Four problems compound while it stays anonymous:
@@ -311,7 +311,7 @@ the word:
 | Type | Sense / what it binds | Example AIP | Example package |
 |---|---|---|---|
 | `HarnessAdapter` | adapter over a **harness** — wraps a harness (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
-| `FrameworkAdapter` | bridge into a **foreign framework** — projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/mastra` |
+| `FrameworkAdapter` | bridge into a **foreign framework**: projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/bridge` |
 | `ServiceAdapter` | adapter to a **backend service** — routes a declared kind to a concrete backend: settlement rails, tunnel, sandbox, eval-reporter providers | [AIP-49](/docs/aip-49) | `@agentproto/provider-kit` |
 
 AIP-52 means the second sense: `FrameworkAdapter`, the outward framework
@@ -370,8 +370,8 @@ elsewhere; the rename is the fix.
 
 ## Worked examples (informative)
 
-**`@agentproto/mastra`** — the flagship target and reference impl
-([`packages/mastra/src/index.ts`](https://github.com/agentproto/ts/tree/main/packages/mastra)):
+**`@agentproto/bridge`**: the flagship target and reference impl
+([`packages/bridge/src/index.ts`](https://github.com/agentproto/ts/tree/main/packages/bridge)):
 
 - `buildMastraAgent` projects an [AGENT (AIP-42)](/docs/aip-42) handle
   into `new Agent({...})` from `@mastra/core/agent` — the package
@@ -401,8 +401,8 @@ flattens become named degradations, not silent drops.
 ## Backwards Compatibility
 
 Not applicable — this AIP introduces a new spec. It names a pattern that
-already exists in shipped code (`@agentproto/mastra`,
-`@agentproto/tool`) and fixes a contract around it; the existing bridges
+already exists in shipped code (`@agentproto/bridge`, formerly
+`@agentproto/mastra`, `@agentproto/tool`) and fixes a contract around it; the existing bridges
 are the reference implementation and do not change shape. This AIP was
 named ADAPTER until 2026-10-23 ([AIP-70](/docs/aip-70)); `adapter` remains
 readable as a legacy alias. The one prior overload it resolves is the
@@ -413,7 +413,7 @@ re-export shim to `@agentproto/provider-kit`).
 
 ## Reference Implementation
 
-[`@agentproto/mastra`](https://github.com/agentproto/ts/tree/main/packages/mastra)
+[`@agentproto/bridge`](https://github.com/agentproto/ts/tree/main/packages/bridge)
 is the reference implementation: `buildMastraAgent`,
 `makeQueryKnowledgeTool`, and `makePlaybookOverlayProcessor` are conforming
 bridges for the AGENT, TOOL, and PROCESSOR doctypes respectively, and

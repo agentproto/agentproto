@@ -11,7 +11,7 @@ AIP's [Emitted layout](/docs/aip-53#emitted-layout) section, not this
 file.
 
 The canonical TypeScript implementation lives at
-[`packages/app-kit`](https://github.com/agentproto/ts/tree/main/packages/app-kit)
+[`packages/app`](https://github.com/agentproto/ts/tree/main/packages/app)
 (bundle authoring, `emit`/`load`) and
 [`packages/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime)
 (install/run lifecycle, UI bridge, data plane). This guide is the
@@ -42,12 +42,12 @@ focuses on 1–3 and points at the rest.
 
 Validate at `defineApp` time AND again on every load. The reference
 implementation enforces these in `defineApp`
-(`packages/app-kit/src/define-app.ts`) and re-runs the same construction
+(`packages/app/src/define-app.ts`) and re-runs the same construction
 path in `loadAppHandle`:
 
 1. **Agents-or-UI.** `agents` MUST be non-empty unless `ui` is present.
    A UI-only app (empty/omitted `agents` + a `ui` block) is conforming
-   and first-class — this codifies `define-app.ts:49-52` and the five
+   and first-class; this codifies `define-app.ts:60-64` and the five
    builtin panels in `packages/apps/src/index.ts` that ship as
    `agents: []`. An app with neither agents nor `ui` MUST be refused.
 2. **Unique ids.** Duplicate agent ids or duplicate workflow ids in one
@@ -71,7 +71,7 @@ path in `loadAppHandle`:
 
 Error style: name the offending field and what was received (the
 reference `AppDefinitionError` prefixes every message with
-`defineApp (app-kit):`). A bare "invalid app" is not sufficient.
+`defineApp (app):`). A bare "invalid app" is not sufficient.
 
 ## Emission and loading
 

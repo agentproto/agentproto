@@ -9,8 +9,8 @@ author: Jeremy André <jeremy@agentik.net>
 requires: [1]
 discussions-to: https://github.com/agentproto/agentproto/discussions/59
 layer: identity
-package: "@agentproto/pair-client"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/pair-client
+package: "@agentproto/pairing"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/pairing
 ---
 
 | Field | Value |
@@ -22,7 +22,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/pair-client
 | Type | Core |
 | Requires | [AIP-1](/docs/aip-1) |
 | Created | 2026-09-26 |
-| Package | `@agentproto/pair-client` (client), `@agentproto/secrets` (handshake, derivations, offer codec) |
+| Package | `@agentproto/pairing` (client), `@agentproto/secrets` (handshake, derivations, offer codec) |
 
 ## Abstract
 
@@ -497,7 +497,7 @@ This AIP was titled MOBILE PAIRING until 2026-10-23 ([AIP-70](/docs/aip-70)).
 - `@agentproto/secrets` (`packages/secrets/src/pairing/`): `handshake.ts`
   (pair/v2), `derive.ts` (the route/auth split and the pair root), and
   `offer-url.ts` (the offer codec). See agentproto/ts#1448.
-- `@agentproto/pair-client`: `inspectOffer`, `pairFromOffer`,
+- `@agentproto/pairing`: `inspectOffer`, `pairFromOffer`,
   `connect` → `TunnelClient.fetch`, and `createIndexedDbCredentialStore`. See
   agentproto/ts#1447.
 - `@agentproto/acp` (`packages/acp/src/tunnel/`): `wrapE2E` and the tunnel
