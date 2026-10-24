@@ -84,7 +84,7 @@ provider is in use.
 
 | Term | Meaning |
 |---|---|
-| **Provider** | A concrete browser implementation described by one `BROWSER.md` manifest. Not an AIP-52 ADAPTER. |
+| **Provider** | A concrete browser implementation described by one `BROWSER.md` manifest. Not an AIP-52 BRIDGE. |
 | **Instance** | One running browser (process tree, container or remote session) launched from a provider. |
 | **Target** | One tab or page inside an instance. The unit tools act on. Tools take a `target` handle. |
 | **Driver handle** | The object `attach` returns: a page-control interface bound to an instance. |
@@ -936,7 +936,7 @@ Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.re
 ## See also
 
 - [AIP-30 DRIVER.md](/docs/aip-30) (the supertype this profiles)
-- [AIP-45 AGENT-CLI.md](/docs/aip-45) (the precedent for a profile over a driver)
+- [AIP-45 HARNESS.md](/docs/aip-45) (the precedent for a profile over a driver)
 - [AIP-14 TOOL.md](/docs/aip-14) (tool ids, error envelope, capability requirements)
 - [AIP-7 GOVERNANCE.md](/docs/aip-7) (approvals: agents never decide)
 - [AIP-59 MOBILE PAIRING](/docs/aip-59) (the auth model)

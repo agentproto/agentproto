@@ -145,7 +145,7 @@ interface Operator {
   /** Optional runtime binding — picks the runtime this operator runs
    *  on. Default `kind: "in-process"` runs in the host's Mastra-style
    *  in-process loop. `kind: "agent-cli"` dispatches turns to a
-   *  spawned AIP-45 agent CLI subprocess (Hermes, Claude Code, ...). */
+   *  spawned AIP-45 harness subprocess (Hermes, Claude Code, ...). */
   runtime?: RuntimeBinding
 }
 ```
@@ -160,10 +160,10 @@ operator's turns. Two kinds today:
 runtime:
   kind: in-process
 
-# Agent CLI — dispatch turns to an AIP-45 manifest's spawned binary.
+# Harness — dispatch turns to an AIP-45 manifest's spawned binary.
 runtime:
   kind: agent-cli
-  ref: claude-code                # AIP-45 AGENT-CLI.md ref
+  ref: claude-code                # AIP-45 HARNESS.md ref
   config:                         # per-runtime configuration (optional)
     mode: plan                    # one manifest-declared mode (mutually exclusive)
     options:                      # manifest-declared option ids → values
