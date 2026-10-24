@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-identity-workspace
 title: Author an IDENTITY.md (workspace root or view) for AIP-23
 description:

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: use-io-blocks
 title: Wire AIP-16 IO blocks into a new manifest format
 description:

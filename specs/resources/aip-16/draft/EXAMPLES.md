@@ -521,7 +521,7 @@ flows in, what flows out — is the same. When a skill BINDS a tool, the tool's
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: localise-document
 title: Localise a workspace PDF
 description:

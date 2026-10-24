@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-mcp
 title: Author an MCP driver (AIP-32)
 description:

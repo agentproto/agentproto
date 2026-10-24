@@ -7,7 +7,7 @@ type: Core
 created: 2026-10-14
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 36, 44, 45]
-layer: primitives
+layer: host
 package: "@agentproto/runtime"
 ref-impl: https://github.com/agentproto/ts/tree/main/adapters/claude-code-cloud
 ---
@@ -19,7 +19,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/adapters/claude-code-cloud
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Core |
-| Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX: the target this one is distinguished from), [AIP-44](/docs/aip-44) (ACP: the wire a cloud session is projected onto), [AIP-45](/docs/aip-45) (AGENT-CLI: the harness manifest a vendor binds to) |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX: the target this one is distinguished from), [AIP-44](/docs/aip-44) (ACP: the wire a cloud session is projected onto), [AIP-45](/docs/aip-45) (HARNESS: the harness manifest a vendor binds to) |
 | Created | 2026-10-14 |
 | Package | `@agentproto/runtime` (spawn resolution, vendor registry, re-attach); `@agentproto/adapter-claude-code-cloud` (first vendor) |
 
@@ -273,4 +273,4 @@ This AIP was titled Managed cloud agents until 2026-10-23 ([AIP-70](/docs/aip-70
 
 - [AIP-36: SANDBOX.md](/docs/aip-36): host-controlled compute, the target this one is not
 - [AIP-44: ACP.md](/docs/aip-44): the wire a cloud session is projected onto
-- [AIP-45: AGENT-CLI.md](/docs/aip-45): the harness manifests a vendor binds to
+- [AIP-45: HARNESS.md](/docs/aip-45): the harness manifests a vendor binds to

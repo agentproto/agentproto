@@ -78,7 +78,7 @@ Frontmatter is YAML 1.2, delimited by `---` lines. Hosts MUST:
 - Use a real YAML parser (`js-yaml`, `pyyaml`, `gopkg.in/yaml.v3`). Home-rolled
   parsers silently corrupt list-of-objects.
 - Reject manifests where the frontmatter is empty, malformed, or missing
-  `schema: skills/v1`.
+  `schema: skill/v1`.
 - Treat the markdown body (everything after the closing `---`) as opaque
   instruction text. Do NOT attempt to extract tool calls or workflow steps from
   the body — that's not what skills are.

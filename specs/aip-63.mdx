@@ -1,6 +1,6 @@
 ---
 title: "AIP-63: BROWSER (browser/v1): browser provider manifest, instance lifecycle, profile consent"
-description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state, and the `browser-recording/v1` artifact that makes what an agent did in a browser replayable.
+description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state, and the `browser.recording/v1` artifact that makes what an agent did in a browser replayable.
 aip: 63
 status: Draft
 type: Schema
@@ -44,7 +44,7 @@ model for seeding a browser from a user's profile: explicit per-domain
 grants, an append-only ledger, and a revoke that deletes derived
 material.
 
-Finally it fixes the **recording artifact** (`browser-recording/v1`): a
+Finally it fixes the **recording artifact** (`browser.recording/v1`): a
 directory of JSON Lines and JPEG files that lets a human watch, live or
 afterwards, what an agent did in a browser. One format serves both
 capture modes (one frame per action, continuous screencast), masks
@@ -84,7 +84,7 @@ provider is in use.
 
 | Term | Meaning |
 |---|---|
-| **Provider** | A concrete browser implementation described by one `BROWSER.md` manifest. Not an AIP-52 ADAPTER. |
+| **Provider** | A concrete browser implementation described by one `BROWSER.md` manifest. Not an AIP-52 BRIDGE. |
 | **Instance** | One running browser (process tree, container or remote session) launched from a provider. |
 | **Target** | One tab or page inside an instance. The unit tools act on. Tools take a `target` handle. |
 | **Driver handle** | The object `attach` returns: a page-control interface bound to an instance. |
@@ -468,7 +468,7 @@ under `resources/aip-63/draft/examples/recording-sample/`.
 
 ```
 rec_01JSAMPLE0000000000000001/
-  manifest.json      schema browser-recording/v1: who, when, mode, status, redaction, retention
+  manifest.json      schema browser.recording/v1: who, when, mode, status, redaction, retention
   frames.jsonl       one line per stored frame: i, tMs, file, url, tabId, w, h
   actions.jsonl      one line per tool call: seq, tMs, tool, url, target, summary, status, durationMs
   frames/000001.jpg  the images, named by i
@@ -499,7 +499,7 @@ the recording against the recording directory and MUST reject a `file`
 or `exports[].file` that leaves it.
 
 **R2** (recording). `manifest.json` MUST validate against
-`$defs/manifest` and carry `schema: "browser-recording/v1"`. A reader
+`$defs/manifest` and carry `schema: "browser.recording/v1"`. A reader
 MUST refuse a manifest with an unknown `schema` value instead of guessing.
 
 **R3** (recording). `frames.jsonl` and `actions.jsonl` are append-only,
@@ -915,6 +915,8 @@ follow AIP-14's domain-prefix convention.
 
 **With AIP-52.** No relation (see § Terminology).
 
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.recording/v1`; documents that declare `browser-recording/v1` remain valid, and hosts MUST accept both.
+
 ## Open questions
 
 - Windows and Linux cookie decryption for `import`: the consent rules
@@ -934,7 +936,7 @@ follow AIP-14's domain-prefix convention.
 ## See also
 
 - [AIP-30 DRIVER.md](/docs/aip-30) (the supertype this profiles)
-- [AIP-45 AGENT-CLI.md](/docs/aip-45) (the precedent for a profile over a driver)
+- [AIP-45 HARNESS.md](/docs/aip-45) (the precedent for a profile over a driver)
 - [AIP-14 TOOL.md](/docs/aip-14) (tool ids, error envelope, capability requirements)
 - [AIP-7 GOVERNANCE.md](/docs/aip-7) (approvals: agents never decide)
 - [AIP-59 PAIRING](/docs/aip-59) (the auth model)

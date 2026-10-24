@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-collection
 title: Author a COLLECTION.md (and optionally items) for AIP-18
 description:
@@ -689,7 +689,7 @@ the file you are creating.
 
 - [AIP-18 — collections/v1 spec](/docs/aip-18)
 - [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-6 — company/v1](/docs/aip-6)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — same composition pattern

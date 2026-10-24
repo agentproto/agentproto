@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-secrets
 title: Author a SECRETS.md (AIP-19)
 description:

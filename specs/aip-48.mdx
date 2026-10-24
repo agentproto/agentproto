@@ -29,7 +29,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/agent-runtime
 
 ## Abstract
 
-`agentruntimes/v1` defines a **single-doc** manifest format for a multi-agent
+`runtime/v1` defines a **single-doc** manifest format for a multi-agent
 runtime: a composition of seven swappable ports — **participants**,
 **substrate**, **dispatcher**, **lifecycle**, **state**, **effectors**,
 **provisioning** — that together describe how a set of agents executes a
@@ -95,7 +95,7 @@ template). Frontmatter is the structured contract; the markdown body (if
 present) is human-readable documentation.
 
 ```yaml
-schema: agentruntimes/v1
+schema: runtime/v1
 kind: MultiAgentRuntime
 id: <slug>                            # unique within scope; lower-kebab
 participants:                         # 1..n
@@ -307,6 +307,10 @@ The reference compositions:
 The dispatcher and participant adapters are byte-identical between the two
 modes — proven by `__smoke__/smoke-cross-substrate.mjs` in the kernel
 package.
+
+## Backwards Compatibility
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `runtime/v1`; documents that declare `agentruntimes/v1` remain valid, and hosts MUST accept both.
 
 ## Known limitations
 

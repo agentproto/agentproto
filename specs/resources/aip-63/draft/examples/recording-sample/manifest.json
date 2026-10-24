@@ -1,5 +1,5 @@
 {
-  "schema": "browser-recording/v1",
+  "schema": "browser.recording/v1",
   "id": "rec_01JSAMPLE0000000000000001",
   "sessionId": "sess_sample_login",
   "provider": "chrome-live",

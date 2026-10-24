@@ -244,7 +244,7 @@ pattern 6. Validates against `ATTESTATION.schema.json`.
 
 ```json
 {
-  "schema": "agentproto.review.attestation/v1",
+  "schema": "review.attestation/v1",
   "runId": "review-6f0b9a52-3f43-4c1c-a4d5-0f3f6c1f5a10",
   "reviewId": "web-app",
   "manifestSha": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
@@ -332,14 +332,14 @@ pattern 6. Validates against `ATTESTATION.schema.json`.
       "ref": "@agentproto/review-pack-core",
       "id": "core",
       "version": "1.0.0",
-      "alg": "agentproto-pack-digest/v1",
+      "alg": "review.pack-digest/v1",
       "sha256": "fe060a88f5bb7f3fdc86d883b1681665cd633d5a8cc5bcdb6d0b32112ed173a7"
     },
     {
       "ref": "git+https://github.com/example/review-pack-a11y#0123456789abcdef0123456789abcdef01234567",
       "id": "a11y",
       "version": "0.3.0",
-      "alg": "agentproto-pack-digest/v1",
+      "alg": "review.pack-digest/v1",
       "sha256": "9a8b7c6d5e4f30211203f4e5d6c7b8a99a8b7c6d5e4f30211203f4e5d6c7b8a9"
     }
   ],
@@ -365,7 +365,7 @@ pattern 6. Validates against `ATTESTATION.schema.json`.
 
 ## 6. Pack digest and canonical JSON test vectors
 
-**Pack digest (`agentproto-pack-digest/v1`).** A pack whose `REVIEW.md` bytes
+**Pack digest (`review.pack-digest/v1`).** A pack whose `REVIEW.md` bytes
 are `pack-md\n` and whose one selected agent check declares
 `rubric: ./rubrics/correctness.md` with file bytes `rubric\n`:
 

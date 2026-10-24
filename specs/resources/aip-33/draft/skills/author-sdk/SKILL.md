@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-sdk
 title: Author an SDK driver (AIP-33)
 description:

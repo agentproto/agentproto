@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-design
 title: Author a DESIGN.md (AIP-4)
 description:
@@ -76,7 +76,7 @@ kit is citable and installable.
 - `kit`: kebab-case, 2–48 chars, descriptive of the _vibe_ not the literal
   colors (`heritage-press` not `cream-and-oxblood`).
 - `title`: human display label.
-- `schema: designkit/v1` is required; it pins the registry version the kit
+- `schema: design/v1` is required; it pins the registry version the kit
   conforms to.
 - `version`: semver. Bump on any token change (`1.0.0` → `1.1.0` for added
   tokens; `2.0.0` for removed or renamed).

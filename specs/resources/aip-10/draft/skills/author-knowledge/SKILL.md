@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-knowledge
 title: Author a KNOWLEDGE.md (workspace root or view) for AIP-10
 description:
@@ -466,7 +466,7 @@ you are creating.
 
 - [AIP-10 — agentknowledge/v1 spec](/docs/aip-10)
 - [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-6 — company/v1](/docs/aip-6)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [`../../ADAPTER.md`](../../ADAPTER.md) — implementer's guide for hosts

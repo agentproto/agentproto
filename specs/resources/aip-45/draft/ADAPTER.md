@@ -1,7 +1,7 @@
-# AIP-45 AGENT-CLI.md — adapter implementer's guide
+# AIP-45 HARNESS.md — adapter implementer's guide
 
-This guide is for implementers writing a new agent-CLI adapter — either
-a manifest (`AGENT-CLI.md`) or a `protocol: proprietary` adapter
+This guide is for implementers writing a new harness adapter — either
+a manifest (`HARNESS.md`) or a `protocol: proprietary` adapter
 package.
 
 ## Choosing a protocol arm
@@ -26,7 +26,7 @@ When in doubt, push the upstream agent toward ACP — it's where the
 ecosystem is converging. Adapters for ACP-speaking agents are
 manifest-only; adapters for non-ACP agents are code.
 
-## Authoring an `AGENT-CLI.md`
+## Authoring a `HARNESS.md`
 
 Minimum required fields:
 
@@ -145,10 +145,10 @@ without losing the "real run on a developer's box" coverage.
 
 ## Model bridging — using an AIP-45 CLI as a ModelPort
 
-Any AIP-45 agent CLI can be bridged into a generic `ModelPort` (the
+Any AIP-45 harness can be bridged into a generic `ModelPort` (the
 single-call `complete({ system?, prompt }) → { result }` contract used
 by corpus distill, report writer, and judgment steps). This lets corpus
-pipelines treat agent CLIs as LLM executors without knowing which model
+pipelines treat harnesses as LLM executors without knowing which model
 is underneath.
 
 ### `makeAgentCliModel`
@@ -191,7 +191,7 @@ context across calls and would corrupt a stateless extraction pipeline.
 Use `makeAgentCliModel` when:
 
 - You want to run corpus distillation or report generation through a
-  locally-installed agent CLI (e.g. `claude-code`, `codex`) instead of
+  locally-installed harness (e.g. `claude-code`, `codex`) instead of
   a direct API call.
 - You're building a routing layer that transparently switches between
   an API model and a local CLI model based on availability.
@@ -221,6 +221,6 @@ corpus seam that accepts a `ModelLike`.
 - Adapter packages: `@your-scope/adapter-<name>`, MIT/Apache-2.0
   license, peer-dep on `@agentproto/driver-agent-cli`.
 - Manifests: live alongside the adapter package or in
-  `agentproto/ts/adapters/<name>/AGENT-CLI.md`.
+  `agentproto/ts/adapters/<name>/HARNESS.md`.
 - The upstream agent's licence governs runtime use; the adapter
   package licence governs the wrapper code.

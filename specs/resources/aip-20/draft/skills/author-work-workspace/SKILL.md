@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-work-workspace
 title: Author a WORK.md work root and work it through the AIP-20 protocol
 description:

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-work-item
 title: Author a PROJECT / INITIATIVE / TASK doctype (AIP-13)
 description:
@@ -336,7 +336,7 @@ on write. Authoring ends with the doctype file.
 ## See also
 
 - [AIP-13 — agentwork/v1 spec](/docs/aip-13)
-- [AIP-6 — agentcompanies/v1: COMPANY.md, ROLE.md, OBJECTIVE.md](/docs/aip-6)
+- [AIP-6 — company/v1: COMPANY.md, ROLE.md, OBJECTIVE.md](/docs/aip-6)
 - [AIP-9 — OPERATOR.md](/docs/aip-9) — assignee/lead refs
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide for hosts
