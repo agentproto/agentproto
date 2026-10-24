@@ -20,7 +20,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/review
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Schema |
-| Requires | [AIP-1](/docs/aip-1) (process), [AIP-15](/docs/aip-15) (WORKFLOW — the execution shape a review binding compiles to), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — the reviewer child sessions agent lanes run in), [AIP-54](/docs/aip-54) (REF — the artifact-reference model a future PACK AIP is expected to reuse for review packs) |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-15](/docs/aip-15) (WORKFLOW: the execution shape a review binding compiles to), [AIP-46](/docs/aip-46) (SESSION: the reviewer child sessions agent lanes run in), [AIP-54](/docs/aip-54) (REF: the artifact-reference model a future PACK AIP is expected to reuse for review packs) |
 | Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE — where an organisation's merge policy consumes an attestation), [AIP-36](/docs/aip-36) (SANDBOX — the confinement a host SHOULD put around command lanes and reviewer sessions, and the inline form an agent check's `sandbox` field reuses), [AIP-65](/docs/aip-65) (DECISION — a host MAY pick a binding with a decision and the attestation records which one) |
 | Created | 2026-09-29 |
 | Package | `@agentproto/review` (manifest, compile, attestation, verdict fold, pack resolution); `@agentproto/runtime` (ledger, signing, composition, reviewer host); `@agentproto/cli` (`review` verbs) |
@@ -1312,7 +1312,7 @@ that the preset's name (never its secrets) is recorded on the lane and in
 REVIEW.md be portable across hosts; until then `preset` is a host-local
 name.
 
-### AIP-46 AGENT-SESSIONS: reviewer child sessions
+### AIP-46 SESSION: reviewer child sessions
 
 Each agent lane runs in a child session started through
 [AIP-46](/docs/aip-46)'s `agent_start`, parented to the requesting session,
@@ -1381,7 +1381,7 @@ attestation and how to verify it; it does not define policy.
 - [AIP-7 — GOVERNANCE](/docs/aip-7) — merge policy that consumes an attestation
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — the compile target
 - [AIP-36 — SANDBOX](/docs/aip-36) — confinement for command lanes and reviewer sessions, and the inline `sandbox` form on an agent check
-- [AIP-46 — AGENT-SESSIONS](/docs/aip-46) — reviewer child sessions
+- [AIP-46 SESSION](/docs/aip-46): reviewer child sessions
 - [AIP-54 — REF](/docs/aip-54) — the artifact-ref model a future PACK AIP is expected to use
 - [AIP-65 — DECISION](/docs/aip-65) — a host MAY pick a binding with a decision; the attestation records which one
 - [`REVIEW.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW.schema.json), [`REVIEW-PACK.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/REVIEW-PACK.schema.json), [`ATTESTATION.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-62/draft/ATTESTATION.schema.json) — canonical schemas

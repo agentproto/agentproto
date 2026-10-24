@@ -1,5 +1,5 @@
 ---
-title: "AIP-59: MOBILE PAIRING — browser clients over an E2E rendezvous"
+title: "AIP-59: PAIRING (pairing/v1): browser clients over an E2E rendezvous"
 description: How a plain browser (a phone scanning a QR code) pairs with an agentproto daemon and then reaches its HTTP surface end-to-end encrypted through an untrusted rendezvous broker. Fixes the offer URL carried in a URL fragment, the pair/v2 handshake over WebCrypto, the route/auth token split that keeps every secret off the broker, credential storage, the service-worker proxy model with bounded, chunked, cancellable frames, authenticated revocation, and the threat model.
 aip: 59
 status: Review
@@ -16,7 +16,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/pair-client
 | Field | Value |
 |---|---|
 | AIP | 59 (provisional — editors assign the final number) |
-| Title | MOBILE PAIRING — browser clients over an E2E rendezvous |
+| Title | PAIRING (pairing/v1): browser clients over an E2E rendezvous |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Core |
@@ -427,6 +427,8 @@ must be re-paired. The tunnel frame additions (`http_cancel`,
 `http_request_chunk`, `bodyChunked`, `ws_message.more`) are gated by
 capabilities that the daemon advertises in `hello`. A peer that lacks them
 receives whole frames and keeps working within the frame bound.
+
+This AIP was titled MOBILE PAIRING until 2026-10-23 ([AIP-70](/docs/aip-70)).
 
 ## Security Considerations
 

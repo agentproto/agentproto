@@ -1,5 +1,5 @@
 ---
-title: "AIP-61: INFERENCE — inference-endpoint/v1 (spawnable model-serving resource, provider interface, session binding, local-only privacy)"
+title: "AIP-61: INFERENCE-ENDPOINT (inference-endpoint/v1): spawnable model-serving resource, provider interface, session binding, local-only privacy"
 description: Names the inference endpoint — a locally-run, device-hosted, or operator-hosted model server — as a spawnable, supervised resource with the same shape as an AIP-46 session. Fixes the InferenceEndpoint resource and its capabilities (loaded vs max context, device, cost, ttl); a normative connector notion (`{connector, baseUrl, auth?}`, identical for a local and a remote custom endpoint, with a detection-filled `local` preconfig and declared per-runtime request quirks); an InferenceProvider interface mirroring AIP-36's SandboxProvider across four provider classes (attach, local-managed, device, operator-hosted — split into shared and private offerings); static and dynamic gateway registration with `<endpoint>/<model>` and `<model>@<device>` addressing; the `inference` field on agent_start with a fit check that MUST run before spawn; and the `local-only` privacy profile that refuses any non-local upstream.
 aip: 61
 status: Draft
@@ -16,12 +16,12 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/llm-endpoint
 | Field | Value |
 |---|---|
 | AIP | 61 (provisional — editors assign the final number) |
-| Title | INFERENCE — inference-endpoint/v1 |
+| Title | INFERENCE-ENDPOINT (inference-endpoint/v1): spawnable model-serving resource, provider interface, session binding, local-only privacy |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Schema |
-| Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX — the `SandboxProvider` shape this AIP mirrors, and the `network.egress` block §5 constrains), [AIP-45](/docs/aip-45) (HARNESS — the harness manifest the fit check reads a first-request weight from), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — `agent_start`, the field this AIP extends) |
-| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE — the audit log `local-only` per-request records land in), [AIP-58](/docs/aip-58) (RUN — `Spend` is the natural shape for billing an endpoint's `costPerHour`), [AIP-59](/docs/aip-59) (MOBILE PAIRING — one candidate control channel for an `operator-hosted`/`private` endpoint or a paired `device`) |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX: the `SandboxProvider` shape this AIP mirrors, and the `network.egress` block §5 constrains), [AIP-45](/docs/aip-45) (HARNESS: the harness manifest the fit check reads a first-request weight from), [AIP-46](/docs/aip-46) (AGENT-SESSIONS: `agent_start`, the field this AIP extends) |
+| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE: the audit log `local-only` per-request records land in), [AIP-58](/docs/aip-58) (RUN: `Spend` is the natural shape for billing an endpoint's `costPerHour`), [AIP-59](/docs/aip-59) (MOBILE PAIRING: one candidate control channel for an `operator-hosted`/`private` endpoint or a paired `device`) |
 | Created | 2026-09-27 |
 | Package | `@agentproto/llm-endpoint` (gateway, addressing, static registration); `@agentproto/runtime` ([AIP-46](/docs/aip-46)'s `agent_start`, extended here) |
 
@@ -659,6 +659,8 @@ Not applicable — this AIP introduces a new spec. It additively extends
 `privacy?`. A caller that sets neither sees no change in behaviour; a host
 that has not implemented this AIP simply has no such fields to set.
 
+This AIP was titled INFERENCE until 2026-10-23 ([AIP-70](/docs/aip-70)).
+
 ## Security Considerations
 
 - **`baseUrl` is attacker-influenceable for `attach` and `operator-hosted`
@@ -741,11 +743,11 @@ that has not implemented this AIP simply has no such fields to set.
   mirrors, `network.egress` is what §5 constrains
 - [AIP-45](/docs/aip-45) — HARNESS.md; the harness manifest the fit check
   reads from
-- [AIP-46](/docs/aip-46) — AGENT-SESSIONS; `agent_start` is the surface this
+- [AIP-46](/docs/aip-46): SESSION; `agent_start` is the surface this
   AIP extends with `inference` and `privacy`
 - [AIP-7](/docs/aip-7) — GOVERNANCE; the audit log §5's per-request records
   target
 - [AIP-58](/docs/aip-58) — RUN; `Spend` and the lease/heartbeat pattern both
   referenced in [Open questions](#open-questions)
-- [AIP-59](/docs/aip-59) — MOBILE PAIRING; one candidate control channel for
+- [AIP-59](/docs/aip-59): PAIRING; one candidate control channel for
   an `operator-hosted`/`private` or `device` endpoint

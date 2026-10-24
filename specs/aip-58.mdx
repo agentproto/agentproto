@@ -23,7 +23,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Status | Draft |
 | Type | Schema |
 | Domain | runs.sh |
-| Requires | [AIP-15](/docs/aip-15) (WORKFLOW — the primary producer of runs), [AIP-16](/docs/aip-16) (IO — the file contract the run workspace fulfils), [AIP-37](/docs/aip-37) (LIFECYCLE — the event vocabulary this AIP extends), [AIP-46](/docs/aip-46) (AGENT-SESSIONS — a step's driver may be a session) |
+| Requires | [AIP-15](/docs/aip-15) (WORKFLOW: the primary producer of runs), [AIP-16](/docs/aip-16) (IO: the file contract the run workspace fulfils), [AIP-37](/docs/aip-37) (LIFECYCLE: the event vocabulary this AIP extends), [AIP-46](/docs/aip-46) (SESSION: a step's driver may be a session) |
 | Composes with | [AIP-53](/docs/aip-53) (APP — an app run is a run whose children are workflow runs), [AIP-41](/docs/aip-41) (ROUTINE — a routine fire is a run), [AIP-7](/docs/aip-7) (GOVERNANCE — audit consumes the event log), [AIP-35](/docs/aip-35) (STORAGE — where a run's artifacts may sync to) |
 | Resources | [`./resources/aip-58`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-58/draft) — `run.schema.json`, `event.schema.json`, `journal-entry.schema.json`, `EXAMPLES.md`, `vectors/` |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
@@ -919,7 +919,7 @@ Compatibility section for what changed and why nothing existing breaks.
   workspace fulfils; amended to add `outputsFiles.<key>.required`
 - [AIP-37 — LIFECYCLE.md](/docs/aip-37) — the event vocabulary this AIP
   extends with `run.*` / `step.*` names
-- [AIP-46 — AGENT-SESSIONS](/docs/aip-46) — a step's driver may be a
+- [AIP-46 SESSION](/docs/aip-46): a step's driver may be a
   session; the session id a step records is AIP-46's
 - [AIP-53 — APP.md](/docs/aip-53) — an app run's `app_run` /
   `app_status` / `app_stop` verbs are the app-level view of the runs
