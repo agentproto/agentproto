@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-agency-workspace
 title: Author an AGENCY.md (workspace root or view) for AIP-21
 description:
@@ -591,7 +591,7 @@ side-effect. Authoring a new manifest is a LEAF operation.
   composes on
 - [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP
 - [AIP-3 — SKILL.md](/docs/aip-3)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
+- [AIP-6 — company/v1](/docs/aip-6)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-9 — agentoperators/v1](/docs/aip-9)
 - [AIP-10 — agentknowledge/v1](/docs/aip-10)

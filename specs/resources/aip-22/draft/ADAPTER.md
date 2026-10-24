@@ -707,7 +707,7 @@ These stay out of the spec on purpose.
 - [AIP-22 — agentoffice/v1 spec](/docs/aip-22)
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — substrate this AIP composes
   on
-- [AIP-6 — agentcompanies/v1](/docs/aip-6) — the predecessor (deprecated)
+- [AIP-6 — company/v1](/docs/aip-6) — the predecessor (deprecated)
 - [AIP-20 — agentwork/v2](/docs/aip-20) — sibling Workspace AIP, mirror
   composition mechanic
 - [AIP-21 — agentagencies/v2](/docs/aip-21) — sibling Workspace AIP for

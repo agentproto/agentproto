@@ -600,8 +600,8 @@ hash protocol and confirm the engagement was executed as recorded.
 ## See also
 
 - [AIP-8 — agentagencies/v1 spec](/docs/aip-8)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6)
-- [AIP-7 — agentgovernance/v1](/docs/aip-7)
+- [AIP-6 — company/v1](/docs/aip-6)
+- [AIP-7 — governance/v1](/docs/aip-7)
 - [AIP-15 — WORKFLOW.md spec](/docs/aip-15)
 - [`./SKILL.md`](./SKILL.md) — agent-side authoring skill
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide

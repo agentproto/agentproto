@@ -81,7 +81,7 @@ lessons/
 
 ```yaml
 ---
-schema: learning/v1
+schema: lesson/v1
 slug: <kebab-case-lesson-id>
 title: <one-sentence imperative — what to do or avoid>
 trigger:
@@ -217,6 +217,8 @@ learning across work items, and by Simone to feed Council
 ## Backwards Compatibility
 
 Not applicable — this AIP introduces a new spec.
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `lesson/v1`; documents that declare `learning/v1` remain valid, and hosts MUST accept both.
 
 ## Security Considerations
 

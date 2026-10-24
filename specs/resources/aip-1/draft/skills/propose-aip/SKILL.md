@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: propose-aip
 title: Author and propose a new AIP
 description:
@@ -203,7 +203,7 @@ Pick a verb that names the most common author task:
 - `<verb>-<noun>` for everything else (curate-wiki, propose-aip,
   configure-governance).
 
-Mirror the [AIP-3](/docs/aip-3) skill format: frontmatter (`schema: skills/v1`),
+Mirror the [AIP-3](/docs/aip-3) skill format: frontmatter (`schema: skill/v1`),
 When to use / When NOT, Process steps, Output, See also.
 
 Each SKILL.md goes in `resources/aip-NN/draft/skills/<verb>-<noun>/SKILL.md`.

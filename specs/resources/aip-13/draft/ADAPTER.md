@@ -638,7 +638,7 @@ These stay out of the spec on purpose.
 ## See also
 
 - [AIP-13 — agentwork/v1 spec](/docs/aip-13)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6) — COMPANY.md, ROLE.md, OBJECTIVE.md
+- [AIP-6 — company/v1](/docs/aip-6) — COMPANY.md, ROLE.md, OBJECTIVE.md
 - [AIP-9 — OPERATOR.md](/docs/aip-9) — assignee/lead/executor resolution
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — `KNOWLEDGE.md` workspace
   manifest, the structural sibling of `WORK.md`

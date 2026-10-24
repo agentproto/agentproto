@@ -23,7 +23,7 @@ instruction and depends only on the agent's default toolset.
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: explain-like-im-five
 title: Explain like I'm five
 description:
@@ -70,7 +70,7 @@ into the tool layer.
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: github-pr-house-style
 title: Draft a GitHub PR description in house style
 description:
@@ -140,7 +140,7 @@ the host can expect to parse from the agent's reply for downstream wiring.
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: release-note-from-diff
 title: Generate a release note from a diff
 description: Produce a customer-facing release note paragraph from a code diff and an optional issue reference. Use when the user asks for a changelog entry or release blurb; do NOT use for internal commit messages.
@@ -199,7 +199,7 @@ registration time rather than at runtime.
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: ship-release
 title: Ship a release end-to-end
 description:
@@ -256,7 +256,7 @@ no tools themselves (they emit files via the host's workspace adapter).
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: scaffold-fetch-tool
 title: Scaffold a fetch-style read-only tool
 description:
@@ -316,7 +316,7 @@ a preferred host.
 
 ```md
 ---
-schema: skills/v1
+schema: skill/v1
 name: long-context-summary
 title: Summarise a long document with chunked map-reduce
 description:
@@ -372,7 +372,7 @@ ignore namespaces they don't recognise.
 
 ## Anti-patterns to avoid
 
-- **Missing `schema: skills/v1`.** The host's parser dispatches on this field; a
+- **Missing `schema: skill/v1`.** The host's parser dispatches on this field; a
   manifest without it MUST be rejected. Don't rely on format inference.
 - **`capabilities` omitted** when the skill assumes network or secret access.
   Declare every grant the body relies on, even if the underlying tool already

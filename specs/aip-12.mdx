@@ -81,7 +81,7 @@ playbooks/
 
 ```yaml
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: <kebab-case-playbook-id>
 title: <one-sentence — what this overlay does>
 selector:                               # typed binding — see §Selector binding
@@ -264,6 +264,8 @@ lock is shared with the Simone base persona definition.
 ## Backwards Compatibility
 
 Not applicable — this AIP introduces a new spec.
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `playbook/v1`; documents that declare `playbooks/v1` remain valid, and hosts MUST accept both.
 
 ## Security Considerations
 

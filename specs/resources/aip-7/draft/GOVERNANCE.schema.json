@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentproto.sh/schemas/aip-7/GOVERNANCE.schema.json",
-  "title": "agentgovernance/v1 (AIP-7)",
+  "title": "governance/v1 (AIP-7)",
   "description": "Validates the five AIP-7 doctypes: signature (approval event), audit-event (append-only log line), policy (declarative autonomy rule), approval-request (pending human decision over a pinned payload), and governance.workspace/v1 (workspace manifest, root or view). Branch on the `doctype` (or for the workspace, the `schema`) field.",
   "oneOf": [
     { "$ref": "#/$defs/signature" },
@@ -12,8 +12,8 @@
   ],
   "$defs": {
     "schemaTag": {
-      "const": "agentgovernance/v1",
-      "description": "Doctype family. Constant across all three doctypes."
+      "enum": ["governance/v1", "agentgovernance/v1"],
+      "description": "Doctype family. Constant across all three doctypes. `agentgovernance/v1` is accepted as a legacy alias (AIP-70)."
     },
     "isoDateTime": {
       "type": "string",

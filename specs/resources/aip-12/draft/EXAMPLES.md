@@ -28,7 +28,7 @@ default priority, lock_check empty (the runtime's locks still apply).
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: quote-evidence-inline
 title: Quote evidence inline when arguing against a teammate.
 targets:
@@ -67,7 +67,7 @@ role. The runtime weaves it only when the operator is acting in that skill.
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: check-token-expiry-first
 title: Check token expiry before debugging auth flows.
 targets:
@@ -114,7 +114,7 @@ locks — both layers must agree before the overlay weaves.
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: slow-pace-on-crisis
 title: Slow pacing when the user is crisis-flagged.
 targets:
@@ -165,7 +165,7 @@ passes.
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: cite-source-when-naming-frameworks
 title: Cite the source when referencing named frameworks.
 targets:
@@ -239,7 +239,7 @@ crisis-flagged users at `priority: 85`.
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: acknowledge-before-redirecting
 title: Acknowledge feelings before redirecting to a resource.
 targets:
@@ -289,7 +289,7 @@ workflow).
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: alice-prefers-bullet-summaries
 title: Alice's preferred response shape — bullet summary first, then prose.
 targets:
@@ -339,7 +339,7 @@ supersedes it. The host walks the lifecycle: TTL expires → status auto-flips t
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: temp-promo-tone
 title: Match the spring 2026 launch campaign tone for marketing replies.
 targets:
@@ -379,7 +379,7 @@ paragraph, never use the word "solution".
 
 ```md
 ---
-schema: playbooks/v1
+schema: playbook/v1
 slug: summer-2026-tone
 title: Summer 2026 campaign tone for marketing replies.
 targets:

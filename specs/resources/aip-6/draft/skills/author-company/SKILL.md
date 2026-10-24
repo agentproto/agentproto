@@ -1,9 +1,9 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-company
-title: Author an agentcompanies/v1 workspace (AIP-6)
+title: Author a company/v1 workspace (AIP-6)
 description:
-  Walk through producing a valid agentcompanies/v1 workspace — COMPANY.md plus
+  Walk through producing a valid company/v1 workspace — COMPANY.md plus
   role and objective doctypes — with cross-references resolved and validated.
 version: 1.0.0
 tags: [aip-6, companies, roles, objectives, authoring, manifest, agentproto]
@@ -36,11 +36,11 @@ examples:
       - pricewatch/objectives/q3-pipeline/OBJECTIVE.md
 ---
 
-# Author an agentcompanies/v1 workspace (AIP-6)
+# Author a company/v1 workspace (AIP-6)
 
 Use this skill when the user asks to **define, draft, or scaffold a company** as
 a portable file-format package. The skill produces a valid
-[AIP-6 agentcompanies/v1](/docs/aip-6) workspace — the `COMPANY.md` root plus
+[AIP-6 company/v1](/docs/aip-6) workspace — the `COMPANY.md` root plus
 one folder per role and per objective. Every doctype is a markdown file with
 YAML frontmatter; references between them are slug-based; the result is a
 git-native package any conforming adapter can load.
@@ -50,7 +50,7 @@ git-native package any conforming adapter can load.
 - "Define our company as a file-format package."
 - "Draft the org structure for a two-person agency."
 - "Scaffold the roles and objectives for our marketing pod."
-- "Express this team's reporting tree as agentcompanies/v1."
+- "Express this team's reporting tree as company/v1."
 
 ## When NOT to use
 
@@ -132,7 +132,7 @@ For every slug in `structure.roles`, create `roles/<slug>/ROLE.md` with
 frontmatter:
 
 ```yaml
-schema: agentcompanies/v1
+schema: company/v1
 doctype: role
 id: founder
 name: Founder
@@ -168,7 +168,7 @@ For every slug in `structure.objectives` (and any sub-objectives roles list
 under `objectives`), create `objectives/<slug>/OBJECTIVE.md`:
 
 ```yaml
-schema: agentcompanies/v1
+schema: company/v1
 doctype: objective
 id: q3-pipeline
 name: Q3 Pipeline
@@ -292,7 +292,7 @@ files written; instantiation (per AIP-8) is a separate step.
 
 ## See also
 
-- [AIP-6 — agentcompanies/v1 spec](/docs/aip-6)
+- [AIP-6 — company/v1 spec](/docs/aip-6)
 - [AIP-7 — governance, capabilities, approval](/docs/aip-7)
 - [AIP-8 — agencies engine, operator instances](/docs/aip-8)
 - [AIP-14 — TOOL.md spec](/docs/aip-14) — referenced from `role.tools`

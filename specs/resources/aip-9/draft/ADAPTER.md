@@ -357,6 +357,6 @@ This is the standard "is this operator installable?" handshake.
 - [AIP-14 — TOOL.md](/docs/aip-14) — tools loaded into operators
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — what dispatches to operators
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
-- [AIP-6 — agentcompanies/v1](/docs/aip-6) — file-tree representation
+- [AIP-6 — company/v1](/docs/aip-6) — file-tree representation
 - [`./OPERATOR.schema.json`](./OPERATOR.schema.json) — manifest validator
 - [`./SKILL.md`](./SKILL.md) — agent-side authoring skill

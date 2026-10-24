@@ -1,6 +1,6 @@
 ---
 title: "AIP-64: PACK (pack/v1): the installable capability bundle: plugin, apps, knowledge, playbook, pricing"
-description: "Names the pack, the commercial assemblage that ships a plugin (built inline from `./skills/` or merged from published `@agentproto/skill-pack-*` includes) together with zero or more AIP-53 apps, a knowledge workspace selection, an optional playbook to generate, legacy pricing data, and non-technical blockers, as a first-class doctype. Fixes the PACK.md frontmatter (`pack/v1`), every cross-field rule a conformant parser enforces, the two authoring paths (`definePack` and `parsePackManifest`) over one shared zod schema, the frozen `PackHandle` with its derived `status` (`planned | assembling | ready | gated`), the `aip://64/<name>[@version]` artifact-ref grammar and the git pin grammar reused from AIP-62, the `agentproto-pack-digest/v1` content digest over the PACK.md and each declared app's APP.md source, and the installation contract (apps install through AIP-42 `app_install`, the plugin installs through the skill install verb, knowledge resolves at query time, the playbook generates on demand, and re-applying a pack replaces it, never duplicates it)."
+description: "Names the pack, the commercial assemblage that ships a plugin (built inline from `./skills/` or merged from published `@agentproto/skill-pack-*` includes) together with zero or more AIP-53 apps, a knowledge workspace selection, an optional playbook to generate, legacy pricing data, and non-technical blockers, as a first-class doctype. Fixes the PACK.md frontmatter (`pack/v1`), every cross-field rule a conformant parser enforces, the two authoring paths (`definePack` and `parsePackManifest`) over one shared zod schema, the frozen `PackHandle` with its derived `status` (`planned | assembling | ready | gated`), the `aip://64/<name>[@version]` artifact-ref grammar and the git pin grammar reused from AIP-62, the `review.pack-digest/v1` content digest over the PACK.md and each declared app's APP.md source, and the installation contract (apps install through AIP-42 `app_install`, the plugin installs through the skill install verb, knowledge resolves at query time, the playbook generates on demand, and re-applying a pack replaces it, never duplicates it)."
 aip: 64
 status: Draft
 type: Schema
@@ -367,10 +367,10 @@ pack-fetch field) names a git source, the pin grammar is the one
   reference such as `git+https://host/a#b/pack.git#<sha>` is rejected,
   not split at the last `#`.
 
-### Content digest (`agentproto-pack-digest/v1`)
+### Content digest (`review.pack-digest/v1`)
 
 A pack's content digest binds the assemblage to its bytes. The recipe
-name is the literal `agentproto-pack-digest/v1`, **reused from
+name is the literal `review.pack-digest/v1`, **reused from
 [AIP-62](/docs/aip-62)** (which uses it for review packs). The recipe
 here is the pack-scoped variant:
 
@@ -393,10 +393,10 @@ independently and are covered by their own AIPs' mechanisms. A pack
 with no declared apps digests its PACK.md alone.
 
 A consumer that records a pack digest MUST also record `alg` (the
-literal `agentproto-pack-digest/v1`). A consumer that does not
+literal `review.pack-digest/v1`). A consumer that does not
 recognize a recorded `alg` MUST refuse to compare and MUST NOT treat
 the pack as verified. A recipe change MUST bump `alg`
-(`agentproto-pack-digest/v2`).
+(`review.pack-digest/v2`).
 
 ### Installation contract
 
@@ -545,7 +545,7 @@ conformant host MUST NOT treat `pricing` as authoritative when a
 product prices the same `aip://64/<name>` ref.
 
 The digest recipe is versioned by `alg`. A recipe change MUST bump
-`agentproto-pack-digest/v2` and a consumer meeting an unknown `alg`
+`review.pack-digest/v2` and a consumer meeting an unknown `alg`
 MUST refuse to compare.
 
 The error prefix carries `AIP-52` today as a placeholder mislabel
@@ -578,7 +578,7 @@ host's app trust rules apply unchanged, and the pack adds none.
 host MUST surface them verbatim and MUST NOT parse them into decisions
 beyond the gate itself.
 
-**The digest is a binding, not a signature.** `agentproto-pack-digest/v1`
+**The digest is a binding, not a signature.** `review.pack-digest/v1`
 binds the declared surface to bytes; it authenticates nothing. A
 consumer that needs authenticity signs over the digest the way
 [AIP-62](/docs/aip-62) signs over its pack digests. Only the declared
@@ -626,7 +626,7 @@ system. The pack adds no knowledge semantics.
 ### AIP-62 REVIEW: the shared grammar and digest
 
 The git pin grammar (first-`#` rule, 40-hex sha, `git+https` only) and
-the `agentproto-pack-digest/v1` recipe name are reused from
+the `review.pack-digest/v1` recipe name are reused from
 [AIP-62](/docs/aip-62), which shipped them for review packs. The two
 AIPs share the recipe name but apply it over different inputs: review
 packs digest their REVIEW.md and selected rubrics; a PACK digests its
@@ -681,4 +681,4 @@ never conflated.
 - [AIP-57](/docs/aip-57): MODEL-ROUTING; the RoutingPack name
   distinction
 - [AIP-62](/docs/aip-62): REVIEW; the git pin grammar and the
-  `agentproto-pack-digest/v1` recipe name it shipped first
+  `review.pack-digest/v1` recipe name it shipped first

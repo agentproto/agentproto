@@ -2,7 +2,7 @@
 
 This document is the implementer's guide for any runtime, framework, or language
 that wants to **load, validate, and project** AIP-6
-[`agentcompanies/v1`](/docs/aip-6) workspaces into its own representation. It is
+[`company/v1`](/docs/aip-6) workspaces into its own representation. It is
 normative for parts marked MUST and informative for parts marked SHOULD.
 
 The audience is a host author — someone exposing `defineCompany`, `defineRole`,
@@ -13,7 +13,7 @@ vendor-specific catalog. Authors themselves should read
 ## Contract overview
 
 A conforming host implements four responsibilities, in this order when an
-`agentcompanies/v1` workspace is registered:
+`company/v1` workspace is registered:
 
 1. **Discover** — walk the workspace root, locate `COMPANY.md`, and enumerate
    `roles/*/ROLE.md` and `objectives/*/OBJECTIVE.md`.
@@ -52,7 +52,7 @@ Rules:
   field. Mismatch is a spec bug surfaced at validation.
 - Files outside this layout (READMEs, prompts, fixtures) are ignored. They are
   non-normative and the host MUST tolerate them.
-- A workspace without `COMPANY.md` is not an `agentcompanies/v1` package. The
+- A workspace without `COMPANY.md` is not an `company/v1` package. The
   host MUST refuse with a clear error.
 
 ## Doctype loader rules
@@ -65,7 +65,7 @@ Each doctype file is a markdown document with YAML frontmatter delimited by
    prompts, audit views).
 2. **Parse YAML strictly** — duplicate keys, tab indentation, and non-string
    keys SHOULD all error rather than silently succeed.
-3. **Check `schema: agentcompanies/v1`** — refuse files lacking the identifier.
+3. **Check `schema: company/v1`** — refuse files lacking the identifier.
    The schema field is the format-discriminator at the filesystem level.
 4. **Discriminate on `doctype`** — pick the right `oneOf` branch under
    `COMPANY.schema.json`.
@@ -304,7 +304,7 @@ These are runtime-policy concerns and stay out of the spec on purpose.
 
 ## See also
 
-- [AIP-6 — agentcompanies/v1 spec](/docs/aip-6)
+- [AIP-6 — company/v1 spec](/docs/aip-6)
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-8 — agencies engine, operators](/docs/aip-8)
 - [AIP-14 — TOOL.md spec](/docs/aip-14)

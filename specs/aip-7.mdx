@@ -27,7 +27,7 @@ package: "@agentproto/governance"
 
 ## Abstract
 
-`agentgovernance/v1` is an open file-format standard for recording
+`governance/v1` is an open file-format standard for recording
 approvals, audit logs, and autonomy policies as workspace files. It
 provides a vendor-neutral, filesystem-first, third-party-verifiable
 primitive for any system — human, agentic, or hybrid — that needs
@@ -41,7 +41,7 @@ channels may resolve it.
 
 Auditability in agentic systems is typically vendor-locked: each platform
 keeps approvals and logs in its own database, with proprietary formats
-and no cross-platform verification. agentgovernance/v1 makes the artifacts
+and no cross-platform verification. governance/v1 makes the artifacts
 themselves portable and verifiable: a workspace receiving these files can
 validate every doctype and verify the audit chain end-to-end without
 trusting the originating system.
@@ -91,7 +91,7 @@ Conventions adopted:
 - **Markdown canonical** with YAML frontmatter (for `POLICY.md`)
 - **JSON canonical** for `signature.json` and `audit-log.jsonl` lines
 - **Slug-based references**, never database IDs
-- **`schema: agentgovernance/v1`** on every doctype
+- **`schema: governance/v1`** on every doctype
 - **Vendor-specific extensions** under `metadata.<vendor>.*`
 - **Git-native** workspace layout
 
@@ -692,6 +692,8 @@ The `approval-request` doctype is purely additive. The optional
 `documentHash`, `signerKind`, `method`, and `evidence` fields it relies on
 in `signature` are optional in the schema, so existing signatures remain
 valid. A host that does not implement approval requests is unaffected.
+
+Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `governance/v1`; documents that declare `agentgovernance/v1` remain valid, and hosts MUST accept both.
 
 ## Security Considerations
 

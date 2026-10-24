@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-cli
 title: Author a CLI.md (AIP-29)
 description:

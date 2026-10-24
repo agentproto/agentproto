@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-http
 title: Author an HTTP driver (AIP-31)
 description:

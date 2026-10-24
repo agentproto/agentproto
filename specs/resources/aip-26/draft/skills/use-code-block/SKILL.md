@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: use-code-block
 title: Wire AIP-26 CODE blocks into a new manifest format
 description:

@@ -1,5 +1,5 @@
 ---
-schema: skills/v1
+schema: skill/v1
 name: author-persona
 title: Author a PERSONA.md (AIP-25)
 description:
