@@ -520,6 +520,20 @@ limits:
 
 - `kind: "spend-usd"`: `value` is a USD ceiling accumulated over
   `window` for the given `scope`.
+- `spend-usd` accumulates the `costUsd` reported per `model:invoke`
+  under the session cost model in
+  [AIP-46](/docs/aip-46#session-cost-and-billing-mode-added-2026-10-18).
+  That is the billing basis chosen on purpose: `costUsd` is known at
+  invocation time, so the host can refuse the next invoke, whereas
+  `amortizedCostUsd` is an allocation that depends on later usage. On
+  an API key `costUsd` is the real bill; on a subscription it bounds
+  usage at API-equivalent price; on a free model it is 0, so a
+  `spend-usd` limit never blocks a free model (rate limits govern
+  those). A host that cannot report `costUsd` for an invocation MUST
+  count it at the catalog price of the model and tokens when it has
+  one, and otherwise SHOULD treat the limit as not enforceable for
+  that session and say so in the decision report, instead of counting
+  0 silently.
 - `scope: "session"` aggregates spend over the session's lineage: a
   successor declared via `succeeds`, or a continue-fresh handoff,
   shares the bucket of the session it replaces, so a handoff does not
