@@ -221,6 +221,17 @@ schedule:
     workspace: "@me/marketing"
 ```
 
+#### Event filter
+
+`schedule.filter` is a flat map. Each key is a dotted path into the
+event payload (for example `session.kind`) and each value is a
+string, a finite number, a boolean or `null`. An event matches when
+every entry is present at its path and strictly equal to the value.
+A path that is missing from the payload never matches, even against
+`null`, and a path never resolves through an inherited property or an
+array. This AIP does not define payload fields: the payload a path
+addresses is the one the host delivers for that event.
+
 ### Target
 
 The `target` field selects exactly one of `action`, `workflow`, `tool`,
@@ -360,6 +371,12 @@ interface RoutineDefinition {
 
 9. **No I/O at parse time.** Parsing a ROUTINE.md MUST NOT trigger
    network calls, registry lookups, or schedule registration.
+
+10. **Filter shape.** `schedule.filter`, when present, MUST be a flat
+    map of dotted paths to string, finite number, boolean or `null`
+    values. A host MUST refuse to register an event routine whose
+    filter it cannot evaluate (an array or object value, an empty path
+    segment) instead of firing it unfiltered.
 
 ### Stable identity
 
