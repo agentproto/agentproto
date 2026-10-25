@@ -8,8 +8,8 @@ created: 2026-10-11
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 15, 57]
 layer: host
-package: "@agentproto/runtime"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+package: "@agentproto/decision"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/decision
 ---
 
 | Field | Value |
@@ -22,7 +22,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-2](/docs/aip-2) (template), [AIP-15](/docs/aip-15) (WORKFLOW: the `decide` step and the `suspend` semantics a human rung relies on), [AIP-57](/docs/aip-57) (MODEL-ROUTING: an `llm` rung names its model through a role) |
 | Composes with | [AIP-62](/docs/aip-62) (REVIEW: a decision picks the review binding), [AIP-7](/docs/aip-7) (GOVERNANCE: the human rung's delivery channel), [AIP-61](/docs/aip-61) (INFERENCE-ENDPOINT: what "local" means for exposure classes), [AIP-16](/docs/aip-16) (IO: the reserved `extract` schema) |
 | Created | 2026-10-11 |
-| Package | `@agentproto/runtime` (engine, judges, registry, record store, tools); `@agentproto/workflow-runtime` (the `decide` step); `@agentproto/cli` (`agentproto decide`) |
+| Package | `@agentproto/decision` (policy parser, evidence, decision primitive); `@agentproto/workflow-runtime` (the `decide` step); `@agentproto/cli` (`agentproto decide`) |
 
 ## Abstract
 
@@ -700,8 +700,10 @@ field name inside a review.
 
 ## Reference implementation
 
-Not yet implemented as specified. The reference runtime has the pieces it
-is extracted from: the session steward workflows
+The reference [`@agentproto/decision`](https://github.com/agentproto/ts/tree/main/packages/decision)
+package ships the DECISION.md policy parser, bounded evidence collection,
+and the reusable decision primitive. It was extracted from the session
+steward workflows
 (`packages/apps/session-steward/.agentproto/workflows/session-steward/actions.mjs`,
 `two-step.mjs`, `docs/cli/verbs/steward.md`), the Jev client
 (`packages/runtime/src/jev-client.ts`, `choice` only, never throws,

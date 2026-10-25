@@ -9,8 +9,8 @@ author: Jeremy André <jeremy@agentik.net>
 requires: [1, 46]
 discussions-to: https://github.com/agentproto/agentproto/discussions/60
 layer: host
-package: "@agentproto/runtime"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+package: "@agentproto/sentinel"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/sentinel
 ---
 
 | Field | Value |
@@ -23,7 +23,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-46](/docs/aip-46) (SESSION: the inbox a matched event is delivered into, and the session liveness, resume, and parent semantics delivery relies on) |
 | Composes with | [AIP-41](/docs/aip-41) (SCHEDULE: the `routine` target kind, a frozen shape with no delivery implementation yet), [AIP-62](/docs/aip-62) (REVIEW: the PR auto-linker is the natural companion to a review that opens a pull request) |
 | Created | 2026-09-29 |
-| Package | `@agentproto/runtime` (sentinel store, runtime, providers, tools, ingress, auto-link); `@agentproto/provider-kit` (adapter catalog, list and setup tool plumbing); `@agentproto/cli` (`agentproto sentinel` verbs) |
+| Package | `@agentproto/sentinel` (sentinel store, runtime, providers, tools, ingress, auto-link); `@agentproto/runtime` (daemon wiring); `@agentproto/provider-kit` (adapter catalog, list and setup tool plumbing); `@agentproto/cli` (`agentproto sentinel` verbs) |
 
 ## Abstract
 
@@ -130,7 +130,7 @@ Three properties are missing from any ad-hoc answer:
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as in
 RFC 2119. Unless stated otherwise the behavior below is that of the
-reference implementation (`@agentproto/runtime`, `@agentproto/cli`) and
+reference implementation (`@agentproto/sentinel`, `@agentproto/runtime`, `@agentproto/cli`) and
 is normative for conformant hosts.
 
 ### The primitive
@@ -756,18 +756,18 @@ suite failing after the merge) is journaled to
 
 | Concern | Source (in `agentproto/ts`) |
 |---|---|
-| Spec, event envelope, provider interface | `packages/runtime/src/sentinel-providers/types.ts` |
-| Store (persistence, dedup window, ids) | `packages/runtime/src/sentinel-store.ts` |
-| Runtime (poll loop, delivery, lifetime, parking) | `packages/runtime/src/sentinel-runtime.ts` |
-| Provider registry and third-party discovery | `packages/runtime/src/sentinel-providers/registry.ts` |
-| `local-gh` provider | `packages/runtime/src/sentinel-providers/local-gh.ts` |
-| `webhook` provider | `packages/runtime/src/sentinel-providers/webhook.ts`; hook store in `webhook-hooks.ts` |
-| `agentpush` provider | `packages/runtime/src/sentinel-providers/agentpush.ts` |
-| GitHub webhook normalization | `packages/runtime/src/sentinel-github-normalize.ts` |
-| Provider selection | `packages/runtime/src/sentinel-provider-select.ts`; public URL in `sentinel-public-url.ts` |
-| Push ingress | `packages/runtime/src/sentinel-inbound.ts`; route wiring in `http-server.ts` |
-| MCP tools | `packages/runtime/src/sentinel-tools.ts`; adapter tools in `sentinel-adapters.ts` |
-| PR auto-link | `packages/runtime/src/sentinel-autolink.ts` |
+| Spec, event envelope, provider interface | `packages/sentinel/src/sentinel-providers/types.ts` |
+| Store (persistence, dedup window, ids) | `packages/sentinel/src/sentinel-store.ts` |
+| Runtime (poll loop, delivery, lifetime, parking) | `packages/sentinel/src/sentinel-runtime.ts` |
+| Provider registry and third-party discovery | `packages/sentinel/src/sentinel-providers/registry.ts` |
+| `local-gh` provider | `packages/sentinel/src/sentinel-providers/local-gh.ts` |
+| `webhook` provider | `packages/sentinel/src/sentinel-providers/webhook.ts`; hook store in `webhook-hooks.ts` |
+| `agentpush` provider | `packages/sentinel/src/sentinel-providers/agentpush.ts` |
+| GitHub webhook normalization | `packages/sentinel/src/sentinel-github-normalize.ts` |
+| Provider selection | `packages/sentinel/src/sentinel-provider-select.ts`; public URL in `sentinel-public-url.ts` |
+| Push ingress | `packages/sentinel/src/sentinel-inbound.ts`; route wiring in `packages/runtime/src/http-server.ts` |
+| MCP tools | `packages/sentinel/src/sentinel-tools.ts`; adapter tools in `sentinel-adapters.ts` |
+| PR auto-link | `packages/sentinel/src/sentinel-autolink.ts` |
 | CLI verbs (`watch`, `list`, `rm`, `status`) | `packages/cli/src/commands/sentinel.ts` |
 
 ## Backward compatibility

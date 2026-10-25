@@ -8,8 +8,8 @@ created: 2026-10-14
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 36, 44, 45]
 layer: host
-package: "@agentproto/runtime"
-ref-impl: https://github.com/agentproto/ts/tree/main/adapters/claude-code-cloud
+package: "@agentproto/cloud-agent"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/cloud-agent
 ---
 
 | Field | Value |
@@ -21,7 +21,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/adapters/claude-code-cloud
 | Type | Core |
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX: the target this one is distinguished from), [AIP-44](/docs/aip-44) (ACP: the wire a cloud session is projected onto), [AIP-45](/docs/aip-45) (HARNESS: the harness manifest a vendor binds to) |
 | Created | 2026-10-14 |
-| Package | `@agentproto/runtime` (spawn resolution, vendor registry, re-attach); `@agentproto/adapter-claude-code-cloud` (first vendor) |
+| Package | `@agentproto/cloud-agent` (spawn resolution, vendor registry, re-attach); `@agentproto/adapter-claude-code-cloud` (first vendor) |
 
 ## Abstract
 
@@ -230,7 +230,7 @@ hardlinked objects, which section 3 makes moot.
 - **Relay.** `@agentproto/adapter-claude-code-cloud` is an ACP stdio relay
   ([agentproto/ts#1947](https://github.com/agentproto/ts/pull/1947)). It
   reuses the stream-json to ACP mapping of `@agentproto/adapter-claude-sdk`.
-- **Spawn wiring.** `@agentproto/runtime` adds a vendor registry and
+- **Spawn wiring.** `@agentproto/cloud-agent` adds a vendor registry and
   `resolveCloudSpawn`. It refuses §2 and §4 violations before any side
   effect, with the code `cloud_spawn_refused`
   ([agentproto/ts#1950](https://github.com/agentproto/ts/pull/1950)).

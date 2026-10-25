@@ -597,16 +597,7 @@
     }
   ],
   "pending": [
-    "aip-21:package",
-    "aip-45:package",
     "aip-46:package",
-    "aip-48:package",
-    "aip-56:package",
-    "aip-58:package",
-    "aip-60:package",
-    "aip-65:package",
-    "aip-66:package",
-    "aip-67:package",
     "aip-69:package",
     "aip-69:title"
   ]

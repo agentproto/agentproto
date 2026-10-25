@@ -8,11 +8,11 @@ created: 2026-05-08
 updated: 2026-10-23
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 29, 36, 44]
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/driver/agent-cli
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/harness
 resources: ./resources/aip-45/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/45
 layer: drivers
-package: "@agentproto/driver-agent-cli"
+package: "@agentproto/harness"
 ---
 
 | Field | Value |
@@ -23,7 +23,7 @@ package: "@agentproto/driver-agent-cli"
 | Type | Schema |
 | Domain | cli.sh |
 | Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-29](/docs/aip-29) (CLI), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP) |
-| Reference Impl | [`@agentproto/driver-agent-cli`](https://github.com/agentproto/ts/tree/main/packages/driver/agent-cli) |
+| Reference Impl | [`@agentproto/harness`](https://github.com/agentproto/ts/tree/main/packages/harness) |
 | Resources | [`./resources/aip-45`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md), [`HARNESS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/HARNESS.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) |
 
 ## Abstract
@@ -62,7 +62,7 @@ Guilde, Katchy, Simone, dev tooling — and across platforms (macOS,
 Linux, headless servers, Modal/Daytona sandboxes).
 
 AIP-45 factors the integration shape into a single declarative file
-plus a single TypeScript runner (`@agentproto/driver-agent-cli`), the
+plus a single TypeScript runner (`@agentproto/harness`), the
 same way AIP-29 factors tool-CLI integration. The discriminator means
 new harnesses join the catalog by writing a manifest, not by writing
 runner code.
@@ -92,7 +92,7 @@ A manifest is **AIP-45-conformant** iff:
    `modelcontextprotocol.io`.
 5. When `protocol: "proprietary"`, the manifest's adapter package
    (`adapter` field) implements the `AgentCliClient` interface from
-   `@agentproto/driver-agent-cli`.
+   `@agentproto/harness`.
 6. When `modes` is present, every entry has a unique `id` matching
    `^[a-z0-9][a-z0-9\-]*$`; mode patches reference no symbols beyond
    `bin_args_append` and `env`.
@@ -180,10 +180,9 @@ load the manifest; this is a hard error, not a warning.
 
 > **Amendment — codifies shipped behaviour.** `protocol: "print"` is a
 > fourth discriminator arm. It is validated by the closed enum
-> `z.enum(["acp", "mcp", "proprietary", "print"])` in
-> `packages/driver/agent-cli/src/schema.ts` and driven by
-> `packages/driver/agent-cli/src/protocol/print-arm.ts` in the
-> reference implementation.
+> `z.enum(["acp", "mcp", "proprietary", "print"])` in the
+> `@agentproto/harness` reference implementation and driven by its
+> print protocol arm.
 
 `print` serves **headless one-shot CLIs**: instead of a long-lived
 connection, the driver spawns **one fresh subprocess per turn** and
@@ -594,7 +593,7 @@ ship one renderer.
 
 ## Reference Implementation
 
-[`@agentproto/driver-agent-cli`](https://github.com/agentik/agentik-studio/tree/dev/projects/agentproto/ts/packages/driver/agent-cli)
+[`@agentproto/harness`](https://github.com/agentproto/ts/tree/main/packages/harness)
 — TypeScript runner that loads a `HARNESS.md` manifest, applies
 the sandbox + auth, spawns the binary, dispatches to the protocol
 arm, and emits normalised stream events.
