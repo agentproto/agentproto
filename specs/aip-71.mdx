@@ -283,9 +283,17 @@ with its conformance fixtures. The AIP-45 `capabilities.hooks` declaration is
 typed in the agent-cli driver, reported by the harness and session capability
 surfaces, and declared today by the Codex and Claude Code adapters. The
 internal contract types (admission decisions and occurrence keys) are in
-`@agentproto/runtime`. The durable reaction receipts, the reaction runner and
-the native hook projections themselves are follow-up work in the same
-repository. This AIP defines no package of its own. Until a native projection
+`@agentproto/runtime`, together with the durable reaction receipts (one file
+per workspace bucket, keyed by the occurrence key), the reaction runner that
+executes a binding once per key with the running state written before the
+target starts, and the `agentproto:session-completed` host event. Spawn
+admission wraps session spawn and returns reuse and deny decisions. Two
+reactions run on this path today: an opt-in ingestion of completed sessions
+into the workspace brain, and AIP-41 event routines, whose `target` is
+dispatched through the same authorized path as a scheduled routine. The native
+hook projections, the AIP-42 `on` shorthand, prompt admission and the
+admission of tool dispatch are follow-up work in the same repository. This AIP
+defines no package of its own. Until a native projection
 ships for an event, the host MUST NOT claim native ownership of it, even where
 the harness declares the capability.
 
