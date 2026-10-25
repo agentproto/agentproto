@@ -757,12 +757,14 @@ state keeps looking at exactly what it always looked at.
 
 ## Reference Implementation
 
-The reference [`@agentproto/run`](https://github.com/agentproto/ts/tree/main/packages/run)
-package (specifically its run store and pure run-record types, and the
-compiled step algebra it delegates to in
-`@agentproto/workflow-runtime`'s `types.ts`) already ships several of
-the pieces this AIP formalizes, and is the evidence base this AIP's
-Motivation draws on:
+The run substrate (workspace layout, event log, run store, step cache, and
+run-record types) is provided by
+[`@agentproto/run`](https://github.com/agentproto/ts/tree/main/packages/run).
+Execution remains in the reference runtime's
+`packages/runtime/src/workflow-runner.ts`, which delegates to the compiled
+step algebra in `@agentproto/workflow-runtime`'s `types.ts`. These packages
+already ship several of the pieces this AIP formalizes, and are the evidence
+base this AIP's Motivation draws on:
 
 - **A run record with a state machine** — `WorkflowRun` /
   `WorkflowRunStatus` (`idle | running | awaiting-input |

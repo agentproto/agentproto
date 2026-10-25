@@ -10,8 +10,8 @@ requires: [1, 2, 9, 40, 47]
 resources: ./resources/aip-48/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/48
 layer: coordination
-package: "@agentproto/runtime"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+package: "@agentproto/agent-runtime"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/agent-runtime
 ---
 
 | Field | Value |
@@ -78,7 +78,7 @@ AIP-48 collapses these vectors onto one manifest:
 - Replace the scope by changing the manifest — local-only and cloud-hosted
   share the same seven-port shape.
 
-The reference kernel (`@agentproto/runtime`) is a thin orchestration
+The reference kernel (`@agentproto/agent-runtime`) is a thin orchestration
 loop over the port interfaces; the reference adapters (`substrate-file`,
 `substrate-guilde-mcp`, `dispatcher-mention`, `state-fs`,
 `participant-agent-cli`) implement the most common composition. Future
@@ -288,7 +288,7 @@ This AIP was titled MULTI_AGENT_RUNTIME until 2026-10-23 ([AIP-70](/docs/aip-70)
 
 ## Reference implementation
 
-`@agentproto/runtime` ships the kernel + the five reference adapters
+`@agentproto/agent-runtime` ships the kernel + the five reference adapters
 listed above. `@agentproto/runtime-profile-standard` ships an installable
 profile that drops the .claude/ scaffolding (two example sub-agents, hooks,
 slash commands, an example swarm manifest) into a user's repo via

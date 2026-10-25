@@ -700,10 +700,10 @@ field name inside a review.
 
 ## Reference implementation
 
-The reference [`@agentproto/decision`](https://github.com/agentproto/ts/tree/main/packages/decision)
-package ships the DECISION.md policy parser, bounded evidence collection,
-and the reusable decision primitive. It was extracted from the session
-steward workflows
+Not yet implemented as specified. The DECISION.md core (policy parser,
+bounded evidence collection, and the reusable decision primitive) now lives
+in [`@agentproto/decision`](https://github.com/agentproto/ts/tree/main/packages/decision),
+extracted from the session steward workflows
 (`packages/apps/session-steward/.agentproto/workflows/session-steward/actions.mjs`,
 `two-step.mjs`, `docs/cli/verbs/steward.md`), the Jev client
 (`packages/runtime/src/jev-client.ts`, `choice` only, never throws,

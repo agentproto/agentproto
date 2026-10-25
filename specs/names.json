@@ -597,7 +597,9 @@
     }
   ],
   "pending": [
+    "aip-45:package",
     "aip-46:package",
+    "aip-48:package",
     "aip-69:package",
     "aip-69:title"
   ]

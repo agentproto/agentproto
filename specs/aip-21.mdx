@@ -779,8 +779,9 @@ ceiling.
 
 The reference implementation lives in
 [`@agentproto/agency`](https://github.com/agentproto/ts/tree/main/packages/agency),
-which provides the `AGENCY.md` workspace root manifest, the engagement
-lifecycle helpers, and the scope axes this AIP specifies.
+which exports `defineAgency` and `defineAgencyV2`, the
+`AgencyV2Definition` and `AgencyV2Handle` types, and the `agency/v2` spec
+metadata.
 
 The implementation composes with [AIP-18](/docs/aip-18)'s collection
 machinery: `AGENCY.md` validation delegates per-item-kind validation to
