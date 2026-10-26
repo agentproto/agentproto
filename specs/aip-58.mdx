@@ -11,8 +11,8 @@ requires: [1, 2, 15, 16, 37, 46]
 resources: ./resources/aip-58/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/58
 layer: host
-package: "@agentproto/runtime"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+package: "@agentproto/run"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/run
 ---
 
 | Field | Value |
@@ -26,7 +26,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 | Requires | [AIP-15](/docs/aip-15) (WORKFLOW: the primary producer of runs), [AIP-16](/docs/aip-16) (IO: the file contract the run workspace fulfils), [AIP-37](/docs/aip-37) (LIFECYCLE: the event vocabulary this AIP extends), [AIP-46](/docs/aip-46) (SESSION: a step's driver may be a session) |
 | Composes with | [AIP-53](/docs/aip-53) (APP — an app run is a run whose children are workflow runs), [AIP-41](/docs/aip-41) (ROUTINE — a routine fire is a run), [AIP-7](/docs/aip-7) (GOVERNANCE — audit consumes the event log), [AIP-35](/docs/aip-35) (STORAGE — where a run's artifacts may sync to) |
 | Resources | [`./resources/aip-58`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-58/draft) — `run.schema.json`, `event.schema.json`, `journal-entry.schema.json`, `EXAMPLES.md`, `vectors/` |
-| Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
+| Reference Impl | [`@agentproto/run`](https://github.com/agentproto/ts/tree/main/packages/run) |
 
 ## Abstract
 
@@ -757,11 +757,14 @@ state keeps looking at exactly what it always looked at.
 
 ## Reference Implementation
 
-The reference daemon's `@agentproto/runtime` package (specifically
-`workflow-runner.ts`, and the compiled step algebra it delegates to in
-`@agentproto/workflow-runtime`'s `types.ts`) already ships several of
-the pieces this AIP formalizes, and is the evidence base this AIP's
-Motivation draws on:
+The run substrate (workspace layout, event log, run store, step cache, and
+run-record types) is provided by
+[`@agentproto/run`](https://github.com/agentproto/ts/tree/main/packages/run).
+Execution remains in the reference runtime's
+`packages/runtime/src/workflow-runner.ts`, which delegates to the compiled
+step algebra in `@agentproto/workflow-runtime`'s `types.ts`. These packages
+already ship several of the pieces this AIP formalizes, and are the evidence
+base this AIP's Motivation draws on:
 
 - **A run record with a state machine** — `WorkflowRun` /
   `WorkflowRunStatus` (`idle | running | awaiting-input |

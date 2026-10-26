@@ -7,8 +7,8 @@ type: Schema
 created: 2026-04-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 7, 18]
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/agency-v2
-package: "@agentproto/agency-v2"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/agency
+package: "@agentproto/agency"
 replaces: 8
 resources: ./resources/aip-21/draft
 discussions-to: https://github.com/agentproto/agentproto/discussions/21
@@ -777,16 +777,16 @@ ceiling.
 
 ## Reference Implementation
 
-Reference implementation in progress. The spec leads the
-implementation; once the in-flight `packages/agencies/v2` package
-lands, this AIP will absorb the working schema in full as part of
-moving Draft → Review.
+The reference implementation lives in
+[`@agentproto/agency`](https://github.com/agentproto/ts/tree/main/packages/agency),
+which exports `defineAgency` and `defineAgencyV2`, the
+`AgencyV2Definition` and `AgencyV2Handle` types, and the `agency/v2` spec
+metadata.
 
-The implementation will compose with [AIP-18](/docs/aip-18)'s
-`packages/collection/core` (also in flight) — `AGENCY.md`
-validation delegates per-item-kind validation to AIP-18; both
-packages share the same merge algorithm and resolution-chain
-exposure surface as [AIP-20](/docs/aip-20).
+The implementation composes with [AIP-18](/docs/aip-18)'s collection
+machinery: `AGENCY.md` validation delegates per-item-kind validation to
+AIP-18; both packages share the same merge algorithm and
+resolution-chain exposure surface as [AIP-20](/docs/aip-20).
 
 ## Backwards Compatibility
 

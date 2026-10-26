@@ -9,7 +9,8 @@ author: Jeremy André <jeremy@agentik.net>
 requires: [43]
 discussions-to: https://github.com/agentproto/agentproto/discussions/67
 layer: host
-package: "@agentproto/model-intel"
+package: "@agentproto/quota"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/quota
 ---
 
 | Field | Value |
@@ -21,7 +22,7 @@ package: "@agentproto/model-intel"
 | Type | Standards Track |
 | Requires | [AIP-43](/docs/aip-43) (the registry handles a reader is registered through) |
 | Created | 2026-10-19 |
-| Package | `@agentproto/model-intel` |
+| Package | `@agentproto/quota` |
 
 ## Abstract
 
@@ -370,7 +371,7 @@ rather than synthesising one):
 
 ## Reference Implementation
 
-`@agentproto/model-intel` — in the
+[`@agentproto/quota`](https://github.com/agentproto/ts/tree/main/packages/quota), in the
 [`agentproto/ts`](https://github.com/agentproto/ts/tree/main) monorepo —
 ships the `quota/v1` types, the reader contract, the
 `defineQuotaReader` handle factory, and readers for the `provider`-basis

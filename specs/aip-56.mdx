@@ -8,8 +8,8 @@ created: 2026-09-07
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2]
 layer: primitives
-package: "@agentproto/define-doctype"
-ref-impl: https://github.com/agentproto/ts/tree/main/packages/define-doctype
+package: "@agentproto/doctype"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/doctype
 ---
 
 | Field | Value |
@@ -19,7 +19,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/define-doctype
 | Status | Draft |
 | Type | Schema |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
-| Reference Impl | [`@agentproto/define-doctype`](https://github.com/agentproto/ts/tree/main/packages/define-doctype) |
+| Reference Impl | [`@agentproto/doctype`](https://github.com/agentproto/ts/tree/main/packages/doctype) |
 
 ## Abstract
 
@@ -46,7 +46,7 @@ invalid id might be accepted by `defineDriver`; an error thrown deep
 inside a framework adapter might not say which spec rejected the
 definition, or which field was at fault.
 
-`@agentproto/define-doctype` is imported by **41 packages** in the
+`@agentproto/doctype` is imported by **41 packages** in the
 `agentproto/ts` monorepo. The invariants below are load-bearing across
 the whole doctype ecosystem; centralising them means one fix repairs
 every constructor, and one error format is learnable once.
@@ -167,7 +167,7 @@ function; no I/O.
 
 ## Reference implementation
 
-[`@agentproto/define-doctype`](https://github.com/agentproto/ts/tree/main/packages/define-doctype)
+[`@agentproto/doctype`](https://github.com/agentproto/ts/tree/main/packages/doctype)
 — pure, zero-dependency. Exports `createDoctype`, `DoctypeDefinitionBase`,
 `DoctypeOptions`, `DOCTYPE_DEFAULT_ID_PATTERN`,
 `DOCTYPE_MAX_DESCRIPTION_LEN`, and `filterSerializable`. Consumers
