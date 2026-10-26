@@ -12,7 +12,7 @@ the general answer to a question every AIP has answered differently:
 
 - AIP-18's `ref` field — an id string scoped to ONE named collection,
   no shape guarantee.
-- app-kit's `attach` — a structural `DoctypeHandle` that serializes
+- `@agentproto/app`'s `attach` — a structural `DoctypeHandle` that serializes
   the whole bundle and carries no reliable discriminator.
 - AIP-42's `AnyRef` — bare strings, typed only by call-site convention.
 - AIP-55's first draft — bespoke `appRef`/`packRef` per target kind.
@@ -76,7 +76,7 @@ const uri = refToUri(ref)            // "aip://53/the-agentic-coder@1.0.0"
 | Existing | Migration |
 |---|---|
 | AIP-18 `ref` field + `refKind` | Validate ref values as `aip://` URIs; `refKind` narrows the accepted `aip`(s). |
-| app-kit `attach` (DoctypeHandle) | Carry `ArtifactRef`s; the host resolves through its catalog. Fixes the inline-the-whole-bundle flaw. |
+| `@agentproto/app` `attach` (DoctypeHandle) | Carry `ArtifactRef`s; the host resolves through its catalog. Fixes the inline-the-whole-bundle flaw. |
 | AIP-42 `AnyRef` string form | Unchanged at the string layer; `aip://` URIs are a valid `ref:` value hosts narrow to `ref/v1`. |
 | The pending harness manifest's `$resolver` (no AIP number assigned yet) | A URI rendering of the same coordinates. |
 | AIP-53 draft `target` union | Replaced by `on: ref/v1` (see AIP-53). |
