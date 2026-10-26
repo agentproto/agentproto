@@ -61,7 +61,7 @@ mechanism, and none of them interoperate:
 1. **AIP-18's `ref` field** is an id string scoped to exactly one
    named collection (`refKind` names "the target collection's `name`")
    with no shape guarantee at the schema level. It cannot cross AIPs.
-2. **Inline doctype handles** (e.g. app-kit's `attach`) serialize the
+2. **Inline doctype handles** (e.g. `@agentproto/app`'s `attach`) serialize the
    whole referenced bundle, carry no reliable discriminator field, and
    cannot be rehydrated — nothing downstream resolves an id back to a
    handle.
