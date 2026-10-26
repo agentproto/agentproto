@@ -418,7 +418,7 @@
       "aip": 48,
       "name": "RUNTIME",
       "specId": "runtime/v1",
-      "package": "@agentproto/runtime",
+      "package": "@agentproto/agent-runtime",
       "layer": "coordination"
     },
     {
@@ -599,7 +599,6 @@
   "pending": [
     "aip-45:package",
     "aip-46:package",
-    "aip-48:package",
     "aip-69:package",
     "aip-69:title"
   ]
