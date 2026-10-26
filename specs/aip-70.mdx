@@ -79,11 +79,12 @@ form:
 | spec id | `<name>/v<N>`, `N` the major version of the AIP | `work/v2` |
 | document schema ids (`schema:` and JSON Schema `const`) | `<name>/v<N>`, or `<name>.<kind>/v<N>` (one level) when the AIP defines several documents | `knowledge.entry/v1` |
 | document file, when the AIP defines one | `<NAME>.md`; an AIP defining several documents names each `<KIND>.md` and lists them as `files` | `POLICY.md`; AIP-68: `STEWARD.md`, `SECRETARY.md` |
-| package | `@agentproto/<name>`; driver family: `@agentproto/driver-<name>` | `@agentproto/policy` |
+| package | `@agentproto/<name>`; driver family: `@agentproto/driver-<name>`; coordination family: `@agentproto/agent-<name>` | `@agentproto/policy` |
 | define function | `define<Name>` in PascalCase | `definePolicy` |
 | tools | `<name>_<verb>` (or a documented sub-resource, `<name>_<resource>_<verb>`) | `session_restart` |
 | layer | one of `process`, `primitives`, `capabilities`, `identity`, `coordination`, `memory`, `surfaces`, `drivers`, `host` | |
 
+- Coordination packages MAY carry the `agent-` prefix (`@agentproto/agent-<name>`), as the AIP-48 kernel does with `@agentproto/agent-runtime`.
 - The `agent` prefix is not used in names, spec ids or schema ids. The
   schema ids already in use mostly lack it (`policy/v1`, `role/v1`,
   `agent/v1`); titles and code that carry it (`agentpolicy/v1`) are

@@ -104,9 +104,9 @@ function shapeProblems(entry) {
   if (entry.package) {
     const allowed = [`@agentproto/${lower}`]
     if (entry.layer === "drivers") allowed.push(`@agentproto/driver-${lower}`)
-    // Some reference packages carry the historical `agent-` prefix, which
-    // the AIP NAME does not (the multi-agent kernel is `agent-runtime`).
-    if (entry.name === "RUNTIME") allowed.push("@agentproto/agent-runtime")
+    // Coordination packages may carry the `agent-` prefix (the kernel is
+    // `agent-runtime`).
+    if (entry.layer === "coordination") allowed.push(`@agentproto/agent-${lower}`)
     if (!allowed.includes(entry.package)) out.push(`package "${entry.package}" is not ${allowed.map((a) => `"${a}"`).join(" or ")}`)
   }
   if (entry.file && entry.files) out.push("has both file and files")
