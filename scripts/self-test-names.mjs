@@ -91,6 +91,14 @@ const cases = [
   ],
   ["define not define<Name> fails", { specs: good, entries: [{ ...baseEntries[0], define: "defineAlphaThing" }, baseEntries[1]] }, 1],
   ["package not @agentproto/<name> fails", { specs: { ...good, 1: spec(1, "AIP-1: ALPHA (alpha/v1): first", 'package: "@agentproto/a"\n') }, entries: [{ ...baseEntries[0], package: "@agentproto/a" }, baseEntries[1]] }, 1],
+  [
+    "agent-prefixed kernel package passes",
+    {
+      specs: { ...good, 1: spec(1, "AIP-1: RUNTIME (runtime/v1): first", 'package: "@agentproto/agent-runtime"\n') },
+      entries: [{ aip: 1, name: "RUNTIME", specId: "runtime/v1", package: "@agentproto/agent-runtime", layer: "primitives" }, baseEntries[1]],
+    },
+    0,
+  ],
   ["--write-pending refuses a broken registry", { specs: { ...good, 3: spec(3, "AIP-3: GAMMA (gamma/v1): third") }, flags: ["--write-pending"] }, 1],
   ["duplicate active name fails", { specs: good, entries: [baseEntries[0], { ...baseEntries[1], name: "ALPHA" }] }, 1],
   ["entry without spec fails", { specs: good, entries: [...baseEntries, { aip: 9, name: "NINE", layer: "host" }] }, 1],
