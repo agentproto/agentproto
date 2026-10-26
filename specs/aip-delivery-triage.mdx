@@ -1,0 +1,550 @@
+---
+aip: XXXX
+title: "AIP-XXXX: DELIVERY-TRIAGE (delivery-triage/v1): triage, ledger and batching between producers and the inbox"
+description: "Defines the session-delivery stage between any producer and the AIP-46 inbox: deterministic wake, fyi and drop decisions with a non-bypassable always-wake floor, an append-only JSONL triage ledger that never carries payloads, replace-in-place digest batching as ContextSlot N1, silent no-op acknowledgements, and observation-only rollout."
+author: Agentproto Contributors <contributors@agentproto.invalid>
+status: Draft
+type: Core
+created: 2026-10-24
+requires: [37, 46, 60, 71]
+layer: primitives
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
+---
+
+| Field | Value |
+|---|---|
+| AIP | XXXX (provisional, editors assign the final number) |
+| Title | DELIVERY-TRIAGE (delivery-triage/v1) |
+| Status | Draft |
+| Type | Core |
+| Requires | [AIP-37](/docs/aip-37), [AIP-46](/docs/aip-46), [AIP-60](/docs/aip-60), [AIP-71](/docs/aip-71) |
+| Created | 2026-10-24 |
+| Reference Implementation | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
+
+## Abstract
+
+Every producer that can reach a session eventually has to answer one
+question: does this event wake the session, arrive quietly in its inbox, or
+stop at the delivery boundary? AIP-DELIVERY-TRIAGE defines that stage. It
+fixes three decisions (`wake`, `fyi`, `drop`), a deterministic rule pass with
+an optional classifier fallback, a non-bypassable always-wake floor, one
+append-only JSONL ledger line per triaged event, replace-in-place digest
+batching, and a silent no-op acknowledgement.
+
+The stage sits after the producer has resolved a target session (an AIP-71
+binding, an AIP-60 sentinel target, or a follow record) and before the AIP-46
+inbox applies its four urgency tiers. It adds no delivery channel and
+no event store. Its ledger is metadata about triage, never a copy of the
+event.
+
+## Motivation
+
+A session can already receive digests from a follower, Sentinel events
+([AIP-60](/docs/aip-60)), routine fires ([AIP-41](/docs/aip-41)) and clerk
+passes ([AIP-68](/docs/aip-68)). Each producer knows what it saw but not
+whether the target should be interrupted. Without a shared delivery stage,
+implementations make one of two mistakes:
+
+1. Every event wakes the session. A busy follower or a noisy watch turns
+   every turn into a stream of interruptions.
+2. A local filter silently suppresses events. The event disappears, the
+   session never sees it, and nobody can tell what was filtered or why.
+
+The first mistake burns context and attention. The second is a safety
+failure: a false negative can hide the one event a human needed. This AIP
+requires both a floor that cannot be filtered away and a durable, inspectable
+record of every decision.
+
+## Scope and non-goals
+
+This AIP covers the session-delivery stage: producer to triage to inbox. It
+starts after the producer has resolved a target session. Producers resolve it
+differently: an AIP-71 reaction binding, an AIP-60 sentinel target, or a
+follow record. Bindings, sinks and reaction execution belong to [AIP-71](/docs/aip-71) sections 1 to 6 and are
+not redefined here.
+
+It deliberately does not define:
+
+- a new delivery channel: the [AIP-46](/docs/aip-46) inbox and its four
+  urgency tiers remain the only one;
+- a durable event bus or a replayable event log;
+- receipts, an outbox or delivery acknowledgement: those stay with AIP-71
+  sections 6 and 7 and the receipts design;
+- bindings, sinks or action execution: those stay with AIP-71;
+- the classification vocabulary of a clerk: that stays with AIP-68.
+
+## Specification
+
+The key words MUST, MUST NOT, SHOULD, SHOULD NOT, RECOMMENDED and MAY are interpreted as described in
+[AIP-1](/docs/aip-1).
+
+### 1. Position in the delivery pipeline
+
+The pipeline is:
+
+```text
+producer -> target resolution -> triage (this AIP) -> AIP-46 inbox -> turn
+```
+
+A producer emits an event and resolves the target session: through an AIP-71
+binding, an AIP-60 sentinel target, or a follow record. This AIP begins with
+that target already chosen. When a producer re-targets after triage (for
+example a sentinel redirecting to a successor session), the ledger records the
+target actually used. Triage reads the event
+descriptor, the target and the configured urgency, then produces exactly one
+decision and one ledger line. The AIP-46 inbox applies the resulting urgency
+tier.
+
+Triage MUST NOT change the target, create a session, or invoke an action. A
+producer that cannot resolve a live target has no triage event to record.
+
+### 2. Producers
+
+| Producer | Source token | Typical event |
+|---|---|---|
+| Session follow digest | `follow` | a follower's per-turn digest |
+| Sentinel | `sentinel` | an AIP-60 `SentinelEvent` |
+| Routine fire | future token | an AIP-41 scheduled fire |
+| Clerk pass | future token | an AIP-68 pass result |
+
+The `source` field is an open set. A future producer MUST register a stable
+lower-case token and document the producer-specific ledger fields it adds.
+The two shipped tokens are `follow` and `sentinel`.
+
+A follow digest is a bounded summary of turn activity sent to a follower
+session. Triage treats the digest as one event with a follower identity, a
+session identity, an event name and an optional label. A Sentinel event is an
+AIP-60 envelope delivered to a target session. This AIP does not redefine
+either producer's matching, polling, dedup or stop conditions.
+
+The producer MUST mark an event that belongs to an always-wake class
+(section 4) before rule evaluation. A producer that cannot classify an event
+MUST leave it unmarked rather than guess.
+
+### 3. Decisions
+
+Every triaged event has exactly one decision:
+
+| Decision | Meaning | Inbox result |
+|---|---|---|
+| `wake` | The target should act now. | Deliver at the configured wake urgency. |
+| `fyi` | The target should see it without being woken. | Deliver at `fyi`. |
+| `drop` | The event does not enter the inbox. | No delivery. |
+
+`wake` MUST deliver at the urgency the producer or target configured, under
+[AIP-46](/docs/aip-46) section "Delivery tiers". Triage only ever lowers or
+keeps the configured urgency; it never raises it. A target configured to
+receive a producer's events at `fyi` (for example a passive follow, or a clerk
+under AIP-68) keeps receiving them at `fyi`, and the ledger still records the
+decision `wake`. This keeps the AIP-68 never-wake policy and the always-wake
+floor consistent: the floor means "never lowered by triage", not "forced above
+what the target asked for".
+
+`fyi` MUST deliver to the inbox at the `fyi` tier, with no wake, as AIP-46
+defines for that tier.
+
+`drop` suppresses inbox delivery. It does not delete, mutate or hide the
+source record. The producer's own store remains authoritative for the event,
+and the triage ledger MUST retain an identifier that makes the suppressed
+event inspectable. A `drop` decision without a ledger line is a protocol
+violation.
+
+### 4. The always-wake floor
+
+Some events are too important to trust to a rule or a classifier. When an
+event is outside all three classes below, a rule or classifier MAY choose any
+decision. When it belongs to any class, the decision MUST be `wake` and
+neither a rule nor a classifier may lower it (the urgency stays as configured,
+see section 3):
+
+| Class | Trigger |
+|---|---|
+| awaiting-human | The target is awaiting input from the human, or the event reports a question, approval request or other explicit human-input dependency. |
+| crash | The producer observed an abnormal termination or unrecoverable failure of the target or a process the target owns. |
+| terminal | The producer marked the event terminal, for example an AIP-60 `SentinelEvent` with `terminal: true`. A lifecycle boundary such as a session exit is terminal only when its producer marks it so; a producer MAY demote an ordinary exit (for example an operator-requested stop) by a named rule, and that rule MUST be listed in the producer's documentation. |
+
+The classes are evaluated before any producer rule, after the target has been
+resolved. A producer declares the rule id it uses for each class (the
+reference implementation uses `always-wake` for follow and `terminal` for
+sentinel). A configuration MUST NOT disable the floor. A producer
+MUST NOT mark an event always-wake merely to bypass a rule; the mark is a
+claim about the event, and a host SHOULD record the claim in the ledger
+through the applicable rule id.
+
+The [AIP-68](/docs/aip-68) never-wake rule is a clerk-profile triage policy,
+not a core property of this stage. That profile makes all of a clerk's
+lifecycle subscriptions `fyi` so a clerk never wakes the session it watches.
+It does not make `fyi` universal. Because triage never raises urgency
+(section 3), the clerk profile's `fyi` delivery is compatible with the floor:
+the decision is still `wake`, delivered at the `fyi` tier the profile
+configured. No producer other than that profile may claim never-wake as a
+reason to skip section 4.
+
+### 5. Rules first, classifier second
+
+Rule evaluation is deterministic given its declared inputs. For the same
+event descriptor, target configuration and named producer state facts it MUST
+return the same decision and rule id. Rules MUST NOT read the event body,
+call a model or perform network I/O. They MAY consult producer metadata,
+target configuration and producer state facts (for example "the same
+coalesce key was seen for this target in the last 10 minutes", or "the
+followed session already reported this turn"). Every state fact a rule reads
+MUST be named in the producer's documentation, so a ledger line can be
+re-derived from its inputs.
+
+The evaluation order is:
+
+1. the always-wake floor (section 4);
+2. producer rules, in a fixed order declared by the producer;
+3. the default rule.
+
+When no other rule matches, the default rule returns `wake`. An event that no
+rule recognises is never silently demoted: demotion to `fyi` or `drop` is
+always the effect of a named rule. The ledger records `default` as the rule id
+for that case.
+
+A producer MAY additionally run an optional classifier after the rules have
+produced a result. The classifier:
+
+- MUST receive only the redacted event descriptor: identifiers, type,
+  subject, configured urgency and always-wake class. It MUST NOT receive
+  message text, event data, summaries, diffs, prompts or credentials;
+- MUST NOT override `wake` for an always-wake event;
+- MUST return one of the three decisions or fail.
+
+If the classifier fails, times out, returns an invalid value, or is
+unavailable, the rules result MUST be used. A classifier failure MUST NOT
+change delivery and MUST NOT suppress an event. A classifier that changes a
+decision MUST have a stable rule id so the ledger can name it. The reference
+implementation records `classifier:<rule>` (the rule id the classifier
+overrode or confirmed).
+
+A triage error before a decision is made MUST fail open: the event follows
+the producer's untriaged delivery path rather than being dropped.
+
+### 6. Ledger
+
+Every triaged event produces exactly one JSON line, whether the decision was
+`wake`, `fyi` or `drop`, and whether or not the decision was applied. The
+ledger is append-only JSONL. An implementation MUST write the line before
+delivery is attempted, so a crash cannot produce a delivery with no triage
+record.
+
+Common fields, in this order:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ts` | string | RFC 3339 timestamp of triage. |
+| `source` | string | Producer token; `follow` and `sentinel` ship today. |
+| `applied` | boolean | `true` when triage was in effect and the decision governed delivery (including a `wake` that matches the untriaged behaviour), `false` in observation-only mode. |
+| `decision` | string | `wake`, `fyi` or `drop`. |
+| `rule` | string | Rule id, or `default` when no rule matched. |
+
+Follow lines add:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `follower` | string | Follower session id. |
+| `event` | string | Digest event name. |
+| `sessionId` | string | Session the digest describes. |
+| `label` | string | Optional follower label; omit when absent. |
+
+Sentinel lines add:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `target` | string | Target session id actually used for delivery. |
+| `sentinelId` | string | AIP-60 sentinel id. |
+| `eventId` | string | AIP-60 event id, stable across redelivery. |
+| `type` | string | AIP-60 event type. |
+| `subject` | string | AIP-60 subject identifier. |
+| `urgency` | string | Configured inbox urgency, not the applied tier. |
+
+The Sentinel producer uses the rule ids `terminal`, `coalesced-repeat` and
+`default`. `terminal` marks the always-wake floor. `coalesced-repeat`
+marks an event whose coalesce key (producer-defined, for example an AIP-60 subject
+and type) was already seen for the same target within the producer's repeat
+window; it demotes the event to `fyi`. The reference implementation uses a
+10 minute window.
+`default` is the no-match rule.
+
+Example follow line:
+
+```json
+{"ts":"2026-10-24T12:00:00.000Z","source":"follow","applied":true,"decision":"wake","rule":"default","follower":"sess_follower","event":"turn-end","sessionId":"sess_child","label":"backend"}
+```
+
+Example Sentinel line:
+
+```json
+{"ts":"2026-10-24T12:00:01.000Z","source":"sentinel","applied":true,"decision":"wake","rule":"terminal","target":"sess_child","sentinelId":"sen_123","eventId":"evt_abc","type":"pull_request.closed","subject":"github:owner/repo#42","urgency":"next-turn"}
+```
+
+A line MUST carry enough identifiers to find the event it describes in the
+producer's own store, and the digest or message it was delivered in when it
+was delivered. Producers add their own fields for this (for example an event
+timestamp, an event key, a task id, and the delivered message id).
+
+The ledger MUST NOT carry message text, event data, summaries, prompts,
+diffs, file contents, credentialed URLs or any other producer payload. This
+follows the redaction posture of [AIP-71](/docs/aip-71) section 8. The ledger
+is an index of decisions, not an event archive. `subject` is an identifier and
+MUST be redacted if the producer cannot guarantee that it contains no secret.
+
+The default ledger locations are:
+
+```text
+~/.agentproto/follow-triage.jsonl
+~/.agentproto/sentinel-triage.jsonl
+```
+
+An implementation MAY use another location when it keeps these file names
+and documents the path. Ledger permissions SHOULD restrict access to the
+host user.
+
+### 7. Batching and ContextSlot N1
+
+A follower can produce several digests in a short interval. Appending each
+one to the target's queue lets stale context accumulate and pushes fresher
+context further away. Instead, a digest for the same follower replaces the
+still-queued pending digest in place:
+
+- the queue position is unchanged;
+- the replacement MUST contain every event of the digest it replaces plus the
+  new events: replacement supersedes the old text with a superset, so no
+  event is lost (the host keeps the pending digest's events with the queued
+  item until it is delivered or removed; a host that caps retained events
+  MUST report how many were omitted in the digest itself, and every omitted
+  event still has its ledger line);
+- the superseded item MUST NOT remain anywhere else the target can read it
+  (for example as a duplicate inbox copy);
+- `coalescedCount` on the pending item increments;
+- no second pending digest is appended for that follower.
+
+`coalescedCount` is an integer of at least 1. It is a field on the pending
+digest, not on the ledger, because the ledger carries no content. Every
+constituent event still gets its own ledger line.
+
+A digest that has already been delivered, or is in flight, MUST NOT be
+rewritten. A later digest starts a new pending item.
+
+This queue is **ContextSlot N1** (normative): a named, replace-never-append
+slot for volatile per-turn context. A ContextSlot has at most one value per
+key for a target turn. Writing a new value replaces the current value and
+readers see the newest value; the slot keeps no separate history, and the
+newest value carries forward what the producer still needs the target to see
+(for digests, the superset above). The ledger and the producer store are where
+history remains inspectable.
+
+Batching applies to digests that are queued behind a running turn. A digest
+delivered at the `fyi` tier lives in the inbox and is not queued; hosts MAY
+apply the same replace rule to it, and the conformance item below applies to
+queued digests only.
+
+**ContextSlot N2** (optional): recomputing the system prompt for each turn
+from current sources instead of appending volatile text to a persistent
+prompt. N2 is harness-dependent and MAY be implemented. A host that does not
+implement N2 is still conformant. N2 MUST NOT be used to remove an event from
+the ledger or to avoid the always-wake floor.
+
+### 8. No-op acknowledgement and silent turns
+
+A turn whose only action is acknowledging the item that woke it is a no-op.
+The host records that fact on `turn-end` as `silent: true`.
+
+`silent` is a flag of its own, distinct from any "empty turn" notion that
+signals a suspected failure. It MAY be set only when all of the following hold:
+the turn completed normally (not errored, aborted or interrupted); it is not
+awaiting input; it produced no assistant text; it was woken by delivered
+items; and the host observed an explicit no-op acknowledgement for those items
+during that turn. The acknowledgement is observed by the host at the
+acknowledgement operation itself (the host knows the caller session, the turn
+and the acknowledged items). A host MUST NOT infer it from tool names alone,
+and MUST NOT decide silence by reading the turn's final message as prose.
+That rule is [AIP-58](/docs/aip-58) section 3 applied to acknowledgement:
+prose that reads like "done" is not an action record. The ack operation MUST
+NOT set `silent` on an event by itself.
+
+A silent turn MUST still appear in the transcript and in the AIP-58 event
+log. A turn woken by a human message, or by an item of kind `blocker` or
+`question`, MUST NOT be recorded as silent. Consumers that skip uneventful
+turns (followers, clerks) MAY treat `silent: true` as uneventful: no digest,
+no pass and no wake for that turn. Absent `silent` is equivalent to `false`.
+
+### 9. Observation before suppression
+
+A conforming implementation MUST be able to run in observation-only mode. In
+that mode triage computes the same decision, writes the same ledger line with
+`applied: false`, and leaves delivery unchanged. No part of the decision may
+be applied.
+
+Enabling `applied: true` by default is an implementation decision, not a
+protocol requirement. It SHOULD be gated by evidence from the ledger,
+including review of dropped events and of always-wake false negatives. A host
+SHOULD expose its current mode and ledger paths in its configuration and
+read surfaces.
+
+Both modes use the same rule evaluation and the same ledger shape. Switching
+modes MUST NOT change the rule ids or the set of fields.
+
+### 10. Conformance
+
+An implementation conforms to AIP-DELIVERY-TRIAGE when it:
+
+1. triages only after a binding selected a target session;
+2. emits only `wake`, `fyi` or `drop`, with the AIP-46 mapping above;
+3. enforces the always-wake floor before rules and classifier;
+4. evaluates deterministic rules first and falls back to their result when an
+   optional classifier fails;
+5. writes one complete ledger line per triaged event, with no payload fields;
+6. replaces a queued digest in place with a superset of its events and never
+   appends a second pending digest for the same follower;
+7. records a host-observed no-op acknowledgement as `turn-end` with
+   `silent: true` under the conditions of section 8, never from prose;
+8. supports observation-only mode with `applied: false`;
+9. leaves bindings, sinks, receipts, the urgency tiers and the inbox contract
+   unchanged (queued-digest replacement changes queue content, not the
+   contract).
+
+## Rationale
+
+**Why rules before a classifier?** A classifier is useful for ambiguous
+events, but it is non-deterministic, can be unavailable and can be steered by
+adversarial text. Rules give a stable, testable default and make the
+classifier an optional refinement rather than the source of truth. The
+fallback rule keeps a model outage from changing delivery.
+
+**Why an always-wake floor?** Any filter can be wrong. A human waiting for an
+answer or a session that just crashed must not depend on the quality of a
+rule set. The floor is small and explicit so it can be audited and tested.
+
+**Why a ledger with no payloads?** The ledger has to be safe to keep, inspect
+and share during an incident. Payloads contain prompts, customer data and
+credentials. Identifiers and decisions are enough to reconstruct why a
+delivery happened or did not happen, while the producer store remains the
+place where the event itself lives.
+
+**Why keep a dropped event in the ledger?** `drop` is a delivery decision,
+not a retention decision. A silent drop with no record is indistinguishable
+from a lost event. The ledger makes suppression observable and reversible.
+
+**Why replace instead of append for digests?** Volatile context competes with
+the actual task for attention. A queue of stale digests is worse than one
+current digest at the same position. Replacement also keeps the queue bound
+without a separate trimming policy.
+
+**Why is `silent` computed by the host?** The agent's prose is not a reliable
+action record. A tool that marks its own turn silent could hide work, and a
+host that reads the final message would reintroduce the ambiguity AIP-58
+exists to remove. The turn recorder sees the calls.
+
+**Why observation mode?** Suppression changes what a human and an agent see.
+Operators need a rollout path that proves the rules against real traffic
+before they are allowed to suppress anything.
+
+**Why not make AIP-68 never-wake universal?** Never-wake is how a clerk
+protects a session it only observes. It is a property of that profile, not of
+delivery in general. Making it core would let any producer avoid the
+always-wake floor by declaring itself a clerk.
+
+## Reference Implementation
+
+The reference implementation lives in
+[`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime).
+The follow digest ledger shipped in agentproto/ts PR #2225 and the Sentinel
+ledger in PR #2226. They write
+`~/.agentproto/follow-triage.jsonl` and
+`~/.agentproto/sentinel-triage.jsonl` with the field shapes in section 6.
+The Sentinel producer uses the rule ids `terminal`, `coalesced-repeat` and
+`default`. Observation-only mode is the default rollout path until an
+operator enables application.
+
+This AIP defines no package of its own. The runtime owns the triage stage,
+the ledger writer and the digest queue. Bindings and sinks remain with
+[AIP-71](/docs/aip-71), the inbox with [AIP-46](/docs/aip-46), and Sentinel
+event semantics with [AIP-60](/docs/aip-60).
+
+## Backwards Compatibility
+
+This AIP sets no `replaces`. It does not change the AIP-46 envelope, the
+AIP-60 event shape, the AIP-71 binding contract or any producer's wire
+format. An implementation that does not apply triage keeps its existing
+delivery behaviour.
+
+The additions are local and additive:
+
+- the ledger files are new and can be written in observation-only mode;
+- `silent` is a new optional field on `turn-end`; absent means `false`;
+- replacing a queued digest in place changes queue behaviour, not the
+  delivered digest format;
+- the always-wake floor narrows what a filter may suppress, so it cannot
+  silently remove a delivery that an existing deployment already made.
+
+Existing consumers that ignore unknown fields continue to work. A consumer
+that reads `silent` MUST treat it exactly like an empty turn.
+
+## Security Considerations
+
+**False negatives are the primary risk.** A rule or classifier that suppresses
+an event can hide a question, a crash or a terminal outcome from the human who
+needed it. The always-wake floor, the mandatory ledger and observation-only
+mode exist for this reason. A host MUST NOT ship a suppression rule set
+without a ledger review path.
+
+**Classifier input is a data boundary.** A classifier can be remote. Sending
+message text, event data, diffs or credentials to it leaks payloads outside
+the session's trust boundary. Classifiers receive the redacted descriptor
+only. A classifier output is advisory: it never overrides the floor and never
+overrides a failed rule pass.
+
+**Prompt injection through event metadata.** Subjects, labels and types can
+contain attacker-controlled text. Rules are deterministic and do not
+interpret text. A classifier that receives free-form identifiers MUST treat
+them as untrusted input and MUST NOT be allowed to turn them into tool calls
+or delivery decisions outside the three allowed outcomes.
+
+**Ledger confidentiality and integrity.** The ledger contains identifiers and
+timestamps. It SHOULD be readable only by the host user, and it MUST NOT
+become a shadow event store. A tampered ledger makes suppression
+unreviewable, so the host SHOULD keep it append-only and outside paths a
+session can write. Where the host and the session share an operating-system
+user the ledger cannot be made tamper-proof; a deployment that needs that
+property SHOULD isolate sessions from the ledger path. Hosts SHOULD define a
+rotation and retention policy for ledger files.
+
+**Drop is visibility, not deletion.** `drop` must not be used to satisfy a
+retention request. A producer that needs deletion must delete at the source
+under its own policy, and the ledger must still show that a decision
+occurred.
+
+**No authority is delegated.** Triage cannot grant an action, bypass AIP-38
+authorization, or start a session. It only selects among inbox urgencies that
+the host already supports.
+
+## Follow-up amendments
+
+These are listed for the editors and are not part of this proposal's diff:
+
+- [AIP-71](/docs/aip-71): none required. `context: "replace"` was considered
+  for the hook projection capability and rejected: that field describes a
+  harness hook seam, while ContextSlot N1 is host queue behaviour.
+- [AIP-37](/docs/aip-37): add `silent` to the `turn-end` event description
+  as a host-recorded boolean for no-op acknowledgements, with the conditions
+  of section 8 (a separate flag from any empty-turn notion).
+- [AIP-46](/docs/aip-46): define the no-op acknowledgement operation that the
+  host observes for section 8, and note that the inbox urgency tiers are the
+  only delivery targets for triage.
+- [AIP-60](/docs/aip-60): note that `terminal: true` is an always-wake class
+  input and that `coalesced-repeat` is the ledger id for repeat collapse.
+- [AIP-68](/docs/aip-68): state that its never-wake rule is a clerk-profile
+  policy, not a core delivery property.
+
+## References
+
+- [AIP-1 process and RFC 2119 keywords](/docs/aip-1)
+- [AIP-37 lifecycle vocabulary](/docs/aip-37)
+- [AIP-46 sessions, inbox and delivery tiers](/docs/aip-46)
+- [AIP-58 runs and the outcome rule](/docs/aip-58)
+- [AIP-60 Sentinel](/docs/aip-60)
+- [AIP-68 clerks](/docs/aip-68)
+- [AIP-71 action hooks](/docs/aip-71)
