@@ -1,5 +1,5 @@
 ---
-title: "AIP-69: AUTH-PROFILE, authprofile/v1 (a named reference to the credential that pays for a session)"
+title: "AIP-69: AUTH-PROFILE (auth-profile/v1): a named reference to the credential that pays for a session"
 description: "A runtime primitive for the account a session bills or authenticates through: a named, harness-independent reference to a credential on one billing endpoint, never the secret. Fixes the AuthProfile document (endpoint, method, credential reference, sub-account, subscription), the eligibility predicate that decides which profiles can serve a given harness and route, the profile as an AIP-38 resource (which models it may serve, who may use it, how much it may spend), and the read surface. Referenced by AIP-46 sessions, AIP-67 quota and AIP-38 policy."
 aip: 69
 status: Draft
@@ -10,19 +10,18 @@ requires: [19, 29, 37, 38, 39, 43, 45, 67]
 discussions-to: https://github.com/agentproto/agentproto/discussions
 resources: ./resources/aip-69/draft
 layer: primitives
-package: "@agentproto/auth"
 ---
 
 | Field | Value |
 |---|---|
 | AIP | 69 (provisional, editors assign the final number) |
-| Title | AUTH-PROFILE, authprofile/v1 |
+| Title | AUTH-PROFILE (auth-profile/v1): a named reference to the credential that pays for a session |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Standards Track |
 | Requires | [AIP-19](/docs/aip-19), [AIP-29](/docs/aip-29), [AIP-37](/docs/aip-37), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-43](/docs/aip-43), [AIP-45](/docs/aip-45), [AIP-67](/docs/aip-67) |
 | Created | 2026-10-23 |
-| Package | `@agentproto/auth` |
+| Reference implementation | `@agentproto/auth` (`profile-types.ts`), shared with AIP-50 |
 | Resources | [`./resources/aip-69`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-69/draft): `AuthProfile.schema.json` |
 
 ## Abstract
