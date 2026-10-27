@@ -133,7 +133,7 @@ Top-level fields (informative summary):
 | `mcp` | When `protocol=mcp` | Inline MCP server config |
 | `adapter` | When `protocol=proprietary` | NPM package implementing `AgentCliClient` |
 | `print` | When `protocol=print` | Inline print surface config (optional — Claude Code defaults when omitted) |
-| `session` | No | Session policy: mode, idle_timeout_ms, max_turns |
+| `session` | No | Session settings: mode, idle_timeout_ms, max_turns |
 | `models` | No | Model routing: default, allowed, env-mapped. Each `allowed` entry is a bare id string (provider unstated — the projector MUST NOT guess one) or `{ id, provider?, mode? }`: `id` is unchanged on the wire, `provider` is the ProviderPreset id (or direct provider) that serves and bills the model, `mode` is this adapter's mode id that routes to `provider`. |
 | `gateways` | No | Gateway endpoints (Anthropic/OpenAI-compatible backends) this harness can be pointed at. Formerly `presets`, which remains a legacy alias. See § Gateways. |
 | `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |

@@ -74,7 +74,7 @@ No existing AIP covers this. AIP-57 resolves a role to a model but has no
 notion of a model that returns typed probabilities. AIP-62 folds a review
 into a verdict and leaves the choice of binding to the host. AIP-15 has
 `branch` and `approval` steps but no step that asks a typed question and
-escalates. AIP-7 escalates to a human operator, not from one model to
+escalates. AIP-7 escalates to a user, not from one model to
 another.
 
 ## Design principles
@@ -707,7 +707,7 @@ extracted from the session steward workflows
 (`packages/apps/session-steward/.agentproto/workflows/session-steward/actions.mjs`,
 `two-step.mjs`, `docs/cli/verbs/steward.md`), the Jev client
 (`packages/runtime/src/jev-client.ts`, `choice` only, never throws,
-bounded retries), and model roles (`packages/runtime/src/model-roles.ts`).
+bounded retries), and model slots (`packages/runtime/src/model-roles.ts`).
 
 Known gaps the implementation must close: the runtime has no raw
 structured-output model call and no logprob access (its LLM judging runs

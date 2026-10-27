@@ -512,7 +512,7 @@ and its runtime projection in `@agentproto/workflow-runtime`
 |---|---|---|
 | `agent.ref` | string | App-scoped agent id (e.g. `"@my-app/reviewer"`) the host resolves to a concrete adapter + spawn options at compile time. An unresolvable ref fails compilation, never the run. Omit to spawn a plain `adapter`, or to reuse via `sessionRef`. |
 | `prompt` | string | Required. The prompt sent to the session. |
-| `adapter` | string | Adapter slug for spawning a NEW session. Ignored (and unnecessary) when `agent.ref` resolves one. Omit both `adapter` and `agent` to reuse via `sessionRef`. |
+| `adapter` | string | Harness slug for spawning a NEW session. Ignored (and unnecessary) when `agent.ref` resolves one. Omit both `adapter` and `agent` to reuse via `sessionRef`. |
 | `sessionRef` | string | Reuse an earlier agent step's spawned session, by that step's `id`. |
 | `sandbox` | string \| object | Run the step's session inside a sandbox — a provider slug or an inline spec (`{ provider: ... }`). Only meaningful with `adapter`; a `sessionRef` reuse inherits the referenced session's placement. Hosts without sandbox support MUST fail the spawn loudly rather than silently running on the host. |
 | `cacheable` | boolean | Cache this step's output under the run's cacheKey. Default `false`. |
