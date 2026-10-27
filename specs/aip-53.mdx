@@ -658,8 +658,8 @@ unpack/validate → record install → setup (this block) → ready
    install, exactly as before.
 4. **Re-run** is `agentproto app setup <appId> [--force] [--dry-run]
    [--only <stepId>]...`. The existing `agentproto setup <slug>` verb
-   MUST also accept an installed app id in place of an adapter slug; app
-   ids are `@scope/name`, adapter slugs are not scoped, so the two
+   MUST also accept an installed app id in place of a harness slug; app
+   ids are `@scope/name`, harness slugs are not scoped, so the two
    namespaces cannot collide.
 5. **Update** (`app_resync` and equivalents) re-evaluates the ledger by
    fingerprint, as above, and reports `setupState: "required"` only for

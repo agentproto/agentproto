@@ -345,7 +345,7 @@ distinguished by tenancy and lifecycle, not by a separate provider class:
 
 | Offering | Tenancy | `start()` semantics | Counts as `local-only`? |
 |---|---|---|---|
-| `shared` | Multi-tenant — open models served through the operator's own upstream hosted-model providers, behind the same gateway routing that already carries vendor traffic; the operator adds cost + margin, owns no GPU of its own | Effectively instantaneous — there is no box to boot; `state` is always `"running"`, `ttl` does not apply | **No** — the request still reaches a hosted model vendor via the upstream provider; see §5 |
+| `shared` | Multi-tenant — open models served through the operator's own upstream inference endpoints, behind the same gateway routing that already carries vendor traffic; the operator adds cost + margin, owns no GPU of its own | Effectively instantaneous — there is no box to boot; `state` is always `"running"`, `ttl` does not apply | **No** — the request still reaches a hosted model vendor via the upstream provider; see §5 |
 | `private` | Single-tenant — a GPU box the operator spawns on demand, backed by an operator-chosen GPU vendor, with a weights cache to bound cold start | Provisions the rented instance, restores or pulls the weights volume, starts the runtime, exposes it only to this daemon (e.g. over a rendezvous channel, per [AIP-59](/docs/aip-59)) | **Yes** — no model vendor sees the request; the operator and its GPU vendor are the trusted parties (§5) |
 
 **Out of scope: the end user's own cloud account.** `operator-hosted`
