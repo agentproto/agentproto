@@ -107,13 +107,7 @@ function shapeProblems(entry) {
     // Coordination packages may carry the `agent-` prefix (the kernel is
     // `agent-runtime`).
     if (entry.layer === "coordination") allowed.push(`@agentproto/agent-${lower}`)
-    // A package may implement several AIPs of one family (AIP-70 Open
-    // Questions 2): it is named after one of them, so a sibling's name is
-    // a valid package for this AIP too (`@agentproto/runtime` for SESSION).
-    const shared = registry.aips.some(
-      (other) => other.aip !== entry.aip && !other.supersededBy && other.name && entry.package === `@agentproto/${other.name.toLowerCase()}`,
-    )
-    if (!allowed.includes(entry.package) && !shared) out.push(`package "${entry.package}" is not ${allowed.map((a) => `"${a}"`).join(" or ")}`)
+    if (!allowed.includes(entry.package)) out.push(`package "${entry.package}" is not ${allowed.map((a) => `"${a}"`).join(" or ")}`)
   }
   if (entry.file && entry.files) out.push("has both file and files")
   if (entry.file && entry.file !== `${entry.name}.md`) out.push(`file "${entry.file}" is not "${entry.name}.md"`)

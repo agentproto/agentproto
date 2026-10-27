@@ -402,7 +402,6 @@
       "aip": 46,
       "name": "SESSION",
       "specId": "session/v1",
-      "package": "@agentproto/runtime",
       "layer": "host"
     },
     {
