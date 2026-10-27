@@ -1,6 +1,6 @@
 ---
 title: "AIP-46: SESSION (session/v1): long-running multi-turn agent orchestration"
-description: A generic session-management protocol for orchestrating long-running, multi-turn agent CLIs (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-54 (REF) as the session's ground.
+description: A generic session-management protocol for orchestrating long-running, multi-turn harnesses (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-54 (REF) as the session's ground.
 aip: 46
 status: Review
 type: Schema
@@ -26,7 +26,7 @@ layer: host
 ## Abstract
 
 `agent-session-lifecycle/v1` standardises how a host **spawns,
-drives, observes, and tears down** long-running agent CLI sessions on
+drives, observes, and tears down** long-running harness sessions on
 a machine. It sits above [AIP-45](/docs/aip-45), which defines how
 to install and start a single agent binary, by adding the
 N-sessions-on-one-daemon plumbing every real orchestration scenario
@@ -155,7 +155,7 @@ demoted to a column:
 ### Session data model
 
 A session is the host's record of one running (or recently exited)
-agent CLI invocation. Required fields:
+harness invocation. Required fields:
 
 ```ts
 interface Session {
@@ -663,7 +663,7 @@ end one turn discards the agent's context and forces a respawn, defeating
 the multi-turn continuity this AIP exists to provide.
 
 `wasBusy` reports whether a turn was actually cancelled. Interrupt is
-**idempotent**: on an idle or already-terminal session it MUST succeed as
+**idempotent**: on an idle session or one already in a terminal state it MUST succeed as
 a no-op with `wasBusy: false` rather than erroring — a consumer racing a
 turn-end should not have to distinguish "stopped it" from "it had already
 finished", and both leave the session in the state the consumer asked
@@ -856,7 +856,7 @@ NOT be able to set any `from` field; hosts MUST reject one that tries.
 display-only and MUST NOT be relied upon for identity.
 
 Hosts MUST authorise: child → parent, parent → direct child, and the host
-itself or its human operator → any session (`system` / `human`). Sibling
+itself or its user → any session (`system` / `human`). Sibling
 messaging is OPTIONAL and off by default. Any other pair — a cousin, a
 grandparent, the sender itself — MUST be refused.
 
@@ -904,7 +904,7 @@ settled is handed back rather than starting a detached turn. Hosts SHOULD
 rate-limit steers per recipient; the excess is delivered as `next-turn`.
 
 Hosts SHOULD NOT grant `interrupt` to session senders by default and MAY
-downgrade it to `steer`; the human operator keeps it. The send result MUST
+downgrade it to `steer`; the user keeps it. The send result MUST
 report the tier actually applied (`urgencyApplied`).
 
 #### Inbox and tools
@@ -1022,7 +1022,7 @@ session artifact, `ref` set to the artifact's `key`. An unpinned
 artifact still lists via `session_artifact_list`; pinning is what
 promotes it into the terse "ended" summary a supervisor or UI reads
 without a separate call.
-### Session cost and billing mode (added 2026-10-18)
+### Session cost and billing basis (added 2026-10-18)
 
 > **Draft — AIP-46 amendment** (2026-10-18). *Normative identifiers
 > (field names, literals, tool names) are English and final.*
@@ -1649,7 +1649,7 @@ code, only the extra envelope fields this section adds.
 
 ### The 2026-10-18 cost-and-billing amendment (draft)
 
-§Session cost and billing mode is additive in the strictest sense of
+§Session cost and billing basis is additive in the strictest sense of
 *shapes*: the three `costUsd` / `amortizedCostUsd` / `billingMode`
 fields are optional on `Session`, and a host with no subscription
 profile emits exactly the same payloads it did before the amendment.
