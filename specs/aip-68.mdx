@@ -22,7 +22,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/clerk
 | Doctypes | `agentsteward/v1` (session-triage profile, written as `STEWARD.md`) + `agentsecretary/v1` (memory-secretary profile, written as `SECRETARY.md`) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-46](/docs/aip-46) (sessions, lifecycle events, outcomes), [AIP-41](/docs/aip-41) (routine trigger), [AIP-58](/docs/aip-58) (run/journal of a clerk pass) |
 | Composes with | [AIP-6](/docs/aip-6) (COMPANY targets), [AIP-10](/docs/aip-10) (KNOWLEDGE targets), [AIP-11](/docs/aip-11) (LESSON.md distillation), [AIP-53](/docs/aip-53) (app-bundled clerks) |
-| Reference Impl | [`@agentproto/clerk`](https://github.com/agentproto/ts/tree/main/packages/clerk) (the clerk pass, shipped, no AIP); Pygmalion memory secretary (`projects/pygmalion/packages/core/src/memory/`, agentik-studio) |
+| Reference Impl | [`@agentproto/clerk`](https://github.com/agentproto/ts/tree/main/packages/clerk) (the AIP-68 clerk pass); [`session-steward` app](https://github.com/agentproto/ts/tree/main/packages/apps/session-steward) (steward, shipped); Pygmalion memory secretary (`projects/pygmalion/packages/core/src/memory/`, agentik-studio) |
 
 ## Abstract
 
@@ -63,8 +63,8 @@ never block the watched session, and a free-tier-first model budget.
 Three gaps, one primitive:
 
 1. **The steward shipped without a spec.** The reference
-   implementation (`packages/clerk` for the out-of-band pass, the `agentproto
-   steward` CLI, the wrap-up tools `session_wrapup_plan` /
+   implementation (`packages/clerk` for the out-of-band pass and the
+   `packages/apps/session-steward` app, the `agentproto steward` CLI, the wrap-up tools `session_wrapup_plan` /
    `session_wrapup_apply` and `session_evidence`) is in daily use, but
    the verdict vocabulary, the origin policy, the remaining-work check
    and the three-step snapshot contract (`classify` → `analyze` →
@@ -473,14 +473,15 @@ UX on the reference implementation (`agentproto steward`).
 
 ## Reference Implementation
 
-- **Steward:** shipped, at
-  [`packages/clerk`](https://github.com/agentproto/ts/tree/main/packages/clerk)
- , with the out-of-band pass, the `agentproto steward` CLI verb, `classify`/`analyze`/`act`
+- **Steward:** shipped as the AIP-68 clerk pass at
+  [`@agentproto/clerk`](https://github.com/agentproto/ts/tree/main/packages/clerk) and the
+  [`session-steward` app](https://github.com/agentproto/ts/tree/main/packages/apps/session-steward),
+  with the `agentproto steward` CLI verb, `classify`/`analyze`/`act`
   workflows, the `session_wrapup_plan` / `session_wrapup_apply` /
-  `session_evidence` tools, the origin policy and rules engine. No
-  AIP yet; this document is its first spec.
+  `session_evidence` tools, the origin policy and rules engine. This
+  document is the first spec for the steward behavior.
 - **Secretary:** reference at
-  [`agentik-studio/projects/pygmalion`](https://github.com/agentik-studio/agentik-studio/tree/main/projects/pygmalion) memory secretary
+  [`agentik-studio/projects/pygmalion/packages/core/src/memory/`](https://github.com/agentik-studio/agentik-studio/tree/main/projects/pygmalion/packages/core/src/memory)
   (incremental pass `conversation/pass.ts`, triggers
   `conversation/triggers.ts`, lens `conversation/lens.ts`, per-source
   dedup in `conversation/sources.ts`, handoff writer `memory/handoff/`),
