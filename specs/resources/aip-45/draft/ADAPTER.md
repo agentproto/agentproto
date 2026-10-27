@@ -10,7 +10,7 @@ package.
 Does the binary speak ACP?
 ├── Yes → protocol: "acp"
 │         Bind to an AIP-44 ACP.md describing the wire profile.
-│         Reference impl: src/protocol/acp.ts in @agentproto/driver-agent-cli.
+│         Reference impl: src/protocol/acp-client.ts in @agentproto/harness.
 │
 └── No → Does it speak MCP-over-stdio?
          ├── Yes → protocol: "mcp"
@@ -70,7 +70,7 @@ A `protocol: "proprietary"` adapter package exports a default `defineAgentCli`
 result whose runtime reaches the `AgentCliClient` interface:
 
 ```ts
-import type { AgentCliClient, StreamEvent } from "@agentproto/driver-agent-cli"
+import type { AgentCliClient, StreamEvent } from "@agentproto/harness"
 
 export const myAdapter: AgentCliClient = {
   async connect(opts) { /* spawn + handshake */ },
@@ -154,7 +154,7 @@ is underneath.
 ### `makeAgentCliModel`
 
 ```ts
-import { makeAgentCliModel } from "@agentproto/driver-agent-cli"
+import { makeAgentCliModel } from "@agentproto/harness"
 
 const model = makeAgentCliModel(agentCliDefinition, {
   cwd: "/path/to/workspace",
@@ -219,7 +219,7 @@ corpus seam that accepts a `ModelLike`.
 ## Publishing
 
 - Adapter packages: `@your-scope/adapter-<name>`, MIT/Apache-2.0
-  license, peer-dep on `@agentproto/driver-agent-cli`.
+  license, peer-dep on `@agentproto/harness`.
 - Manifests: live alongside the adapter package or in
   `agentproto/ts/adapters/<name>/HARNESS.md`.
 - The upstream agent's licence governs runtime use; the adapter

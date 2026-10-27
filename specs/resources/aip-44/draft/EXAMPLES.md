@@ -91,7 +91,7 @@ install/spawn; this manifest is the wire-protocol slice.
 ---
 name: hermes-client
 id: hermes-client
-description: ACP client that connects to a spawned Hermes subprocess. Owned by @agentproto/driver-agent-cli when AIP-45 protocol=acp.
+description: ACP client that connects to a spawned Hermes subprocess. Owned by @agentproto/harness when AIP-45 protocol=acp.
 version: 0.1.0
 kind: client
 transport: stdio
