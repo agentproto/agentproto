@@ -52,7 +52,7 @@ named their core type `ModelRoute` — with three different shapes.
 
 | Implementation | Keyspace | Has | Lacks |
 |---|---|---|---|
-| `llm-endpoint` `src/packs.ts` (`ModelPack` / `PACK_REGISTRY`) | model name | packs, per-pack tool policy, verified context/output limits | layers, gates, chains |
+| `inference-endpoint` `src/packs.ts` (`ModelPack` / `PACK_REGISTRY`) | model name | packs, per-pack tool policy, verified context/output limits | layers, gates, chains |
 | `@agstudio/agent-framework` `model-routing.ts` (`defineRoutingPack` / `overlayPack` / `resolveRoute`) | role | layers + `source` reporting, `null` gate, failover rungs, typed keyspace | chains, sticky selection |
 | openagentik router `routing/virtual-resolve.ts` (`resolveStickyServedModel`) | virtual model id | chains, deterministic sticky selection | packs, layers, gates |
 
@@ -302,7 +302,7 @@ Prior art, all pure and all partial:
 
 - [`packages/inference-endpoint/src/packs.ts`](https://github.com/agentproto/ts/tree/main/packages/inference-endpoint): `ModelPack`, `ModelRoute`, `PACK_REGISTRY`
 - `@agstudio/agent-framework` `mastra/model-provider/model-routing.ts` — `defineRoutingPack`, `overlayPack`, `resolveRoute`, `RouteSource`
-- openagentik router `packages/core/src/routing/virtual-resolve.ts` — `resolveStickyServedModel`
+- openagentik router `routing/virtual-resolve.ts`: `resolveStickyServedModel`
 
 ## See also
 
