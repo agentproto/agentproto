@@ -99,7 +99,7 @@ Implementations:
 
 The reference `agent-cli` executor spawns an AIP-45 binary with the prompt
 on stdin and parses optional JSON output. For richer streaming, future
-executors can wrap `@agentproto/driver-agent-cli` and surface ACP events.
+executors can wrap `@agentproto/harness` and surface ACP events.
 
 ## State adapters
 
