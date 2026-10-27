@@ -523,7 +523,7 @@ AIP. The convergence is deliberate.
 ## Reference Implementation
 
 The starting point is the existing persona DB schema:
-`packages/core/src/domain/persona/persona.columns.ts`
+`persona.columns.ts`
 — `name`, `description`, `prompt`, `slug`, `avatar`, ownership
 flags. The schema is intentionally light. AIP-25 elevates that
 shape with the structured fields the live spec requires
@@ -533,7 +533,7 @@ cross-AIP refs) without absorbing
 an existing persona row produces a `persona/v1` manifest with the
 DB-backed fields populated and the elevated fields empty;
 authors fill the elevated fields incrementally. A reference
-implementation in `packages/persona/v1` is in flight; once the
+implementation in `packages/persona` is in flight; once the
 package lands, this AIP will absorb the working schema in full as
 part of moving Draft → Review.
 

@@ -770,7 +770,7 @@ A public reference implementation is **TBD** — pending extraction into
 runs in production; its shape (described below) is what any conforming
 implementation should mirror:
 
-- `packages/agent-framework/src/council/` —
+- the agent framework's `council/` module:
   the framework substrate: `types.ts` (Mentor, MentorOutput,
   PersonaFragment, CouncilGuidance, SynthesisRule, CouncilStore),
   `council.workflow.ts` (the gather → invoke → persist → synthesise
@@ -778,18 +778,17 @@ implementation should mirror:
   application algorithm), `persona-overlay.ts` (the lock-check
   implementation and overlay eviction planner), `triggers.ts` (the
   trigger heuristics).
-- `packages/simone/src/council/` —
+- Simone's `council/` module:
   Simone's app-specific realisation: five mentors, four synthesis
   rules, the `SIMONE_LOCKED_TRAITS` constant, the
   sentinel-prefilter for early-exit on safety patterns. The
   database schema (`council_consultations`, `persona_overlays`)
-  in `packages/simone/src/domain/council/schema.ts` is the
+  in `council/schema.ts` is the
   reference shape for the consultations and overlay tables.
 
 Voting, peer, and hierarchy modes are NOT yet implemented. The
-spec leads the implementation. Once the in-flight `assembly`
-package lands under `packages/agent-framework/src/assembly/`, this
-AIP will absorb the working schemas in full as part of moving
+spec leads the implementation. Once the in-flight `@agentproto/assembly` package
+lands in `agentproto/ts`, this AIP will absorb the working schemas in full as part of moving
 Draft → Review.
 
 ## Backwards Compatibility

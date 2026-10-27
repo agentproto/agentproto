@@ -695,12 +695,12 @@ process without coupling our operating-workspace cadence to it.
 ## Reference Implementation
 
 Reference implementation in progress. The spec leads the
-implementation; once the in-flight `packages/companies/v2` package
+implementation; once the in-flight `packages/office` package
 lands, this AIP will absorb the working schema in full as part of
 moving Draft → Review.
 
 The implementation will compose with [AIP-18](/docs/aip-18)'s
-`packages/collection/core` (also in flight) — `OFFICE.md`
+`packages/collection` (also in flight); `OFFICE.md`
 validation delegates per-item-kind validation to AIP-18; both
 packages share the same merge algorithm and resolution-chain
 exposure surface. It will also share infrastructure with the

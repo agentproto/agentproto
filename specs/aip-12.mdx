@@ -252,11 +252,10 @@ playbooks have nothing concrete to weave against.
 
 ## Reference Implementation
 
-`packages/agent-framework/src/playbooks` —
+The reference implementation's `playbooks/` module:
 weave function (built on the Council-of-Mentors persona overlay code),
 ACE-style evolve loop, lock-check enforcement, shadow → active
-promotion gate. The Council framework in
-`packages/agent-framework/src/council`
+promotion gate. The Council framework's `council/` module
 is the first conformant consumer — Council mentors emit
 `PLAYBOOK.md` files instead of in-memory fragments, and the persona
 lock is shared with the Simone base persona definition.
