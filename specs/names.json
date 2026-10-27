@@ -402,7 +402,7 @@
       "aip": 46,
       "name": "SESSION",
       "specId": "session/v1",
-      "package": "@agentproto/session",
+      "package": "@agentproto/runtime",
       "layer": "host"
     },
     {
@@ -596,9 +596,5 @@
       "layer": "primitives"
     }
   ],
-  "pending": [
-    "aip-46:package",
-    "aip-69:package",
-    "aip-69:title"
-  ]
+  "pending": []
 }
