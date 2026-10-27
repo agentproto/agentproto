@@ -404,7 +404,9 @@ Both profiles inherit these normative mechanics:
   implemented as an AIP-53 app whose body is the binding of its two
   doctypes plus the workflow assets.
 - **Never-wake.** All lifecycle subscriptions are `fyi`; the ask ladder
-  (§4.6) is a session's ONLY inbound wake and is bounded.
+  (§4.6) is a session's ONLY inbound wake and is bounded. This is a clerk
+  profile policy applied through [AIP delivery triage](/docs/aip-delivery-triage),
+  not a property of core delivery: other producers wake by default.
 - **Single-flight + debounce.** At most one pass per clerk per subject
   runs; events arriving mid-pass are dropped (the pass window covers
   them) with a debounce floor (default 60 s).
