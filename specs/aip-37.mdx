@@ -100,7 +100,7 @@ for host namespaces).
 | Event | Fires when |
 |---|---|
 | `turn-start` | An agent turn begins (LLM about to be called). |
-| `turn-end` | An agent turn completes (final response delivered or stream closed). |
+| `turn-end` | An agent turn completes (final response delivered or stream closed). The event MAY carry `silent: true`, a host-recorded boolean for a turn whose only action was a no-op acknowledgement of the item that woke it; see [AIP delivery triage](/docs/aip-delivery-triage) section 8 for the conditions. `silent` is a flag of its own, distinct from any empty-turn notion; absent means `false`. |
 | `turn-error` | An agent turn fails with an unrecoverable error. |
 | `turn-interrupt` | An active agent turn is explicitly interrupted by an operator or host. |
 

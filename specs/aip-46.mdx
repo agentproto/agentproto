@@ -921,7 +921,7 @@ the tools of [§MCP tools](#mcp-tools):
 | `message_parent` | `{message, kind?, urgency?, interrupt?, replyTo?}` — alias of `message_send({to: "parent"})` |
 | `message_reply` | `{replyTo, text, kind?, urgency?}` — routed to the original sender, same `correlationId` |
 | `inbox_list` | `{from?, kind?, correlationId?, limit?}` |
-| `inbox_ack` | `{ids}` |
+| `inbox_ack` | `{ids, noop?}`: `noop: true` declares that the caller looked at the items and nothing needed doing. The host records it for the caller's current turn at the ack itself; it never sets `silent` on its own, and the host decides `silent` at turn end under [AIP delivery triage](/docs/aip-delivery-triage) section 8. Hosts that do not support the flag ignore it and ack normally. |
 | `inbox_wait` | `{from?, kind?, correlationId?, timeoutMs?}` — blocks until a match or the timeout; returns `{messages, timedOut, pendingChildren}` |
 
 `inbox_wait` is how a supervisor collects its children's reports **without
@@ -938,6 +938,10 @@ neighbours and grant no control over the recipient.
 HTTP hosts SHOULD mirror them as `POST /sessions/:id/messages` (the
 recipient is `:id`; the sender is the authenticated caller),
 `GET /sessions/:id/inbox`, and `POST /sessions/:id/inbox/ack`.
+
+The four urgency tiers are the only delivery targets of the triage stage in
+[AIP delivery triage](/docs/aip-delivery-triage): triage can lower or keep the
+urgency of an item before it enters the inbox, never raise it.
 
 ### Output projection
 

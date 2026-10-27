@@ -237,7 +237,7 @@ Canonical envelope (CloudEvents 1.0 structured JSON):
 | `data` | object | Required. The normalized projection, at most 32 KiB. Raw provider payloads never appear. |
 | `summary` | string | Required. One line, used verbatim (after a `[<scheme>]` prefix) as the inbox message text. |
 | `subjects` | string[] | Required. The full hierarchy, most specific first. |
-| `terminal` | boolean | Required. Ends the subject's lifecycle when the spec's `until` is `subject_terminal`. |
+| `terminal` | boolean | Required. Ends the subject's lifecycle when the spec's `until` is `subject_terminal`. A `terminal: true` event is an always-wake class input for [AIP delivery triage](/docs/aip-delivery-triage); a repeat collapsed by triage is recorded in the ledger under the rule id `coalesced-repeat`. |
 | `consumerref` | string | Optional. The opaque consumer reference a provider was asked to stamp. |
 | `seq` | number | Optional. A monotonic sequence, when the provider assigns one. |
 
