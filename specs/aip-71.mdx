@@ -287,12 +287,19 @@ internal contract types (admission decisions and occurrence keys) are in
 per workspace bucket, keyed by the occurrence key), the reaction runner that
 executes a binding once per key with the running state written before the
 target starts, and the `agentproto:session-completed` host event. Spawn
-admission wraps session spawn and returns reuse and deny decisions. Two
+admission wraps session spawn and returns reuse and deny decisions. Three
 reactions run on this path today: an opt-in ingestion of completed sessions
-into the workspace brain, and AIP-41 event routines, whose `target` is
-dispatched through the same authorized path as a scheduled routine. The native
-hook projections, the AIP-42 `on` shorthand, prompt admission and the
-admission of tool dispatch are follow-up work in the same repository. This AIP
+into the workspace brain, an opt-in dispatch of the AIP-68 clerk pass (both
+owned per workspace, so exactly one path runs each firing), and AIP-41 event
+routines, whose `target` is dispatched through the same authorized path as a
+scheduled routine or, for an `action` target, through a typed registry of host
+actions. A reaction that starts a session leaves a causation chain: the
+runtime stamps the new session with the originating event and a depth, and a
+cap (default 4) bounds the chain. The runner also exposes a read model of its
+receipts (counts per binding, queue age, latency and dead reasons) and writes
+one structured log line per attempt. The native hook projections, the AIP-42
+`on` shorthand, prompt admission and the admission of tool dispatch are
+follow-up work in the same repository. This AIP
 defines no package of its own. Until a native projection
 ships for an event, the host MUST NOT claim native ownership of it, even where
 the harness declares the capability.
