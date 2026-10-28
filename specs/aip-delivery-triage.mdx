@@ -132,13 +132,15 @@ Every triaged event has exactly one decision:
 | `drop` | The event does not enter the inbox. | No delivery. |
 
 `wake` MUST deliver at the urgency the producer or target configured, under
-[AIP-46](/docs/aip-46) section "Delivery tiers". Triage only ever lowers or
-keeps the configured urgency; it never raises it. A target configured to
-receive a producer's events at `fyi` (for example a passive follow, or a clerk
-under AIP-68) keeps receiving them at `fyi`, and the ledger still records the
-decision `wake`. This keeps the AIP-68 never-wake policy and the always-wake
-floor consistent: the floor means "never lowered by triage", not "forced above
-what the target asked for".
+[AIP-46](/docs/aip-46) section "Delivery tiers", with one floor defined by
+class, not by producer: an event of the awaiting-human or crash class
+(section 4) is delivered at `next-turn` or above, even when the configured
+urgency is `fyi`. For every other event triage only ever lowers or keeps the
+configured urgency; it never raises it, and a `wake` decision on a target
+configured at `fyi` is still delivered at `fyi`, with the ledger recording
+the decision `wake`. When a digest carries an awaiting-human or crash line
+together with other lines, the whole digest is delivered at `next-turn` with
+every line it carries.
 
 `fyi` MUST deliver to the inbox at the `fyi` tier, with no wake, as AIP-46
 defines for that tier.
@@ -171,14 +173,18 @@ MUST NOT mark an event always-wake merely to bypass a rule; the mark is a
 claim about the event, and a host SHOULD record the claim in the ledger
 through the applicable rule id.
 
-The [AIP-68](/docs/aip-68) never-wake rule is a clerk-profile triage policy,
-not a core property of this stage. That profile makes all of a clerk's
-lifecycle subscriptions `fyi` so a clerk never wakes the session it watches.
-It does not make `fyi` universal. Because triage never raises urgency
-(section 3), the clerk profile's `fyi` delivery is compatible with the floor:
-the decision is still `wake`, delivered at the `fyi` tier the profile
-configured. No producer other than that profile may claim never-wake as a
-reason to skip section 4.
+The `terminal` class keeps "never lowered by triage" only: a producer's
+terminal event, such as a closed pull request, is `wake` but follows the
+configured urgency, so a passive target stays passive for lifecycle
+boundaries. Only awaiting-human and crash carry the `next-turn` delivery
+floor of section 3, because they mean that a human or the target's owner is
+blocked.
+
+The `next-turn` floor concerns deliveries into a session's inbox. The
+[AIP-68](/docs/aip-68) clerk is an out-of-band process, not a session target:
+its lifecycle subscriptions are not inbox deliveries in this sense, so its
+never-wake policy (all subscriptions `fyi`) is unaffected by the floor. No
+session target may claim never-wake as a reason to skip section 4.
 
 ### 5. Rules first, classifier second
 
@@ -393,7 +399,8 @@ An implementation conforms to AIP-DELIVERY-TRIAGE when it:
 
 1. triages only after a binding selected a target session;
 2. emits only `wake`, `fyi` or `drop`, with the AIP-46 mapping above;
-3. enforces the always-wake floor before rules and classifier;
+3. enforces the always-wake floor before rules and classifier, including the
+   `next-turn` delivery floor for awaiting-human and crash events;
 4. evaluates deterministic rules first and falls back to their result when an
    optional classifier fails;
 5. writes one complete ledger line per triaged event, with no payload fields;
