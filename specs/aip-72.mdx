@@ -545,12 +545,105 @@ Projection rules:
 
 ## Reference Implementation
 
-The document (sections 1 to 7) is implemented by
-[`@agentproto/memory`](https://github.com/agentproto/ts/tree/main/packages/memory):
-`defineMemory`, `parseMemory`, `renderMemory`, `validateMemory`, and the
+The reference implementation lives in
+[agentproto/ts](https://github.com/agentproto/ts). It covers the
+document, the store, a daemon tool surface, a spawn-time digest, and the
+native-dir projection and capture for one adapter.
+
+**Document (sections 1 to 7).**
+[`@agentproto/memory`](https://github.com/agentproto/ts/tree/main/packages/memory)
+provides `defineMemory` (the writer path: validates in canonical mode,
+fills `status: active` and an empty `body`, returns a frozen handle),
+`validateMemory` (each issue carries the rule it breaks; legacy items
+pass unless canonical mode is asked for), `parseMemory`, `renderMemory`
+(validates, double-quotes every string, keeps key order) and the
 lifecycle helpers `memoryStatus`, `isAllowedStatusTransition` and
-`isInForce`. The store (section 8) and the projection (section 9) have no
-implementation yet.
+`isInForce`. It enforces rules 1, 2, 4, 5, 9, 10 and 12 and the `until` part of rule 11 on one
+document, and rule 3 through the renderer. Rule 8 yields warnings only. Rules 6 and 7,
+and the `while` and `session` parts of rule 11, need a second version
+of an item or outside context; they are left to the store and the host.
+
+**Store (section 8).** The same package exports the `MemoryStore` port
+(`write`, `read`, `list`, `search`, `supersede`, `archive`, `dismiss`),
+the typed errors (`MemoryConflictError`, `MemoryNotFoundError`,
+`MemoryTransitionError`, `MemorySlugTakenError`; an invalid document
+raises `MemoryValidationError` naming the field) and `FilesMemoryStore`,
+the files-backed store over the reference layout. It covers rules 13 to
+22:
+
+- `revision` is the SHA-256 of the file bytes and every change of an
+  existing item needs the current `ifRevision` (rule 17); an equal
+  re-write is a no-op (rule 18); `updated_at` is set on a content change
+  only (rules 6 and 19).
+- `supersede` and `archive` rewrite only the `status` line (adding it
+  when absent), commit the new item before retiring the old one, refuse
+  any status change through `commit`, and nothing deletes an item file
+  (rules 15, 16 and 20).
+- A slug is unique among active items (rule 14); a proposal is keyed by
+  the hash of its rendered document and becomes an item only through a
+  `commit` that names it with `fromProposal` (rule 21).
+- `search` is a weighted term match over the in-force items. It takes an
+  optional knowledge provider through a structural interface; a hit that
+  names an item the filter excludes is dropped, and any other hit is
+  returned as `source: "knowledge"` (rule 22).
+
+Writes use a temporary file and a rename and are serialized within one
+store instance. Several processes writing one directory are not
+coordinated.
+
+**Daemon tools and digest (sections 8 and 9, system prompt path).**
+[`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime)
+keeps one `FilesMemoryStore` per resolved root (config key `memory.root`,
+overridden by an AIP-42 `memory.store` that names a files root) and
+registers the tools `memory_search`, `memory_list`, `memory_read`,
+`memory_write` (default mode `propose`), `memory_supersede`,
+`memory_archive` and `memory_dismiss`. Store errors become structured
+tool errors (`conflict`, `not_found`, `invalid_transition`,
+`slug_taken`, `validation`). The write policy of rule 21 is a role
+gate: the operator and supervisor sessions may commit, supersede, archive
+and dismiss; any other session, or one with no recorded role, can only
+propose; a session whose agent sets `memory.enabled: false` writes
+nothing while reads still work.
+
+At spawn, when the agent manifest's `memory` block states a binding
+(`enabled: true`, `store` or `anchors`), the runtime appends the digest
+as one delimited block that presents the items as recorded data. It
+selects in-force items by the `global` tag or the session's anchors
+(`session:`, `agent:`, `project:` and the manifest's), orders them as the
+Digest subsection says, bounds the block at 4000 characters, cuts whole
+items and ends with the count left out and the tool to reach them. It
+covers rules 23, 25 and 26. A store read failure is a spawn warning,
+never a spawn failure.
+
+**Native projection and capture (section 9).** `@agentproto/harness`
+implements the native-dir path (`native-memory.ts`) and the claude-code
+adapter declares `capabilities.memory { inject: "native-dir", capture:
+"native-dir-diff" }`:
+
+- Projection writes one topic file per in-force item, carrying `id`,
+  `slug` and a content hash in its frontmatter, and rewrites only a
+  fenced, bounded block at the top of the native index. Native files and
+  native index lines are never touched. It is idempotent and returns a
+  snapshot that is persisted beside the session cache.
+- The path falls back to the system prompt digest, never both, when the
+  harness's automatic memory is disabled, when the project sets its own
+  memory directory, or when the config directory is the user's real one
+  (rule 25).
+- Capture runs on the daemon's session event bus at `turn-end` and at
+  exit, diffs the native location against the snapshot, and writes
+  proposals only (rule 24): a new or changed native file becomes a new
+  item, an edited projected file becomes the same `id` with the new
+  content, a deleted projected file becomes the same `id` with
+  `status: archived`. Each carries `capture.mode: live`,
+  `provenance.source: native-memory` and the session id. Output passes
+  `validateMemory`.
+
+**Known gaps.** An adapter that declares `inject: none`, or declares
+nothing, still receives the system prompt digest when the manifest opts
+in, which is wider than the resolution order of section 9 (step 3). A
+bare store id in `memory.store` has no resolver yet and uses the default
+root with a spawn warning. Sandbox sessions get no native projection and
+no capture. Sessions started by the application runner get no digest.
 
 ## Backwards Compatibility
 

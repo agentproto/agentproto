@@ -460,6 +460,12 @@ capabilities:
 before boot. It does not enable a hook, install user code, or grant a
 permission by itself.
 
+Each entry MUST satisfy the four declaration rules of AIP-71 section 3:
+no whitespace in `event` or `native_event`, a non-empty `handlers`,
+`can_block: false` on a `lifecycle` entry, and no two entries sharing an
+`(event, native_event)` pair. `HARNESS.schema.json` encodes the first
+three; a reader enforces the pair rule.
+
 `capabilities.memory` declares how the harness can receive memory items
 and give its own memory writes back, as defined by the
 [AIP-72](/docs/aip-72) projection (section 9):
