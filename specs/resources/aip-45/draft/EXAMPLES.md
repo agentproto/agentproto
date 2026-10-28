@@ -228,6 +228,90 @@ tags: [claude-code, anthropic, acp, coding]
 ---
 ```
 
+## Stream events: plan approval and an agent-caused mode change
+
+A harness with session modes `plan` and `execute` declares both
+contracts:
+
+```yaml
+capabilities:
+  streaming: true
+  tool_calls: true
+  bidirectional: true
+  mode_events: true
+  typed_prompts: true
+```
+
+The agent submits a plan. The event validates against
+[`./STREAM-EVENTS.schema.json`](./STREAM-EVENTS.schema.json):
+
+```json
+{
+  "kind": "agent-prompt",
+  "sessionId": "s-1",
+  "toolCallId": "req-7",
+  "request": "plan-approval",
+  "text": "Approve this plan?",
+  "options": [
+    { "optionId": "approve", "name": "Approve", "kind": "allow_once" },
+    { "optionId": "reject", "name": "Reject with feedback", "kind": "reject_once" }
+  ],
+  "planApproval": {
+    "plan": "1. Add the parser.\n2. Add tests.\n3. Wire the CLI flag.",
+    "planRef": "plans/parser.md",
+    "targetModeId": "execute",
+    "approveOptionId": "approve",
+    "rejectOptionId": "reject"
+  }
+}
+```
+
+The caller approves with `respondPermission("req-7", { optionId: "approve" })`
+(or rejects with `{ optionId: "reject", feedback: "Split step 3." }`).
+On approval the harness switches to the target mode and emits:
+
+```json
+{
+  "kind": "mode-changed",
+  "sessionId": "s-1",
+  "modeId": "execute",
+  "previousModeId": "plan",
+  "cause": "agent",
+  "reason": "plan approved"
+}
+```
+
+A question with fixed choices and a free-text answer:
+
+```json
+{
+  "kind": "agent-prompt",
+  "sessionId": "s-1",
+  "toolCallId": "req-8",
+  "request": "question",
+  "text": "Which database should the service use?",
+  "options": [
+    { "optionId": "answer:0", "name": "PostgreSQL", "kind": "allow_once" },
+    { "optionId": "answer:1", "name": "SQLite", "kind": "allow_once" },
+    { "optionId": "answer", "name": "Type an answer", "kind": "allow_once" },
+    { "optionId": "decline", "name": "Do not answer", "kind": "reject_once" }
+  ],
+  "question": {
+    "prompt": "Which database should the service use?",
+    "choices": [
+      { "optionId": "answer:0", "label": "PostgreSQL" },
+      { "optionId": "answer:1", "label": "SQLite", "description": "Single file, no server" }
+    ],
+    "allowFreeText": true,
+    "freeTextOptionId": "answer"
+  }
+}
+```
+
+The caller answers `{ optionId: "answer:1" }`, or types an answer with
+`{ optionId: "answer", feedback: "DuckDB" }`. A caller that ignores
+`request` sees four named options and still answers correctly.
+
 ## Conformance targets
 
 Every example MUST satisfy:
@@ -239,3 +323,6 @@ Every example MUST satisfy:
 3. AIP-29 install/version/auth schemas (validated via `$ref`)
 4. AIP-36 sandbox schema
 5. AIP-44 ACP schema (when `protocol=acp`, on the bound `acp:` ref)
+
+Every stream event example MUST satisfy
+[`./STREAM-EVENTS.schema.json`](./STREAM-EVENTS.schema.json).
