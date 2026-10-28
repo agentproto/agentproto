@@ -85,7 +85,7 @@
         "minLength": 1
       },
       "default": [],
-      "description": "Free-form labels. Scope anchors are carried here in their formatted form (e.g. 'global', 'project:fhcm', 'agent:assistant', 'pr:agentproto/ts#1858')."
+      "description": "Free-form labels. Scope anchors are carried here in their formatted form (e.g. 'global', 'project:acme', 'agent:assistant', 'pr:acme/app#42')."
     },
     "polarity": {
       "enum": [
@@ -318,7 +318,7 @@
         "trust": {
           "type": "string",
           "minLength": 1,
-          "description": "Trust class of the source (e.g. 'jeremy', 'internal')."
+          "description": "Trust class of the source (e.g. 'owner', 'internal')."
         },
         "explicitness": {
           "type": "string",
@@ -350,7 +350,7 @@
             "minLength": 1
           },
           "default": [],
-          "description": "Resolved anchor labels in their formatted form (e.g. 'global', 'project:fhcm', 'pr:agentproto/ts#1858', 'session:sess_…')."
+          "description": "Resolved anchor labels in their formatted form (e.g. 'global', 'project:acme', 'pr:acme/app#42', 'session:sess_…')."
         },
         "ageHours": {
           "type": "number",

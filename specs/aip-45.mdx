@@ -289,6 +289,9 @@ capabilities:
       path: admission
       can_block: true
       handlers: [command, mcp]
+  memory:                  # optional AIP-72 memory projection declaration
+    inject: native-dir     # native-dir | system-prompt | none
+    capture: native-dir-diff # native-dir-diff | none
 ```
 
 `capabilities.hooks` is an open list of native hook declarations defined by
@@ -296,10 +299,25 @@ capabilities:
 before boot. It does not enable a hook, install user code, or grant a
 permission by itself.
 
+`capabilities.memory` declares how the harness can receive memory items
+and give its own memory writes back, as defined by the
+[AIP-72](/docs/aip-72) projection (section 9):
+
+| Field | Values | Meaning |
+|---|---|---|
+| `inject` | `native-dir` \| `system-prompt` \| `none` | How a digest of in-force items reaches a session at spawn: written into the harness's native memory location, appended to the system prompt, or not at all. |
+| `capture` | `native-dir-diff` \| `none` | Whether the native memory location can be diffed after the session so its changes become store proposals. |
+
+An absent `memory` reads as `{ inject: none, capture: none }`. Like
+`hooks`, it is metadata: the host resolves the effective projection
+(native first, system prompt as the fallback) and does not enable one
+because of the declaration alone.
+
 When `protocol: "acp"`, protocol capabilities MUST be a subset of the ACP
 capabilities the bound AIP-44 manifest declares; the runner enforces this at
-load time. `hooks` is a harness-extension capability under AIP-71, not an ACP
-wire capability, and is therefore excluded from that subset check.
+load time. `hooks` (AIP-71) and `memory` (AIP-72) are harness-extension
+capabilities, not ACP wire capabilities, and are therefore excluded from
+that subset check.
 
 ### Modes
 

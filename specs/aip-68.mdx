@@ -232,6 +232,13 @@ human). The `session` lens MUST NOT promote.
 
 A shared level held as files MAY store promoted facts as [AIP-72](/docs/aip-72) `memory/v1` items.
 
+When the shared level is an [AIP-72 memory store](/docs/aip-72) (section 8),
+promotion is a `commit` write through that store, and the clerk is also the
+writer that promotes the proposals the store holds, including those captured
+from a harness's native memory by the AIP-72 projection (section 9): it
+commits each one it accepts with `fromProposal` (or archives the slug, for a
+proposal that carries `status: archived`), and dismisses the rest.
+
 #### 3.4 Cursors and idempotence
 
 A pass reads transcripts FROM DISK and advances `cursor.json` per
