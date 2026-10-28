@@ -6,7 +6,7 @@ status: Review
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 9, 17, 19, 54, 36, 38, 39, 42, 44, 45, 57, 69]
+requires: [1, 2, 9, 17, 19, 23, 54, 36, 38, 39, 42, 44, 45, 57, 69]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: host
@@ -19,8 +19,8 @@ layer: host
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
-| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-54](/docs/aip-54) (REF — the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
-| Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-23](/docs/aip-23) (the `session://` identity-ref a session principal is named by), [AIP-34](/docs/aip-34) (the doors behind the `door` message relation), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-54](/docs/aip-54) (REF — the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-23](/docs/aip-23) (IDENTITY-REF, the `session://` principal), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-34](/docs/aip-34) (the doors behind the `door` message relation), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
 
 ## Abstract
@@ -510,7 +510,9 @@ which no other party can derive or guess. The host:
 1. MUST deliver the credential only to the session it was minted for,
    on the surfaces the host hands that session, and MUST NOT write it to
    the session descriptor, a transcript, a log, an error message or any
-   other read surface.
+   other read surface. The host MUST NOT write the credential into a
+   file under the session's working directory (its ground), which the
+   session's workspace could commit or share.
 2. MUST store only a one-way hash of the credential, never the
    credential itself.
 3. MUST revoke the credential when the session is retired. A revoked
@@ -544,8 +546,13 @@ The rules:
    session using the surfaces it was given is always evaluated as
    itself.
 3. **A claim is not an identity.** A session id that a caller states
-   about itself (a URL parameter, a header, a body field) is a claim. A
-   host MUST NOT evaluate a request as a session on the strength of a
+   about itself (a URL parameter, a header, a body field) is a claim.
+   When the caller presents a session credential, the `:id` of a route
+   that acts on the caller's own session, at least
+   `POST /sessions/:id/checkpoint` and the inbox acknowledgement of
+   §Inbox and tools, is a claim under this rule: it MUST name the
+   credential's session, else the host refuses with `identity_mismatch`.
+   The operator may name any session there. A host MUST NOT evaluate a request as a session on the strength of a
    claim. Once it enforces this section, a host MUST refuse with
    `identity_unverified` a request that claims a session id and presents
    no valid credential, and MUST refuse with `identity_mismatch` a
@@ -568,7 +575,12 @@ The rules:
    transport. A host that treats `anonymous` as the operator accepts a
    known residual: a host-spawned session that deliberately omits its
    credential is `anonymous` too. Such a host MUST NOT describe that
-   configuration as gating a session that strips its own identity.
+   configuration as gating a session that strips its own identity. A
+   host that offers that treatment MUST also offer the configuration
+   that withdraws it, and MUST report the number of `anonymous`
+   requests it evaluated as the operator on the same read surface as
+   the classes of rule 6, both in observe-only mode and once it
+   enforces.
 6. **Observe-only mode.** Before it enforces rules 3 and 4, a host MAY
    run in an observe-only mode: it classifies every request into one of
    the five classes below and records the count per class, and refuses
@@ -584,6 +596,20 @@ The rules:
 | claim only | a claim and no credential |
 | anonymous | no credential and no claim |
 
+7. **An external identifier is a label.** A caller the host did not
+   spawn MAY register an identifier of its own for display and
+   attribution. Such a session holds no credential and is not a
+   session principal: a request naming it is evaluated as `anonymous`,
+   counts as `anonymous` in rule 6, and the identifier is not a
+   `session://` ref. A host MUST NOT register an external identifier
+   that equals the id of a session it spawned.
+8. **Enforcement never outruns delivery.** A host MUST NOT enforce
+   rules 3 and 4 against callers on a surface, or spawned through an
+   adapter, to which it does not yet deliver the credential under
+   rule 2. It MAY enforce per surface and per adapter and MUST report
+   which it enforces; until it enforces everywhere it delivers
+   everywhere, it does not conform to rules 3 and 4.
+
 **Workspace-scoped authority.** A rule scoped to a workspace keys off
 the session credential together with the session's workspace binding
 (§Session messages): the credential says which session is calling, and
@@ -597,7 +623,9 @@ caller supplies in place of the binding.
 > ([agentproto/ts#2335](https://github.com/agentproto/ts/pull/2335)): a
 > random `apst_`-prefixed token, stored as a SHA-256 hash in
 > `session-credentials.json`, presented in the
-> `x-agentproto-session-token` header on the daemon self-mount, revoked
+> `x-agentproto-session-token` header on the daemon self-mount, and not
+> yet in the process environment, so a native hook callback
+> ([AIP-71](/docs/aip-71) §8) still authenticates as the operator, revoked
 > when the session retires and minted afresh on restart and resume. The
 > config key `defaults.identity.sessionTokens` (`"shadow"`, the default,
 > or `"off"`) selects it, and `GET /identity` reports the five counters
@@ -1031,7 +1059,10 @@ Sibling, peer and door messaging are OPTIONAL. The rules:
 3. **Deny by default.** The `sibling`, `peer` and `door` grants MUST be
    deny unless the host's configuration enables them, and only the
    operator may change that configuration (§Operator-only
-   configuration).
+   configuration). An [AIP-34](/docs/aip-34) workspace `policy` MAY deny
+   `sibling`, `peer` or `door` for the sessions bound to that
+   workspace, and MUST NOT enable a grant the operator's configuration
+   leaves at deny.
 4. **The binding is the host's.** A session's workspace binding is the
    most specific registered workspace (§Workspaces) whose path contains
    the real path of the session's working directory (`cwd`, its
@@ -1070,6 +1101,8 @@ even when it is also a `peer` pair.
 > collects relations in `permissions.ts` (`collectMessageRelations`,
 > `decideMessage`) and binds a session through `workspace-binding.ts`
 > (the cwd resolved against `~/.agentproto/workspaces.json`).
+> `defaults.messaging.allowSameWorkspace` defaults to true, the
+> migration default of §Backwards Compatibility, and
 > `defaults.messaging.peerBinding` selects `"slug"` (the recorded
 > workspace slug, the default) or `"verified"` (the cwd-derived
 > binding), and the decision carries `peerVerified`; in `"slug"` mode a
@@ -1925,8 +1958,16 @@ The behaviour changes are deliberate:
 - A pair that only shares a recorded workspace slug, or the `default`
   bucket, stops being a `peer` pair. A host that delivered such
   messages before this amendment MAY keep delivering them during its
-  migration, provided it reports each such pair; it does not conform to
-  §Relations rules 4 and 5 until it stops.
+  migration, provided it records each such pair at least once on a
+  surface the operator can read; it does not conform to §Relations
+  rules 4 and 5 until it stops.
+- A host whose `peer` grant was allow before this amendment MAY keep
+  that default during its migration, provided its configuration read
+  surface reports the effective grant and the operator can set it to
+  deny through the same configuration; it does not conform to
+  §Relations rule 3 until its default is deny. A pair delivered under
+  that default is still subject to rules 4 and 5, or to the allowance
+  above.
 - The 2026-09-26 sentence that refused "any other pair" is replaced by
   §Relations rule 2. Every pair that sentence refused is still refused
   unless it holds a `peer` or `door` relation whose grant the operator
@@ -2091,8 +2132,9 @@ The behaviour changes are deliberate:
   supervisor that owns the plan. Revisit if hosts report siblings
   routing everything through the parent as the binding friction.
 - **Who enables `peer`.** §Relations makes the `peer` grant operator
-  configuration. A workspace owner could reasonably enable it for its
-  own workspace through the AIP-34 manifest's `policy`, within the
+  configuration and lets a workspace `policy` only narrow it. A
+  workspace owner could reasonably also enable it for its own
+  workspace through the AIP-34 manifest's `policy`, within the
   operator's ceiling. Unsettled whether that is a second authority
   worth having.
 - **A door form for session messages.** AIP-34 doors name a `path` and
