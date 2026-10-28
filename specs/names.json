@@ -593,6 +593,13 @@
       "name": "ACTION-HOOKS",
       "specId": "action-hooks/v1",
       "layer": "primitives"
+    },
+    {
+      "aip": 72,
+      "name": "MEMORY",
+      "specId": "memory/v1",
+      "file": "MEMORY.md",
+      "layer": "memory"
     }
   ],
   "pending": []

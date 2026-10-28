@@ -43,6 +43,8 @@ maintained alongside the canonical machine config. Together these turn agent
 knowledge into a compounding, composable artifact instead of a stateless RAG
 retrieval, and make the resulting knowledge base portable across runtimes.
 
+An agent's own typed, mutable memory items (user, feedback, project, reference) are a sibling doctype, [AIP-72](/docs/aip-72) `memory/v1`, which reuses the base fields of this AIP.
+
 ## Motivation
 
 Most agent knowledge today lives in one of two places: an opaque vector
