@@ -10,7 +10,6 @@ requires: [1, 2, 10]
 discussions-to: https://github.com/agentproto/agentproto/discussions
 resources: ./resources/aip-72/draft
 layer: memory
-ref-impl: https://github.com/agentik-studio/agentik-studio/tree/main/projects/pygmalion/packages/core/src/memory
 ---
 
 | Field | Value |
@@ -23,7 +22,6 @@ ref-impl: https://github.com/agentik-studio/agentik-studio/tree/main/projects/py
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-10](/docs/aip-10) (base fields) |
 | Composes with | [AIP-11](/docs/aip-11) (lessons), [AIP-68](/docs/aip-68) (the secretary clerk promotes into memory items) |
 | Created | 2026-10-28 |
-| Reference Impl | Pygmalion memory writer (`projects/pygmalion/packages/core/src/memory/wiki/items-writer.ts`, agentik-studio) |
 | Resources | [`./resources/aip-72`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-72/draft): `MEMORY.schema.json` |
 
 ## Abstract
@@ -87,7 +85,7 @@ name: "citer-ses-sources"
 type: feedback
 polarity: do
 description: "Citer ses sources"
-tags: ["global", "agent:pygmalion"]
+tags: ["global", "agent:assistant"]
 lifetime: { kind: "durable" }
 status: active
 created: "2026-10-13T11:30:00.000Z"
@@ -179,8 +177,8 @@ claim came from: `mode` (`live` during the session it describes, or
 
 ### 6. Body
 
-The markdown body is free. It holds the assertion itself in prose; the
-reference writer renders a feedback item as the rule, then a "why" and a
+The markdown body is free. It holds the assertion itself in prose; a
+writer MAY render a feedback item as the rule, then a "why" and a
 "how to apply" paragraph, but readers MUST NOT depend on any body
 structure.
 
@@ -232,7 +230,7 @@ of this AIP. This revision fixes only the document they exchange.
   force a lifecycle and a principal scope onto a wiki that does not need
   them; reusing its five base fields keeps one listing and one slug
   convention across the memory layer.
-- **Legacy fields kept.** The reference writer already has items on disk
+- **Legacy fields kept.** Writers already have items on disk
   keyed by `id`/`name`/`type`; the schema accepts them so no migration is
   needed to adopt the doctype.
 - **Three statuses.** The draft enum also listed the proposal states
@@ -250,16 +248,12 @@ of this AIP. This revision fixes only the document they exchange.
 
 ## Reference Implementation
 
-Pygmalion memory writer:
-[`agentik-studio/projects/pygmalion/packages/core/src/memory/`](https://github.com/agentik-studio/agentik-studio/tree/main/projects/pygmalion/packages/core/src/memory)
-(item writer `wiki/items-writer.ts`, status rewrite
-`items/reader.ts` `rewriteItemStatus`, called by the nightly
-consolidation `consolidate/engine.ts`). There is no `@agentproto` package
-for this doctype yet.
+There is no reference implementation and no `@agentproto` package for this
+doctype yet.
 
 ## Backwards Compatibility
 
-Not applicable (new spec). Items written by the Pygmalion writer before
+Not applicable (new spec). Items written before
 the canonical fields existed validate through the legacy branch
 (section 2). Items written with empty `provenance.sessionId` or
 `provenance.ref`, or with the `anchors` array or the

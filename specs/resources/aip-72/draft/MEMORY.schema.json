@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentproto.sh/schemas/aip-72/MEMORY.schema.json",
   "title": "MEMORY.md frontmatter, memory/v1 (AIP-72)",
-  "description": "Validates the YAML frontmatter of an AIP-72 memory/v1 item: one small typed assertion (user, feedback, project, reference) about a principal or its work, with a lifecycle. A third doctype in the memory layer: it neither absorbs nor replaces AIP-10 knowledge/v1 entries (curated, shareable wiki pages over immutable sources) nor AIP-11 lesson/v1 (distilled lessons from runs). A memory/v1 item carries the AIP-10 base fields (schema, slug, kind, title, updated_at); the remaining fields codify the item shape the Pygmalion writer produces and are OPTIONAL, so an AIP-10-aligned writer and the Pygmalion writer both validate against the same schema. The markdown body (the `body` property) is unrestricted text.",
+  "description": "Validates the YAML frontmatter of an AIP-72 memory/v1 item: one small typed assertion (user, feedback, project, reference) about a principal or its work, with a lifecycle. A third doctype in the memory layer: it neither absorbs nor replaces AIP-10 knowledge/v1 entries (curated, shareable wiki pages over immutable sources) nor AIP-11 lesson/v1 (distilled lessons from runs). A memory/v1 item carries the AIP-10 base fields (schema, slug, kind, title, updated_at); the remaining fields are the memory item shape and are OPTIONAL, so a writer that emits only the AIP-10 base fields and a writer that emits the full item both validate against the same schema. The markdown body (the `body` property) is unrestricted text.",
   "type": "object",
   "additionalProperties": false,
   "anyOf": [
@@ -26,7 +26,7 @@
   "properties": {
     "schema": {
       "const": "memory/v1",
-      "description": "Discriminator for a memory/v1 document. Optional only to tolerate legacy Pygmalion items written before this doctype existed; a canonical memory/v1 document MUST set it, and when present it MUST equal 'memory/v1'."
+      "description": "Discriminator for a memory/v1 document. Optional only to tolerate legacy items written before this doctype existed; a canonical memory/v1 document MUST set it, and when present it MUST equal 'memory/v1'."
     },
     "slug": {
       "type": "string",
@@ -40,7 +40,7 @@
       "minLength": 2,
       "maxLength": 32,
       "pattern": "^[a-z][a-z0-9-]*$",
-      "description": "Item kind (AIP-10 convention). Common values mirror Pygmalion's memory types: 'user', 'feedback', 'project', 'reference'."
+      "description": "Item kind (AIP-10 convention). Common values are the memory types: 'user', 'feedback', 'project', 'reference'."
     },
     "title": {
       "type": "string",
@@ -56,13 +56,13 @@
     "id": {
       "type": "string",
       "minLength": 1,
-      "description": "Pygmalion item identifier (e.g. 'mem_qc8f407g'). Legacy alias for the AIP-10 path stem; when the base fields are omitted it takes part in identifying the item."
+      "description": "Item identifier (e.g. 'mem_qc8f407g'). Legacy alias for the AIP-10 path stem; when the base fields are omitted it takes part in identifying the item."
     },
     "name": {
       "type": "string",
       "minLength": 1,
       "maxLength": 1000,
-      "description": "Pygmalion slugified name, distinct from `title`. Kept as a separate field so a Pygmalion write round-trips without loss."
+      "description": "Slugified name, distinct from `title`. Kept as a separate field so a legacy item round-trips without loss."
     },
     "type": {
       "enum": [
@@ -71,12 +71,12 @@
         "project",
         "reference"
       ],
-      "description": "Pygmalion memory type. The closed type set from the memory contract; `kind` is the AIP-10-aligned spelling of the same notion."
+      "description": "Memory type. The closed type set from the memory contract; `kind` is the AIP-10-aligned spelling of the same notion."
     },
     "description": {
       "type": "string",
       "maxLength": 4000,
-      "description": "Pygmalion one-line human-readable summary, independent of the body."
+      "description": "One-line human-readable summary, independent of the body."
     },
     "tags": {
       "type": "array",
@@ -85,18 +85,18 @@
         "minLength": 1
       },
       "default": [],
-      "description": "Free-form labels. Scope anchors are carried here in their formatted form (e.g. 'global', 'project:fhcm', 'agent:pygmalion', 'pr:agentproto/ts#1858')."
+      "description": "Free-form labels. Scope anchors are carried here in their formatted form (e.g. 'global', 'project:fhcm', 'agent:assistant', 'pr:agentproto/ts#1858')."
     },
     "polarity": {
       "enum": [
         "do",
         "dont"
       ],
-      "description": "Pygmalion feedback polarity. Present only on items of type 'feedback'."
+      "description": "Feedback polarity. Present only on items of type 'feedback'."
     },
     "lifetime": {
       "$ref": "#/$defs/lifetime",
-      "description": "How long the item stays valid. Pygmalion writes { kind: 'durable' } or { kind: 'while', anchor: { … } }."
+      "description": "How long the item stays valid. Typical values are { kind: 'durable' } or { kind: 'while', anchor: { … } }."
     },
     "status": {
       "enum": [
@@ -109,12 +109,12 @@
     "created": {
       "type": "string",
       "format": "date-time",
-      "description": "Pygmalion creation timestamp."
+      "description": "Creation timestamp."
     },
     "written": {
       "type": "string",
       "format": "date-time",
-      "description": "Pygmalion last-write timestamp. Mirrors the AIP-10 `updated_at`."
+      "description": "Last-write timestamp. Mirrors the AIP-10 `updated_at`."
     },
     "decidedBy": {
       "type": "object",
@@ -350,7 +350,7 @@
             "minLength": 1
           },
           "default": [],
-          "description": "Resolved anchor labels in Pygmalion's formatted form (e.g. 'global', 'project:fhcm', 'pr:agentproto/ts#1858', 'session:sess_…')."
+          "description": "Resolved anchor labels in their formatted form (e.g. 'global', 'project:fhcm', 'pr:agentproto/ts#1858', 'session:sess_…')."
         },
         "ageHours": {
           "type": "number",
