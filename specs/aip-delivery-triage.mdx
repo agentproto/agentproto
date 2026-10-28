@@ -180,11 +180,11 @@ boundaries. Only awaiting-human and crash carry the `next-turn` delivery
 floor of section 3, because they mean that a human or the target's owner is
 blocked.
 
-The [AIP-68](/docs/aip-68) never-wake rule is a clerk-profile policy, not a
-core property of this stage. A profile that must never wake its target MUST
-NOT receive awaiting-human or crash events as triaged deliveries; it reads
-them from the producer's own record. No other profile may claim never-wake
-as a reason to skip section 4.
+The `next-turn` floor concerns deliveries into a session's inbox. The
+[AIP-68](/docs/aip-68) clerk is an out-of-band process, not a session target:
+its lifecycle subscriptions are not inbox deliveries in this sense, so its
+never-wake policy (all subscriptions `fyi`) is unaffected by the floor. No
+session target may claim never-wake as a reason to skip section 4.
 
 ### 5. Rules first, classifier second
 
