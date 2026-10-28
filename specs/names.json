@@ -599,6 +599,7 @@
       "name": "MEMORY",
       "specId": "memory/v1",
       "file": "MEMORY.md",
+      "package": "@agentproto/memory",
       "layer": "memory"
     }
   ],

@@ -1,15 +1,17 @@
 ---
 title: "AIP-72: MEMORY (memory/v1): typed memory items about a principal and its work"
-description: "Fixes the stored memory document, one markdown file per memory item: a small typed assertion (user, feedback, project, reference) about a principal or its work, with AIP-10 base fields, a lifecycle (active, then superseded or archived), a lifetime, provenance and capture blocks, and a free markdown body. Scope is the document only; a store port and harness projection come in a later revision."
+description: "Fixes the stored memory document, one markdown file per memory item: a small typed assertion (user, feedback, project, reference) about a principal or its work, with AIP-10 base fields, a lifecycle (active, then superseded or archived), a lifetime, provenance and capture blocks, and a free markdown body; then the memory store a host reads and writes items through (propose or commit, read, list, search, supersede, archive, compare-and-set, no hard delete) and the projection of items into each harness session (a bounded digest injected natively or through the system prompt, native-memory changes captured back as proposals)."
 aip: 72
 status: Draft
 type: Schema
 created: 2026-10-28
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 10]
+requires: [1, 2, 10, 45]
 discussions-to: https://github.com/agentproto/agentproto/discussions
 resources: ./resources/aip-72/draft
 layer: memory
+package: "@agentproto/memory"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/memory
 ---
 
 | Field | Value |
@@ -19,8 +21,8 @@ layer: memory
 | Status | Draft |
 | Type | Schema |
 | Doctype | `memory/v1` (one memory item, written as a markdown file with YAML frontmatter) |
-| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-10](/docs/aip-10) (base fields) |
-| Composes with | [AIP-11](/docs/aip-11) (lessons), [AIP-68](/docs/aip-68) (the secretary clerk promotes into memory items) |
+| Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-10](/docs/aip-10) (base fields, knowledge providers), [AIP-45](/docs/aip-45) (the projection declaration) |
+| Composes with | [AIP-11](/docs/aip-11) (lessons), [AIP-42](/docs/aip-42) (`memory` block of an agent), [AIP-68](/docs/aip-68) (the secretary clerk promotes proposals into a store), [AIP-71](/docs/aip-71) (native first projection) |
 | Created | 2026-10-28 |
 | Resources | [`./resources/aip-72`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-72/draft): `MEMORY.schema.json` |
 
@@ -33,8 +35,10 @@ is stored: a markdown file whose YAML frontmatter carries the
 [AIP-10](/docs/aip-10) base fields, a closed `type`
 (`user | feedback | project | reference`), a lifecycle
 (`active`, then `superseded` or `archived`), a `lifetime`, and
-provenance and capture blocks; the markdown body is free. This revision
-specifies the document only.
+provenance and capture blocks; the markdown body is free. It then
+specifies the **store** a host reads and writes items through, and the
+**projection** that shows in-force items to a harness session at spawn
+and captures the session's native-memory changes back as proposals.
 
 ## Motivation
 
@@ -76,35 +80,35 @@ otherwise (the reference store writes `items/<type>/<id>.md`).
 ```yaml
 ---
 schema: memory/v1
-slug: "citer-ses-sources"
+slug: "cite-sources"
 kind: feedback
-title: "Citer ses sources"
+title: "Cite sources"
 updated_at: "2026-10-13T11:30:00.000Z"
 id: mem_test001
-name: "citer-ses-sources"
+name: "cite-sources"
 type: feedback
 polarity: do
-description: "Citer ses sources"
+description: "Always cite sources"
 tags: ["global", "agent:assistant"]
 lifetime: { kind: "durable" }
 status: active
 created: "2026-10-13T11:30:00.000Z"
 written: "2026-10-13T11:30:00.000Z"
 decidedBy:
-  rule: "lens-confident"
+  rule: "classifier-confident"
   source: "builtin"
 provenance:
   source: "converse"
-  quote: "note que tu dois toujours citer tes sources"
+  quote: "always cite your sources"
   at: "2026-10-13T11:00:00.000Z"
-  extractorVersion: "lens@3"
+  extractorVersion: "extractor@3"
 capture:
   mode: "batch"
-  producer: "secretary:user"
+  producer: "clerk:user"
   capturedAt: "2026-10-13T11:00:00.000Z"
 ---
 
-Toujours citer ses sources.
+Always cite sources.
 ```
 
 ### 2. Fields
@@ -164,7 +168,7 @@ An anchor is `{ kind: "global" }`, `{ kind: "project" \| "contact" \| "agent", s
 ### 5. Provenance and capture
 
 `provenance` records where the claim was observed: `source` (a source
-class such as `converse` or `brain-transcript`), `sessionId`, `ref`
+class such as `converse` or `transcript`), `sessionId`, `ref`
 (an opaque pointer into the source, such as a message uuid or a file
 path), `quote` (the verbatim text backing the claim), `at` (when it was
 observed) and `extractorVersion` (which extractor generation produced
@@ -217,12 +221,286 @@ Reader rules:
     writer archives it.
 12. A reader MUST NOT reject an item because of its body.
 
-### Future work
+### 8. Store
 
-A store port (`IMemoryStore`: write, read, list, search, supersede,
-archive) and the projection of memory items into each harness (system
-prompt or native memory directory) will be specified in a later revision
-of this AIP. This revision fixes only the document they exchange.
+A **memory store** holds memory items and offers six operations. It
+keys items by `id`: a commit of an item without one gets an `id`
+assigned by the store. `slug`, when present, is a second handle (rule
+14). The
+files are the source of truth; any index a store keeps (full text,
+embeddings, a knowledge provider) is derived from them and MUST be
+rebuildable from the files alone.
+
+- **write** an item, in one of two modes. `propose` records a
+  proposal: a `memory/v1` document that is not an item yet, is not in
+  force, and is never projected into a session. `commit` creates the
+  item, or replaces the content of an existing one.
+- **read** one item by `id`. A lookup by `slug` is a `list` with the
+  `slug` filter, and finds at most one active item.
+- **list** items, filtered by type, status, tag (scope anchors in
+  formatted form) and whether the item is in force (rules 10 and 11).
+  With `proposals: true` it lists the pending proposals instead.
+- **search** items by a free query. A store MAY delegate the query to
+  an [AIP-10](/docs/aip-10) knowledge provider that indexes the items;
+  every hit MUST say whether it is a memory item of this store
+  (`source: "memory"`, with its `id`) or something else the provider
+  returned (`source: "knowledge"`).
+- **supersede** an item by a new one: the new item is committed, then
+  the old item's `status` becomes `superseded`. The old item stays
+  readable.
+- **archive** an item: its `status` becomes `archived`. The item stays
+  readable.
+
+A proposal that will not be committed is dropped with **dismiss**. A
+proposal is not an item, so dropping it erases nothing that was in
+force.
+
+```ts
+type MemoryType = "user" | "feedback" | "project" | "reference"
+type MemoryStatus = "active" | "superseded" | "archived"
+
+// MemoryDocument: the frontmatter fields of section 2 plus `body`.
+interface MemoryRecord {
+  item:        MemoryDocument
+  revision:    string             // opaque; changes on every byte change
+  proposalId?: string             // set on a proposal, absent on an item
+}
+
+interface MemoryFilter {
+  type?:      MemoryType | readonly MemoryType[]
+  status?:    MemoryStatus | readonly MemoryStatus[]
+  slug?:      string              // matches at most one active item
+  tags?:      readonly string[]   // match any, e.g. ["global", "project:acme"]
+  inForce?:   boolean             // rules 10 and 11, at the store's clock
+  proposals?: boolean             // list proposals instead of items
+}
+
+interface MemorySearchHit {
+  source:   "memory" | "knowledge"
+  id?:      string                // REQUIRED when source is "memory"
+  slug?:    string
+  title:    string
+  snippet?: string
+  score?:   number
+  ref?:     string                // provider pointer when source is "knowledge"
+}
+
+interface MemoryStore {
+  write(
+    item: MemoryDocument,
+    opts: { mode: "propose" | "commit"; ifRevision?: string; fromProposal?: string },
+  ): Promise<MemoryRecord>
+  read(id: string): Promise<MemoryRecord | null>
+  list(filter?: MemoryFilter): Promise<readonly MemoryRecord[]>
+  search(
+    query: string,
+    opts?: { filter?: MemoryFilter; limit?: number },
+  ): Promise<readonly MemorySearchHit[]>
+  supersede(
+    oldId: string,
+    next: MemoryDocument,
+    opts?: { ifRevision?: string },
+  ): Promise<{ old: MemoryRecord; next: MemoryRecord }>
+  archive(id: string, opts?: { ifRevision?: string }): Promise<MemoryRecord>
+  dismiss(proposalId: string): Promise<void>
+}
+```
+
+`search` and `list` default to `inForce: true` when no `status` or
+`inForce` filter is given. A failed operation rejects with a conflict
+(rule 17), a validation error naming the field, or a not-found error.
+
+#### Reference layout
+
+The reference store is a directory. Every implementation SHOULD be able
+to read it, whatever it uses internally, so a store can be exported to
+it and imported from it:
+
+```
+<store root>/
+  items/<type>/<id>.md           # one memory/v1 item per file; path stem = id
+  proposals/<proposal-id>.md     # pending proposals, not items
+```
+
+The reference store computes `revision` as the SHA-256 of the file bytes,
+and a proposal id as the SHA-256 of the rendered proposal, so the same
+proposal written twice lands on the same file.
+
+Store rules:
+
+13. A store MUST validate every committed item against the writer rules
+    (1 to 8) and MUST reject an item that breaks one, naming the field.
+14. An `id` MUST identify at most one item in a store, across all
+    types; a commit that changes an item's `type` moves the item and
+    never leaves two files for one `id`. A `slug`, when present, MUST be
+    unique among the active items of the store, and a store MUST reject
+    a commit that would give two active items the same slug.
+15. A store MUST only change `status` from `active` to `superseded`
+    (through supersede) or to `archived` (through archive), and MUST
+    reject a commit that would move an item out of `superseded` or
+    `archived` (rule 7). An item replaced in substance is superseded
+    under a new `id`, not rewritten in place.
+16. A store MUST NOT hard delete an item. The only exception is erasure
+    at the principal's request (Security Considerations), which is not
+    part of this interface.
+17. Writes use compare-and-set. A commit that would change an existing
+    item, a supersede and an archive MUST carry the `ifRevision` the
+    caller last read, and the store MUST reject the operation with a
+    conflict when the current revision differs. Last writer wins was
+    rejected because a clerk pass and a human edit can target the same
+    item, and a silent overwrite would lose a retirement or a
+    correction with no trace.
+18. A write is idempotent by `id`: a commit whose item equals the
+    stored one in every field but `updated_at` and `written`, body
+    included, succeeds without touching the file and returns the
+    current revision, with or without `ifRevision`. A propose of a
+    document already pending returns the existing proposal.
+19. On a commit that creates an item or changes any field other than
+    `status`, the store MUST set `updated_at` (and `written`, when the
+    item carries it) to the commit time. Supersede and archive are
+    status-only rewrites: they MUST leave `updated_at` and every other
+    byte of the file unchanged (rule 6).
+20. Supersede MUST commit the new item before it retires the old one,
+    so an interrupted supersede leaves both items active, never neither.
+    The new item MUST have a different `id` from the old one. It MAY
+    carry the old item's slug: the check of rule 14 then ignores the
+    item being superseded, and until an interrupted supersede is retried
+    a lookup by that slug returns the item with the later `updated_at`.
+21. A store MUST NOT turn a proposal into an item on its own. A
+    proposal becomes an item only through a commit by a writer the
+    host's write policy allows; a commit with `fromProposal` drops that
+    proposal once the item is written.
+22. A search hit with `source: "memory"` MUST name an item of this
+    store that is in force at the time of the call, unless the filter
+    asked for other statuses. A store that delegates search MUST check
+    each hit against the files (the index may be stale) and drop or
+    relabel a hit that no longer matches.
+
+This revision records no link from a superseded item to the item that
+replaced it; a store MAY keep that link in its own index, and the
+result of `supersede` returns both.
+
+### 9. Projection
+
+A **projection** is how a session sees memory. It has two halves.
+
+- **Inject**, at spawn: the host computes a digest of the in-force items
+  scoped to the session and hands it to the session, either in the
+  system prompt or by writing it into the harness's native memory
+  location.
+- **Capture**, during or after the session: changes the session made to
+  its native memory are read back and written to the store as
+  proposals. A capture never commits.
+
+Each [AIP-45](/docs/aip-45) harness adapter declares what it supports in
+`capabilities.memory`:
+
+```ts
+interface MemoryProjectionCapability {
+  inject:  "native-dir" | "system-prompt" | "none"
+  capture: "native-dir-diff" | "none"
+}
+```
+
+- `inject: native-dir` means the harness reads a native memory
+  directory or file at start, and the adapter can write items into it.
+- `inject: system-prompt` means the harness has no native memory but
+  accepts appended system-prompt text at spawn.
+- `inject: none` means neither.
+- `capture: native-dir-diff` means the harness writes its native memory
+  location during the session, and the adapter can diff it against what
+  was projected.
+
+An absent declaration reads as `{ inject: "none", capture: "none" }`.
+Like a capability in [AIP-71](/docs/aip-71), the declaration is
+metadata: it does not enable a projection by itself.
+
+#### Resolution
+
+Native first, system prompt as the fallback, one owner per session, as
+in AIP-71 section 4:
+
+1. When the harness declares `inject: native-dir` and the host
+   implements the native projection for that adapter, the digest is
+   written into the native location.
+2. Otherwise, when the harness declares `native-dir` or
+   `system-prompt` and the host can append to that session's system
+   prompt, the digest is appended to the system prompt.
+3. Otherwise the session gets no digest at spawn.
+
+A host MUST use exactly one inject path per session: the same items
+MUST NOT reach a session through both. A host MUST NOT claim the native
+path for a harness whose native projection it does not implement, even
+where the harness declares it. Capability read surfaces SHOULD report
+the effective inject and capture paths.
+
+#### Digest
+
+The digest is the in-force items (rules 10 and 11) whose tags include
+`global` or one of the session's anchors (its project, agent, task, PR
+or session, as the host resolves them). An item with no anchor tag is
+treated as `global`. For each item it carries:
+
+- `type`, `id`, `slug` when present, and `title`;
+- `polarity`, on a `feedback` item;
+- `description` when present, otherwise the first paragraph of the
+  body.
+
+Items are ordered by type (`feedback`, `user`, `project`, `reference`),
+then from the most specific anchor to `global` (session, task, PR,
+agent, project, global), then by `updated_at`, newest first. The host
+chooses a size bound for the digest and SHOULD keep it near a few
+thousand characters. The host MUST cut whole items, never part of one,
+and MUST end a cut digest with the number of in-force items left out
+and the way to reach them (a search tool, when the host offers one).
+
+On the system-prompt path the digest is one delimited block that
+presents the items as recorded data, not as instructions. On the
+native-dir path the adapter writes the digest or one file per item in
+the harness's native format; the `id` MUST survive in a recoverable form
+(for example the file name stem), so a capture can map a changed file
+back to its item.
+
+A session that gets no digest (step 3) still reaches memory if the host
+exposes the store's read, list and search operations as tools. A host
+SHOULD expose them to every session whose agent has memory enabled
+([AIP-42](/docs/aip-42) `memory.enabled`).
+
+#### Capture
+
+With `capture: native-dir-diff`, the host records the native location
+as it projected it, then diffs it at session end and MAY diff it
+earlier ([AIP-37](/docs/aip-37) `compact-start` or `turn-end`). Each
+difference becomes a proposal, never a commit:
+
+| Difference | Proposal |
+|---|---|
+| a new entry | a new item |
+| a changed projected item | the same `id` with the new content |
+| a removed projected item | the same `id` with `status: archived` |
+
+Accepting a proposal that carries `status: archived` is an archive of
+that item (rule 15), not a commit.
+
+A captured proposal carries `capture.mode: live`, a `capture.producer`
+naming the projection, `provenance.source: native-memory` and the
+session id in `provenance.sessionId`. Proposals are promoted into items
+by a writer the host's write policy allows, such as the
+[AIP-68](/docs/aip-68) secretary clerk (rule 21).
+
+With `capture: none` nothing is read back from the harness; memory
+written during the session reaches the store only through tools or a
+later clerk pass over the transcript.
+
+Projection rules:
+
+23. A host MUST NOT project a proposal, or an item that is not in force.
+24. A host MUST NOT commit a captured change; it MUST write it as a
+    proposal.
+25. A host MUST NOT inject the same items through more than one path in
+    one session.
+26. A host that cuts the digest MUST cut whole items and say how many
+    it left out.
 
 ## Rationale
 
@@ -242,14 +520,37 @@ of this AIP. This revision fixes only the document they exchange.
 - **`capture` apart from `provenance`.** Where a claim was observed and
   which component wrote it down are different questions; a batch pass
   re-reading an old transcript has one provenance and a later capture.
+- **Files as the source of truth.** Every harness and store can read a
+  directory of markdown files; an index can be rebuilt from them, the
+  reverse is not true. Search is delegated to whatever knowledge
+  provider the host already runs instead of being specified twice.
+- **Compare-and-set over last writer wins.** Two writers of one item
+  (a clerk pass and a human) are expected, not rare; a revision check
+  turns a lost update into a visible conflict at the cost of one re-read.
+- **Proposals apart from items.** Captured and extracted claims are
+  untrusted until a policy-bound writer commits them; keeping them out
+  of `items/` means no reader, digest or search can mistake one for an
+  item in force.
+- **Native first, system prompt as fallback.** As in AIP-71, a harness
+  that reads its own memory location gets items where it already looks,
+  and its own writes there can be captured; every other harness still
+  gets the same digest through the system prompt, and never both.
+- **A host-chosen digest bound.** Context budgets differ per harness and
+  per model; the spec fixes the order items are cut in (from the end
+  of the section 9 order), that only whole items are cut, and that the
+  cut is announced, not the number.
 - **Status-only rewrites keep `updated_at`.** Retiring an item does not
   change what it says; keeping the timestamp lets a reader sort by
   content age, and lets the store rewrite one line.
 
 ## Reference Implementation
 
-There is no reference implementation and no `@agentproto` package for this
-doctype yet.
+The document (sections 1 to 7) is implemented by
+[`@agentproto/memory`](https://github.com/agentproto/ts/tree/main/packages/memory):
+`defineMemory`, `parseMemory`, `renderMemory`, `validateMemory`, and the
+lifecycle helpers `memoryStatus`, `isAllowedStatusTransition` and
+`isInForce`. The store (section 8) and the projection (section 9) have no
+implementation yet.
 
 ## Backwards Compatibility
 
@@ -259,6 +560,10 @@ the canonical fields existed validate through the legacy branch
 `provenance.ref`, or with the `anchors` array or the
 `source`/`ts`/`hash` capture of the pending draft, do not validate and
 need a rewrite.
+
+The store and the projection (sections 8 and 9) are additive. A harness
+manifest without `capabilities.memory` keeps loading and reads as
+`{ inject: "none", capture: "none" }`.
 
 ## Security Considerations
 
@@ -270,6 +575,14 @@ need a rewrite.
 - **Personal data.** `user` items describe a person. A store SHOULD let
   the principal list and erase their items; erasure on request overrides
   the "retire, do not delete" rule of section 3.
+- **Projected text.** The digest and the native memory location are read
+  by the model as context. A host MUST present digest items as recorded
+  data, MUST project only the items scoped to that session, and MUST
+  NOT write the items of one principal into a native location another
+  principal's sessions read.
+- **Captured text.** Whatever a session writes into its native memory
+  may come from untrusted input it processed; this is why a capture only
+  ever proposes (rule 24).
 - **Secrets.** A writer MUST NOT store a secret value in any field or in
   the body, including inside `provenance.quote`.
 
@@ -278,4 +591,6 @@ need a rewrite.
 - [AIP-10 KNOWLEDGE](/docs/aip-10): the base fields, and the sibling
   doctype for curated knowledge
 - [AIP-11 LESSON](/docs/aip-11): distilled lessons
-- [AIP-68 CLERK](/docs/aip-68): the secretary that produces memory items
+- [AIP-45 HARNESS](/docs/aip-45): `capabilities.memory`, the projection declaration
+- [AIP-68 CLERK](/docs/aip-68): the secretary that promotes proposals into items
+- [AIP-71 ACTION-HOOKS](/docs/aip-71): the native first pattern the projection follows

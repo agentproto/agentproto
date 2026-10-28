@@ -248,6 +248,9 @@ model:
 
 ```yaml
 memory:
+  enabled: true                        # AIP-72 memory items for this agent
+  store: "./memory"                    # AIP-72 memory store ref (host default when omitted)
+  anchors: ["project:acme"]            # scope anchors whose items are projected
   scope: per-conversation             # per-conversation | per-thread | per-workspace | none
   retention_turns: 50                  # rolling window
   semantic:
@@ -256,6 +259,16 @@ memory:
       ref: "openai/text-embedding-3-small"
     top_k: 5
 ```
+
+`scope`, `retention_turns` and `semantic` configure conversation
+history. `enabled`, `store` and `anchors` bind the agent to
+[AIP-72](/docs/aip-72) memory items:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | When `false`, the agent MUST NOT write any memory item (none is created, updated or retired), and the host projects none into its sessions. |
+| `store` | ref | host default | The AIP-72 memory store (section 8) the agent's items are read from and proposed to: a workspace-relative path to a reference-layout directory, or a host-resolved store id. |
+| `anchors` | string[] | host-resolved | Scope anchors in formatted form (`global`, `project:<slug>`, `agent:<slug>`...) added to the ones the host resolves for a session; they select the items of the AIP-72 projection digest (section 9). `global` always applies. |
 
 ### Lifecycle hooks
 
@@ -299,6 +312,9 @@ interface AgentDefinition {
   delegatesTo?:   AgentRef[]
 
   memory?: {
+    enabled?:         boolean
+    store?:           string
+    anchors?:         string[]
     scope?:           "per-conversation" | "per-thread" | "per-workspace" | "none"
     retentionTurns?:  number
     semantic?: {
