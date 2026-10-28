@@ -348,6 +348,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/nativeHookCapability" },
           "description": "AIP-71 native hook declaration (section 3): an open list of the native hook seams this harness can project. Metadata only: it does not enable a hook, install user code, or grant a permission. A harness-extension capability, excluded from the ACP subset check."
+        },
         "mode_events": {
           "type": "boolean",
           "description": "The harness exposes session modes and emits the mode-changed stream event for every change of the current mode the caller did not make itself (SHOULD for the caller's own setSessionMode too). Absent reads as false. A harness-extension capability, excluded from the ACP subset check."
