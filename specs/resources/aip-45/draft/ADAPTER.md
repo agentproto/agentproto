@@ -90,11 +90,22 @@ canonical taxonomy:
 | `tool-call` | Agent invoking a tool — args + tool id |
 | `tool-result` | Tool's response delivered back to the agent |
 | `thought` | Agent's internal reasoning (when capability declared) |
-| `agent-prompt` | Agent asking the user/client for input mid-turn |
+| `agent-prompt` | Agent asking the user/client to choose: a tool permission, a question, or a plan approval (`request`) |
+| `mode-changed` | The session's current mode changed (`cause: caller \| agent`) |
 | `turn-end` | Agent has finished the current turn |
 | `error` | Out-of-band error during the turn |
 
 Vendor-specific event types MUST NOT leak past the protocol arm.
+
+When the agent switches its own session mode (for example after an
+approved plan), emit `mode-changed` with `cause: "agent"` and declare
+`capabilities.mode_events: true`; do not report the switch as a
+`thought`. When the agent asks a question or submits a plan, set
+`request` on the `agent-prompt` with its `question` or `planApproval`
+payload and declare `capabilities.typed_prompts: true`, instead of
+naming the kind in a vendor `_meta` key. Keep `options` complete, so a
+caller that ignores `request` can still answer. Field shapes:
+[`STREAM-EVENTS.schema.json`](./STREAM-EVENTS.schema.json).
 Hosts (Guilde Shell view, Katchy workflow runner, Simone) consume the
 canonical taxonomy only.
 
