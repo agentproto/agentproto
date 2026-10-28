@@ -5,7 +5,7 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-10-18
+updated: 2026-10-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42]
 resources: ./resources/aip-53/draft
@@ -199,6 +199,7 @@ interface AppDefinition {
   data?:         AppDataDefinition                   // default data-dir hint for the app_data_* plane
   category?:     string                               // coarse grouping surfaced in catalogs/trees
   setup?:        AppSetupStep[]                       // post-install configuration pipeline — see "Setup steps"
+  services?:     AppService[]                          // long-running processes the host starts with the app, see "Services"
 }
 
 interface AgentEntry {
@@ -216,6 +217,19 @@ interface AgentEntry {
  */
 interface AppDataDefinition {
   dir?: string
+}
+
+/**
+ * One long-running process the host starts with the app (see
+ * [Services](#services-services)). Exactly one of `command` / `entry`.
+ */
+interface AppService {
+  name:     string        // kebab-case slug, unique within the app
+  command?: string        // structured form: argv[0], no shell
+  args?:    string[]      // structured form only: argv after `command`
+  entry?:   string        // legacy form: a shell command line, run as `sh -c`
+  cwd?:     string        // relative to the installed app dir; default the app dir
+  port?:    number        // 1..65535, bookkeeping only
 }
 
 interface AppUiDefinition {
@@ -247,7 +261,7 @@ frontmatter is `.strict()` and carries no `systemPrompt` field, so the
 free-text prompt only ever lives in an `AGENT.md` body.
 
 `workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`,
-`data`, `category`, `setup`, and `workspace` are all optional. An app with agents
+`data`, `category`, `setup`, `services`, and `workspace` are all optional. An app with agents
 and nothing else is still a conforming app, as is a UI-only app with an
 empty `agents` array.
 
@@ -328,6 +342,15 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     `setup` is executed or contacted until a host's install path runs
     it (see [Setup steps](#setup-steps-setup)).
 
+11. **`services` non-empty, names unique, one launch form each.** When
+    `services` is present it MUST be non-empty and every `name` MUST be
+    unique within it. Each entry MUST declare exactly one of `entry` and
+    `command`; `args` MUST NOT be set alongside `entry`. `defineApp` and
+    the loader MUST refuse a definition that violates any of these.
+    Like rules 9 and 10, validating `services` performs no I/O: nothing
+    in `services` is executed or contacted until a host's install path
+    starts it (see [Services](#services-services)).
+
 ### Emitted layout
 
 `emit(dir)` (equivalently, a conforming host's install/write path) MUST
@@ -387,6 +410,7 @@ dev: { launch: [{ name: "…", runtimeExecutable: "…", runtimeArgs: [...], por
 data: { dir: "data" }              # only when `data` is set — app_data_* hint, relative to <dir>
 category: "book"                   # only when `category` is set — freeform catalog grouping
 setup: [ … ]                       # only when `setup` is set — see "Setup steps"
+services: [ … ]                    # only when `services` is set, see "Services"
 ```
 
 `agents[]` and `workflows[]` entries are `{ id, path }` refs, `path`
@@ -723,6 +747,104 @@ An older host whose schema predates this field rejects an `APP.md` that
 carries `setup` (strict root). That is the intended fail-safe: an app
 that *needs* setup to be usable must not be installed by a host that
 would ignore the setup.
+
+### Services (`services[]`)
+
+`services` is OPTIONAL. When present it declares the **long-running
+processes** an app needs alongside its agents and workflows: a web
+server, a bridge, a worker. A service is a process the app *declares* and
+the host *starts with the app* and keeps running; `defineApp`, `emit` and
+`loadAppHandle` only validate and carry the declaration, they never run
+it. One entry is one process. There is no dependency graph between
+services, no scaling (no replica count) and no scheduler (no cron, no
+queue) behind the field.
+
+It is not `dev.launch`. `dev.launch` holds dev-only launch recipes and is
+never executed by a host that installs the app; `services` is the
+production hosting surface.
+
+```yaml
+services:
+  - name: web
+    command: node
+    args: [dist/server.js]
+    cwd: server
+    port: 4321
+  - name: bridge
+    entry: pnpm --filter bridge start
+```
+
+Each entry is an object with exactly these keys; any other key is
+rejected.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | Service identifier. A kebab-case slug matching `^[a-z][a-z0-9-]*$`, unique within the app. Together with the app id it identifies the service for the host's bookkeeping, logs and cleanup. |
+| `command` | one of `command` / `entry` | Structured form (preferred). A non-empty string: the binary or script to run, passed as `argv[0]` and never interpreted by a shell. |
+| `args` | no | Structured form only. A non-empty array of strings, the argv after `command`, passed verbatim. Not valid alongside `entry`. |
+| `entry` | one of `command` / `entry` | Legacy form. A non-empty shell command line, run by the host as `sh -c <entry>`. Use `command` unless you need shell syntax. |
+| `cwd` | no | Working directory, a non-empty path relative to the installed app directory. Defaults to the app directory. |
+| `port` | no | The TCP port the service listens on, an integer from 1 to 65535. Omitted means a service that does not listen. Bookkeeping only: the host records it, and this AIP does not define passing it to the process (for example as an environment variable), so the service binds its own port. |
+
+Exactly one of `command` and `entry` MUST be present on every entry.
+
+#### Host behaviour
+
+A host that runs an app (its `app_install` path) is the only party that
+starts services. The reference implementation behaves as follows, and the
+requirements below codify it:
+
+1. **Start at install.** After the install has recorded the app, a host
+   MUST attempt to start every declared service before the install
+   returns. Services are started in declaration order; the host does not
+   wait for a service to become ready, so a service MUST NOT assume that
+   an earlier one is listening.
+2. **A service that fails to start does not fail the install.** The host
+   MUST report the failure (name and reason) and MUST NOT roll the install
+   back or mark the app uninstalled because of it.
+3. **One live process per service, idempotent.** Re-running the install
+   for an app MUST NOT start a second process for a service that is still
+   running. A service whose recorded process has died is replaced. A
+   service the manifest no longer declares MUST be stopped.
+4. **Environment.** A service runs with the host's environment. A
+   relative `cwd` is resolved against the installed app directory.
+5. **Restart.** On an unexpected exit a host SHOULD restart the service
+   with a bounded, increasing delay, and give up after repeated failures
+   so the next install or host boot replaces it. The reference
+   implementation waits 1s doubling up to 60s, and gives up after 5
+   failures within 10 minutes; those numbers are not normative.
+6. **Boot.** When the host itself starts, it SHOULD re-establish the
+   services of every installed app that declares them.
+7. **Uninstall.** Uninstalling an app MUST stop every one of its services,
+   including any child processes they spawned, so a reinstall does not
+   leave a second copy running.
+
+A host that does not run services still MUST reject a malformed
+`services` block when it loads an app.
+
+#### Errors
+
+A malformed `services` block is rejected at load and at install with an
+error that starts with `invalid services declaration`, whichever gate
+sees it first. The message names the offending entry by index
+(`services[1].port`), and a duplicate name reads `two services named 'x'`.
+
+#### Schema note
+
+[`APP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft)
+declares `services` as an array of strict objects. "Exactly one of
+`entry` / `command`" and "`args` only with `command`" are expressed with
+`oneOf`. JSON Schema 2020-12 cannot say that `name` is unique across the
+array; `uniqueItems` only rejects entries that are identical in full, so
+a validator that stops at the schema accepts two services with the same
+`name` and different commands. The loader is the authority on that rule
+(conformance rule 11).
+
+The schema is stricter than the reference implementation in one place:
+the reference implementation resolves any non-empty `cwd`, including an
+absolute path or one with `..` segments, which places a service outside
+its app directory. The schema rejects both. A host SHOULD refuse such a
+`cwd` too.
 
 ## The `.agentapp` package format (`agentapp/v1`)
 
@@ -1285,6 +1407,14 @@ supersede.
   but this AIP does not itself mandate the enforcement mechanism —
   only that the declaration exists and is carried through `emit` /
   `loadAppHandle` unmodified.
+
+- **`services` start host-side processes with no consent step.** A
+  service is a command line the app's author chose, run with the host's
+  environment and privileges as soon as the app is installed. Unlike a
+  `cmd` setup step, this AIP defines no consent gate for it, so installing
+  an app from an untrusted source is installing code to run. A host
+  SHOULD show the declared services of an app before installing it, and
+  SHOULD NOT resolve a `cwd` outside the app directory.
 
 - **`.agentapp` integrity is checksum, not signature.** The aggregate
   SHA-256 (see [`unpack`](#unpack)) detects corruption and
