@@ -177,7 +177,9 @@ type HookOwner = "harness" | "host"
 The harness MAY own a binding only when its AIP-45 manifest declares a
 matching native capability whose timing and result semantics satisfy the
 binding. Otherwise the host owns it. A host MUST NOT silently downgrade a
-blocking admission hook to a non-blocking observer.
+blocking admission hook to a non-blocking observer. A host that projects a
+blocking binding MUST use the synchronous form of the native hook: a native
+hook that runs in the background cannot block, whatever `can_block` says.
 
 The resolution order is:
 
@@ -189,6 +191,28 @@ The resolution order is:
 
 Capability read surfaces SHOULD report the selected owner and any unsupported
 event. Absence is not support.
+
+#### Several binding sources
+
+A binding can come from several sources: the daemon configuration, a
+workspace file, an agent manifest (the AIP-42 `on:` shorthand), an AIP-41
+routine, or a native projection the host writes. AIP-71 defines no
+precedence between these sources.
+
+- The bindings of each source MUST have binding ids that no other source
+  uses.
+- When one occurrence matches bindings from several sources, the host MUST
+  deliver it to each matching binding independently.
+- A binding from one source MUST NOT suppress, replace or override a binding
+  from another source. Deduplication uses the section 5 key, and that
+  key carries the binding id.
+- The owner is chosen per binding. A harness that owns one binding of an
+  event does not make the host skip another binding of the same event.
+
+Two sources that bind the same target to the same event therefore run it
+twice. A host that wants only one of them to run MUST express that choice
+as [AIP-38](/docs/aip-38) policy on the target action, not as a precedence
+between hook sources.
 
 ### 5. At-most-one local execution
 
@@ -202,7 +226,8 @@ prevent double execution using a stable occurrence key scoped to the session:
 The occurrence id MAY be a harness callback id, tool-call id, turn id, or a
 host-generated monotonic id. It MUST remain stable when the same native event
 is retried. This rule is local deduplication, not an exactly-once delivery
-claim.
+claim. It is also per binding: two bindings reached by the same occurrence
+have two keys, and executing one never counts as executing the other.
 
 Every segment MUST be non-empty and MUST NOT contain whitespace or control
 characters. The session id, the event and the occurrence id MUST NOT contain
@@ -243,15 +268,49 @@ Therefore:
 ### 8. Security and trust
 
 Native hook code executes with the harness process's authority. Native hook
-projection MUST preserve the harness's trust and configuration precedence
-rules. A host MUST NOT mark project-local hooks trusted on behalf of a user
-unless an explicit managed policy authorizes that behavior.
+projection MUST preserve the harness's trust rules and the precedence the
+harness applies between its own settings files. That harness ordering is not
+a precedence between binding sources (section 4). A host MUST NOT mark
+project-local hooks trusted on behalf of a user unless an explicit managed
+policy authorizes that behavior.
 
 Hook inputs may contain prompts, tool arguments and filesystem paths. Logs and
 receipts MUST redact credentials and MUST NOT persist full sensitive payloads
 by default. Admission failures MUST fail according to the declared policy; a
 transport error is not an implicit policy denial unless the binding explicitly
 chooses fail-closed behavior.
+
+#### Native callbacks
+
+When the harness owns a binding, the host projects a native hook that runs a
+host-provided command, and that command calls back the host. These rules
+apply to that callback:
+
+1. The callback MUST name the host session from the environment the host
+   gave the harness process, for example `AGENTPROTO_SESSION_ID`. It MUST
+   NOT take the session from an identifier in the hook payload: a payload
+   session id belongs to the harness.
+2. The callback MUST authenticate to the host with a credential the host
+   already trusts for that caller class. Today that is the operator's local
+   daemon credential; once the host enforces session identity under
+   [AIP-46](/docs/aip-46), it is the per-session credential.
+3. The host MUST NOT write that credential into the harness's settings
+   file.
+4. The callback MUST NOT log or forward its environment. The harness may
+   place its own credentials there.
+5. A callback that fails, times out or cannot reach the host is a transport
+   error, as defined above. It MUST NOT be treated as a refusal. It MUST NOT
+   block the harness step it observes unless the binding was explicitly
+   authored as blocking.
+6. The host MUST write a projected hook only into a settings file that the
+   host itself creates for that session and rewrites at each spawn, such as
+   a per-session isolated settings file. That file is the host's even where
+   the harness reads it as its user-level file. The host MUST NOT add a hook
+   to a settings file that belongs to the user or to the project, and MUST
+   NOT mark such a hook approved or trusted on the user's behalf.
+7. A projected non-blocking hook SHOULD bound its own run time below the
+   timeout the harness applies to the hook. It SHOULD exit successfully in
+   every case, including a failed callback.
 
 ## Conformance
 
@@ -262,8 +321,10 @@ An implementation conforms to AIP-71 when it:
    authorization to AIP-38;
 3. reports native support rather than guessing it, and refuses a `hooks`
    declaration that breaks the section 3 rules;
-4. assigns one owner per binding and prevents local double execution;
-5. preserves harness trust boundaries;
+4. assigns one owner per binding and prevents local double execution,
+   without a precedence between binding sources;
+5. preserves harness trust boundaries and authenticates native callbacks as
+   section 8 requires;
 6. treats missing events as unsupported, not successful execution;
 7. keeps Sentinel's durable watch contract separate.
 
@@ -308,8 +369,10 @@ executes a binding once per key with the running state written before the
 target starts, and the `agentproto:session-completed` host event. Spawn
 admission wraps session spawn and returns reuse and deny decisions. Three
 reactions run on this path today: an opt-in ingestion of completed sessions
-into the workspace brain, an opt-in dispatch of the AIP-68 clerk pass (both
-owned per workspace, so exactly one path runs each firing), and AIP-41 event
+into the workspace brain, an opt-in dispatch of the AIP-68 clerk pass (each
+workspace is served either by the reaction or by the legacy code path it
+replaces, never both; that path is not a binding, so this is a migration
+switch and not a precedence between sources), and AIP-41 event
 routines, whose `target` is dispatched through the same authorized path as a
 scheduled routine or, for an `action` target, through a typed registry of host
 actions (the daemon registers `session:archive`, which archives the session of
@@ -322,11 +385,45 @@ exposes a read model of its receipts (counts per binding, queue age, latency
 and dead reasons) and writes one structured log line per attempt. Prompt
 delivery has a persisted, bounded dedupe key, so a retried prompt is delivered
 at most once inside a window; the hold barrier of prompt admission is not built.
-The native hook projections, prompt admission and the admission of tool
-dispatch are follow-up work in the same repository. This AIP
+One native projection ships, off by default
+([agentproto/ts#2346](https://github.com/agentproto/ts/pull/2346)): with
+`defaults.nativeHooks.preCompactCheckpoint: "on"`, the claude-code driver
+writes one synchronous `PreCompact` hook (matcher `auto`, harness timeout
+30 s) into the isolated per-session settings file it rewrites at every
+spawn. The hook runs `agentproto hook pre-compact`, which reads
+`AGENTPROTO_SESSION_ID`, posts a checkpoint with reason
+`native-pre-compact` and an occurrence id derived from the transcript size,
+gives up after 20 s and always exits 0. The daemon dedupes it under the key
+`<session>/compact-start/<occurrence>/builtin:pre-compact-checkpoint`.
+Native compactions are also observed after the fact as
+`agentproto:context-compacted`
+([agentproto/ts#2342](https://github.com/agentproto/ts/pull/2342)).
+The other native hook projections, prompt admission and the admission of
+tool dispatch are follow-up work in the same repository. This AIP
 defines no package of its own. Until a native projection
 ships for an event, the host MUST NOT claim native ownership of it, even where
 the harness declares the capability.
+
+**Verified live for Claude Code (informative).** On 2026-10-28 the
+reference implementation ran a synchronous probe hook from a project-level
+settings file in daemon-spawned Claude Code sessions. It verified that:
+
+- `PreCompact` fires for both `trigger: "manual"` and `trigger: "auto"`.
+  The payload carries Claude Code's own `session_id`, not the host's, with
+  `transcript_path`, `cwd`, `prompt_id`, `hook_event_name`, `trigger` and
+  `custom_instructions`.
+- The hook process inherits the session environment, including
+  `AGENTPROTO_SESSION_ID` equal to the daemon session id. The environment
+  also carries a harness-internal credential (rule 4 of section 8).
+- The harness awaits the hook before it applies the compaction.
+- Exit code 2 blocks a manual compaction.
+- The daemon transcript shows no hook event. It shows only the compaction
+  itself.
+
+It did not verify the user-level variant that the projection writes (the
+isolated settings file) live, an `auto` compaction with exit code 2, the
+managed policies that disable or restrict hooks, the checkpoint time on a
+large transcript against the 20 s budget, or any Codex hook.
 
 ## Security Considerations
 
