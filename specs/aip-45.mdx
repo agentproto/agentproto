@@ -5,7 +5,7 @@ aip: 45
 status: Review
 type: Schema
 created: 2026-05-08
-updated: 2026-10-23
+updated: 2026-10-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 29, 36, 44]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/harness
@@ -24,7 +24,7 @@ package: "@agentproto/harness"
 | Domain | cli.sh |
 | Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-29](/docs/aip-29) (CLI), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-44](/docs/aip-44) (ACP) |
 | Reference Impl | [`@agentproto/harness`](https://github.com/agentproto/ts/tree/main/packages/harness) |
-| Resources | [`./resources/aip-45`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md), [`HARNESS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/HARNESS.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) |
+| Resources | [`./resources/aip-45`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md), [`HARNESS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/HARNESS.schema.json), [`STREAM-EVENTS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/STREAM-EVENTS.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) |
 
 ## Abstract
 
@@ -238,13 +238,172 @@ to a closed taxonomy regardless of underlying protocol:
 | `tool-call` | Agent invoking a tool — args + tool id |
 | `tool-result` | Tool's response delivered back to the agent |
 | `thought` | Agent's internal reasoning (when capability declared) |
-| `agent-prompt` | Agent asking the user / client for input mid-turn |
+| `agent-prompt` | Agent asking the user / client to choose: a tool permission, a question, or a plan approval |
+| `mode-changed` | The session's current mode changed (when `capabilities.mode_events` declared) |
 | `turn-end` | Agent has finished the current turn |
 | `error` | Out-of-band error during the turn |
 
 The runner translates protocol-specific events to this taxonomy
 exactly once at the protocol arm boundary; downstream consumers never
 see protocol-specific shapes.
+
+The reference implementation carries the event name in a `kind` field
+(`{ kind: "text-delta", sessionId, text }`); the subsections below use
+that field name. Field-level shapes for `agent-prompt` and
+`mode-changed` are published as JSON Schema in
+[`STREAM-EVENTS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/STREAM-EVENTS.schema.json).
+
+#### Session modes and `mode-changed` (added 2026-10-28)
+
+A harness MAY expose **session modes**: a runtime registry of modes
+the caller can switch between mid-session (an ACP agent's
+`SessionModeState.availableModes`, or the equivalent a proprietary arm
+reports), with one current mode. Session modes are not the manifest's
+static `modes[]` (see § Modes), which are composed at spawn. The
+caller switches a session mode with `setSessionMode(modeId)` (ACP
+`session/set_mode`). A harness can also switch by itself, for example
+when an approved plan moves the session from a planning mode to an
+executing mode.
+
+A `mode-changed` event reports that the current session mode is now a
+different one:
+
+```ts
+{
+  kind: "mode-changed"
+  sessionId: string
+  modeId: string          // the current mode after the change
+  previousModeId: string  // the mode before the change
+  cause: "caller" | "agent"
+  reason?: string         // human-readable, e.g. "plan approved"
+  _meta?: Record<string, unknown>
+}
+```
+
+Rules:
+
+1. A harness that exposes session modes and declares
+   `capabilities.mode_events: true` MUST emit `mode-changed` with
+   `cause: "agent"` whenever the current mode changes for any reason
+   other than the caller's own `setSessionMode` call. This includes a
+   switch that follows the caller's answer to a `plan-approval` request
+   (see below): the caller approved a plan, but the harness picked the
+   target mode and made the switch.
+2. The harness SHOULD also emit `mode-changed` with `cause: "caller"`
+   once a caller's `setSessionMode` call has been applied. A refused
+   or no-op call emits nothing.
+3. A harness MUST NOT emit `mode-changed` when `modeId` equals
+   `previousModeId`. The mode a session starts in is reported by the
+   session's initial state (ACP `SessionModeState.currentModeId`), not
+   by an event.
+4. `modeId` MUST be one of the session's available modes.
+5. The event is emitted after the switch took effect and before any
+   other event produced under the new mode. When no turn is in flight,
+   it is delivered on the session's out-of-turn event channel, like any
+   other event the agent emits between turns.
+6. When `protocol: "acp"`, the arm translates an ACP
+   `current_mode_update` session update into `mode-changed`. It fills
+   `previousModeId` from the mode it tracked before the update, and sets
+   `cause: "caller"` only when the update confirms a `session/set_mode`
+   the arm itself sent and has not seen applied yet; otherwise
+   `cause: "agent"`.
+
+A caller that tracks the current mode SHOULD update it from
+`mode-changed` rather than from the agent's prose or `thought` text.
+
+#### `agent-prompt` requests (added 2026-10-28)
+
+An `agent-prompt` event asks the caller to choose among options. It
+mirrors ACP `session/request_permission`:
+
+```ts
+{
+  kind: "agent-prompt"
+  sessionId: string
+  toolCallId: string            // request id, passed back to respondPermission
+  options: Array<{
+    optionId: string
+    name: string
+    kind: "allow_once" | "allow_always" | "reject_once" | "reject_always"
+  }>
+  text?: string                 // human-readable question line
+  toolName?: string
+  rawInput?: unknown
+  request?: "tool-permission" | "question" | "plan-approval"  // default "tool-permission"
+  question?: QuestionRequest          // when request is "question"
+  planApproval?: PlanApprovalRequest  // when request is "plan-approval"
+  _meta?: Record<string, unknown>     // vendor extras
+}
+```
+
+The caller answers with `respondPermission(toolCallId, resolution)`,
+where `resolution` is either `{ optionId, feedback? }` (one of the
+offered options, plus optional free text) or `{ cancelled: true }`.
+`feedback` is the only place free text travels.
+
+`request` names what the agent is asking for. It is OPTIONAL and an
+absent value reads as `tool-permission`, so every existing event stays
+valid.
+
+| `request` | Meaning | Typed payload |
+|---|---|---|
+| `tool-permission` | May the agent run this tool call? (`toolName`, `rawInput`) | none |
+| `question` | The agent asks the user a question | `question` |
+| `plan-approval` | The agent submits a plan and waits for approval before acting on it | `planApproval` |
+
+```ts
+type QuestionRequest = {
+  prompt: string               // the question text
+  choices: Array<{
+    optionId: string           // MUST appear in options
+    label: string
+    description?: string
+  }>
+  allowFreeText: boolean       // a typed answer is accepted
+  freeTextOptionId?: string    // REQUIRED when allowFreeText; MUST appear in options
+}
+
+type PlanApprovalRequest = {
+  plan?: string                // the plan text
+  planRef?: string             // or a reference to it (path or URI)
+  targetModeId?: string        // the session mode entered if approved
+  approveOptionId: string      // MUST appear in options, kind allow_once
+  rejectOptionId: string       // MUST appear in options, kind reject_once
+}
+```
+
+Rules:
+
+1. A harness that sets `request` to `question` or `plan-approval` MUST
+   carry the matching typed payload, and MUST declare
+   `capabilities.typed_prompts: true`.
+2. Every option a typed payload refers to MUST also be in `options`,
+   with a human-readable `name`. Every typed request MUST offer at
+   least one option of kind `reject_once` or `reject_always`, so a caller
+   can always refuse.
+3. **Question.** The caller answers a choice by selecting its
+   `optionId`. When `allowFreeText` is true, the caller answers with
+   free text by selecting `freeTextOptionId` and putting the text in
+   `feedback`. A free-text selection without `feedback` is an empty
+   answer; the harness MUST NOT invent one.
+4. **Plan approval.** A `plan-approval` request MUST carry `plan`,
+   `planRef`, or both. Selecting `approveOptionId` approves the plan.
+   Selecting `rejectOptionId` rejects it, and `feedback`, when present,
+   is the reason handed back to the agent. When `targetModeId` is set
+   and the plan is approved, the harness switches to that mode and
+   emits `mode-changed` with `cause: "agent"` (rule 1 of the previous
+   subsection) when it declares `mode_events`. A rejected plan leaves
+   the mode unchanged.
+5. `{ cancelled: true }` declines any request kind.
+6. `_meta` stays the place for vendor extras. A harness SHOULD NOT
+   carry in `_meta` what `request`, `question` or `planApproval`
+   already express.
+
+A caller that ignores `request` still works: it sees a permission
+prompt with named options, picks one by `optionId`, and may attach
+`feedback`. For a question it picks a choice, or the free-text option
+with its text; for a plan it picks approve or reject. Only the
+rendering is generic.
 
 ### Lifecycle
 
@@ -283,6 +442,8 @@ capabilities:
   multimodal: boolean      # accepts non-text input
   resumable: boolean       # supports session/load semantics
   bidirectional: boolean   # may emit agent-prompt
+  mode_events: boolean     # emits mode-changed (session modes)
+  typed_prompts: boolean   # types agent-prompt requests (question, plan-approval)
   hooks:                   # optional AIP-71 native hook declaration
     - event: tool-call     # portable AIP-37 event
       native_event: PreToolUse
@@ -313,11 +474,24 @@ An absent `memory` reads as `{ inject: none, capture: none }`. Like
 (native first, system prompt as the fallback) and does not enable one
 because of the declaration alone.
 
+`capabilities.mode_events` and `capabilities.typed_prompts` let a caller
+feature-detect the two contracts of § Stream event taxonomy before boot:
+
+| Field | Meaning when `true` |
+|---|---|
+| `mode_events` | The harness exposes session modes and emits `mode-changed` for every change of the current mode that the caller did not make itself (and, as a SHOULD, for the caller's own `setSessionMode` too). |
+| `typed_prompts` | The harness sets `request` on `agent-prompt` and carries the `question` or `planApproval` payload for those kinds. |
+
+An absent flag reads as `false`. A caller MUST NOT assume either contract
+from a harness that does not declare it: without `mode_events` it reads
+the current mode from the session's state, and without `typed_prompts` it
+treats every `agent-prompt` as `tool-permission`, whatever `_meta` says.
+
 When `protocol: "acp"`, protocol capabilities MUST be a subset of the ACP
 capabilities the bound AIP-44 manifest declares; the runner enforces this at
-load time. `hooks` (AIP-71) and `memory` (AIP-72) are harness-extension
-capabilities, not ACP wire capabilities, and are therefore excluded from
-that subset check.
+load time. `hooks` (AIP-71), `memory` (AIP-72), `mode_events` and
+`typed_prompts` are harness-extension capabilities, not ACP wire
+capabilities, and are therefore excluded from that subset check.
 
 ### Modes
 
@@ -610,6 +784,43 @@ uses MCP — it cares that both produce `text-delta` and `tool-call`
 events. Normalising at the protocol-arm boundary lets every consumer
 ship one renderer.
 
+**Why `mode-changed` mirrors ACP `current_mode_update`.** ACP already
+lets an agent switch modes by itself and tell the client with a
+`current_mode_update` session update carrying `currentModeId`. AIP-45
+keeps that meaning and adds the two fields a caller cannot recover on
+its own: `previousModeId` (so a consumer that joins late or replays a
+log needs no prior state) and `cause` (so a UI can tell "you switched"
+from "the agent switched"). A proprietary arm gets the same event an
+ACP arm does, instead of a `thought` notice a caller would have to
+parse.
+
+**Why the caller's own switch is a SHOULD, not a MUST.** The caller
+already learns the outcome of `setSessionMode` from its return value, so
+the event adds nothing for it. Other consumers of the same stream (a
+second UI on the session, a recorder, a supervisor) do not see that
+return value, which is why emitting is recommended. It is not required
+because some arms cannot tell an echoed `current_mode_update` from an
+agent switch without tracking their own pending calls, and a missed
+caller-caused event costs nothing to the caller that made the switch.
+The agent-caused case is a MUST because no other signal reports it.
+
+**Why `request` instead of a new event.** A question and a plan approval
+have the same lifecycle as a tool permission: the turn parks, the caller
+picks an option, the harness resumes. Reusing `agent-prompt` and
+`respondPermission` keeps one parking and answering path, and keeps
+every existing caller working, since the options list stays the
+complete answer surface. The field is named `request` because `kind`
+already names the event. ACP's elicitation request (a form or URL the
+agent asks the client to fill) is marked unstable in the ACP SDK
+(`@agentclientprotocol/sdk` 0.21.1), so AIP-45 does not bind to it;
+an ACP arm MAY map a future stable elicitation to `request: "question"`.
+
+**Why plan approval names its option ids.** Approve and reject could be
+inferred from option kinds (`allow_once`, `reject_once`), but a harness
+may offer more than one option of a kind (for example an approve that
+also grants future edits). Naming the two ids removes the guess while
+the kinds keep a generic caller correct.
+
 ## Reference Implementation
 
 [`@agentproto/harness`](https://github.com/agentproto/ts/tree/main/packages/harness)
@@ -639,6 +850,17 @@ Not applicable — first agentproto AIP for interactive harnesses.
 AIP-29 stays correct for tool CLIs; AIP-45 covers the harness case
 that AIP-29 wasn't designed for. `AGENT-CLI.md` is accepted as a legacy file name ([AIP-70](/docs/aip-70)).
 
+### The 2026-10-28 mode-changed and typed agent-prompt amendment (draft)
+
+Additive. `mode-changed` is a new event: a consumer that does not know
+it MUST ignore it, as for any unknown event. `request`, `question` and
+`planApproval` are new OPTIONAL fields of `agent-prompt`; an absent
+`request` reads as `tool-permission`, which is what every `agent-prompt`
+meant before. A caller that ignores them still answers with an
+`optionId` from `options`. `capabilities.mode_events` and
+`capabilities.typed_prompts` are OPTIONAL and read as `false` when
+absent, so existing manifests keep validating and keep their meaning.
+
 ### The 2026-10-23 presentable auth methods amendment (draft)
 
 `auth.methods` is OPTIONAL. A manifest that omits it keeps working: the
@@ -664,6 +886,16 @@ adds the bidirectional-protocol surface.
   attacker-controlled if the agent's model was compromised by
   upstream prompt injection. Hosts MUST apply the same prompt-
   injection mitigations as for any user input.
+- **Agent-caused mode changes.** A `mode-changed` event with
+  `cause: "agent"` reports a switch; it does not authorize one. A host
+  that ties permissions to the current mode MUST apply its own policy
+  to the new mode (for example, re-check that an executing mode is
+  allowed for this session) rather than trust the agent's choice.
+- **Plan text and question text.** `planApproval.plan`, `question.prompt`
+  and choice labels come from the agent and are attacker-controlled
+  under prompt injection, like `text-delta`. Hosts MUST render them as
+  untrusted content and MUST NOT resolve `planRef` outside the session's
+  sandbox.
 - **Tool calls from the subprocess.** Events of type `tool-call` ask
   the host to do something. Hosts MUST gate every tool call through
   AIP-7 governance — the manifest's `capabilities.tool_calls` flag
@@ -691,5 +923,6 @@ adds the bidirectional-protocol surface.
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth surface
 - [AIP-36 — SANDBOX.md](/docs/aip-36) — sandbox profile
 - [`./HARNESS.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-45/draft) — JSON Schema validator
+- [`./STREAM-EVENTS.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/STREAM-EVENTS.schema.json): JSON Schema for the `agent-prompt` and `mode-changed` events
 - [`./EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/EXAMPLES.md) — Hermes (acp), Goose (mcp), Gemini CLI (proprietary)
 - [`./ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-45/draft/ADAPTER.md) — implementer's guide
