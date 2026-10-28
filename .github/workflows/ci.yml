@@ -57,6 +57,20 @@ jobs:
         continue-on-error: true
         run: node scripts/check-aip-refs.mjs .
 
+  check-spec-json:
+    name: Spec JSON parses
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Every specs/**/*.json parses
+        # A dropped `},` left HARNESS.schema.json invalid on main because
+        # nothing parsed the schemas. Parse only: compiling them needs a
+        # validator dependency this repo does not carry.
+        run: node scripts/check-spec-json.mjs .
+
   check-names:
     name: Canonical names (AIP-70)
     runs-on: ubuntu-latest
