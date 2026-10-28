@@ -148,6 +148,24 @@ interface NativeHookCapability {
 Capability declarations are metadata. They MUST NOT install handlers, bypass a
 harness trust review, grant tools, or weaken an existing permission policy.
 
+A manifest is valid only if every `hooks` entry satisfies these rules. Rules 1
+to 3 are also encoded in the AIP-45 harness schema; rule 4 spans entries and
+cannot be expressed in JSON Schema, so a reader enforces it.
+
+1. `event` and `native_event` MUST be non-empty and MUST NOT contain
+   whitespace.
+2. `handlers` MUST list at least one mechanism, and MUST NOT list the same
+   mechanism twice.
+3. When `path` is `lifecycle`, `can_block` MUST be `false`. A lifecycle seam
+   observes a transition and cannot prevent it.
+4. `hooks` MUST NOT contain two entries with the same `(event, native_event)`
+   pair. A harness that exposes one native callback through several handler
+   mechanisms lists them in one entry's `handlers`.
+
+A reader MUST refuse a manifest that breaks any of these rules. It MUST NOT
+repair the entry silently, for example by dropping a duplicate or by clearing
+`can_block`.
+
 ### 4. Resolution and ownership
 
 For every resolved binding, the host chooses exactly one owner:
@@ -242,7 +260,8 @@ An implementation conforms to AIP-71 when it:
 1. preserves the three hook paths and their timing;
 2. accepts AIP-37 event refs and AIP-39 action refs, and leaves
    authorization to AIP-38;
-3. reports native support rather than guessing it;
+3. reports native support rather than guessing it, and refuses a `hooks`
+   declaration that breaks the section 3 rules;
 4. assigns one owner per binding and prevents local double execution;
 5. preserves harness trust boundaries;
 6. treats missing events as unsupported, not successful execution;
