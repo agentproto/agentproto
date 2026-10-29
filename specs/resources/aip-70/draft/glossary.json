@@ -28,7 +28,7 @@
       "term": "operator",
       "means": "an agent holding a role in an organization",
       "owner": 9,
-      "neverMeans": "the human who controls a host (say user); the principal holding a host's credential (say host operator)"
+      "neverMeans": "the human who controls a host (say user); the principal holding a host's credential (say host operator); the host user's name for a session (say operator label); a runtime strategy (the shared in-process shell is the behaviour of `runtime.kind: in-process`)"
     },
     {
       "term": "user",
@@ -66,7 +66,7 @@
       "term": "operator label",
       "means": "the durable name only the host operator, or the host itself, assigns to a session or a lineage, matched by `label:` scopes and `session-label://` principals",
       "owner": 46,
-      "neverMeans": "a label; a session id"
+      "neverMeans": "a label; a session id; an AIP-9 operator, or its slug"
     },
     {
       "term": "session config",
@@ -105,6 +105,12 @@
       "neverMeans": "who bills",
       "futureOwner": 43,
       "via": "agentproto/agentproto#90"
+    },
+    {
+      "term": "vendor extension",
+      "means": "a namespaced key (`metadata.<vendor>`) a file carries for one host, which the spec does not define and which other hosts MUST tolerate",
+      "owner": 70,
+      "neverMeans": "a model vendor (say vendor); a field the owning AIP defines"
     },
     {
       "term": "endpoint",
@@ -169,6 +175,12 @@
       "neverMeans": "a role"
     },
     {
+      "term": "delegation profile",
+      "means": "a host-local file that names a profile (harness, model, prompt) for a delegated session; the daemon's own `roles` directory holds them",
+      "owner": 70,
+      "neverMeans": "an AIP-47 role; an access role"
+    },
+    {
       "term": "model slot",
       "means": "a logical model name resolved per host (review.small, judge.session)",
       "owner": 70,
@@ -227,6 +239,14 @@
       "means": "an AIP-34 workspace node, including the `x.workspace` doctypes",
       "owner": 34,
       "neverMeans": "a run's scratch directory"
+    },
+    {
+      "term": "node scope",
+      "means": "the nearest declared AIP-34 node whose folder contains a session's AIP-46 `ground`; walls, policy and memory visibility apply to it",
+      "owner": 70,
+      "neverMeans": "an operator's home (operators are not scoped, sessions are); a policy scope string",
+      "futureOwner": 34,
+      "via": "an AIP-34 amendment"
     },
     {
       "term": "run directory",

@@ -14,8 +14,8 @@ inputs:
     required: true
     description:
       One-paragraph description of the role the operator plays — what it owns,
-      who it talks to, what it must NOT do. The skill turns this into identity +
-      profile + skill/tool wiring.
+      who it talks to, what it must NOT do. The skill turns this into a role
+      binding + persona + boundaries + skill/tool wiring.
   - name: hostLanguage
     type: string
     required: false
@@ -42,13 +42,14 @@ examples:
 # Author an OPERATOR.md (AIP-9)
 
 Use this skill when the user asks to **build, draft, or define an operator** —
-the agent shell that powers an AI-company role. The skill produces a valid
+an agent holding a role in an organization. The skill produces a valid
 [AIP-9 OPERATOR.md](/docs/aip-9) manifest plus an entry file that exposes the
 standard `defineOperator` signature.
 
-An operator is **one shell, configured many ways**. The shape is fixed:
-identity, profile, skills, tools, memory, governance, capabilities,
-participation. The contents move per role.
+An operator is **written like an agent and always resolves into one**. It says
+which [AIP-47](/docs/aip-47) role it holds and how the role's slots are filled,
+where it lives (`home`), and which persona, identity and policy it carries. It
+does not say how it runs: that is `runtime`, and only the portable part.
 
 ## When to use
 
@@ -70,8 +71,9 @@ participation. The contents move per role.
 
 ## Process
 
-Eight steps. The first two fix who the operator is; the next three attach what
-it can do; the last three lock the safety contract and validate.
+Eight steps. The first two fix who the operator is and what job it holds; the
+next three attach what it can do; the last three lock the safety contract and
+validate.
 
 ### 1. Fix identity
 
@@ -85,18 +87,28 @@ it can do; the last three lock the safety contract and validate.
 These three fields together MUST uniquely identify the operator inside its host.
 Two operators with the same `id` is a registration error.
 
-### 2. Author the profile
+### 2. Bind the role, the persona and the boundaries
 
-`profile` is the long-form prose the runtime stitches into the operator's system
-prompt. It has three required parts:
+The job is a role, not prose in the operator file.
 
-- `role` — the job title and primary responsibility.
-- `voice` — tone + register + first-person pronouns vs neutral.
-- `boundaries` — what the operator MUST NOT do, in imperative voice. Boundaries
-  are NORMATIVE — they show up at every turn.
+- `role` — the [AIP-47](/docs/aip-47) role held: a slug (`role: research`) or
+  `{ ref, bind?, with? }`. `bind` fills the role's slots (one value per slot the
+  role declares, each matching the slot's type); `with` carries rare scalar
+  parameters. A role is intent, never permission: binding it grants nothing.
+  Leave `role` out only for files that predate it; a reader then falls back to
+  `metadata.roleSlug` and warns.
+- `persona` — the [AIP-25](/docs/aip-25) persona ref that carries the voice
+  (tone, register, pronouns). Do not write `profile.voice`: it is deprecated.
+- `boundaries` — what the operator MUST NOT do, in imperative voice, as a
+  top-level array. Boundaries are NORMATIVE and show up at every turn. Do not
+  write `profile.boundaries`: it is dropped.
+- `profile.role` — optional position or title prose ("Head of support, Paris
+  office"). It is not a role ref.
+- `home` — the AIP-54 ref of the workspace node the operator lives in, when it
+  has one.
 
-A strong profile reads like a real role description. A weak one reads like a
-marketing tagline. Avoid the latter.
+The body of `OPERATOR.md` is only what is specific to this holder of the role.
+The mission and responsibilities belong to the role, so every holder shares them.
 
 ### 3. Wire the skills
 
@@ -105,8 +117,8 @@ Each entry is either:
 
 - A string id (`competitive-analysis`) resolved from the host's skill catalog,
   or
-- An object `{ id, source?: <url|path>, version?, allow? }` for per-skill
-  overrides.
+- An [AIP-54](/docs/aip-54) ref object `{ ref | file | inline }`. A legacy object
+  `{ id, source?: <url|path>, version?, allow? }` is still accepted.
 
 Rules:
 
@@ -143,42 +155,36 @@ Rules:
 
 ### 5. Configure memory
 
-`memory` declares what the operator carries across turns. Three sub-fields:
+`memory` is the [AIP-42](/docs/aip-42) block:
 
-- `kind` — `none` | `thread` | `operator-context` | `external`.
-  - `none` — stateless. Each turn is fresh.
-  - `thread` — operator remembers the current conversation only.
-  - `operator-context` — operator carries facts across all threads it
-    participates in (the default for a "real" role).
-  - `external` — host-defined backend (vector store, KV, …). Specify
-    `external.uri` + `external.namespace`.
-- `policy` — `append-only` | `redactable` | `summarising`. Most operators use
-  `summarising` (long-running operators that compact old turns into rolling
-  summaries).
-- `share_with[]` — operator ids that may **read** this operator's memory. Empty
-  by default. Sharing is one-way; declare it on the source side.
+- `enabled: false` — stateless. Each turn is fresh.
+- `scope` — `per-conversation` | `per-thread` | `per-workspace` | `none`.
+- `store`, `anchors`, `retention_turns`, `semantic` — as in AIP-42.
 
-Memory is per-operator on purpose. An operator's "personality through history"
-is what makes a coordinator different from a researcher even when both run the
-same shell.
+An operator's memory belongs to the operator, not to a session: it survives a
+respawned session. Ownership does not widen visibility; an item is visible in a
+session only if the session's node projection includes its node.
 
-### 6. Bind governance
+The earlier `memory.kind` and `memory.policy` are still accepted (see the table
+in AIP-9). `memory.share_with[]` is deprecated: share by granting read on the
+memory store ([AIP-38](/docs/aip-38)).
 
-`governance` is the [AIP-7](/docs/aip-7) binding. Three required parts:
+### 6. Bind the policy and the autonomy
 
-- `policies[]` — policy refs the operator MUST consult before privileged
-  actions. Format `policy:<ref>` resolved against the host's policy registry.
-- `audit_log` — the audit channel the operator writes to. Format `audit:<ref>`
-  (`audit:default`, `audit:legal-actions`, …).
-- `autonomy` — `autonomous` | `supervised` | `gated`.
-  - `autonomous` — runs on its own; gated tools still prompt.
-  - `supervised` — every privileged action prompts.
-  - `gated` — operator does not run at all without per-turn human approval.
-    Reserved for highest-risk roles.
+Access is a policy bound on the operator, never a property of the role:
 
-The governance binding gives the operator **awareness** of what it can and
-cannot do, not just runtime rejection. The system prompt synthesised from
-`profile` MUST reflect the boundaries the binding implies.
+- `policy` — the [AIP-38](/docs/aip-38) policy ref the operator is bound to. The
+  effective policy is this policy composed with the policy of the session's node
+  chain, most restrictive wins.
+- `autonomy` — the integer 0 to 10 (0 always asks, 10 acts freely). A gated
+  operator (0) MUST NOT be proactive: `participation.mode` is `mention-only` or
+  `silent`.
+- A tool you declare that the policy does not grant refuses registration. A tool
+  only the role declares is dropped with `intent_unsatisfied`.
+
+The earlier `governance` block (`policies[]`, `audit_log`, and `autonomy` as
+`autonomous` | `supervised` | `gated`) is still accepted; `gated` is 0,
+`supervised` is 5, `autonomous` is 10. Audit goes through [AIP-7](/docs/aip-7).
 
 ### 7. Set capabilities + participation
 
@@ -187,7 +193,8 @@ CAN do (`research`, `summarisation`, `email-drafting`). The host matches against
 tool / skill capability requirements and surfaces `unmet-capability` at
 registration if any required capability is missing.
 
-`participation` controls conversation behaviour:
+`participation` is optional (an operator that never joins a shared thread omits
+it) and controls conversation behaviour:
 
 - `mode` — `mention-only` | `proactive` | `silent`. `mention-only` is the
   default and the safest. `proactive` lets the operator speak unprompted
@@ -206,22 +213,22 @@ Author `OPERATOR.md`:
 name: <Display Name>
 id: <kebab-id>
 persona_summary: <one-line>
-version: 1.0.0
 entry: operator.ts
-profile:
-  role: <…>
-  voice: <…>
-  boundaries: [<…>]
+role:
+  ref: <role-ref>
+  bind: { <slot>: <value>, … }
+home: <node-ref>
+persona: <persona-ref>
+identity: <identity-ref>
+policy: <policy-ref>
+autonomy: <0..10>
+boundaries: [<…>]
 skills: [<skill-ref>, …]
 tools: [<tool-ref>, …]
 memory:
-  kind: <…>
-  policy: <…>
-  share_with: [<…>]
-governance:
-  policies: [<…>]
-  audit_log: <…>
-  autonomy: <…>
+  scope: <…>
+runtime:
+  kind: <in-process | agent-cli>
 capabilities: [<…>]
 participation:
   mode: <…>
@@ -230,9 +237,7 @@ participation:
 tags: [<…>]
 ---
 
-## Profile (long-form)
-
-<full prose the runtime stitches into the system prompt>
+<what is specific to this holder of the role>
 
 ## Skills
 
@@ -241,10 +246,6 @@ tags: [<…>]
 ## Tools
 
 <table mapping each tool ref to what it lets the operator do>
-
-## Boundaries
-
-<numbered list of MUST-NOT rules>
 
 ## Examples
 
@@ -259,15 +260,14 @@ import { defineOperator } from "<host-runtime>"
 export default defineOperator({
   id: "research-analyst",
   personaSummary: "...",
-  profile: { role: "...", voice: "...", boundaries: ["..."] },
+  role: { ref: "research" },
+  persona: "ws://personas/evidence-first",
+  boundaries: ["..."],
   skills: ["competitive-analysis"],
   tools: ["pricing-snapshot", "append-to-notes"],
-  memory: { kind: "operator-context", policy: "summarising" },
-  governance: {
-    policies: ["policy:research-public-only"],
-    auditLog: "audit:default",
-    autonomy: "supervised",
-  },
+  memory: { scope: "per-workspace" },
+  policy: "ws://policies/research-public-only",
+  autonomy: 5,
   capabilities: ["research", "summarisation"],
   participation: { mode: "mention-only", reactions: true },
 })
@@ -285,12 +285,13 @@ Fix every error. Specifically check:
 - All skill refs resolve against the host's [AIP-3](/docs/aip-3) skill catalog.
 - All tool refs resolve against the host's [AIP-14](/docs/aip-14) tool catalog
   (or are valid MCP server bindings).
-- `governance.policies[]` resolve against the host's [AIP-7](/docs/aip-7) policy
-  registry.
+- `role.bind` names only slots the role declares, binds every required slot, and
+  each value matches the slot's type.
+- `policy` resolves against the host's [AIP-38](/docs/aip-38) policy registry.
 - `capabilities` cover everything the loaded skills + tools require. Missing
   capabilities surface as `unmet-capability` at registration.
-- `memory.share_with[]` references are operators that exist (or remove the
-  entry).
+- Nothing in the file widens access: access comes from `policy` and the node
+  chain, not from the role.
 
 ## Output
 
@@ -306,8 +307,8 @@ Reply to the user with:
 
 1. The folder you wrote to.
 2. A one-line **identity recap**: `<id>` — `<persona_summary>`.
-3. The **autonomy class** (`autonomous` / `supervised` / `gated`) so they verify
-   the safety dial.
+3. The **autonomy** integer (0 always asks, 10 acts freely) so they verify the
+   safety dial.
 4. Skills + tools wired in, as a flat list.
 5. **Open assumptions** — defaults you guessed (memory policy, participation
    mode, audit channel) the user might want to override.
@@ -317,11 +318,13 @@ written.
 
 ## See also
 
-- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-9 — OPERATOR (operator/v1)](/docs/aip-9)
+- [AIP-47 — ROLE.md](/docs/aip-47) — the role an operator holds
 - [AIP-3 — SKILL.md](/docs/aip-3) — skills the operator wires in
 - [AIP-14 — TOOL.md](/docs/aip-14) — tools the operator wires in
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
 - [AIP-6 — company/v1](/docs/aip-6) — file representation
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide for hosts
 - [`./EXAMPLES.md`](./EXAMPLES.md) — reference OPERATOR.md files (minimal,
-  with-tools, with-skills, with-workflow, governed, specialised, composing)
+  with-tools, with-skills, with-workflow, governed, specialised, composing,
+  role slots with a home node, and the earlier shape)
