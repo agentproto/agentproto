@@ -1,6 +1,6 @@
 ---
 title: "AIP-72: MEMORY (memory/v1): typed memory items about a principal and its work"
-description: "Fixes the stored memory document, one markdown file per memory item: a small typed assertion (user, feedback, project, reference) about a principal or its work, with AIP-10 base fields, a lifecycle (active, then superseded or archived), a lifetime, provenance and capture blocks, and a free markdown body; then the memory store a host reads and writes items through (propose or commit, read, list, search, supersede, archive, compare-and-set, no hard delete) and the projection of items into each harness session (a bounded digest injected natively or through the system prompt, native-memory changes captured back as proposals)."
+description: "Fixes the stored memory document, one markdown file per memory item: a small typed assertion (user, feedback, project, reference) about a principal or its work, with AIP-10 base fields, a lifecycle (active, then superseded or archived), a lifetime, provenance and capture blocks, and a free markdown body; then the memory store a host reads and writes items through (propose or commit, read, list, search, supersede, archive, compare-and-set, no hard delete) and the projection of items into each harness session (a bounded digest injected natively or through the system prompt, native-memory changes captured back as proposals); then the node and operator anchors, which scope an item's visibility by AIP-34 node and mark its ownership by AIP-9 operator, and the rule that every store operation applies the session's node projection."
 aip: 72
 status: Draft
 type: Schema
@@ -22,7 +22,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/memory
 | Type | Schema |
 | Doctype | `memory/v1` (one memory item, written as a markdown file with YAML frontmatter) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-10](/docs/aip-10) (base fields, knowledge providers), [AIP-45](/docs/aip-45) (the projection declaration) |
-| Composes with | [AIP-11](/docs/aip-11) (lessons), [AIP-42](/docs/aip-42) (`memory` block of an agent), [AIP-68](/docs/aip-68) (the secretary clerk promotes proposals into a store), [AIP-71](/docs/aip-71) (native first projection) |
+| Composes with | [AIP-9](/docs/aip-9) (operator memory ownership), [AIP-11](/docs/aip-11) (lessons), [AIP-34](/docs/aip-34) (node scope of a session, walls), [AIP-42](/docs/aip-42) (`memory` block of an agent), [AIP-68](/docs/aip-68) (the secretary clerk promotes proposals into a store), [AIP-71](/docs/aip-71) (native first projection) |
 | Created | 2026-10-28 |
 | Resources | [`./resources/aip-72`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-72/draft): `MEMORY.schema.json` |
 
@@ -39,6 +39,11 @@ provenance and capture blocks; the markdown body is free. It then
 specifies the **store** a host reads and writes items through, and the
 **projection** that shows in-force items to a harness session at spawn
 and captures the session's native-memory changes back as proposals.
+Where the host declares an [AIP-34](/docs/aip-34) tree, an item also
+carries a **node anchor** (where it is visible) and, when an
+[AIP-9](/docs/aip-9) operator wrote it, an **operator anchor** (whose
+it is), and the store applies the session's **node projection** to every
+operation (section 10).
 
 ## Motivation
 
@@ -63,6 +68,13 @@ Memory is not knowledge, and not a lesson:
   counts. A memory item is a single assertion (a preference, a fact about
   a project, a pointer), not a playbook entry; it has no trigger and no
   outcome count.
+
+Memory is also scoped. A host that serves several nodes of an
+[AIP-34](/docs/aip-34) tree, or several trees, holds items that must not
+reach every session: a company's decisions are not a personal tree's
+facts, and one guild's notes are not its sibling's. A flat tag match
+cannot say that, and `global` crosses everything. Section 10 adds the
+node anchor and the projection that give memory the same walls as files.
 
 ## Specification
 
@@ -124,7 +136,7 @@ Always cite sources.
 | `name` | string, up to 1000 chars | legacy | Slugified name, kept apart from `slug` for round-trip. |
 | `type` | `user \| feedback \| project \| reference` | legacy | The closed memory type. |
 | `description` | string, up to 4000 chars | no | One-line summary, independent of the body. |
-| `tags` | string[] | no | Free labels; scope anchors in formatted form (`global`, `project:<slug>`, `agent:<slug>`, `pr:<owner>/<repo>#<n>`). |
+| `tags` | string[] | no | Free labels; scope anchors in formatted form (`global`, `project:<slug>`, `agent:<slug>`, `pr:<owner>/<repo>#<n>`, and, section 10, `node:<id>` and `operator:<id>`). |
 | `polarity` | `do \| dont` | no | Feedback polarity; only on `feedback` items. |
 | `lifetime` | object | no | How long the item holds (section 4). |
 | `status` | `active \| superseded \| archived` | no | Lifecycle (section 3); absent means `active`. |
@@ -163,7 +175,10 @@ rewriting its `status`, not by deleting the file.
 | `session` | none | for the session that produced it |
 
 An anchor is `{ kind: "global" }`, `{ kind: "project" \| "contact" \| "agent", slug }`,
-`{ kind: "task" \| "session", id }` or `{ kind: "pr", repo, number }`.
+`{ kind: "task" \| "session" \| "node" \| "operator", id }` or
+`{ kind: "pr", repo, number }`. A `node` anchor holds while the node
+still resolves in its tree, and an `operator` anchor while the operator
+still resolves (section 10).
 
 ### 5. Provenance and capture
 
@@ -255,6 +270,15 @@ A proposal that will not be committed is dropped with **dismiss**. A
 proposal is not an item, so dropping it erases nothing that was in
 force.
 
+**Scope.** Where the host declares an [AIP-34](/docs/aip-34) tree, every
+operation on behalf of a session carries that session's `scope`
+(section 10) and applies its node projection: `list`, `search` and
+`read` return only items in the projection, `propose` and `commit` stamp
+and check the node anchor, and `supersede`, `archive` and `dismiss` act
+only on items and proposals in it. This holds for proposals as much as
+for items. A call without a `scope` is a host call, not a session call
+(section 10, rule 30).
+
 ```ts
 type MemoryType = "user" | "feedback" | "project" | "reference"
 type MemoryStatus = "active" | "superseded" | "archived"
@@ -266,6 +290,15 @@ interface MemoryRecord {
   proposalId?: string             // set on a proposal, absent on an item
 }
 
+// Section 10. Built by the host from the calling session, never by the store.
+interface MemoryScope {
+  nodes:     readonly string[]    // node projection: AIP-34 ids, nearest first, already
+                                  // cut at a sealed or hard node; empty = the session
+                                  // has no node scope
+  tree?:     string               // id of the root node of the session's tree
+  operator?: string               // operator anchor id, when the session runs an operator
+}
+
 interface MemoryFilter {
   type?:      MemoryType | readonly MemoryType[]
   status?:    MemoryStatus | readonly MemoryStatus[]
@@ -273,6 +306,7 @@ interface MemoryFilter {
   tags?:      readonly string[]   // match any, e.g. ["global", "project:acme"]
   inForce?:   boolean             // rules 10 and 11, at the store's clock
   proposals?: boolean             // list proposals instead of items
+  scope?:     MemoryScope         // section 10; absent = a host call
 }
 
 interface MemorySearchHit {
@@ -288,9 +322,13 @@ interface MemorySearchHit {
 interface MemoryStore {
   write(
     item: MemoryDocument,
-    opts: { mode: "propose" | "commit"; ifRevision?: string; fromProposal?: string },
+    opts: {
+      mode: "propose" | "commit"; ifRevision?: string; fromProposal?: string
+      scope?: MemoryScope
+      owner?: "operator" | "node"   // section 10, rule 32; default "operator"
+    },
   ): Promise<MemoryRecord>
-  read(id: string): Promise<MemoryRecord | null>
+  read(id: string, opts?: { scope?: MemoryScope }): Promise<MemoryRecord | null>
   list(filter?: MemoryFilter): Promise<readonly MemoryRecord[]>
   search(
     query: string,
@@ -299,16 +337,18 @@ interface MemoryStore {
   supersede(
     oldId: string,
     next: MemoryDocument,
-    opts?: { ifRevision?: string },
+    opts?: { ifRevision?: string; scope?: MemoryScope },
   ): Promise<{ old: MemoryRecord; next: MemoryRecord }>
-  archive(id: string, opts?: { ifRevision?: string }): Promise<MemoryRecord>
-  dismiss(proposalId: string): Promise<void>
+  archive(id: string, opts?: { ifRevision?: string; scope?: MemoryScope }): Promise<MemoryRecord>
+  dismiss(proposalId: string, opts?: { scope?: MemoryScope }): Promise<void>
 }
 ```
 
 `search` and `list` default to `inForce: true` when no `status` or
 `inForce` filter is given. A failed operation rejects with a conflict
 (rule 17), a validation error naming the field, or a not-found error.
+An item or proposal outside the `scope` of the call is reported as
+not-found, never as a distinct error (rule 28).
 
 #### Reference layout
 
@@ -437,9 +477,14 @@ the effective inject and capture paths.
 #### Digest
 
 The digest is the in-force items (rules 10 and 11) whose tags include
-`global` or one of the session's anchors (its project, agent, task, PR
-or session, as the host resolves them). An item with no anchor tag is
-treated as `global`. For each item it carries:
+`global` or one of the session's anchors (its project, agent, task, PR,
+session or operator, as the host resolves them). An item with no anchor
+tag is treated as `global`; a `node:` or `operator:` tag is not counted
+as an anchor here (section 10). Where the session has a node scope, the
+digest is further limited to the items in the session's node projection
+(section 10), which it applies as one more condition on the same
+selection, so an item the projection excludes never reaches the digest
+whatever its other anchors say. For each item it carries:
 
 - `type`, `id`, `slug` when present, and `title`;
 - `polarity`, on a `feedback` item;
@@ -448,7 +493,8 @@ treated as `global`. For each item it carries:
 
 Items are ordered by type (`feedback`, `user`, `project`, `reference`),
 then from the most specific anchor to `global` (session, task, PR,
-agent, project, global), then by `updated_at`, newest first. The host
+operator, agent, project, node from the session's own node outward,
+global), then by `updated_at`, newest first. The host
 chooses a size bound for the digest and SHOULD keep it near a few
 thousand characters. The host MUST cut whole items, never part of one,
 and MUST end a cut digest with the number of in-force items left out
@@ -484,7 +530,10 @@ that item (rule 15), not a commit.
 
 A captured proposal carries `capture.mode: live`, a `capture.producer`
 naming the projection, `provenance.source: native-memory` and the
-session id in `provenance.sessionId`. Proposals are promoted into items
+session id in `provenance.sessionId`. Where the session has a node
+scope it also carries the session's node anchor and, when the session
+runs an operator, its operator anchor, by the write defaults of
+section 10 (rule 31). Proposals are promoted into items
 by a writer the host's write policy allows, such as the
 [AIP-68](/docs/aip-68) secretary clerk (rule 21).
 
@@ -501,6 +550,162 @@ Projection rules:
     one session.
 26. A host that cuts the digest MUST cut whole items and say how many
     it left out.
+
+### 10. Node scope
+
+Sections 8 and 9 scope memory by flat anchors. This section adds the two
+anchors that tie memory to an [AIP-34](/docs/aip-34) tree and to an
+[AIP-9](/docs/aip-9) operator, and the projection every store operation
+applies. It matters where the host declares a tree. A host with no
+declared node keeps the behaviour of sections 8 and 9: a session there
+has no node scope (AIP-34, "Node scope of a session") and the walls do
+not apply to it.
+
+#### Two anchors, two meanings
+
+- **Node anchor**, `{ kind: "node", id }`, formatted `node:<id>`. `id` is
+  the AIP-34 `id` of a node (`@<owner>/<slug>`). It scopes **visibility**:
+  the item belongs to that node, and is visible to the sessions whose
+  node projection (next subsection) includes it.
+- **Operator anchor**, `{ kind: "operator", id }`, formatted
+  `operator:<id>`. `id` is the operator body of an
+  [AIP-54](/docs/aip-54) `operator:` ref (`<slug>`, or `<slug>@<workspace>`
+  for an operator of another workspace), the anchor AIP-9 puts on the
+  memory of the operator it resolves. It marks **ownership**: whose memory
+  the item is. It never makes an item visible anywhere by itself.
+
+An item carries at most one node anchor and at most one operator anchor.
+A reader that finds several node anchors treats the item as visible only
+where all of them are in the projection.
+
+#### Node projection
+
+The **node projection** of a session is the list of nodes whose items it
+can be shown. Walk up from the session's node scope, which is read from
+the calling session's `ground` as AIP-34 defines it (at spawn for the
+digest, on every call for the tools). The projection holds the session's
+node and each ancestor inside the same tree, up to the tree root, and
+stops after the first node whose wall is `sealed` or `hard`: that node is
+in, nothing above it is. It never holds a sibling, a descendant, a node
+of another tree, or a node reached only through a door
+(`includes`/`exports`). A session with no node scope has an empty
+projection.
+
+The host computes the projection, nearest node first, and gives it to
+the store as the `nodes` of a `MemoryScope`. A store does not compute it
+and does not read it from its own configuration. The projection never
+widens what the walls allow; it is the memory view of the walls of
+AIP-34, and "What `sealed` guarantees" there holds for memory by
+construction.
+
+An item is in the projection of a session when all of these hold:
+
+1. it is in force (rules 10 and 11);
+2. **node.** It carries a node anchor and that node is in the session's
+   `nodes`. An item with no node anchor is outside the projection of
+   every session that has a node scope. In a session with no node scope
+   the reverse holds: an item with a node anchor is outside it, and an
+   item with none is judged by conditions 3 and 4 alone, as in section 9;
+3. **anchors.** It is tagged `global` or one of the session's other
+   anchors (section 9). The `node:` and `operator:` tags do not count as
+   anchors for this condition and for the "no anchor tag is `global`"
+   default. The conditions are an intersection: an anchor, `global` and
+   an AIP-42 `memory.anchors` entry included, never admits an item that
+   condition 2 excludes;
+4. **ownership.** If it carries an operator anchor, the session runs that
+   operator, or the store's [AIP-38](/docs/aip-38) read grant on that
+   anchor reaches the session. A grant extends condition 4 only. It never
+   extends condition 2, so sharing an operator's memory does not cross a
+   wall.
+
+An operator's own item is therefore visible in a session only if the
+session's projection also includes the item's node. An item owned by an
+operator on a node outside the chain of the session is absent from that
+session, however the session was started and whoever owns the item.
+
+`global` is **tree-root scope**. In a call with a node scope, `global`
+means the root node of the session's tree: an item tagged `global`
+carries the node anchor of that root (rule 33). Because the projection
+holds the root only when no sealed or hard node cuts the chain below it,
+a `global` item of one tree is never in a projection of another tree, and
+is not in the projection of a session inside a sealed node.
+
+#### Writes, promotion and siblings
+
+Store rules, continuing the numbering of section 8:
+
+27. **Projection on every operation.** Given a `scope`, a store MUST
+    apply the node projection to `list`, `search`, `read`, `propose`,
+    `commit`, `supersede`, `archive` and `dismiss`, and to the listing of
+    proposals. An item outside it is not listed, not found by search, not
+    readable, and not changeable.
+28. **Outside is not found.** `read`, `supersede`, `archive` and `dismiss`
+    on an item or proposal outside the projection MUST fail with the same
+    not-found error as an absent one, so a session cannot learn that an
+    item exists on a node it cannot see.
+29. **Filter first.** `list` and `search` MUST apply the projection before
+    pagination, `limit`, ranking and the building of snippets. A store
+    that delegates `search` to an [AIP-10](/docs/aip-10) knowledge
+    provider MUST either run the provider over an index restricted to the
+    projection, or not delegate that call; checking hits afterwards
+    (rule 22) is not enough, because it would rank and excerpt text the
+    session may not see.
+30. **Scope comes from the caller.** The host builds the `scope` from the
+    calling session, as AIP-34 requires, and a store MUST NOT take it from
+    its own configuration. A call whose caller cannot be identified is
+    refused by the host before it reaches the store. A call with no
+    `scope` is a **host call**: it reads and writes as the host, for an
+    export, an erasure at the principal's request, a migration or a clerk
+    pass. A host MUST NOT give a session a store handle, a tool or a
+    route that makes host calls.
+31. **Write defaults.** On a `propose` or `commit` with a non-empty
+    `scope.nodes`, a store MUST add the node anchor `scope.nodes[0]` (the
+    session's own node) when the document has none, and the operator
+    anchor `scope.operator` when the session runs an operator and the
+    document has none (rule 32). A node anchor, named by the writer or
+    added, MUST be in `scope.nodes`; any other is a validation error naming
+    `tags`. A captured proposal gets the same defaults (section 9).
+32. **Ownership is the default, node-shared is a choice.** A write by a
+    session that runs an operator is owned by that operator. A writer that
+    means the item for every operator of the node passes `owner: "node"`,
+    and the store then adds no operator anchor. A writer MUST NOT name an
+    operator anchor other than `scope.operator`.
+33. **Untagged writes are refused.** A host call that creates an item or a
+    proposal with no node anchor, on a store whose host declares trees,
+    MUST be rejected with a validation error naming `tags`. A document
+    tagged `global` in a call with a non-empty `scope.nodes` MUST carry the
+    node anchor `scope.tree`, which the store adds when absent and which
+    MUST be in `scope.nodes`; any other node anchor with `global` is a
+    validation error. A session with an empty `scope.nodes` writes
+    without a node anchor, as before.
+34. **Promotion is an explicit re-tag.** An item moves to an ancestor
+    node only when a commit replaces its node anchor with another node of
+    `scope.nodes`, carrying the `ifRevision` of rule 17 and allowed by the
+    write policy of rule 21. A commit that sets a node anchor outside
+    `scope.nodes` MUST be rejected. A re-tag changes neither the operator
+    anchor nor the item's other anchors, and never reaches above a sealed
+    or hard node: what leaves such a node does so through its
+    `EXPORT.md` and matching `exports` (AIP-34), not through memory.
+    Nothing promotes an item by itself: not a lifetime, not a clerk pass,
+    not a read.
+35. **Siblings never come in by projection.** An item of a sibling node, of
+    a descendant, or of another tree is never in a projection. A host MAY
+    offer a **cross-node query** as a separate, explicit operation. It MUST
+    check the caller against the queried node (the caller is a member of
+    that node, by an [AIP-22](/docs/aip-22) seat, an AIP-34 `agents` entry
+    or an AIP-38 grant), MUST honour the walls of AIP-34 (a sealed or hard
+    node answers only with what it exports), SHOULD be rate-limited, MUST
+    restrict the answer to the queried node's items that pass conditions 1
+    and 4 for the caller, and MUST NOT feed the answer into a digest. It
+    answers the one query asked; it does not widen later projections.
+
+The digest of section 9, the `native-dir` projection and its capture, and
+every tool the host exposes over the store (in the reference
+implementation `memory_search`, `memory_list`, `memory_read`,
+`memory_write` and the others) read and write through these rules. A
+native memory location is shared by the sessions that read it, so a host
+MUST NOT write the items of one node into a native location that a
+session outside that node's projection reads.
 
 ## Rationale
 
@@ -539,6 +744,30 @@ Projection rules:
   per model; the spec fixes the order items are cut in (from the end
   of the section 9 order), that only whole items are cut, and that the
   cut is announced, not the number.
+- **Node anchor for visibility, operator anchor for ownership.** One
+  anchor cannot do both. If ownership widened visibility, an operator
+  would carry its own items into any session it runs, a company's session
+  would be shown a personal tree's facts, and a wall would hold for
+  everyone except the one principal that crosses it. So the node anchor
+  decides where an item can be seen, the operator anchor decides whose it
+  is, and an operator's own item needs both to pass.
+- **The projection is a conjunct, not another anchor.** Anchors in
+  section 9 only select; a node condition that was one more anchor to
+  match could be satisfied by `global` alone. Making it a condition every
+  item must pass is what lets `global` mean the root of a tree instead of
+  every tree.
+- **Fail closed on untagged items.** Items written before node anchors
+  exist have none. A node-scoped session does not see them until a host
+  call tags them, because the alternative, treating them as `global`,
+  would put a sealed node's old items into every prompt of the tree.
+- **The store applies the projection, the host builds it.** The host
+  already owns the tree, the walls and the caller (AIP-34); a store that
+  re-derived them from its own configuration would serve many sessions
+  with one scope. Passing the computed chain keeps the store small and
+  its rule testable on a plain list.
+- **Siblings by query, not by projection.** A projection is read by every
+  turn without anyone asking; a sibling guild's notes are reached on
+  purpose, checked against membership and the walls, and rate-limited.
 - **Status-only rewrites keep `updated_at`.** Retiring an item does not
   change what it says; keeping the timestamp lets a reader sort by
   content age, and lets the store rewrite one line.
@@ -638,7 +867,11 @@ adapter declares `capabilities.memory { inject: "native-dir", capture:
   `provenance.source: native-memory` and the session id. Output passes
   `validateMemory`.
 
-**Known gaps.** An adapter that declares `inject: none`, or declares
+**Known gaps.** The node and operator anchors, the `scope` of every store
+operation and the node projection (section 10) are specified here and
+not implemented yet: the reference store, the daemon tools and the
+digest select by `global` and the session's own anchors only, and the
+tools call the store without a scope. An adapter that declares `inject: none`, or declares
 nothing, still receives the system prompt digest when the manifest opts
 in, which is wider than the resolution order of section 9 (step 3). A
 bare store id in `memory.store` has no resolver yet and uses the default
@@ -658,6 +891,16 @@ The store and the projection (sections 8 and 9) are additive. A harness
 manifest without `capabilities.memory` keeps loading and reads as
 `{ inject: "none", capture: "none" }`.
 
+Section 10 is additive too. A host with no declared tree passes no scope
+with node anchors and keeps the behaviour of sections 8 and 9, and every
+session it serves has an empty projection. Where trees are declared,
+items written before node anchors exist have none and are outside the
+projection of every node-scoped session until a host call tags them
+(rule 33 refuses an untagged write, not an untagged item already on
+disk). The `tags` and `lifetime.anchor` values `node` and `operator` are
+new; a reader that does not know them MUST NOT show the item to a
+node-scoped session.
+
 ## Security Considerations
 
 - **Context injection.** Memory items are read back into an agent's
@@ -673,6 +916,15 @@ manifest without `capabilities.memory` keeps loading and reads as
   data, MUST project only the items scoped to that session, and MUST
   NOT write the items of one principal into a native location another
   principal's sessions read.
+- **Memory crossing a wall.** An item reaches a session only if the
+  session's node projection includes the item's node (section 10), and an
+  operator's ownership of an item does not change that. The guarantee is
+  the one of AIP-34, "What `sealed` guarantees": it covers what the host
+  composes into a prompt, a projection and a tool answer. It is not an OS
+  wall: a harness with native file tools, or an unconfined command tool,
+  runs as the same OS user and can read memory files on disk, and a local
+  process can claim another session's id. A host that needs more makes
+  the node `hard`.
 - **Captured text.** Whatever a session writes into its native memory
   may come from untrusted input it processed; this is why a capture only
   ever proposes (rule 24).
@@ -681,9 +933,13 @@ manifest without `capabilities.memory` keeps loading and reads as
 
 ## See also
 
+- [AIP-9 OPERATOR](/docs/aip-9): the operator whose memory carries the
+  operator anchor
 - [AIP-10 KNOWLEDGE](/docs/aip-10): the base fields, and the sibling
   doctype for curated knowledge
 - [AIP-11 LESSON](/docs/aip-11): distilled lessons
+- [AIP-34 WORKSPACE](/docs/aip-34): nodes, walls, and the node scope of a
+  session
 - [AIP-45 HARNESS](/docs/aip-45): `capabilities.memory`, the projection declaration
 - [AIP-68 CLERK](/docs/aip-68): the secretary that promotes proposals into items
 - [AIP-71 ACTION-HOOKS](/docs/aip-71): the native first pattern the projection follows
