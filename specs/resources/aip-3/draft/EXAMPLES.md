@@ -360,8 +360,9 @@ ignore namespaces they don't recognise.
   if the underlying tool already declares them — defence in depth.
 - **Vague `description`** like "skill for X" or "useful skill". The host indexes
   descriptions for selection; vague descriptions make the wrong skill picked.
-- **Empty input `description` fields.** The LLM reads these. Empty prose trains
-  the agent to hallucinate values.
+- **Empty or vague parameter descriptions.** When the body's Parameters
+  section names what the caller supplies, the LLM reads it. Empty or vague
+  prose trains the agent to hallucinate values.
 - **Vendor-specific top-level fields.** If a field is host-specific, it goes
   under `metadata.<vendor>.…`. Top-level extensions break cross-host
   portability.
