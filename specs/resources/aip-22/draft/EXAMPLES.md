@@ -218,7 +218,7 @@ identity:
 
 executor: ws://operators/founder
 governance: ../policies/org-default.yaml
-work: ws://workspaces/main-tracker
+work: ws://workspaces/@acme/main-tracker/WORK.md
 knowledge: ws://wikis/handbook/KNOWLEDGE.md
 playbook: ws://playbooks/values
 
@@ -769,7 +769,7 @@ schema: collection.item/v1
 collection: role
 id: ROLE-chief-of-staff
 title: Chief of staff
-holder: operator:chief-of-staff@jeremy-root
+holder: operator:chief-of-staff@jeremy/root
 ---
 ```
 

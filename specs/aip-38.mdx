@@ -34,7 +34,7 @@ must-haves like MFA, signatures, approvals).
 Policy is composable: any AIP that owns a resource (WORKSPACE,
 STORAGE, SANDBOX, CODE, SECRETS, TOOL) MAY embed a `policy:` block
 inline, ref to a sibling POLICY.md file, or reference a published
-policy (e.g. `@acme/policies/team-baseline`).
+policy (e.g. `@acme/team-baseline`).
 
 Grants are made on [AIP-39 ACTION](/docs/aip-39) ids — never on
 TOOL ids directly. This decouples policy from implementation: granting
@@ -275,9 +275,9 @@ policy:
         actions: [{ action: "storage:commit" }]
 
 # Ref to a registry-published policy
-policy: { ref: "@acme/policies/team-baseline" }
+policy: { ref: "@acme/team-baseline" }
 # Shorthand:
-policy: "@acme/policies/team-baseline"
+policy: "@acme/team-baseline"
 
 # File (workspace-local POLICY.md)
 policy: { file: "./policy/main.POLICY.md" }
@@ -286,8 +286,8 @@ policy: "./policy/main"
 
 # Array (multiple policies compose, last-wins on conflicts but most-restrictive on default)
 policy:
-  - { ref: "@acme/policies/org-baseline" }
-  - { ref: "@acme/policies/marketing-team" }
+  - { ref: "@acme/org-baseline" }
+  - { ref: "@acme/marketing-team" }
   - inline:
       grants:
         - { principal: "operator://eve", actions: [{ action: "storage:swap-provider" }] }
@@ -613,7 +613,7 @@ limits:
 ```md
 ---
 schema: policy/v1
-id: "@acme/policies/marketing-team"
+id: "@acme/marketing-team"
 version: 1.2.0
 
 default: deny
@@ -676,8 +676,8 @@ Composed by every Acme marketing guild via:
 ```yaml
 # WORKSPACE.md
 policy:
-  - { ref: "@acme/policies/org-baseline" }
-  - { ref: "@acme/policies/marketing-team" }
+  - { ref: "@acme/org-baseline" }
+  - { ref: "@acme/marketing-team" }
 ```
 ```
 
@@ -730,7 +730,7 @@ arbitrary permissions. Hosts MUST:
   `secrets:rotate:*`, `policy:edit`).
 - Audit all policy compositions — when N policies merge, log the
   resolution chain so reviewers can see "this grant came from
-  `@acme/policies/org-baseline`."
+  `@acme/org-baseline`."
 
 The composition rule "most-restrictive wins" is a security floor.
 Hosts MUST NOT silently allow policies to relax stricter parents
@@ -738,7 +738,7 @@ unless the parent explicitly opts into delegation.
 
 ## Open questions
 
-1. **Policy versioning + delegation.** When `@acme/policies/org-baseline@2.0.0`
+1. **Policy versioning + delegation.** When `@acme/org-baseline@2.0.0`
    ships breaking changes, do dependent workspaces auto-fail or
    auto-upgrade? Likely: pin via `.workspace-lock.json`.
 

@@ -139,7 +139,7 @@ role:
   bind:                          # one value per slot the role declares
     board:         ws://collections/katchy-board
     objective:     ws://collections/katchy-relaunch
-    product_tools: ws://tools/katchy
+    product_tools: { kind: mcp, server: katchy }
   with: { language: fr }         # rare scalars only
 ```
 
@@ -151,8 +151,9 @@ role:
   key the role does not declare, or a value of the wrong type is a load-time
   error. A slot that carries a tool adds that tool to the operator's tools,
   still subject to policy (see [Tools](#tools-and-policy)).
-- `with` carries scalar parameters the role declares. It never carries a ref
-  and never carries prose.
+- `with` carries scalar parameters, one per `{ scalar: ... }` slot the role
+  declares ([AIP-47](/docs/aip-47) §Slots). It never carries a ref and never
+  carries prose.
 
 A role is intent, never permission ([AIP-47](/docs/aip-47)). Binding a role
 never changes the operator's effective policy, denies included.

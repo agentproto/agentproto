@@ -110,8 +110,8 @@
     },
     "work": {
       "type": "string",
-      "pattern": "^ws://workspaces/[a-z][a-z0-9-]*$",
-      "description": "OPTIONAL — AIP-20 work tracker the company runs. Cross-references on items resolve against the bound work workspace by default."
+      "pattern": "^ws://workspaces/@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*/WORK\\.md$",
+      "description": "OPTIONAL — AIP-20 work tracker the company runs, as the AIP-54 ref of its WORK.md: `ws://workspaces/@<owner>/<slug>/WORK.md`. Cross-references on items resolve against the bound work workspace by default."
     },
     "agency": {
       "type": "string",

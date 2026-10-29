@@ -4,7 +4,8 @@ name: role
 title: Role
 description: |
   A position within the company, held by zero or one operators.
-  Mirrors AIP-6's hardcoded role doctype as an AIP-18 collection.
+  An AIP-18 collection of the office's seats: positions, not role
+  definitions, which are AIP-47 ROLE.md documents.
   Roles parent under teams or departments (per the workspace's
   orgTree.containment.rules); a role's manager line is expressed
   via the orthogonal reportsTo field. Workspaces extending this
