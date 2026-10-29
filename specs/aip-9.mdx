@@ -1,12 +1,12 @@
 ---
-title: "AIP-9: OPERATOR (operator/v1): operator runtime protocol"
-description: A single canonical operator shell — pluggable profile, skills, tools, memory, governance — that any agent runtime can implement and any conforming workflow can dispatch to.
+title: "AIP-9: OPERATOR (operator/v1): an agent holding a role in an organization"
+description: An operator is an agent holding a role in an organization. It is written like an AIP-42 agent, binds an AIP-47 role through typed slots, has a home node, a persona, an identity and a policy of its own, and always resolves into one effective agent, which a host runs either as a per-request persona in a shared in-process shell or as a harness session.
 aip: 9
 status: Review
 type: Core
 created: 2026-04-27
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 3, 6, 7, 42]
+requires: [1, 2, 3, 6, 7, 25, 38, 42, 47, 54]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/operator
 discussions-to: https://github.com/agentproto/agentproto/discussions/9
 layer: identity
@@ -16,181 +16,348 @@ package: "@agentproto/operator"
 | Field | Value |
 |---|---|
 | AIP | 9 |
-| Title | OPERATOR (operator/v1): operator runtime protocol |
+| Title | OPERATOR (operator/v1): an agent holding a role in an organization |
 | Status | Draft |
 | Type | Core |
 | Domain | operators.sh |
-| Requires | [AIP-3](/docs/aip-3), [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7), [AIP-42](/docs/aip-42) |
-| Extends | [AIP-42 AGENT.md](/docs/aip-42) (operator = agent + organizational context, dynamically resolved per request) |
+| Requires | [AIP-3](/docs/aip-3), [AIP-6](/docs/aip-6), [AIP-7](/docs/aip-7), [AIP-25](/docs/aip-25), [AIP-38](/docs/aip-38), [AIP-42](/docs/aip-42), [AIP-47](/docs/aip-47), [AIP-54](/docs/aip-54) |
+| Extends | [AIP-42 AGENT.md](/docs/aip-42) (an operator is written like an agent and always resolves into one) |
 | Reference Impl | [`@agentproto/operator`](https://github.com/agentproto/ts/tree/main/packages/operator) |
 
 ## Abstract
 
-`agentoperators/v1` specifies the **runtime contract** for an operator —
-a **dynamic agent**: a single shared shell whose profile, skills,
-tools, memory, and governance bindings are resolved per-request from
-`requestContext` (typically `operatorId` + `conversationId`). One
-runtime class, N operator personas dispatchable per turn.
+An **operator** is an agent holding a role in an organization
+([AIP-70](/docs/aip-70)). That is the only meaning of the word in this
+corpus. An `OPERATOR.md` is **organizational**: it says which
+[AIP-47](/docs/aip-47) role the agent holds and how the role's slots are
+filled, where the agent lives (its home node, [AIP-34](/docs/aip-34)), and
+which persona, identity and policy it carries.
 
-OPERATOR **extends** [AIP-42 AGENT.md](/docs/aip-42). An AGENT.md is
-the static, file-form base primitive — `1 file → 1 agent instance`.
-An OPERATOR is the dynamic-agent extension — `1 shell → N operator
-personas resolved per request`. The two compose:
+The definition does not say how the operator runs. The same file runs as a
+per-request persona in a host's shared in-process shell (`runtime.kind:
+in-process`) or as a harness session ([AIP-46](/docs/aip-46), `runtime.kind:
+agent-cli`). Both start from the same step: **an operator always resolves
+into one effective [AIP-42](/docs/aip-42) agent**, through the pure function
+`resolveOperator`. The agent is the only runnable definition; an operator is
+never run directly.
 
-- **Static agents** (utility researcher, code-reviewer, support-bot)
-  ship as standalone `AGENT.md` files, each instantiated once per
-  workspace at boot.
-- **Dynamic operators** (creative-director, account-strategist,
-  pricing-analyst — anyone bound to a company/role/persona) ship as
-  `OPERATOR.md` files that extend a base AGENT.md and add
-  organizational context, then run through a single shared shell
-  with per-request persona resolution.
+The contract has four parts:
 
-The contract this AIP defines is what the shared shell MUST implement
-to be considered AIP-9-conforming. The file form OPERATORs author
-against is described in [AIP-42 § OPERATOR.md extends AGENT.md](/docs/aip-42).
+- the file: an AGENT's fields (by reference to the AGENT schema) plus
+  `role`, `home`, `reports_to`, `participation`, `capabilities`, `runtime`
+  and `profile`;
+- the resolution: a merge order, tool and policy rules, memory owned by the
+  operator, and the split between `resolveOperator` and the host's turn
+  composer;
+- the runtime binding: portable [AIP-45](/docs/aip-45) config only;
+- the behaviour of an operator in shared conversations, and its lifecycle.
 
 ## Motivation
 
-Agent platforms today multiply agent classes: a "researcher agent",
-a "writer agent", a "coordinator agent", each implemented separately
-with diverging conventions. The result: every new role costs new code,
-and operators built for platform X don't run on platform Y.
+Agent platforms multiply agent classes: a "researcher agent", a "writer
+agent", a "coordinator agent", each implemented separately. Every new job
+costs new code, and an operator built for platform X does not run on
+platform Y.
 
-The opinionated wager of agentoperators/v1: **you don't need multiple
-agent classes — you need one well-specified shell with pluggable
-parts.** A "researcher" is an operator with research skills + research
-tools + a researcher persona. A "coordinator" is the same shell, with
-different attachments. The shape of the agent is fixed; the contents
-move.
+The wager of this AIP is that you do not need multiple agent classes. You
+need one runnable primitive (the AGENT), a template for a job (the ROLE), and
+an organizational binding that places an agent in a job (the OPERATOR). A
+"researcher" is an operator holding the research role, with a researcher
+persona and the project's tools bound to the role's slots. A "coordinator" is
+the same file shape with other attachments.
 
-This unification lets:
+Earlier text of this AIP gave the word two meanings at once: an
+organizational binding (a role in a company), and a runtime strategy (a
+"dynamic agent", one shared shell serving N personas). The second is a
+property of one runtime kind, not the definition of an operator: an operator
+run as a harness session is not a shared shell. This revision keeps the first
+meaning as the definition and documents the second as the behaviour of
+`runtime.kind: in-process`.
 
-- **Workflows** dispatch tasks to *any* operator without per-class
-  adapters
-- **Tools** target the operator-shell contract instead of N agent
-  vendors
-- **Governance** ([AIP-7](/docs/aip-7)) attach uniformly — every
-  operator goes through the same approval/audit gates
-- **File definitions** ([AIP-6](/docs/aip-6) `OPERATOR.md`) be portable
-  across runtimes that implement this AIP
-
-The pattern is field-tested: the reference implementation in Guilde
-runs production agencies built entirely from this single operator
-class, with persona, skill, and tool attachments doing the role
-differentiation.
+The same file serves hosts that run an operator in two ways today: one that
+resolves operators per request in one in-process agent, and one that runs
+every permanent operator as its own long-lived harness session. A job, such
+as "project manager", is written once as a role and reused by every operator
+that holds it; what differs between two holders is a handful of references
+(the board, the objective, the product's tool server) and the instance prose.
 
 ## Specification
 
-> Full normative text is being authored from the Guilde reference
-> implementation. AIP-9 will absorb the formal contract as part of
-> moving Draft → Review.
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as
+described in [AIP-1](/docs/aip-1).
 
-### Relation to AGENT.md (AIP-42) — fields OPERATOR adds
+### Terms
 
-OPERATOR.md inherits every AGENT.md field. The fields below are what
-OPERATOR adds on top, formalizing the organizational binding:
+- **operator**: this AIP's `OPERATOR.md`. An agent holding a role.
+- **host operator**: the principal that holds a host's own credential, which
+  AIP-46 and AIP-71 write "the operator" where no AIP-9 operator appears.
+  Unrelated to this AIP.
+- **operator label**: the durable name the host operator assigns to a session
+  (AIP-46 `Session.operatorLabel`). Unrelated to this AIP, and unrelated to
+  AIP-46's `Session.operator` binding.
 
-| Field | Inherited / added | Description |
+[AIP-70](/docs/aip-70) owns the three rows.
+
+### The file
+
+An `OPERATOR.md` is a markdown file whose frontmatter validates against
+[`OPERATOR.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-9/draft/OPERATOR.schema.json).
+The body is the operator's own instance prose: what this holder of the role
+does here (the mission of this project, the habits of this person).
+
+An operator carries the fields of an [AIP-42](/docs/aip-42) agent and the
+fields below. The schema takes every AGENT field by `$ref` into
+`AGENT.schema.json`, never by copy and never by `allOf` over two closed
+schemas, so a change to an AGENT field reaches the operator without an edit
+here.
+
+| Field | Source | Description |
 |---|---|---|
-| All AGENT fields (`model`, `tools`, `actions`, `skills`, `workflows`, `routines`, `memory`, `governance`, `policy`, `traits`, `autonomy`, `boundaries`, `on`) | inherited | Same semantics as [AIP-42](/docs/aip-42). Operator MAY override any. |
-| `role` | added | Required. Slug identifying the operator's role in the company (e.g. `creative-director`). Used for triage, routing, mention resolution. |
-| `reports_to` | added | Optional. Slug of the operator this one reports to (org chart). |
-| `company` | added | Optional. Ref to [AIP-6](/docs/aip-6) `COMPANY.md` — the operator's home company. |
-| `participation` | added | Required. See [Conversation participation](#conversation-participation). Static agents don't have this — they don't join shared threads. |
-| `capabilities` | added | Optional. Per-action capability flags (autonomous / supervised / gated). |
+| `extends` | AGENT | The base AGENT. It resolves to an AGENT only, never to another operator, so there is one agent chain and one role chain and no diamond across them. |
+| `model`, `tools`, `actions`, `skills`, `workflows`, `routines`, `delegates_to`, `memory`, `governance`, `traits`, `autonomy`, `boundaries`, `on`, `publish`, `tags`, `metadata`, `description`, `version`, `runner` | AGENT | Same semantics as [AIP-42](/docs/aip-42). The operator MAY set any of them inline as an override. `delegates_to` names agents or operators, never roles. |
+| `persona` | AGENT | The [AIP-25](/docs/aip-25) persona: name, voice and the persona's own boundaries. |
+| `identity` | AGENT | The [AIP-23](/docs/aip-23) identity: the substance. |
+| `policy` | AGENT | The [AIP-38](/docs/aip-38) policy bound on this operator. A role never changes it. |
+| `role` | operator | The [AIP-47](/docs/aip-47) role held. See [Role binding](#role-binding). Optional for one minor version, then required. |
+| `home` | operator | The AIP-54 ref of the AIP-34 workspace node that is the operator's home. See [Home, scope and seats](#home-scope-and-seats). |
+| `reports_to` | operator | Slug of the operator this one reports to, used only when no AIP-22 office seat gives the reporting line. A seat wins. |
+| `participation` | operator | Optional. See [Conversation participation](#conversation-participation). An operator that never joins a shared thread omits it. |
+| `capabilities` | operator | Capability names the operator declares, negotiated against the runtime's offer (see [Capability negotiation](#capability-negotiation)). |
+| `runtime` | operator | The portable runtime binding. See [Runtime binding](#runtime-binding). |
+| `profile.role` | operator | Position or title prose, as a person would write it ("Head of support, Paris office"). It is not a role ref: that is `role`. |
 
-The runtime instantiates ONE shared shell (Mastra `Agent` instance in
-the reference impl) and resolves all OPERATOR-specific fields
-(`role`, `participation`, `capabilities`, persona overlays) per-request
-from `requestContext.operatorId`. This is the **dynamic-agent**
-property — N OPERATOR.md definitions sharing one runtime shell, vs N
-AGENT.md files each getting their own instance.
+`persona_summary` (one sentence for a teammate), `name`, `id` (the operator
+slug, also the body of its `operator:<slug>` compact ref), `entry` and
+`schema: operator/v1` complete the file. Of these, `name`, `id` and
+`persona_summary` are required.
 
-### Operator shape
+### Role binding
 
-An operator is the tuple:
+```yaml
+role:
+  ref: ws://roles/pm             # the AIP-47 ROLE
+  bind:                          # one value per slot the role declares
+    board:         ws://collections/katchy-board
+    objective:     ws://collections/katchy-relaunch
+    product_tools: ws://tools/katchy
+  with: { language: fr }         # rare scalars only
+```
+
+- `role.ref` is an AIP-54 ref to the role. A bare string, `role: pm`, is
+  `role: { ref: pm }`.
+- `bind` fills the role's slots. Each key MUST name a slot the role declares,
+  and each value MUST match the slot's declared type; the role validates the
+  binding, this schema checks only its shape. A required slot left unbound, a
+  key the role does not declare, or a value of the wrong type is a load-time
+  error. A slot that carries a tool adds that tool to the operator's tools,
+  still subject to policy (see [Tools](#tools-and-policy)).
+- `with` carries scalar parameters the role declares. It never carries a ref
+  and never carries prose.
+
+A role is intent, never permission ([AIP-47](/docs/aip-47)). Binding a role
+never changes the operator's effective policy, denies included.
+
+#### Alias period
+
+`role` is optional for one minor version of this AIP, because files written
+before it existed carry the role in other places. When `role` is absent a
+reader resolves the role in this order, and emits a `role_fallback` warning
+that names the source it used:
+
+1. `metadata.roleSlug`;
+2. `profile.role`, only when its value is a role slug that resolves in the
+   host's role sources. Free text never matches, and a reader MUST NOT guess
+   a role from prose.
+
+When neither resolves, the operator holds no role and the reader emits
+`role_missing`. A reader MUST NOT fall back to a default role (a catalog's
+first role, or the most senior one): a mis-bound operator takes a role's job
+description, and a powerful default is a silent privilege error. After the
+alias period `role` is required and the fallback is removed.
+
+### Home, scope and seats
+
+- **Home.** `home` is the operator's home node: the root of its memory and
+  of its default policy. A company node, a guild node or a user root. It
+  replaces `company`.
+- **Seats come from offices.** An operator's positions are seats in an
+  [AIP-22](/docs/aip-22) office, whose holder is the operator. A holder in
+  another workspace uses the compact form `operator:<slug>@<workspace>`
+  ([AIP-54](/docs/aip-54) `operator-body`). The operator file does not list
+  its seats.
+- **Sessions are scoped, operators are not.** A session of an operator has
+  exactly one node scope: the node that contains its AIP-46 `ground`. The
+  node of a session started through a seat is that seat's node, not the
+  operator's home. The same operator can run one session per scope.
+- **Policy follows the node chain.** An operator acting in a node is under
+  the composition of that node's chain policy ([AIP-34](/docs/aip-34)) and
+  the operator's own `policy`, most restrictive wins ([AIP-38](/docs/aip-38)).
+  The policy of the home node does not travel with the operator into another
+  tree.
+
+### Resolution
+
+`resolveOperator` turns an operator into an effective agent. It is the one
+normative resolution, and every host calls the same function.
 
 ```ts
-interface Operator {
-  /** AIP-6 OPERATOR.md slug — stable identity */
-  id: string
-
-  /** AIP-6 OPERATOR.md content — role, persona, ranking, profile prose */
-  profile: OperatorProfile
-
-  /** AIP-3 SKILL.md ids the operator has loaded */
-  skills: SkillRef[]
-
-  /** Tool bindings the operator can invoke
-   *  (MCP servers, framework tools, AIP-3 skill-attached tools) */
-  tools: ToolBinding[]
-
-  /** Memory / operator-context slot — what the operator carries
-   *  across turns and what it shares with teammates */
-  memory: MemoryBinding
-
-  /** AIP-7 governance binding — which actions require approval,
-   *  which audit log to write to, which policies gate autonomy */
-  governance: GovernanceBinding
-
-  /** Capability flags — autonomous / supervised / gated, plus
-   *  per-action overrides */
-  capabilities: CapabilityFlags
-
-  /** Conversation participation — whether/when this operator
-   *  reads + responds in shared threads */
-  participation: ParticipationConfig
-
-  /** Optional runtime binding — picks the runtime this operator runs
-   *  on. Default `kind: "in-process"` runs in the host's Mastra-style
-   *  in-process loop. `kind: "agent-cli"` dispatches turns to a
-   *  spawned AIP-45 harness subprocess (Hermes, Claude Code, ...). */
-  runtime?: RuntimeBinding
-}
+resolveOperator(operator, sources) -> AgentEntry
+// AgentEntry = { agent: <AIP-42 agent>, body: string }   (AIP-53)
 ```
+
+It is **pure**: no I/O beyond loading the templates the operator references
+(base agent, identity, persona, role chain, skills, policy), deterministic
+for the same inputs, cacheable. The result carries a stable `id` and
+`version`, and a digest of its inputs (role, persona, identity, policy, slot
+bindings) so a host can tell that a long-lived session runs on instructions
+that no longer match its operator's current resolution.
+
+#### Merge order
+
+The definition is built in this order. Later steps append after earlier ones
+in the body, and override scalar fields.
+
+| Step | Source | What it contributes |
+|---|---|---|
+| 1 | base AGENT (`extends`) | model default, base body, tools, skills |
+| 2 | IDENTITY ([AIP-23](/docs/aip-23)) | substance (the compression tier is a host token-budget choice, not a merge step) |
+| 3 | PERSONA ([AIP-25](/docs/aip-25)) | name, voice, persona boundaries |
+| 4 | ROLE ([AIP-47](/docs/aip-47), after its own `extends` chain) | mission and responsibilities rendered, the role body (append with a separator), the bodies of the role's `skills`, `knowledge.packs` mounted as the corpus floor, tools as intent |
+| 5 | slot bindings | a rendered bindings block ("your board: katchy", the project, the product tools) |
+| 6 | OPERATOR | its own body and its inline overrides, `delegates_to` |
+| 7 | host definition sections ([AIP-42](/docs/aip-42) rule 3) | the AGENTS.md prefix, house rules, the boundaries block |
+
+The role comes after persona and identity so that the job prose sits next to
+the instance body.
+
+Other merge rules:
+
+- **Boundaries** from the AGENT, the persona and the operator, plus the
+  role's `antiPatterns`: union and dedupe. `profile.boundaries` is not part of
+  the shape.
+- **Autonomy.** The AGENT `autonomy` integer (0 always asks, 10 acts freely)
+  replaces the former `governance.autonomy` enum, which maps `gated` to 0,
+  `supervised` to 5 and `autonomous` to 10. A gated operator (0) MUST NOT be
+  proactive: `participation.mode` is `mention-only` or `silent`.
+- **Chains.** The agent chain (at most 5, AIP-42) and the role chain (at most
+  8, AIP-47) are walked separately.
+
+#### Tools and policy
+
+- The operator's tool set is the union of: the base agent's tools, the tools
+  of the role (intent), the tools bound to slots, and the operator's own
+  tools. It is then filtered by the effective policy.
+- A tool the **role** declares as intent and the policy does not grant is
+  dropped, with an `intent_unsatisfied` warning ([AIP-47](/docs/aip-47)). It
+  is never granted by the role's declaration.
+- A tool the **agent or the operator** declares (inline, in the base agent,
+  or by a slot binding) and the policy does not grant is a registration
+  error ([AIP-42](/docs/aip-42) rule 4). A declaration the operator itself
+  made is a request for access, and a host refuses it visibly instead of
+  dropping it.
+- The effective policy is the [AIP-38](/docs/aip-38) composition of the
+  operator's `policy` and the policy of the session's node chain. The role's
+  `defaultPolicy` is advisory: it may pre-fill the form that hires an
+  operator, and nothing more. "These agents have no cron tools" is therefore
+  a policy bound on the operator, or on the node chain that contains it; it is
+  never a property of the role.
+
+#### Memory
+
+An operator's memory belongs to the operator, not to a session: sessions come
+and go (a respawned long-lived session, several parallel conversations) and
+the operator keeps one memory.
+
+- The resolved agent's memory is anchored on the operator: its items carry the
+  [AIP-72](/docs/aip-72) anchor `operator:<slug>`, which marks ownership.
+- Ownership does not widen visibility. An item the operator owns is visible
+  in a session only if the session's node projection also includes the node of
+  the item (AIP-72). An operator's own item on a node outside the session's
+  chain is absent from that session.
+- `memory.share_with` is deprecated toward [AIP-38](/docs/aip-38) read grants
+  on the memory store: an operator that shares its memory grants read on its
+  own anchor, and the store evaluates the grant. A host that has not moved
+  keeps honouring `share_with` as a read grant during the alias period.
+
+#### What resolution does not include
+
+Some context changes every turn and is not part of the definition. The host's
+**turn composer** adds it after `resolveOperator`:
+
+- live state of the persona or identity ([AIP-23](/docs/aip-23): mood, energy,
+  workload);
+- the [AIP-72](/docs/aip-72) memory projection digest for the session's node;
+- [AIP-12](/docs/aip-12) playbook overlays (they ride on the persona and
+  evolve per operator);
+- participation and mention rules;
+- the approvals brief, and the per-request tool pick.
+
+A host keeps its own turn composer, which may be nearly empty (a host whose
+sessions are long-lived harness processes) or rich (a host that rebuilds the
+prompt every request). The host MUST NOT put anything in the composed turn
+that the definition, once resolved, would contradict.
 
 ### Runtime binding
 
-The optional `runtime` block selects the runtime that owns this
-operator's turns. Two kinds today:
+The optional `runtime` block says how the operator is run. It is **portable
+configuration only**.
 
 ```yaml
-# In-process — the host's own agent loop (default).
+# Shared in-process shell (default).
 runtime:
   kind: in-process
 
-# Harness — dispatch turns to an AIP-45 manifest's spawned binary.
+# Harness session.
 runtime:
   kind: agent-cli
   ref: claude-code                # AIP-45 HARNESS.md ref
-  config:                         # per-runtime configuration (optional)
+  config:                         # optional, validated against the manifest
     mode: plan                    # one manifest-declared mode (mutually exclusive)
-    options:                      # manifest-declared option ids → values
+    options:                      # manifest-declared option ids -> values
       model: claude-opus-4-7
       max_turns: 50
     continuation: pinned-session  # one of the manifest's `continuation.supported` ids
-  session:                        # session policy override (optional)
-    mode: persistent
-    idle_timeout_ms: 1800000
 ```
 
-`config` is the contract between the operator and its bound AIP-45
-manifest. Hosts MUST validate every entry before spawn:
+- **`in-process`.** The host instantiates one shared agent shell and resolves
+  the operator-specific parts of each turn (the resolved agent, then the turn
+  composer's context) from `requestContext.operatorId`. N operator files share
+  one runtime class. This is the "shared shell" behaviour, and it belongs to
+  this kind alone.
+- **`agent-cli`.** The host runs the effective agent as an AIP-46 session on
+  the AIP-45 harness named by `ref`. The session's definition is the resolved
+  agent (`agentPath` or `agentId`, passed as the AIP-46 agent binding), and
+  the operator's `config` is layer 3 of the session config
+  ([AIP-46 §Layers and precedence](/docs/aip-46#layers-and-precedence)).
+
+`config` is the contract between the operator and its bound AIP-45 manifest.
+Hosts MUST validate every entry before spawn:
 
 - `config.mode` MUST appear in the manifest's `modes[].id` set.
-- Each `config.options.<id>` MUST match a manifest `options[]` entry
-  by `id` AND satisfy that entry's declared `type` / `enum` / bounds.
+- Each `config.options.<id>` MUST match a manifest `options[]` entry by `id`
+  AND satisfy that entry's declared `type` / `enum` / bounds.
 - `config.continuation` MUST be a member of the manifest's
   `continuation.supported` set.
 
-Unknown ids are a hard load-time error; the host MUST refuse to bind
-the operator. Omitted fields fall back to manifest defaults.
+Unknown ids are a hard load-time error; the host MUST refuse to bind the
+operator. Omitted fields fall back to manifest defaults.
+
+What `runtime` does **not** carry:
+
+- the **session preset** (`claude-hodl-sonnet`), the **posture** and the
+  **auth profile**: these are host configuration owned by the user
+  ([AIP-46](/docs/aip-46) session config). A host binds them when it hires the
+  operator, in its own configuration or under `metadata.<host>`, and passes the
+  preset on the spawn request. They never appear in portable organization
+  data;
+- **session lifetime and idle policy** (`runtime.session`): owned by AIP-46
+  and the host. The field is deprecated and a host MAY read it as a hint during
+  the alias period.
 
 ### Lifecycle
 
-Every operator goes through these states, observable to the runtime
-and to peer operators:
+Every operator goes through these states, observable to the runtime and to peer
+operators:
 
 ```
 idle → invoked → running → ( suspended | completed | interrupted )
@@ -198,13 +365,13 @@ idle → invoked → running → ( suspended | completed | interrupted )
                             resumed → running
 ```
 
-- **invoked** — workflow or human dispatched the operator
-- **running** — actively executing (calling tools, generating)
-- **suspended** — paused for governance approval or human input
-- **resumed** — picked back up after suspension
-- **completed** — turn finished cleanly
-- **interrupted** — stopped before completion (user cancelled, error,
-  policy block)
+- **invoked**: a workflow or a human dispatched the operator
+- **running**: actively executing (calling tools, generating)
+- **suspended**: paused for governance approval or human input
+- **resumed**: picked back up after suspension
+- **completed**: turn finished cleanly
+- **interrupted**: stopped before completion (user cancelled, error, policy
+  block)
 
 Every state transition writes an `audit-event` per [AIP-7](/docs/aip-7).
 
@@ -212,81 +379,148 @@ Every state transition writes an `audit-event` per [AIP-7](/docs/aip-7).
 
 An operator that joins a conversation MUST implement:
 
-- **Mention handling** — receive `@<slug>` mentions and respond
-- **Pass** — choose to *not* respond when the message is not relevant
-  to the operator's role / skills
-- **Reactions** — emit lightweight signals (👍, ✅, 🚧) without
-  generating a full turn
-- **Visibility** — public, private-to-admin, or scoped per the
-  conversation's visibility rules
+- **Mention handling**: receive `@<slug>` mentions and respond
+- **Pass**: choose to *not* respond when the message is not relevant to the
+  operator's role / skills
+- **Reactions**: emit lightweight signals without generating a full turn
+- **Visibility**: public, private-to-admin, or scoped per the conversation's
+  visibility rules
+
+`participation` is optional. An operator without it does not join shared
+threads.
 
 ### Capability negotiation
 
-Operators declare what they CAN do. Runtimes declare what they OFFER.
-Tools / actions are available iff both sides agree. Gaps surface as
-`unmet-capability` errors during workflow planning, before the
-operator runs.
+Operators declare what they CAN do. Runtimes declare what they OFFER. Tools
+and actions are available iff both sides agree. Gaps surface as
+`unmet-capability` errors during workflow planning, before the operator runs.
 
 ## Rationale
 
-*To be authored. Defend:*
+**Why an operator is organizational, not a runtime class.** The organization
+(a role in a company, a seat in an office, a home node) is what is stable
+across hosts. How the agent runs is a host choice that changes: the same
+operator can be a per-request persona in one host and a long-lived harness
+session in another. Putting the runtime in the definition made "operator" mean
+two things and made a harness-run operator contradict its own definition.
 
-- *Why a single shell instead of agent-class subtyping (composition >
-  inheritance, easier portability, cleaner governance attach points)*
-- *Why `participation` is first-class (operators in shared threads
-  are the dominant pattern; treating it as an attachment makes
-  multi-operator collaboration tractable)*
-- *Why governance is a binding, not a wrapper (gives the operator
-  awareness of what it can and cannot do, instead of the runtime
-  silently rejecting actions)*
-- *Why memory is per-operator, not per-conversation (lets operators
-  develop "personality through history" the way human roles do)*
+**Why hybrid: written like an agent, resolved into one.** A file that sets
+any AGENT field inline keeps the simple case simple: one file for one
+operator. Meaning it as a composition keeps the model clean: the AGENT stays
+the only runnable definition, and a standalone agent (a reviewer, a utility)
+needs no company, no role and no operator. The alternative of an AGENT that
+binds a role was refused by AIP-47: an agent that needs a role is, by
+definition, an operator.
+
+**Why `$ref` into the AGENT schema.** The two schemas are closed. A copy would
+drift on the first AGENT change, and `allOf` over two closed schemas rejects
+every field of the other. A flattened schema of references stays closed and
+follows the AGENT.
+
+**Why a pure `resolveOperator` plus a turn composer.** The definition is
+deterministic and cacheable, and hosts can compare digests to find a session
+running stale instructions. What changes every turn (state, memory digest,
+overlays) is host context and stays out of the cached part.
+
+**Why role comes after persona and identity.** The job prose should sit next
+to the instance body, which is the last thing the model reads before the host
+sections.
+
+**Why policy is bound on the operator.** AIP-47 forbids a role changing an
+operator's effective policy, denies included. A policy that lives on the role
+would let a catalog entry silently grant or remove access for every operator
+that holds it.
+
+**Why memory belongs to the operator.** An operator develops "personality
+through history" the way a human holder of a job does. A session is a way to
+run it, and sessions respawn.
 
 ## Reference Implementation
 
-A public reference implementation is **TBD** — pending extraction into
-`agentproto/ts`. The shape any conforming runtime must expose:
+[`@agentproto/operator`](https://github.com/agentproto/ts/tree/main/packages/operator)
+carries the `OperatorDefinition` type, the `defineOperator` function and, as
+the resolver lands, `resolveOperator`. The shape any conforming host exposes:
 
-- An **operator orchestrator** that turns an operator configuration
-  into a runnable agent and executes turns.
-- A **routing** module — mention resolution, multi-operator triage,
-  pass logic.
-- A **generation** module — turn-generation strategies (sequential
-  vs think-then-speak, normal vs deep-work mode).
-- A **typed contract** for operator configuration (the shape AIP-9
-  codifies).
+- **a resolver**: `resolveOperator` as specified above, from the operator and
+  its template sources to an effective agent;
+- **a turn composer**: host specific, as described in [What resolution does
+  not include](#what-resolution-does-not-include);
+- **an orchestrator** that runs the resolved agent in the chosen runtime kind;
+- **routing**: mention resolution, multi-operator triage, pass logic;
+- **a typed contract** for the operator configuration (the schema).
 
-The orchestrator boots from an [AIP-6](/docs/aip-6) `OPERATOR.md`
-package + an [AIP-3](/docs/aip-3) skill set + tool registry, and
-produces a fully-configured operator ready to dispatch to. A working
-implementation runs in production inside the agentik-studio monorepo
-(private); the open reference will land alongside `@agentproto/agencies`
-and `@agentproto/governance` once extracted.
+The authoring guide is
+[`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-9/draft/skills/author-operator/SKILL.md),
+the implementer's guide is
+[`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-9/draft/ADAPTER.md),
+and reference files are in
+[`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-9/draft/EXAMPLES.md).
 
 ## Backwards Compatibility
 
-Not applicable — this is the first runtime spec for operators.
-Pre-existing per-vendor operator classes (LangChain agents, custom
-runtimes) can adopt agentoperators/v1 by implementing an adapter
-that maps to the shape above.
+Files written against the earlier shape keep validating. Each change below is
+accepted for **one minor version** of this AIP, and a reader emits a
+`operator_field_deprecated` warning that names the field, except for `role`,
+which has its own warnings.
+
+| Earlier | Now | Reader behaviour during the alias period |
+|---|---|---|
+| no `role`, `metadata.roleSlug` | `role` | [Role binding](#alias-period): `role_fallback`, then `role_missing` |
+| no `role`, `profile.role` as a slug | `role` | same fallback, only when the value resolves as a slug |
+| `profile.role` as free text | `profile.role` | unchanged, now explicitly position prose |
+| `profile.voice` | `persona` | folded into an inline persona voice, warning |
+| `profile.boundaries` | `boundaries` | folded in (union, dedupe), warning |
+| `company` | `home` | a COMPANY.md ref is read as the company node, warning |
+| `memory.kind` | AGENT `memory` | `none` is `enabled: false`; `thread` is `scope: per-thread`; `operator-context` is the default (items anchored on the operator); `external` is `store: <external.uri>` |
+| `memory.policy` | none | has no AGENT field; the legacy behaviours in ADAPTER.md still apply to operators that use the legacy form |
+| `memory.share_with` | AIP-38 read grants | honoured as a read grant, warning |
+| `governance.policies`, `governance.audit_log` | `policy`, AIP-7 `governance` ref | read as the equivalent bindings, warning |
+| `governance.autonomy` | `autonomy` | `gated` 0, `supervised` 5, `autonomous` 10 |
+| `skills[]` as `{id, source, version, allow}` | AIP-42 `skills` items | accepted |
+| `tools[]` as `{id, source, scope}` | AIP-42 `tools` items | accepted |
+| `runtime.session` | AIP-46 and the host | MAY be read as a hint |
+| `version`, `profile` required | optional | `version` defaults like an agent's; an operator without `profile` has no position prose |
+
+An operator that declared an MCP server as a tool uses the form AIP-42 defines
+for `tools`; this AIP no longer restates it.
+
+`version` and `profile` were required by the earlier schema, and operator files
+in the field omit them (the `metadata.roleSlug` files of Guilde packs, for
+instance). They are now optional, so those files validate.
+
+The earlier statement that an operator is "a dynamic agent" is withdrawn as a
+definition. It is the behaviour of `runtime.kind: in-process`.
 
 ## Security Considerations
 
 Operators are autonomous actors with tool access. The risk surface:
 
-- **Tool-call injection** — a malicious user message persuades the
-  operator to invoke a tool the user shouldn't have access to.
-  Mitigation: governance binding ([AIP-7](/docs/aip-7)) policy gates
-  every privileged tool; the operator MUST consult its governance
-  binding before invoking a gated action.
-- **Skill-as-prompt-injection** — an untrusted skill loaded into a
-  trusted operator could try to subvert the operator's role. Mitigation:
-  AIP-3 skill provenance metadata + runtime-side skill allow-listing.
-- **Memory poisoning** — an attacker controls a conversation and seeds
-  the operator's memory with false facts. Mitigation: memory writes
-  go through a validation step; AIP-7 audit log records every memory
-  update so poisoning is forensically recoverable.
-- **Participation flooding** — an operator with `participation:
-  always-respond` in a shared thread could spam. Mitigation: rate
-  limits and the `pass` primitive (operators choosing silence is
-  first-class behavior, not failure).
+- **Tool-call injection**: a malicious user message persuades the operator to
+  invoke a tool the user should not have access to. Mitigation: the effective
+  policy ([AIP-38](/docs/aip-38)) gates every privileged tool, evaluated at
+  call time; the operator MUST consult it before invoking a gated action.
+- **Elevation by role.** A role that declares tools, or a `defaultPolicy`,
+  must not widen an operator's access. Mitigation: role tools are intent and
+  are dropped with `intent_unsatisfied` when not granted; `defaultPolicy` is
+  advisory; policy is bound on the operator and the node chain only.
+- **Wrong role by fallback.** Binding an operator to a default role when its
+  own is missing gives it another job's description. Mitigation: the fallback
+  is limited to `metadata.roleSlug` and an exact slug in `profile.role`; no
+  default role; `role_missing` is a warning a reviewer can read.
+- **Skill-as-prompt-injection**: an untrusted skill loaded into a trusted
+  operator could try to subvert the operator's role. Mitigation: AIP-3 skill
+  provenance metadata and runtime-side skill allow-listing.
+- **Memory poisoning**: an attacker controls a conversation and seeds the
+  operator's memory with false facts. Mitigation: memory writes go through a
+  validation step; the AIP-7 audit log records every memory update so poisoning
+  is forensically recoverable.
+- **Memory crossing a wall.** An operator-owned item is not visible in a
+  session whose node chain does not include the item's node. Hosts MUST apply
+  the node projection to operator-owned items like any other.
+- **Stale instructions.** A long-lived session keeps the instructions it was
+  spawned with. A revoked grant applies on the next call, but the prompt is
+  stale until the session is refreshed; the digest of the resolution lets a
+  host flag it.
+- **Participation flooding**: an operator with `participation: proactive` in a
+  shared thread could spam. Mitigation: rate limits and the `pass` primitive
+  (operators choosing silence is first-class behaviour, not failure).

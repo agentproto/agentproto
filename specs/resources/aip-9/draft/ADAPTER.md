@@ -11,6 +11,13 @@ this file.
 
 ## Contract overview
 
+An operator is an agent holding a role in an organization. It is organizational
+and independent of how it runs: the same file runs as a per-request persona in
+the host's shared in-process shell (`runtime.kind: in-process`) or as a harness
+session (`runtime.kind: agent-cli`). Either way an operator **always resolves
+into one effective [AIP-42](/docs/aip-42) agent**, and the agent is the only
+runnable definition.
+
 A conforming host implements five responsibilities, in this order when an
 OPERATOR.md folder is registered:
 
@@ -19,10 +26,11 @@ OPERATOR.md folder is registered:
 2. **Load the entry** — `import` (or language-equivalent) the file referenced by
    `entry`. The entry's default export is a value produced by
    `defineOperator(...)`.
-3. **Resolve attachments** — walk `skills[]` against the [AIP-3](/docs/aip-3)
-   catalog, `tools[]` against the [AIP-14](/docs/aip-14) catalog, MCP servers
-   against their respective endpoints, and `governance.policies[]` against the
-   [AIP-7](/docs/aip-7) policy registry. Missing refs MUST refuse registration.
+3. **Resolve attachments** — resolve the operator with `resolveOperator` (see
+   [Resolution](#resolution)): the base agent, identity, persona, role chain,
+   skills ([AIP-3](/docs/aip-3)), tools ([AIP-14](/docs/aip-14)), MCP servers
+   against their endpoints, and the bound policy ([AIP-38](/docs/aip-38))
+   against the policy registry. Missing refs MUST refuse registration.
 4. **Negotiate capabilities** — check that every capability required by the
    loaded skills + tools is present in the operator's declared `capabilities[]`.
    Surface `unmet-capability` at registration; never at first dispatch.
@@ -41,12 +49,12 @@ but `defineOperator` is what the author calls.
 A host that implements `defineOperator` MUST:
 
 1. **Accept the `OperatorDefinition` shape** documented in
-   [AIP-9 § Operator shape](/docs/aip-9#operator-shape). Every field listed
-   there MUST be honoured at runtime.
-2. **Synthesise the system prompt** from `profile.role`, `profile.voice`,
-   `profile.boundaries`, plus prose injected by each loaded skill. The synthesis
-   order is normative:
-   `role → voice → boundaries → skill prompts (in load order) → governance reminder`.
+   [AIP-9 § The file](/docs/aip-9#the-file). Every field listed there MUST be
+   honoured at runtime.
+2. **Resolve the operator** with the pure function `resolveOperator`, which
+   builds the system prompt in the normative merge order of
+   [AIP-9 § Merge order](/docs/aip-9#merge-order):
+   `base agent → identity → persona → role → slot bindings → operator body → host sections`.
    This determinism is what makes operators portable.
 3. **Pass `context` through** to every tool / skill body invoked during a turn,
    with at least:
@@ -121,23 +129,71 @@ type DispatchResult =
 Workflows reading this contract can dispatch to any operator without asking what
 _type_ of agent it is — the shell is uniform.
 
-## Profile application
+## Resolution
+
+`resolveOperator(operator, sources) -> AgentEntry` is **pure**: no I/O beyond
+loading the templates the operator references, deterministic for the same inputs,
+cacheable. It is the one normative resolution; every host calls the same
+function. The host's **turn composer** is separate and host specific.
 
 When the host activates an operator, it MUST:
 
-1. Build the system prompt deterministically from the manifest's `profile` +
-   each loaded skill's prompt fragment.
-2. Cache the synthesised prompt keyed by
-   `(operatorId, version, skill-set hash)`. Re-synthesise only on manifest or
-   skill version change.
-3. Expose the synthesised prompt to debug surfaces (the operator's "show me your
+1. Build the effective agent with `resolveOperator`, in the merge order of
+   AIP-9: base agent (`extends`), identity ([AIP-23](/docs/aip-23)), persona
+   ([AIP-25](/docs/aip-25)), role ([AIP-47](/docs/aip-47), after its own
+   `extends` chain), slot bindings, the operator's own body and inline
+   overrides, then the host definition sections ([AIP-42](/docs/aip-42) rule 3).
+2. Union and dedupe `boundaries` from the agent, the persona and the operator,
+   plus the role's `antiPatterns`.
+3. Cache the result keyed by `(operatorId, version, digest of inputs)`, where
+   the digest covers role, persona, identity, policy and slot bindings.
+   Re-resolve only when an input changes. A long-lived session whose digest no
+   longer matches its operator's current resolution runs stale instructions; the
+   host SHOULD flag it.
+4. Expose the resolved prompt to debug surfaces (the operator's "show me your
    system prompt" capability is first-class for inspection, not a hidden host
    secret).
+
+### The turn composer
+
+What changes every turn is not part of the definition and stays out of the cached
+resolution. The host's turn composer adds it after `resolveOperator`: live
+state ([AIP-23](/docs/aip-23)), the [AIP-72](/docs/aip-72) memory projection
+digest for the session's node, [AIP-12](/docs/aip-12) playbook overlays,
+participation and mention rules, the approvals brief and the per-request tool
+pick. It MAY be nearly empty (a host whose sessions are long-lived harness
+processes) or rich (a host that rebuilds the prompt every request). It MUST NOT
+contradict the resolved definition.
 
 The host MUST NOT silently inject host-specific prompt blocks the manifest
 doesn't reference. Hosts that need to add platform-level text (rate-limit
 reminders, etc.) SHOULD do so via a documented `platform` block that authors can
 opt out of.
+
+## Role binding
+
+`role: { ref, bind?, with? }` names the [AIP-47](/docs/aip-47) role held and fills
+its slots. The host MUST check at load time that every `bind` key names a slot
+the role declares, that every required slot is bound, and that each value matches
+the slot's declared type. A role is intent, never permission: binding a role MUST
+NOT change the operator's effective policy.
+
+While `role` is optional (one minor version), a host without `role` resolves the
+role from `metadata.roleSlug`, then from `profile.role` only when that value is a
+role slug that resolves, and emits a `role_fallback` warning that names the
+source. A host MUST NOT guess a role from free text and MUST NOT fall back to a
+default role: it emits `role_missing` and runs the operator without one.
+
+## Runtime binding
+
+`runtime` carries portable configuration only. With `kind: agent-cli` the host
+runs the resolved agent as an [AIP-46](/docs/aip-46) session on the
+[AIP-45](/docs/aip-45) harness named by `ref`, and the operator's `config` is
+layer 3 of the session config. The host MUST validate `config.mode`,
+`config.options` and `config.continuation` against the manifest before spawn.
+The session preset, the posture and the auth profile are host configuration and
+are never read from `runtime`. `runtime.session` is deprecated: AIP-46 and the
+host own session lifetime.
 
 ## Skill resolution
 
@@ -156,6 +212,16 @@ referenced tool is missing) MUST surface as `unmet-capability` errors during
 dispatch, not silent degradation.
 
 ## Tool resolution
+
+The operator's tool set is the union of the base agent's tools, the role's tools
+(intent), the tools bound to slots and the operator's own tools, filtered by the
+effective [AIP-38](/docs/aip-38) policy (the operator's `policy` composed with the
+policy of the session's node chain):
+
+- A tool the **role** declares and the policy does not grant is **dropped**, with
+  an `intent_unsatisfied` warning. The role's `defaultPolicy` is advisory.
+- A tool the **agent or the operator** declares, or a slot binds, and the policy
+  does not grant **refuses registration** ([AIP-42](/docs/aip-42) rule 4).
 
 `tools[]` entries resolve against the host's [AIP-14](/docs/aip-14) tool catalog
 OR an MCP server endpoint:
@@ -190,14 +256,19 @@ interface MemoryHandle {
 }
 ```
 
-Behaviours per `memory.kind`:
+An operator's memory belongs to the operator, not to a session. The resolved
+agent's items carry the [AIP-72](/docs/aip-72) anchor `operator:<slug>`, which
+marks ownership and does not widen visibility: an item the operator owns is
+visible in a session only if the session's node projection also includes the
+item's node. The operator uses the [AIP-42](/docs/aip-42) `memory` block;
+legacy `memory.kind` values map as follows.
 
-| kind               | `read()` returns                           | `write()` persists                     |
-| ------------------ | ------------------------------------------ | -------------------------------------- |
-| `none`             | always empty                               | no-op (host MUST log a warning)        |
-| `thread`           | current conversation only                  | scoped to the current `conversationId` |
-| `operator-context` | this operator's history across all threads | per-operator namespace                 |
-| `external`         | host delegates to `memory.external.uri`    | same                                   |
+| Earlier `memory.kind` | AGENT `memory`                       | `read()` returns                           |
+| --------------------- | ------------------------------------ | ------------------------------------------ |
+| `none`                | `enabled: false`                     | always empty; `write()` is a no-op         |
+| `thread`              | `scope: per-thread`                  | current conversation only                  |
+| `operator-context`    | default (items anchored on the operator) | this operator's history across all threads |
+| `external`            | `store: <external.uri>`              | host delegates to the store                |
 
 Memory writes MUST go through the `policy` gate:
 
@@ -208,13 +279,15 @@ Memory writes MUST go through the `policy` gate:
   entries into rolling summaries. The author body doesn't see this happening;
   reads return the compacted form.
 
-`memory.share_with[]` grants **read** access only. The granted operator's
-`read()` returns entries from the granting operator's namespace tagged with the
-grant. Writes never cross the boundary.
+`memory.share_with[]` is deprecated toward [AIP-38](/docs/aip-38) read grants on
+the memory store. A host that has not moved keeps honouring it, as a **read**
+grant only: the granted operator's `read()` returns entries from the granting
+operator's namespace tagged with the grant. Writes never cross the boundary.
 
 ## Governance enforcement
 
-The operator's `governance` binding is consulted by:
+The operator's bound `policy` ([AIP-38](/docs/aip-38)), or the legacy
+`governance` binding, is consulted by:
 
 - The runtime, BEFORE every gated tool call.
 - The runtime, BEFORE every memory write that affects shared state.
@@ -222,7 +295,8 @@ The operator's `governance` binding is consulted by:
 
 Resolution per gated action:
 
-1. Read `governance.policies[]` and walk each policy in declaration order.
+1. Read the effective policy (or `governance.policies[]` in the legacy form) and
+   walk each policy in declaration order.
 2. The first policy that matches the action's `(class, scope, capability)`
    triple wins.
 3. The matching policy returns one of `allow` / `deny` / `prompt(<approver>)`.
@@ -232,13 +306,18 @@ Resolution per gated action:
 Unknown policy refs MUST refuse the action. Silent fallthrough is a security
 bug.
 
-`autonomy` overrides:
+`autonomy` is the [AIP-42](/docs/aip-42) integer (0 always asks, 10 acts freely).
+The legacy `governance.autonomy` enum maps to it: `gated` is 0, `supervised` is 5,
+`autonomous` is 10.
 
-| autonomy     | Host behaviour                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------- |
-| `autonomous` | Run gated tools per their own approval class; `policies[]` apply normally.                         |
-| `supervised` | Every privileged action (anything not `mutates: []`) prompts, regardless of tool-level `approval`. |
-| `gated`      | Operator does NOT run a turn without an explicit per-turn `dispatchApproval` from a human.         |
+| autonomy         | Host behaviour                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| high (up to 10)  | Run gated tools per their own approval class; the policy applies normally.                         |
+| middle (about 5) | Every privileged action (anything not `mutates: []`) prompts, regardless of tool-level `approval`. |
+| 0                | Operator does NOT run a turn without an explicit per-turn `dispatchApproval` from a human.         |
+
+An operator at 0 MUST NOT be proactive: `participation.mode` is `mention-only`
+or `silent`.
 
 ## Conversation participation
 
@@ -352,7 +431,9 @@ This is the standard "is this operator installable?" handshake.
 
 ## See also
 
-- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-9 — OPERATOR (operator/v1)](/docs/aip-9)
+- [AIP-47 — ROLE.md](/docs/aip-47) — the role an operator holds
+- [AIP-42 — AGENT.md](/docs/aip-42) — what an operator resolves into
 - [AIP-3 — SKILL.md](/docs/aip-3) — skills loaded into operators
 - [AIP-14 — TOOL.md](/docs/aip-14) — tools loaded into operators
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — what dispatches to operators
