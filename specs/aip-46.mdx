@@ -938,7 +938,7 @@ so MCP clients can drive sessions through the same connection:
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
 | `agent_kill` | `{sessionId}` | Returns `{ok, sessionId}` |
-| `message_*`, `inbox_*` | see [§Session messages](#session-messages-added-2026-09-26) | Typed messages between sessions in one tree. Not delegation actions. |
+| `message_*`, `inbox_*` | see [§Session messages](#session-messages-added-2026-09-26) | Typed messages between sessions. Not delegation actions. |
 
 The MCP tools and the HTTP routes target the same underlying
 registry — calling either family results in the same observable
@@ -986,8 +986,9 @@ there. A consumer wanting the latter MUST use the route.
 
 A host that supports delegation (populates `parentSessionId`) MUST provide a
 typed message channel between sessions in the same tree, distinct from
-prompts. A prompt is an instruction from whoever drives the session; a
-message is a report between sessions whose sender the host **attests**.
+prompts; §Who may message whom says which other pairs it carries. A
+prompt is an instruction from whoever drives the session; a message is
+a report between sessions whose sender the host **attests**.
 
 #### Envelope
 
@@ -1020,10 +1021,50 @@ NOT be able to set any `from` field; hosts MUST reject one that tries.
 `relation` is computed relative to `to` from the session forest. `label` is
 display-only and MUST NOT be relied upon for identity.
 
-Hosts MUST authorise: child → parent, parent → direct child, and the host
-itself or its user → any session (`system` / `human`). Sibling
-messaging is OPTIONAL and off by default. Any other pair — a cousin, a
-grandparent, the sender itself — MUST be refused.
+#### Who may message whom (amended 2026-10-29)
+
+A send from one session to another is the [AIP-39](/docs/aip-39) action
+`session:message`: its principal is the sender, as the Session
+principals section defines it, and its target is the recipient. The
+human operator and the host itself (`system`) are principals too, not
+pairs of sessions, and a host MUST allow a send from either to any
+session. Between two sessions:
+
+1. **A tree edge allows.** A host MUST allow a send from a session to
+   its parent and from a parent to its direct child, with no grant.
+2. **Every other pair needs a grant.** A host MUST refuse a send between
+   any other pair unless an [AIP-38](/docs/aip-38) grant of
+   `session:message` allows it, evaluated with the AIP-38 composition
+   rules: the union of allow grants, a matching deny wins over any
+   allow, and the default is deny. Two children of one parent are not a
+   tree edge: a grant alone allows them, as it alone allows a cousin
+   or a grandparent.
+3. **No precedence.** A tree edge and a grant are independent reasons
+   to allow. A host MUST allow a send when either allows it, MUST NOT
+   stop at the first reason it checks, and a deny grant removes only
+   the grant as a reason, never a tree edge.
+4. **Never to itself.** A host MUST refuse a send whose sender is the
+   recipient.
+5. **The binding is the host's.** A session's workspace binding is the
+   most specific registered workspace (§Workspaces) whose path contains
+   the real path of the session's working directory. A host evaluating
+   a `workspace:` scope MUST derive the binding itself, through its
+   workspace registry, and MUST NOT take it from a slug the session or
+   any caller supplies (the `workspaceSlug` of a spawn request, a
+   header, a parameter, or a slug recorded on a descriptor from such
+   input). The `default` bucket of §Bucket resolution is not a
+   registered workspace and MUST NOT satisfy a workspace-scoped grant.
+6. **A workspace owner may only narrow.** An [AIP-34](/docs/aip-34)
+   workspace `policy` MAY deny `session:message` for the sessions bound
+   to that workspace, and MUST NOT allow a send the operator's policy
+   leaves at deny.
+
+A grant names its sender through its `principal`. AIP-38 lists
+`group://<name>` as a principal scheme, but no AIP defines a group whose
+members are sessions chosen by workspace binding or by operator label,
+so no single grant says "any two sessions of W" (§Open Questions). A link between
+two workspaces is expressed as a grant scoped `workspace:<slug>` until
+AIP-34 defines a door form that names session messages.
 
 #### Recording
 
@@ -1096,8 +1137,9 @@ SHOULD keep `timeoutMs` under the MCP request timeout and return
 to stop.
 
 `message_*` and `inbox_*` are not delegation actions
-([§Delegation](#delegation-and-the-spawn-gate)): they reach only tree
-neighbours and grant no control over the recipient.
+([§Delegation](#delegation-and-the-spawn-gate)): they reach only the
+pairs §Who may message whom allows and grant no control over the
+recipient.
 
 HTTP hosts SHOULD mirror them as `POST /sessions/:id/messages` (the
 recipient is `:id`; the sender is the authenticated caller),
@@ -1592,6 +1634,7 @@ Using the [AIP-39](/docs/aip-39) standard runtime actions:
 | restart or handoff with an overlay | the spawn set, on the new config |
 | every fallback step | the set of the transition the step performs |
 | a caller other than the owner prompts, or interrupts, kills, restarts or hands off | `session:prompt` or `session:control` (scope: session id or label), in addition to any row above |
+| a session messages a session that is not its parent or direct child | `session:message` (scope: session id, label or workspace), as §Who may message whom defines |
 
 Two refusal vocabularies, kept apart:
 
@@ -1847,6 +1890,44 @@ presets (a harness preset is a session preset with `defaultFor`).
 completion check at turn end becomes a limit that refuses the next
 `model:invoke`, a deliberate behaviour change.
 
+### The 2026-10-29 session-message-grants amendment (draft)
+
+§Who may message whom keeps the tree edges and replaces every other
+pair rule with grants of `session:message`. Deny by default stays the
+normative default for every pair that is not a tree edge. A host whose
+pair rule was configured through its own switches (siblings allowed,
+same workspace allowed, a group of linked workspaces) MAY keep them as
+a way to derive those grants, and MUST report the effective grants it
+derives on a surface the operator can read. A host whose same-workspace
+allowance was on before this amendment MAY keep it on during migration
+if it reports the effective grant and the operator can set it to deny.
+A host that binds by recorded slug rather than by working directory
+MAY keep allowing a pair whose two sessions recorded the same slug only
+while it records each such pair at least once on a surface the operator
+can read.
+
+> **Informative: the reference implementation.** In `@agentproto/runtime`,
+> `allowPromptFrom` is a list kept on the target session that names the
+> callers allowed to prompt or control it, by session id, `any`, or
+> `label:` entries matched against the caller's immutable operator
+> label. The `label:` scope of AIP-39 names the target instead, so those
+> entries are the principal side of a `session:prompt` or
+> `session:control` grant, for which AIP-38 has no form yet.
+> `defaults.messaging.allowSiblings`, `allowSameWorkspace` and
+> `peerGroups` are its spelling of `session:message` grants, and
+> `defaults.messaging.peerBinding` (`slug` or `verified`) is the
+> migration switch for the working-directory binding
+> ([agentproto/ts#2326](https://github.com/agentproto/ts/pull/2326),
+> [agentproto/ts#2330](https://github.com/agentproto/ts/pull/2330),
+> [agentproto/ts#2165](https://github.com/agentproto/ts/pull/2165)). It
+> does not conform yet: what it calls `peer` messaging is on by default
+> (`allowSameWorkspace: true`); it checks the tree edge first, so a
+> denied sibling pair gains nothing from the same-workspace allowance,
+> while this text has no precedence; it reports a `peerGroups` link as
+> the relation `peer`; and with `peerBinding: "slug"` two sessions that
+> recorded the same slug, a recorded `default` slug included, are peers.
+
+
 ### The 2026-10-28 session-principals amendment (draft)
 
 §Session principals and §Operator-only configuration change who a
@@ -1998,11 +2079,28 @@ and observe-only mode lets the operator count those callers first.
   return as an AIP-42 concern (a computed `delegates_to`), not as a
   second authority in AIP-46. Revisit when a host reports the
   allowlist as the binding constraint.
-- **Sibling messaging default.** §Session messages makes sibling ↔
-  sibling messages optional and off. Peer coordination (two workers
-  negotiating a shared interface) is a real use, but it bypasses the
-  supervisor that owns the plan. Revisit if hosts report siblings
-  routing everything through the parent as the binding friction.
+- **Sibling messaging default.** §Who may message whom allows two
+  siblings only through a grant of `session:message`. Peer coordination
+  (two workers negotiating a shared interface) is a real use, but it
+  bypasses the supervisor that owns the plan. Revisit if hosts report
+  siblings routing everything through the parent as the binding friction.
+- **A sender-side group form.** `group://<name>` is a standard AIP-38
+  principal scheme, but no AIP defines a group whose members are
+  sessions chosen by workspace binding or by operator label. Without
+  one, "any two sessions of W" and "sessions of W may message sessions
+  of X" need one grant per sender or a `*` principal that also admits
+  senders bound elsewhere. In the reference implementation a restart or
+  continuation mints a new session id, so a grant naming `session://<id>`
+  does not follow a long-lived session. Whether to define such a group
+  form in AIP-23 or AIP-38 is open.
+- **The `relation` of a granted message.** `from.relation` has no value
+  for a pair that no tree edge or sibling link joins (a cousin, or two
+  sessions linked only by a workspace grant). Whether the envelope
+  gains a value for it, or drops `relation` for such a send, is open.
+- **A workspace owner enabling messages.** §Who may message whom rule 6
+  lets an AIP-34 workspace `policy` deny `session:message` but not
+  allow it. Whether a workspace owner may allow sends among its own
+  sessions without the operator is open.
 - **Should `fyi` messages reach the model at all?** An `fyi` never
   wakes the recipient; the reference implementation surfaces a one-line
   digest at the start of its next turn. Whether that digest belongs in
