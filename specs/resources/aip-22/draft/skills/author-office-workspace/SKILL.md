@@ -220,7 +220,7 @@ playbook: ws://playbooks/values
 
 | Field        | Required    | When to set                                                                                                                                            |
 | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `executor`   | optional    | Default org-level operator for company-level prompts.                                                                                                  |
+| `executor`   | optional    | Default org-level operator for company-level prompts (`ws://operators/<slug>` or `operator:<slug>[@<workspace>]`); in a company tree it covers every node. |
 | `governance` | optional    | Set when [AIP-7](/docs/aip-7) approval gates apply. Workspace-root manifests usually set this; views may override only if the parent's policy permits. |
 | `work`       | optional    | Set to bind the company to an [AIP-20](/docs/aip-20) work tracker (the default tracker for the org's items).                                           |
 | `agency`     | optional    | Set when the company also operates as a commercial [AIP-21](/docs/aip-21) agency.                                                                      |
