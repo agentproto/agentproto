@@ -55,47 +55,181 @@ The format draws on:
 
 ## Specification
 
-> **Status note.** The reference implementation in `packages/skill/`
-> (v1.0.0) defines the working schema. The canonical normative
-> specification is being authored from that implementation. This section
-> will be filled in as part of moving AIP-3 from Draft → Review.
+A `SKILL.md` manifest is a markdown file whose YAML frontmatter (delimited by
+`---` lines) carries the manifest fields and whose markdown body carries the
+instruction prose. The frontmatter MUST validate against
+[`SKILL.schema.json`](./draft/SKILL.schema.json). AIP-3 is a profile of
+[agentskills.io](https://agentskills.io): the top-level fields mirror the
+upstream specification (`name`, `description`, `license`, `compatibility`,
+`allowed-tools`, `metadata`), and the AIP-specific extensions live under
+`metadata.aip3.*` so an AIP-3 skill remains a valid agentskills.io skill in any
+conformant runtime.
 
-The high-level shape, pending the full normative text:
+Two properties are required:
 
 ```yaml
 ---
-schema: skill/v1
-name: <kebab-case-skill-id>
-title: <human-readable title>
-description: <one-sentence what-it-does>
-version: <semver>
-tags: [<topic>, <topic>]
-inputs:
-  - name: <param>
-    type: string | number | boolean | object
-    required: true
-    description: <prose>
-tools:
-  - <tool-name>           # optional — tools this skill expects to be available
-examples:
-  - input: { ... }
-    output: <expected output sketch>
+name: <kebab-case-skill-id>          # 1-64 chars, lower alphanumerics and
+                                     # hyphens, no leading/trailing/consecutive
+                                     # hyphens; MUST equal the parent
+                                     # directory name
+description: <one-paragraph purpose> # 1-1024 chars, written for the LLM
+                                     # caller: what the skill does and when
+                                     # to use it
+metadata:
+  aip3: {}                           # see below
 ---
 
-# Body — instruction prose for the agent
+# Body
 
-The body is markdown. Headings, code blocks, and prose are all consumed
-by the runtime as instructions. Sections that read as data (e.g. "## Tool
+The body is markdown. Headings, code blocks, and prose are all consumed by
+the runtime as instructions. Sections that read as data (e.g. "## Tool
 catalog") are conventionally extracted; sections that read as guidance
 ("## When to use this skill") are passed through verbatim.
 ```
 
+### Top-level fields
+
+**name** (required). Machine identifier, 1 to 64 characters, lowercase
+alphanumeric and hyphens only, with no leading, trailing, or consecutive
+hyphens. MUST equal the parent directory name. Inherited verbatim from
+agentskills.io.
+
+**description** (required). One-paragraph purpose, written for the LLM caller.
+SHOULD describe both what the skill does and when to use it. 1 to 1024
+characters. Inherited from agentskills.io.
+
+**license** (optional). License identifier, e.g. an SPDX identifier such as
+`MIT` or `Apache-2.0`, or a pointer to a bundled license file such as
+`LICENSE.txt has complete terms`. At most 200 characters. Inherited from
+agentskills.io.
+
+**compatibility** (optional). Free-form environment requirements, 1 to 500
+characters: intended product, required system packages, network access, and so
+on. Most skills omit this. Inherited from agentskills.io.
+
+**allowed-tools** (optional). Space-separated list of pre-approved tool
+patterns, e.g. `Bash(git:*) Bash(jq:*) Read`. Experimental upstream; runtimes
+MAY ignore it. The field is a request, not a grant: runtimes apply policy
+mediation before honoring it. Inherited from agentskills.io.
+
+**metadata** (optional). Free-form key-value mapping. Hosts and standards stash
+extension fields under namespaced keys, e.g. `metadata.aip3.*` or
+`metadata.acme.*`. Inherited from agentskills.io.
+
+### `metadata.aip3` extensions
+
+The `Aip3Extensions` object of [`SKILL.schema.json`](./draft/SKILL.schema.json)
+carries the AIP-3 fields. Runtimes that do not implement AIP-3 MUST preserve
+this object verbatim, since it lives inside agentskills.io's `metadata`.
+
+**schema**. The dispatch tag. Required for AIP-3 conformance and pinned to
+`skill/v1` for this spec version. `skills/v1` is accepted as a legacy alias
+([AIP-70](/docs/aip-70)).
+
+**variant**. One of `instruction` (prose-only, the default), `executable`
+(bundles runnable code via `execution`), or `composite` (references other
+skills via `uses`).
+
+**version**. Semver, bump on breaking changes to the skill's behavior or
+required tools.
+
+**tags**. Up to 12 catalog tags; lowercase kebab-case with no leading symbols.
+Three to six tags is typical.
+
+**category**. Coarse grouping such as `productivity`, `creative`, or
+`development`. Free-form; runtimes SHOULD NOT enumerate the values. 1 to 64
+characters.
+
+**requires**. Other AIPs the skill depends on, as an array of AIP numbers,
+e.g. `[9]` for the operator runtime. Runtimes MAY warn when a declared
+dependency is unsupported.
+
+**author**. Optional, at most 200 characters. Conventional shape: a
+`Name <email>` pair or a stable handle. It mirrors the agentskills.io
+`metadata.author` convention; when both are present, `metadata.aip3.author`
+wins for AIP-3 runtimes.
+
+**title**. Optional human-readable display title, 1 to 120 characters.
+Headless runtimes that cannot render the body H1 MAY use this; the body H1 is
+preferred.
+
+**uses**. Skill names this skill composes with, each validated like `name`.
+Required and non-empty when `variant` is `composite`.
+
+**execution**. Executable bindings, required when `variant` is `executable`,
+with `code` and `language` required inside it:
+
+- `language`: one of `typescript`, `javascript`, `python`, or `shell`; runtimes
+  MAY refuse languages they do not support.
+- `code`: exactly one of `{ file }` or `{ inline }`. `file` is a relative path
+  to the entry file, which SHOULD live under `scripts/`; path traversal with
+  `..` segments escaping the skill dir MUST be rejected. `inline` is source
+  code that runtimes MUST sandbox before executing.
+- `entrypoint`: optional function name within the entry file.
+- `runtime`: optional execution hints: `provider` (e.g. `modal`, `daytona`,
+  `vercel-sandbox`, `local`), `timeout` in milliseconds (runtimes MUST
+  enforce), and `memory` (e.g. `512MB`).
+- `artifacts`: required `patterns`, one or more glob patterns of output files
+  the runtime should capture.
+- `dependencies`: a package to version map, lockfile-style.
+
+```yaml
+---
+name: pdf-report
+description: >-
+  Turns a CSV of sales data into a formatted PDF report; use when the user
+  asks for a shareable summary of raw numbers.
+allowed-tools: Bash(python:*) Read
+metadata:
+  aip3:
+    schema: skill/v1
+    variant: composite
+    version: 1.2.0
+    title: PDF report builder
+    tags: [reporting, pdf, sales]
+    category: productivity
+    requires: [9]
+    author: Jane Doe <jane@example.com>
+    uses: [csv-clean]
+---
+```
+
+The full reference patterns live in the [`EXAMPLES.md`](./draft/EXAMPLES.md)
+companion of the draft folder, and the authoring skill
+([`skills/author-skill/SKILL.md`](./draft/skills/author-skill/SKILL.md)) in the
+same folder exercises this schema on itself.
+
 ## Rationale
 
-*To be authored. Key decisions to defend in this section: why markdown
-over JSON Schema, why YAML frontmatter over TOML, why no separate
-`runtime` field (use `tags` + capability negotiation instead), why no
-embedded code (skills declare what they need, runtimes provide it).*
+The decisions behind the format, in the order the schema presents them:
+
+- **Markdown over JSON Schema for the manifest.** The payload of a skill is
+  prose written for the agent, and prose reads best in markdown. A JSON-only
+  format would force authors to escape their instructions into strings; here
+  the instructions are the body and the fields are the frontmatter, which is
+  also why the format draws on `package.json` and `Cargo.toml` as portable
+  manifests.
+- **YAML frontmatter over TOML.** The frontmatter is delimited by `---` lines
+  and parsed as YAML 1.2, which the draft folder's
+  [`ADAPTER.md`](./draft/ADAPTER.md) holds normative for hosts (a real YAML
+  parser, never home-rolled). YAML keeps single-field manifests almost free and
+  matches how agentskills.io declines the same shape.
+- **No separate `runtime` field.** Host targeting is expressed with
+  `metadata.aip3.compatibility` (free-form environment requirements) rather
+  than a structured runtime field; there is no capability negotiation to
+  compute against, so a free-form field matches reality. A skill whose needs
+  are tool-shaped declares them in `allowed-tools` and runtimes apply policy
+  mediation there.
+- **No embedded code in the core.** A skill declares what it needs; runtimes
+  provide it. Code appears only through the optional `execution` binding under
+  `metadata.aip3`, gated behind `variant: executable`, because bundling code is
+  the exception, not the baseline. The baseline skill is the markdown body
+  itself.
+- **Extensions under `metadata`.** The AIP-3 fields live under
+  `metadata.aip3.*` so a skill authored against AIP-3 stays a valid
+  agentskills.io skill anywhere; runtimes that do not know AIP-3 preserve the
+  object verbatim.
 
 ## Reference Implementation
 
@@ -112,7 +246,29 @@ Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `skill/v1`;
 
 ## Security Considerations
 
-*To be authored. Threat surface includes: untrusted skills loaded into a
-trusted runtime, skill bodies that perform prompt injection on the host
-agent, frontmatter `tools` declaring tools the runtime should not expose.
-Mitigations live in runtime policy, not the file format itself.*
+The threat surface of the format, and what the schema already does about it:
+
+- **Untrusted skills in a trusted runtime.** A skill's body is instruction text
+  injected verbatim into the agent, so a hostile body can carry prompt
+  injection. Hosts register skills through controlled surfaces (the install
+  scopes of the draft [`ADAPTER.md`](./draft/ADAPTER.md)) and treat the body as
+  instructions to gate, not as host commands.
+- **`allowed-tools` is a request, not a grant.** The field only names tool
+  patterns the skill would like pre-approved; runtimes MAY ignore it and MUST
+  apply policy mediation before honoring it. (Capability gating across AIP
+  policies is the runtime's job, per the draft ADAPTER.md.)
+- **Executable skills run code.** With `variant: executable`, `inline` code
+  MUST be sandboxed before executing, and `execution.code.file` paths that
+  escape the skill directory with `..` segments MUST be rejected. Runtimes must
+  enforce `execution.runtime.timeout`.
+- **Extension keys under `metadata`.** Hosts MUST tolerate unknown
+  `metadata.<host>.*` keys but give them no semantics, so a skill cannot lend
+  itself authority by carrying a host's namespaced keys.
+- **Skill inputs are a runtime concern.** The manifest describes no input
+  shape; where a host needs one it collects it through the host's own policy
+  and validation, keeping the format free of code or credentials.
+
+Mitigations live in runtime policy, not the file format itself. Nothing in
+this format grants authority: every field is descriptive, and the only
+executed thing (`execution`, for `variant: executable`) is optional and
+sandbox-gated.
