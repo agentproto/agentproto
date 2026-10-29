@@ -1158,12 +1158,33 @@ resolver dispatches by scheme:
 | `org://<id>` | An organisation | host's orgs table |
 | `guild://<id>` | A guild / team | host's guilds table |
 | `bot://<name>` | A system bot | host config (e.g. `bot://agentik` = `Agentik <noreply@agentik.net>`) |
+| `session://<id>` | A live agent session on this host, as an [AIP-38](/docs/aip-38) principal | host's session registry ([AIP-46](/docs/aip-46) §Session principals) |
 | `@<owner>/identities/<slug>` | A registry-published identity | address resolver per AIP-34 |
 | `./<path>.IDENTITY.md` | A local AIP-23 IDENTITY.md workspace | filesystem read |
 
 Hosts MAY register additional schemes (e.g. `okta://`, `github://`).
 Configs using non-standard schemes declare an explicit host
 dependency.
+
+**`session://<id>` (added 2026-10-28).** The scheme names one agent
+session, by the id the host minted at spawn ([AIP-46](/docs/aip-46)
+`Session.id`), as the principal of an [AIP-38](/docs/aip-38) grant:
+
+1. **Opaque.** A consumer MUST NOT derive anything from the form of
+   `<id>` (a workspace, a parent, an agent or an order).
+2. **Host-local.** A host MUST NOT resolve a `session://` ref to a
+   session of another host; carried to another host, it names nothing.
+3. **Authenticated, not asserted.** A host MUST resolve a request to
+   `session://<id>` only from the session credential of AIP-46
+   §Session principals. Writing the ref in a request, a header or a
+   config entry MUST NOT make the caller that session.
+4. **Its own identity.** A `session://` ref names the session, not the
+   `operator://` or `user://` it runs for; whether their grants reach
+   it is decided by AIP-38 composition and its delegation ceiling.
+5. **Resolution.** The ref yields a display `name` and the host-policy
+   `email` of conformance rule 4 (`session-<id>@noreply.<host>`). A
+   retired session's ref can label an audit record, but no request
+   resolves to it once its credential is revoked.
 
 ### Minimal resolution contract
 

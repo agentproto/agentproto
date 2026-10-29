@@ -6,7 +6,7 @@ status: Review
 type: Schema
 created: 2026-05-10
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 9, 17, 19, 54, 36, 38, 39, 42, 44, 45, 57, 69]
+requires: [1, 2, 9, 17, 19, 23, 54, 36, 38, 39, 42, 44, 45, 57, 69]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime
 discussions-to: https://github.com/agentproto/agentproto/discussions/46
 layer: host
@@ -19,7 +19,7 @@ layer: host
 | Status | Draft |
 | Type | Schema |
 | Domain | cli.sh |
-| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-54](/docs/aip-54) (REF — the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY — the delegation authority), [AIP-42](/docs/aip-42) (AGENT — the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
+| Requires | [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-54](/docs/aip-54) (REF, the session's ground), [AIP-36](/docs/aip-36) (SANDBOX), [AIP-38](/docs/aip-38) (POLICY, the delegation authority), [AIP-23](/docs/aip-23) (IDENTITY-REF, the `session://` principal), [AIP-42](/docs/aip-42) (AGENT, the session's definition), [AIP-44](/docs/aip-44) (ACP), [AIP-45](/docs/aip-45) (AGENT-CLI) |
 | Composes with | [AIP-3](/docs/aip-3) (skills an agent loads), [AIP-39](/docs/aip-39) (the actions a policy grants or denies), [AIP-47](/docs/aip-47) (ROLE — org context, via [AIP-9](/docs/aip-9) OPERATOR; **never** the spawn authority — see [§Delegation](#delegation-and-the-spawn-gate)) |
 | Reference Impl | [`@agentproto/runtime`](https://github.com/agentproto/ts/tree/main/packages/runtime) |
 
@@ -494,6 +494,168 @@ lattice. Hosts MUST NOT treat the absence of a parent as an implicit
 grant to the *child* — a root-spawned session is still subject to its
 own agent's `delegates_to` for anything it spawns in turn.
 
+#### Session principals (added 2026-10-28)
+
+> **Draft AIP-46 amendment** (2026-10-28). *Normative identifiers
+> (principal names, error codes) are English and final.*
+
+This section says what proves which session made a call. The session
+credential is attribution, not by itself a barrier: a caller that
+presents none is `anonymous`, and where the host evaluates `anonymous`
+as the operator (rule 5) a session that omits its credential gains the
+operator's rights. The credential holds a session to its own rights
+only where the host leaves it no path to the host without a credential.
+
+**The session credential.** A host that spawns a session MUST mint a
+session credential for it: a secret value bound to that one session id,
+which no other party can derive or guess. The host:
+
+1. MUST deliver the credential only to the session it was minted for,
+   on the surfaces the host hands that session, and MUST NOT write it to
+   the session descriptor, a transcript, a log, an error message, any
+   other read surface, or a file under the session's working directory
+   (its ground), which the session's workspace could commit or share.
+2. MUST store only a one-way hash of the credential.
+3. MUST revoke the credential when the session is retired. A revoked
+   credential MUST NOT authenticate any request.
+4. MUST replace the credential when the session restarts, resumes or
+   continues: the host mints a new credential for the new process, and
+   the previous credential MUST NOT authenticate any request once the
+   new one is delivered.
+
+**Proof and principals.** A host MUST resolve every request on a
+surface that can reach a delegation action or a session message to one
+level of proof and at most one principal:
+
+| Proof | The caller presents | Principal |
+|---|---|---|
+| `proven` | a valid session credential, or the operator credential of the host's own auth boundary (§Security Considerations) | `session://<id>` ([AIP-23](/docs/aip-23#reference-schemes)), the session the credential was minted for; or the operator (a host-defined identity-ref), for the operator credential |
+| `claimed` | a session id it names (a URL parameter, a header, a body field) without a valid session credential, or a credential that is malformed, unknown or revoked | none once the host enforces (rules 3 and 4); in observe-only mode (rule 6), the principal the host resolved before this amendment |
+| `none` | no credential and no claim | `anonymous` |
+
+The rules:
+
+1. **The credential decides the session.** A host MUST evaluate a
+   request that presents a valid session credential as the session the
+   credential was minted for, and only as that session, narrowed by
+   §Who may spawn whom and the AIP-38 delegation ceiling. A host MUST
+   NOT evaluate such a request as the operator, even when it also
+   presents the operator's credential.
+2. **A host-spawned session presents its credential.** A host MUST
+   place a session's credential on every surface it hands that session
+   that can reach a delegation action or a session message, so that a
+   session using the surfaces it was given is evaluated as itself.
+3. **A claim is not an identity.** A host MUST NOT evaluate a request
+   as a session on the strength of a claim. Once it enforces this
+   section, a host MUST refuse with `identity_unverified` a request
+   that claims a session id and presents no valid credential, and MUST
+   refuse with `identity_mismatch` a request whose claim names a
+   session other than the one its credential was minted for. A host
+   MUST NOT resolve either request to `anonymous` or to the operator
+   instead. When the caller presents a session credential, the `:id` of
+   a route that acts on the caller's own session, at least
+   `POST /sessions/:id/checkpoint` and the inbox acknowledgement of
+   §Inbox and tools, is a claim under this rule; the operator may name
+   any session there.
+4. **An invalid credential is refused.** Once it enforces this section,
+   a host MUST refuse with `identity_unverified` a request presenting a
+   credential that is malformed, unknown or revoked, and MUST NOT
+   resolve that request to `anonymous`.
+5. **The anonymous caller is never a session.** A host MUST NOT let an
+   `anonymous` caller act as a session: it is never the sender session
+   of a session message nor the calling session of a nested spawn. A
+   host MAY treat an `anonymous` caller that reaches it over loopback
+   as the operator's own client, and then evaluates it as the operator.
+   Whether it does MUST be host configuration that only the operator
+   can change (§Operator-only configuration), and a host MUST NOT
+   extend that treatment to a caller reaching it over any other
+   transport. A host that offers that treatment MUST offer the
+   configuration that withdraws it, MUST report how many `anonymous`
+   requests it evaluated as the operator on a surface the operator can
+   read,
+   and MUST NOT describe the credential or that configuration as
+   keeping a session that omits its credential within its own rights.
+6. **Observe-only mode.** Before it enforces rules 3 and 4, a host MAY
+   run in an observe-only mode: it classifies every request into one of
+   the five classes below and records the count per class on a surface the
+   operator can read, and refuses nothing on that classification. A host in observe-only mode does not
+   conform to rules 3 and 4 and MUST NOT advertise conformance to
+   §Delegation. `verified` is `proven`, `mismatch` is `proven` with a
+   contradicting claim, `invalid credential` and `claim only` are
+   `claimed`, and `anonymous` is `none`.
+
+| Class | The request presents |
+|---|---|
+| verified | a valid credential, and no claim or a claim naming the credential's session |
+| mismatch | a valid credential and a claim naming another session |
+| invalid credential | a credential that is malformed, unknown or revoked |
+| claim only | a claim and no credential |
+| anonymous | no credential and no claim |
+
+7. **An external identifier is a label.** A caller the host did not
+   spawn MAY register an identifier of its own for display and
+   attribution. Such a session holds no credential and is not a
+   session principal: a request naming it is evaluated as `anonymous`,
+   counts as `anonymous` in rule 6, and the identifier is not a
+   `session://` ref. A host MUST NOT register an external identifier
+   that equals the id of a session it spawned.
+8. **Enforcement never outruns delivery.** A host MUST NOT enforce
+   rules 3 and 4 against callers on a surface, or spawned through an
+   adapter, to which it does not yet deliver the credential under
+   rule 2. It MAY enforce per surface and per adapter and MUST report
+   which it enforces; until it enforces everywhere it delivers
+   everywhere, it does not conform to rules 3 and 4.
+9. **A host may require proof.** A host MAY require `proven` for any
+   action it lists (for example the [AIP-39](/docs/aip-39)
+   `session:spawn`, `session:control` and `auth-profile:use`), and then
+   MUST refuse a `claimed` or `none` caller of a listed action with
+   `identity_unverified`, or with `identity_mismatch` when its claim
+   names another session. The requirement holds only against a caller
+   that cannot reach the host without a credential, not against a
+   session that can read the operator credential or reach an
+   unenforced surface.
+
+> **Informative: the reference implementation.** `@agentproto/runtime`
+> mints the credential in observe-only mode
+> ([agentproto/ts#2335](https://github.com/agentproto/ts/pull/2335)): a
+> random `apst_` token, stored as a SHA-256 hash in
+> `session-credentials.json`, sent in the `x-agentproto-session-token`
+> header on the daemon self-mount but not yet in the process
+> environment, so a native hook callback ([AIP-71](/docs/aip-71) §8)
+> still authenticates as the operator. `defaults.identity.sessionTokens`
+> (`"shadow"`, the default, or `"off"`) selects it; `GET /identity`
+> reports the five classes as `verified`, `mismatch`, `invalid_token`,
+> `claim_only` and `anonymous`. Enforcement has not landed.
+
+> **Informative: where the reference implementation does not conform.**
+> It delivers the credential only to unsandboxed `claude-code` and
+> `hermes` sessions (rule 2). A restart leaves the previous credential
+> valid until the old row retires (credential rule 4). It evaluates
+> every `anonymous` local caller as the operator with no switch
+> (rule 5). It honours a `callerSessionId` claim on loopback without a
+> credential (rule 3).
+
+#### Operator-only configuration (added 2026-10-28)
+
+The host's configuration decides which sessions may message or drive
+one another, whether an `anonymous` loopback caller is the operator and
+which actions require `proven` (§Session principals), and which
+[AIP-38](/docs/aip-38) policy the host applies. A host MUST refuse a
+configuration write made by a session principal when the write would
+change any of them. Only the operator MAY change them. The refusal MUST
+hold on every surface that carries a configuration write (an MCP tool,
+an HTTP route, a command the host runs on the session's behalf). A
+session that edits the host's files through its own shell is outside
+this rule's reach (§What this gate cannot reach). This is §Who may
+spawn whom rule 3 (no self-widening) applied to identity, messaging
+and policy.
+
+> **Informative: the reference implementation.** The messaging grants
+> live under `defaults.messaging.*` in `config.json` (with `peerBinding`
+> from [agentproto/ts#2326](https://github.com/agentproto/ts/pull/2326)
+> and [agentproto/ts#2330](https://github.com/agentproto/ts/pull/2330)),
+> written through `config_set`, which does not yet refuse a session.
+
 #### A nested spawn inherits its parent's ground
 
 Identity is not the only thing a nested spawn must carry down. A host
@@ -576,6 +738,8 @@ are normative; hosts MAY add their own.
 | `cwd_outside_parent` | nested spawn named ground outside its parent's subtree |
 | `max_depth_exceeded` | `depth` would exceed `maxDepth` |
 | `child_quota_exceeded` | caller already at `maxChildren` |
+| `identity_unverified` | caller claims a session id without a valid session credential, or presents a malformed, unknown or revoked credential, or presents none to an action the host requires `proven` for (§Session principals, rule 9) |
+| `identity_mismatch` | caller's claim names a session other than the one its credential was minted for (§Session principals) |
 
 A rejection MUST be distinguishable from a spawn failure: the former
 means no session was permitted, the latter that one was permitted and
@@ -850,7 +1014,8 @@ interface SessionMessage {
 ```
 
 `from` MUST be derived by the host from the authenticated caller identity
-(the scope credential or host-attested session binding). A send request MUST
+(the session credential of [§Session principals](#session-principals-added-2026-10-28),
+the scope credential or host-attested session binding). A send request MUST
 NOT be able to set any `from` field; hosts MUST reject one that tries.
 `relation` is computed relative to `to` from the session forest. `label` is
 display-only and MUST NOT be relied upon for identity.
@@ -1518,6 +1683,9 @@ Daemons started via `agentproto serve` (or built directly through
   split of the legacy global `sessions.json`
 - **Spawn gate**: `runtime/src/session-spawn.ts` — the enforcement
   point of §Delegation
+- **Session credentials**: `runtime/src/session-credentials.ts`,
+  `runtime/src/identity-defaults.ts` and `observeCallerIdentity` in
+  `runtime/src/http-server.ts`, the credentials of §Session principals
 
 §[Delegation](#delegation-and-the-spawn-gate) is specified ahead of
 its reference implementation — `@agentproto/runtime` does not yet
@@ -1679,6 +1847,14 @@ presets (a harness preset is a session preset with `defaultFor`).
 completion check at turn end becomes a limit that refuses the next
 `model:invoke`, a deliberate behaviour change.
 
+### The 2026-10-28 session-principals amendment (draft)
+
+§Session principals and §Operator-only configuration change who a
+caller is; on the wire they add only the error codes
+`identity_unverified` and `identity_mismatch`. Deliberately, a session
+that names itself by a claim alone is refused once the host enforces,
+and observe-only mode lets the operator count those callers first.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -1720,6 +1896,9 @@ completion check at turn end becomes a limit that refuses the next
   loopback from auth on any surface exposing the delegation actions
   has published an ungated gateway to every child it runs. Hosts MUST
   authenticate the delegation surface per-session even on loopback.
+  The one exception, §Session principals rule 5, lets a child that
+  omits its credential reach the surface with the operator's rights: a
+  residual the operator accepts by configuration, not an authentication.
 - **The realistic defeat of this gate is not an attacker.** It is an
   adapter shipping its own config entry for the host's own endpoint,
   or a well-meaning caller handing a child a broader MCP server. Both
@@ -1788,13 +1967,11 @@ completion check at turn end becomes a limit that refuses the next
 - **Workspace-scoped reads.** §State partitioning gives a host the
   boundary but no rule for honouring it: nothing here says a consumer
   presenting a workspace-scoped credential MUST be served only that
-  workspace's bucket. Writing that rule means first answering what a
-  workspace-scoped credential *is* — the reference implementation has
-  no such thing today, so the honest state is that pairings and
-  orchestrator scope-tokens are daemon-wide and the partition is a
-  precondition rather than a control (§Security Considerations). The
-  scoping rule and the credential it keys off should land together, or
-  the rule will be written against an authority that does not exist.
+  workspace's bucket. The credential it keys off is no longer open: it
+  is the session credential (§Session principals), and a workspace is
+  not a principal. The read-scoping rule itself is still unwritten, so
+  the partition stays a precondition rather than a control (§Security
+  Considerations).
 - **Retention and reclamation.** Buckets grow without bound; this AIP
   specifies no GC. The obvious question — when may a host delete a
   transcript, and who decides — is deliberately unanswered, because
