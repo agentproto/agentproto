@@ -28,7 +28,7 @@
       "term": "operator",
       "means": "an agent holding a role in an organization",
       "owner": 9,
-      "neverMeans": "the human who controls a host"
+      "neverMeans": "the human who controls a host (say user); the principal holding a host's credential (say host operator)"
     },
     {
       "term": "user",
@@ -37,10 +37,36 @@
       "neverMeans": "an AIP-9 operator"
     },
     {
+      "term": "host operator",
+      "means": "the principal that holds a host's own credential: the user, or a client acting for them (for example a command line or a desktop app); written \"the operator\" inside AIP-46 and AIP-71, where no AIP-9 operator appears",
+      "owner": 70,
+      "neverMeans": "an AIP-9 operator",
+      "futureOwner": 46,
+      "via": "an AIP-46 amendment"
+    },
+    {
+      "term": "principal",
+      "means": "the identity-ref a grant names and a request resolves to (a host operator, a session, `anonymous`, an AIP-9 operator, a user)",
+      "owner": 38,
+      "neverMeans": "an AIP-23 identity workspace"
+    },
+    {
       "term": "session",
       "means": "one running (or ended) harness invocation managed by a host",
       "owner": 46,
       "neverMeans": "a terminal, a browser instance, an ACP wire session (say \"ACP session\")"
+    },
+    {
+      "term": "label",
+      "means": "free text attached for display to a session, a spawn request or an auth profile; a grant never matches it",
+      "owner": 46,
+      "neverMeans": "an operator label; the `label:` scope form, which matches the operator label"
+    },
+    {
+      "term": "operator label",
+      "means": "the durable name only the host operator, or the host itself, assigns to a session or a lineage, matched by `label:` scopes and `session-label://` principals",
+      "owner": 46,
+      "neverMeans": "a label; a session id"
     },
     {
       "term": "session config",
@@ -54,7 +80,7 @@
       "term": "session preset",
       "means": "a named, saved session config",
       "owner": 70,
-      "neverMeans": "a gateway; a harness manifest",
+      "neverMeans": "a gateway; a harness manifest; a per-harness default overlay (say harness defaults, the `host` layer of AIP-46 §Layers)",
       "futureOwner": 46,
       "via": "agentproto/agentproto#89"
     },
@@ -68,7 +94,7 @@
       "term": "auth profile",
       "means": "a named reference to the credential a session bills or authenticates through",
       "owner": 70,
-      "neverMeans": "a context setting; a browser identity",
+      "neverMeans": "a context setting; a browser identity; a daemon config overlay (say config profile)",
       "futureOwner": 69,
       "via": "agentproto/agentproto#87"
     },
@@ -84,7 +110,7 @@
       "term": "endpoint",
       "means": "the party that serves and bills a model",
       "owner": 70,
-      "neverMeans": "the model builder",
+      "neverMeans": "the model builder; an inference endpoint (AIP-61, always qualified); a gateway; an HTTP route",
       "futureOwner": 69,
       "via": "agentproto/agentproto#87"
     },
@@ -100,7 +126,7 @@
       "term": "policy",
       "means": "an AIP-38 access document: grants, limits, requirements",
       "owner": 38,
-      "neverMeans": "a completion check, a retry rule, settings"
+      "neverMeans": "a completion check, a retry rule, settings, a drive or model allow list (say grant)"
     },
     {
       "term": "gate",
@@ -132,9 +158,9 @@
     },
     {
       "term": "access role",
-      "means": "a permission tier of a human or agent (owner, admin, editor, viewer; for sessions, executor and supervisor)",
+      "means": "a permission tier of a human or agent inside a host's organization (owner, admin, editor, viewer), evaluated by AIP-38 policy",
       "owner": 47,
-      "neverMeans": "an AIP-47 role"
+      "neverMeans": "an AIP-47 role; a session's delegation authority, which is its bound agent's `delegates_to` (AIP-46 §Delegation)"
     },
     {
       "term": "position",
@@ -176,7 +202,7 @@
       "term": "pack",
       "means": "an AIP-64 installable capability bundle",
       "owner": 64,
-      "neverMeans": "an AIP-57 routing table"
+      "neverMeans": "an AIP-57 routing table; a host-local bundle of imported MCP servers and skills (say bundle)"
     },
     {
       "term": "routing table",
@@ -308,6 +334,16 @@
       "alias": "session.mode",
       "use": "session.lifetime",
       "pattern": "\\bsession\\.mode\\b"
+    },
+    {
+      "alias": "harness preset",
+      "use": "harness defaults (the `host` layer of AIP-46 §Layers), or a session preset with `defaultFor`",
+      "pattern": "\\bharness presets?\\b"
+    },
+    {
+      "alias": "spawn role",
+      "use": "agent (a built-in AIP-42 agent named by `agent`)",
+      "pattern": "\\bspawn[- ]roles?\\b"
     }
   ]
 }

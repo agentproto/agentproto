@@ -699,8 +699,10 @@ host-defined:
 
 - the session's working directory is the repository root, so the reviewer
   sees the reviewed checkout;
-- the role is `executor`, the origin is `review`, and no separate git
-  worktree is created and duplicate-session reuse is disabled;
+- the bound agent is the host's built-in `executor` (an AGENT declaring
+  no `delegates_to`, AIP-46 §Delegation), the origin is `review`, and
+  no separate git worktree is created and duplicate-session reuse is
+  disabled;
 - the session label is `review:<reviewId>:<checkId>`, and its parent is the
   session that requested the review, when there is one;
 - the session is ended after its single turn, and on timeout or cancel.
