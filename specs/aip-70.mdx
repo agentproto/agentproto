@@ -149,6 +149,7 @@ this table renders it.
 | **session** | one running (or ended) harness invocation managed by a host | [AIP-46](/docs/aip-46) | a terminal, a browser instance, an ACP wire session (say "ACP session") |
 | **label** | free text attached for display to a session, a spawn request or an auth profile; a grant never matches it | [AIP-46](/docs/aip-46) | an operator label; the `label:` scope form, which matches the operator label |
 | **operator label** | the durable name only the host operator, or the host itself, assigns to a session or a lineage, matched by `label:` scopes and `session-label://` principals | [AIP-46](/docs/aip-46) | a label; a session id; an AIP-9 operator, or its slug |
+| **context settings** | the `contextSettings` block of a session: the context floor, the absolute compaction threshold and the reservation of compaction to the operator, each layered as its own axis | [AIP-46](/docs/aip-46) | the `contextProfile` axis of a session config; a prompt's context window |
 | **session config** | how a session runs: harness, model, effort, posture, context, route, auth profile, retry, fallback | AIP-70, then AIP-46 (agentproto/agentproto#89) | a permission |
 | **session preset** | a named, saved session config | AIP-70, then AIP-46 (agentproto/agentproto#89) | a gateway; a harness manifest; a per-harness default overlay (say harness defaults, the `host` layer of AIP-46 §Layers) |
 | **gateway** | a backend endpoint a harness can be pointed at (Anthropic-compatible, OpenAI-compatible) | [AIP-45](/docs/aip-45) | a preset |
