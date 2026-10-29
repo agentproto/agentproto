@@ -1,6 +1,6 @@
 ---
 title: "AIP-47: ROLE (role/v1): organizational role manifest"
-description: A single-doc markdown + frontmatter format for portable organizational roles — mission, responsibilities, capabilities, tools, KPIs, seniority, reporting line, lifecycle hooks. Sibling to AIP-25 PERSONA (face) and AIP-23 IDENTITY (substance); referenced by AIP-9 OPERATOR (its `role` binding) and AIP-6 COMPANY (`roles/<slug>/ROLE.md` doctype). Roles describe what a job is — independent of who holds it (persona/identity) and which instance is hired (operator).
+description: A single-doc markdown + frontmatter format for portable organizational roles — mission, responsibilities, capabilities, tools, KPIs, seniority, reporting line, lifecycle hooks. Sibling to AIP-25 PERSONA (face) and AIP-23 IDENTITY (substance); referenced by AIP-9 OPERATOR (its `role` binding) and located in an AIP-6 COMPANY package by the conventional path `roles/<slug>/ROLE.md`. Roles describe what a job is — independent of who holds it (persona/identity) and which instance is hired (operator).
 aip: 47
 status: Review
 type: Schema
@@ -36,8 +36,8 @@ in an AI company. A role describes **what the job is** — independent of
 who holds it (the persona / identity) and which instance is hired (the
 operator).
 
-[AIP-6](/docs/aip-6) introduces `role` as a primitive of the company
-package (`roles/<slug>/ROLE.md`) and [AIP-9](/docs/aip-9) declares that
+[AIP-6](/docs/aip-6) only keeps the conventional path
+`roles/<slug>/ROLE.md` for a role in a company package and [AIP-9](/docs/aip-9) declares that
 an operator holds a role through its `role: {ref, bind?, with?}` binding
 (required after AIP-9's [alias period](/docs/aip-9#alias-period), optional
 with a fallback and a warning until then), but neither AIP specifies
@@ -80,9 +80,9 @@ You cannot hand a "Senior SEO Specialist" to a colleague, fork it, attach
 KPIs to it, have two operators apply for it, or render a career-page UI
 on top of it.
 
-[AIP-6](/docs/aip-6) anticipates the gap by listing `role` as a doctype
-of the company package — `roles/<slug>/ROLE.md` — but defers the body
-schema. [AIP-9](/docs/aip-9) anticipates the gap by giving the operator a
+[AIP-6](/docs/aip-6) keeps only the conventional path
+`roles/<slug>/ROLE.md` for a role in a company package and leaves the
+body schema to this AIP. [AIP-9](/docs/aip-9) anticipates the gap by giving the operator a
 `role` binding that points at a role by ref. AIP-47 completes the trio.
 
 Beyond the immediate gap, three design pressures point at a standalone
@@ -716,8 +716,8 @@ direction is always role → policy, never the inverse.
 ## Rationale
 
 **Why a separate AIP rather than extending AIP-6.** [AIP-6](/docs/aip-6)
-names `role` as a doctype of the company family but defers the body
-schema. Two options were considered: (a) add the role schema inline to
+only keeps the conventional path `roles/<slug>/ROLE.md` and does not
+define the role document. Two options were considered: (a) add the role schema inline to
 AIP-6, or (b) carve out a sibling AIP. Option (b) wins because the role
 schema is large (a full job description has more fields than the
 company itself), evolves on its own cadence, and is referenced by
@@ -821,7 +821,7 @@ role fields directly on `OPERATOR.md` or on a `role: <enum>` field of
 the operator: those implementations SHOULD migrate to extracting role
 data into `ROLE.md` files and replacing the operator field with a slug
 reference (the `role` binding [AIP-9](/docs/aip-9) declares). AIP-6 did
-not formally specify role-on-operator beyond the doctype mention, so
+not formally specify role-on-operator beyond the conventional `roles/<slug>/ROLE.md` path, so
 this is a clarification, not a break.
 
 For [AIP-9](/docs/aip-9) implementations that resolve the operator
@@ -893,7 +893,7 @@ surface lies in what runtimes do with role contents:
 ## See also
 
 - [AIP-3](/docs/aip-3) — SKILL.md (skills referenced by role)
-- [AIP-6](/docs/aip-6) — COMPANY.md (hosts the role doctype)
+- [AIP-6](/docs/aip-6) — COMPANY.md (keeps the conventional `roles/<id>/ROLE.md` path)
 - [AIP-7](/docs/aip-7) — GOVERNANCE.md (signatures, audit, approval — wraps the policy decisions)
 - [AIP-9](/docs/aip-9) — OPERATOR.md (holds the role through its `role` binding: required after the alias period, optional with a fallback and a warning until then)
 - [AIP-14](/docs/aip-14) — TOOL.md (tools referenced by role)

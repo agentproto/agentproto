@@ -271,7 +271,7 @@ company workspace level — items either participate in the tree (via containmen
 or stand outside it (policies, objectives, etc.).
 
 If an organisation needs the AIP-20 three-axis pattern (e.g. for work items the
-company tracks), it sets `work: ws://workspaces/<slug>` to bind to an AIP-20
+company tracks), it sets `work: ws://workspaces/@<owner>/<slug>/WORK.md` to bind to an AIP-20
 work tracker; the work tracker carries the scope axes for its items.
 
 ## Cross-AIP ref resolution
@@ -282,7 +282,7 @@ work tracker; the work tracker carries the scope axes for its items.
 | `operator:<slug>[@<workspace>]`     | [AIP-9](/docs/aip-9)   | `executor` and seat holders. With `@<workspace>`, look the operator up in that workspace's registry. |
 | `user:<id>[@<workspace>]`           | [AIP-54](/docs/aip-54) | Seat holders only. Look the user up in the host user registry. |
 | `workspace:@<owner>/<slug>`         | [AIP-34](/docs/aip-34) | A seat's `parent` when the seat is attached to a node: the node must be in the same tree and carry a view of this office. |
-| `ws://workspaces/<slug>`            | [AIP-20](/docs/aip-20) | Look up the work workspace.                                                    |
+| `ws://workspaces/@<owner>/<slug>/WORK.md` | [AIP-20](/docs/aip-20) | Look up the work document of that workspace.                             |
 | `ws://agencies/<slug>`              | [AIP-21](/docs/aip-21) | Resolve the agency workspace.                                                  |
 | `ws://wikis/<slug>(/KNOWLEDGE.md)?` | [AIP-10](/docs/aip-10) | Resolve the wiki workspace.                                                    |
 | `ws://playbooks/<slug>`             | [AIP-12](/docs/aip-12) | Resolve the playbook.                                                          |
@@ -543,7 +543,7 @@ Parent:
 ```yaml
 executor: ws://operators/founder
 governance: ../policies/org-default.yaml
-work: ws://workspaces/main-tracker
+work: ws://workspaces/@acme/main-tracker/WORK.md
 knowledge: ws://wikis/handbook/KNOWLEDGE.md
 playbook: ws://playbooks/values
 ```
@@ -627,7 +627,7 @@ defineOfficeWorkspace({
   }
   executor?: string                     // ws://operators/<slug> or operator:<slug>[@<workspace>]
   governance?: string                   // path or ref
-  work?: string                         // ws://workspaces/<slug>
+  work?: string                         // ws://workspaces/@<owner>/<slug>/WORK.md
   agency?: string                       // ws://agencies/<slug>
   knowledge?: string                    // ws://wikis/<slug>
   playbook?: string                     // ws://playbooks/<slug>

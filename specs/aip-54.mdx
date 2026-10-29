@@ -198,6 +198,7 @@ ipfs-body     = cid [ ":" path ]
 email-body    = address
 operator-body = slug [ "@" workspace ]      ; @workspace = cross-workspace disambiguator
 user-body     = id [ "@" workspace ]
+workspace     = owner "/" slug              ; an AIP-34 id without its leading "@" (the suffix's "@" is that "@")
 persona-body  = id
 session-body  = id                          ; AIP-46 session id
 eth_tx-body   = chainId ":" txHash          ; EIP-155 chainId; 0x-prefixed lowercase hex
@@ -332,7 +333,11 @@ be collapsed.
   as `@<owner-slug>/<workspace-slug>` — two segments, not a bare slug.
   So the body is that whole id (`workspace:@acme/marketing-ops`), and
   `ws://workspaces/@acme/marketing-ops` is well-formed. Hosts MUST NOT
-  assume a workspace body is a single segment.
+  assume a workspace body is a single segment. In the cross-workspace
+  suffix of `operator-body` and `user-body` the id is written without
+  its leading `@`, which the suffix's own `@` supplies:
+  `operator:chief-of-staff@acme/ops` names the operator in workspace
+  `@acme/ops`, never `operator:chief-of-staff@@acme/ops`.
 
 ### Resolution
 

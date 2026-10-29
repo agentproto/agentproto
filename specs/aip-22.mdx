@@ -241,7 +241,7 @@ identity:
 executor: ws://operators/<slug>             # OPTIONAL: AIP-9 default org operator of the whole tree
                                             #   (or operator:<slug>[@<workspace>], AIP-54)
 governance: <path-or-ref>                   # OPTIONAL — AIP-7 governance binding
-work: ws://workspaces/<slug>                # OPTIONAL — AIP-20 work tracker
+work: ws://workspaces/@<owner>/<slug>/WORK.md  # OPTIONAL — AIP-20 work tracker
 agency: ws://agencies/<slug>                # OPTIONAL — AIP-21 agency context
 knowledge: ws://wikis/<slug>/KNOWLEDGE.md   # OPTIONAL — AIP-10 wiki binding
 playbook: ws://playbooks/<slug>             # OPTIONAL — AIP-12 culture / values playbook
@@ -671,7 +671,7 @@ schema: collection.item/v1
 collection: role
 id: ROLE-chief-of-staff
 title: Chief of staff
-holder: operator:chief-of-staff@jeremy-root
+holder: operator:chief-of-staff@jeremy/root
 ```
 
 ### Cross-AIP composition
