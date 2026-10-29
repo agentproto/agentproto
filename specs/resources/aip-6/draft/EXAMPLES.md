@@ -1,9 +1,16 @@
 # EXAMPLES.md — company/v1 reference workspaces
 
 Reference workspaces exemplifying common shapes. Each example shows the relevant
-doctypes — `COMPANY.md`, one or more `ROLE.md`, and one or more `OBJECTIVE.md` —
-as a self-contained package an AIP-6-conforming adapter could load. Authors
-should copy the closest pattern and edit fields rather than draft from scratch.
+files of a company package: `COMPANY.md` and `OBJECTIVE.md` (the doctypes AIP-6
+owns), the `ROLE.md` files ([AIP-47](/docs/aip-47) `role/v1` documents, not
+company/v1), and, where the org chart matters, the [AIP-22](/docs/aip-22) office
+that holds the positions and seats. Authors should copy the closest pattern and
+edit fields rather than draft from scratch.
+
+Only blocks that declare `schema: company/v1` are validated by
+[`./COMPANY.schema.json`](./COMPANY.schema.json). A role block declares
+`schema: role/v1` and is validated by AIP-47's `ROLE.schema.json`; a seat block
+is an AIP-22 collection item.
 
 ## Patterns covered
 
@@ -11,16 +18,17 @@ should copy the closest pattern and edit fields rather than draft from scratch.
 2. [Two-role company — founder + ops](#2-two-role-company--founder--ops)
 3. [Full org tree](#3-full-org-tree)
 4. [Objective decomposition](#4-objective-decomposition)
-5. [Role with narrow, scoped capabilities](#5-role-with-narrow-scoped-capabilities)
+5. [Role with a narrow, declared intent](#5-role-with-a-narrow-declared-intent)
 6. [Importing roles from a registry](#6-importing-roles-from-a-registry)
 7. [Branching / forking a company](#7-branching--forking-a-company)
+8. [Legacy spellings: `kind`, `slug` and the agent slot](#8-legacy-spellings-kind-slug-and-the-agent-slot)
 
 ---
 
 ## 1. Solo founder company
 
 The minimum viable workspace. One role wears every hat, one objective drives the
-quarter.
+quarter. A package this small can omit the office.
 
 ```
 pricewatch/
@@ -47,29 +55,33 @@ values:
   - "Show our work."
   - "No vendor lock-in."
 structure:
-  roles: [founder]
   objectives: [q3-pipeline]
 tags: [solo, pricing, saas]
 ---
 ```
 
-**`roles/founder/ROLE.md`:**
+**`roles/founder/ROLE.md`** (an AIP-47 document):
 
 ```yaml
 ---
-schema: company/v1
-doctype: role
-id: founder
-name: Founder
-mandate: >
+schema: role/v1
+name: founder
+title: Founder
+description: Sets product direction and owns customer relationships.
+version: 1.0.0
+seniority: executive
+mission: >
   Set product direction, own customer relationships, run support, manage the AI
   operator that handles routine work.
-scope:
-  owns: ["product", "customers", "support"]
-  capabilities: ["product.write", "customers.write", "support.respond"]
-objectives: [q3-pipeline]
-tools: [pricing-snapshot, send-email-brevo, append-to-notes]
-workflows: [onboarding-after-payment]
+responsibilities:
+  - Decide what the product does next
+  - Answer customers
+capabilities:
+  - product direction
+  - customer support
+tools:
+  - ws://tools/pricing-snapshot
+  - ws://tools/send-email-brevo
 ---
 ```
 
@@ -101,12 +113,14 @@ key_results:
 ## 2. Two-role company — founder + ops
 
 The most common early-stage shape. Founder sets direction; ops handles process.
-`reports_to` records the edge.
+The reporting edge is a seat property in the office, not a COMPANY.md field.
 
 ```
 acme-agency/
   COMPANY.md
-  roles/{founder,ops}/ROLE.md
+  OFFICE.md
+  items/role/{founder,ops}.md       # the seats (AIP-22 items)
+  roles/{founder,ops}/ROLE.md       # the roles they follow (AIP-47)
   objectives/{q3-pipeline,retention-90}/OBJECTIVE.md
 ```
 
@@ -122,10 +136,20 @@ mission: >
   Run a 2-person AI agency that ships custom GTM motions for early-stage SaaS
   founders.
 structure:
-  roles: [founder, ops]
   objectives: [q3-pipeline, retention-90]
-  reports_to:
-    ops: founder
+---
+```
+
+**`items/role/ops.md`** (an AIP-22 seat; `reportsTo` is the reporting line):
+
+```yaml
+---
+schema: collection.item/v1
+collection: role
+id: ROLE-ops
+title: Operations Lead
+reportsTo: ROLE-founder
+holder: operator:ops
 ---
 ```
 
@@ -133,20 +157,24 @@ structure:
 
 ```yaml
 ---
-schema: company/v1
-doctype: role
-id: ops
-name: Operations Lead
-mandate: >
+schema: role/v1
+name: ops
+title: Operations Lead
+description: Runs delivery, support and monthly reviews.
+version: 1.0.0
+seniority: senior
+reports_to: ws://roles/founder
+mission: >
   Run delivery: onboarding, support, monthly reviews. Escalate any request that
   affects pricing, scope, or contract terms.
-reports_to: founder
-scope:
-  owns: ["delivery", "support", "monthly-reviews"]
-  capabilities: ["delivery.write", "support.respond"]
-objectives: [retention-90]
-tools: [append-to-notes, send-email-brevo]
-workflows: [onboarding-after-payment]
+responsibilities:
+  - Onboard new customers after payment
+  - Run the monthly review
+antiPatterns:
+  - Changing pricing, scope or contract terms without the founder
+tools:
+  - ws://tools/append-to-notes
+  - ws://tools/send-email-brevo
 ---
 ```
 
@@ -169,34 +197,41 @@ key_results:
 ---
 ```
 
-`founder/ROLE.md` mirrors the solo founder example with
-`scope.owns: ["new-business", "strategy"]` and `objectives: [q3-pipeline]`.
+`founder` mirrors the solo founder example with
+`responsibilities` about new business and strategy.
 
 ---
 
 ## 3. Full org tree
 
-A four-role tree with explicit reports-to edges. The `structure.reports_to` map
-is the authority on hierarchy; per-role `reports_to` MUST agree.
+A four-seat tree with explicit reporting edges. The office is the authority on
+hierarchy: a seat's `reportsTo` MUST resolve to a seat of the same office, and
+the role's own `reports_to` links roles, not seats.
 
 ```
 fieldworks/
   COMPANY.md
+  OFFICE.md
+  items/role/{founder,head-of-product,head-of-gtm,sdr}.md
   roles/{founder,head-of-product,head-of-gtm,sdr}/ROLE.md
   objectives/annual-revenue/OBJECTIVE.md
 ```
 
-**`COMPANY.md` (excerpt):**
+**`items/role/sdr.md`:**
 
 ```yaml
-structure:
-  roles: [founder, head-of-product, head-of-gtm, sdr]
-  objectives: [annual-revenue]
-  reports_to:
-    head-of-product: founder
-    head-of-gtm: founder
-    sdr: head-of-gtm
+---
+schema: collection.item/v1
+collection: role
+id: ROLE-sdr
+title: SDR
+reportsTo: ROLE-head-of-gtm
+holder: operator:sdr
+---
 ```
+
+The other seats set `reportsTo` the same way: `ROLE-head-of-product` and
+`ROLE-head-of-gtm` report to `ROLE-founder`; `ROLE-founder` omits it (top-level).
 
 The org tree this expresses:
 
@@ -211,25 +246,30 @@ founder
 
 ```yaml
 ---
-schema: company/v1
-doctype: role
-id: sdr
-name: SDR
-mandate: >
+schema: role/v1
+name: sdr
+title: SDR
+description: Sources and qualifies outbound leads.
+version: 1.0.0
+seniority: junior
+mission: >
   Source and qualify outbound leads. Hand off SQLs to head-of-gtm; never close a
   deal.
-reports_to: head-of-gtm
-scope:
-  owns: ["outbound-pipeline"]
-  capabilities: ["leads.write", "outbound.send"]
-objectives: [annual-revenue]
-tools: [clearbit-enrich, send-email-brevo]
-workflows: [lead-triage]
+responsibilities:
+  - Source outbound leads
+  - Qualify leads against the ideal customer profile
+antiPatterns:
+  - Closing a deal
+tools:
+  - ws://tools/clearbit-enrich
+  - ws://tools/send-email-brevo
 ---
 ```
 
-`founder` omits `reports_to` (top-level). `head-of-product` and `head-of-gtm`
-set `reports_to: founder`.
+A package that has no office yet MAY still carry the older
+`structure.reports_to` map in `COMPANY.md`. It is deprecated, read as a seed, and
+the office wins as soon as one exists (see AIP-6 "Where the company's
+organization lives").
 
 ---
 
@@ -286,37 +326,43 @@ The adapter validates: `annual-revenue.children` lists `q3-pipeline`, AND
 `depends_on` builds a DAG — `q3` waits on `q2`'s pipeline to land before its
 starting baseline is meaningful.
 
+The work that serves an objective is not described here. A project that pursues
+`q3-pipeline` is an AIP-34 node whose `work:` field points at an AIP-20
+`WORK.md`; its items link back to the objective by slug.
+
 ---
 
-## 5. Role with narrow, scoped capabilities
+## 5. Role with a narrow, declared intent
 
-A role intentionally restricted to a narrow domain. The mandate describes the
-bounded autonomy; `scope.capabilities` enforces it through AIP-7 governance.
+A role intentionally restricted to a narrow domain. The mission and the
+`antiPatterns` state the intent; a role is intent, never permission. What the
+holder may actually do is decided by an AIP-38 policy bound to the operator or
+to the node it works in, not by the role file.
 
 **`roles/billing-bot/ROLE.md`:**
 
 ```yaml
 ---
-schema: company/v1
-doctype: role
-id: billing-bot
-name: Billing Bot
-mandate: >
-  Read-only operator that produces monthly invoice drafts and posts them to the
-  founder for approval. NEVER charges a card; NEVER modifies subscription state.
-  Escalates any anomaly above $5K to the founder.
-reports_to: ops
-scope:
-  owns: ["invoice-drafts"]
-  capabilities:
-    - "invoices.read"
-    - "invoices.draft"
-    - "subscriptions.read"
-objectives: [retention-90]
+schema: role/v1
+name: billing-bot
+title: Billing Bot
+description: Produces monthly invoice drafts for founder approval.
+version: 1.0.0
+seniority: junior
+reports_to: ws://roles/ops
+mission: >
+  Read-only role that produces monthly invoice drafts and posts them to the
+  founder for approval. Never charges a card; never modifies subscription
+  state. Escalates any anomaly above $5K to the founder.
+responsibilities:
+  - Draft the monthly invoices
+  - Post the drafts to the founder for approval
+antiPatterns:
+  - Charging a card
+  - Modifying subscription state
 tools:
-  - stripe-customer-lookup
-  - append-to-notes
-workflows: []
+  - ws://tools/stripe-customer-lookup
+  - ws://tools/append-to-notes
 metadata:
   acme:
     escalation_threshold_usd: 5000
@@ -326,11 +372,10 @@ metadata:
 
 Rationale:
 
-- `mandate` reads like a contract. Anything outside it is a policy violation.
-- `scope.capabilities` lists only `*.read` and `invoices.draft`. No write
-  capabilities for subscriptions.
+- `mission` and `antiPatterns` read like a contract. The role's `defaultPolicy`
+  MAY point at a recommended policy, advisory only.
 - `tools` includes only the lookups needed; `stripe-charge` is conspicuously
-  absent.
+  absent. Declaring a tool is intent: the policy decides the effect.
 - `metadata.acme.*` carries vendor extensions without polluting the canonical
   fields.
 
@@ -339,8 +384,9 @@ Rationale:
 ## 6. Importing roles from a registry
 
 Pull a stock role from an external registry and bind it locally. The adapter
-materialises the doctype during workspace registration; once materialised, it's
-identical to a hand-authored doctype.
+materialises the file during workspace registration (a role as an AIP-47
+`role/v1` document, an objective as a company/v1 objective); once materialised,
+it's identical to a hand-authored file.
 
 **`COMPANY.md`:**
 
@@ -353,11 +399,7 @@ name: Helio
 mission: >
   Sell solar consultations to homeowners with AI-driven lead qualification.
 structure:
-  roles: [founder, marketer, sdr]
   objectives: [annual-revenue]
-  reports_to:
-    marketer: founder
-    sdr: founder
 imports:
   - from: "open-companies/marketing@^1.0.0"
     as: role
@@ -409,7 +451,7 @@ clone** of the workspace. Two patterns are common.
 ### 7a. Light fork — adjust mission, keep structure
 
 A subsidiary or campaign-specific variant. Copy the workspace, edit `COMPANY.md`
-mission and objectives, leave roles untouched.
+mission and objectives, leave roles and the office untouched.
 
 ```
 helio-commercial/                   # forked from helio/
@@ -428,11 +470,7 @@ id: helio-commercial
 name: Helio Commercial
 mission: Sell solar to commercial property owners and asset managers.
 structure:
-  roles: [founder, marketer, sdr]
   objectives: [commercial-revenue]
-  reports_to:
-    marketer: founder
-    sdr: founder
 metadata:
   fork:
     from: "helio@1.4.0"
@@ -457,7 +495,7 @@ merge.
 
 ```bash
 git checkout -b add-customer-success
-# … author roles/customer-success/ROLE.md and update COMPANY.md.structure …
+# … author roles/customer-success/ROLE.md and add its seat to the office …
 git commit -am "Add customer-success role"
 agentcompanies validate .
 
@@ -475,21 +513,59 @@ The post-merge `validate` catches:
 
 ---
 
+## 8. Legacy spellings: `kind`, `slug` and the agent slot
+
+Files written before `doctype`/`id` were canonical, and files from the AIP-6
+agent slot, stay valid. AIP-6 sets no removal date for these spellings.
+
+**`objectives/q3-pipeline/OBJECTIVE.md`**, with the aliases:
+
+```yaml
+---
+schema: company/v1
+kind: objective
+slug: q3-pipeline
+name: Q3 Pipeline
+statement: Reach 50 paying customers by end of Q3.
+owner: founder
+---
+```
+
+**`agents/researcher/AGENT.md`**, the legacy agent slot ([AIP-42](/docs/aip-42)
+reads it as an agent, `slug` is its `id`):
+
+```yaml
+---
+schema: company/v1
+kind: agent
+slug: researcher
+name: Researcher
+description: Looks things up for the founder.
+---
+```
+
+A file that carries an alias next to its canonical field with a different value
+(`doctype: company` with `kind: objective`) is refused with `alias_conflict`.
+New agents use `schema: agent/v1`.
+
+---
+
 ## Anti-patterns to avoid
 
-- **Folder name ≠ `id`** — `roles/CustomerSuccess/ROLE.md` with
-  `id: customer-success`. Adapter rejects with `folder_id_mismatch`.
+- **Folder name ≠ `id`**: `objectives/Q3Pipeline/OBJECTIVE.md` with
+  `id: q3-pipeline`. Adapter rejects with `folder_id_mismatch`.
 - **Database IDs in references** — slugs only. UUIDs in `reports_to` or `owner`
   defeat git-native portability.
 - **Vendor names in mission** — bakes the package to one runtime. Use
   `metadata.<vendor>.*` for vendor-specific hints.
 - **Asymmetric `parent` / `children`** — set both edges or neither.
 - **`reports_to` cycles** — A reports to B reports to A. Always a spec bug.
-- **Empty `mandate`** — the mandate is the role's bounded-autonomy contract; an
-  empty one removes the safety substrate AIP-7 builds on.
-- **`structure.roles` listing a slug with no `ROLE.md`** — doctype-loader
-  catches it but ship-time effort wasted. Always scaffold the file when adding
-  to the structure list.
+- **A role that carries permissions**: a role is intent. Put the grant in an
+  AIP-38 policy, never in `ROLE.md`.
+- **Seats and reporting in `COMPANY.md` once an office exists**: the office is
+  authoritative; keep the org chart in one place.
+- **A project described in `COMPANY.md`**: a project is an AIP-34 node with an
+  AIP-20 `WORK.md`, not a company/v1 field.
 - **Free-form fields at the top level** — keep top-level fields to those the
   schema knows; namespace everything else under `metadata.<vendor>.*`.
 
@@ -498,8 +574,10 @@ The post-merge `validate` catches:
 - [AIP-6 — company/v1 spec](/docs/aip-6)
 - [AIP-7 — governance, capabilities, approval](/docs/aip-7)
 - [AIP-8 — agencies engine, operators](/docs/aip-8)
-- [AIP-14 — TOOL.md spec](/docs/aip-14)
-- [AIP-15 — WORKFLOW.md spec](/docs/aip-15)
+- [AIP-20: WORK.md spec](/docs/aip-20): projects and work
+- [AIP-22: OFFICE.md spec](/docs/aip-22): positions, seats, reporting
+- [AIP-42: AGENT.md spec](/docs/aip-42): the agent slot
+- [AIP-47: ROLE.md spec](/docs/aip-47): roles
 - [`./SKILL.md`](./SKILL.md) — agent-side authoring skill
 - [`./ADAPTER.md`](./ADAPTER.md) — implementer's guide
 - [`./COMPANY.schema.json`](./COMPANY.schema.json) — frontmatter validator

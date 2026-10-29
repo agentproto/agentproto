@@ -1,6 +1,6 @@
 ---
-title: "AIP-6: COMPANY (company/v1): company, role & objective primitives"
-description: A filesystem-first, vendor-neutral file format for representing AI companies — their org structure, roles, and objectives — as portable git-native packages.
+title: "AIP-6: COMPANY (company/v1): the static company profile"
+description: A filesystem-first, vendor-neutral file format for the static profile of an AI company (identity, mission, values, objectives) as a portable git-native package. Roles are AIP-47, seats and reporting lines are the AIP-22 office, projects are AIP-20.
 aip: 6
 status: Final
 type: Core
@@ -17,26 +17,35 @@ package: "@agentproto/company"
 | Field | Value |
 |---|---|
 | AIP | 6 |
-| Title | COMPANY (company/v1): company, role & objective primitives |
+| Title | COMPANY (company/v1): the static company profile |
 | Status | Final |
 | Type | Core |
 | Domain | companies.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
+| Composes with | [AIP-9](/docs/aip-9) (operators), [AIP-20](/docs/aip-20) (work), [AIP-22](/docs/aip-22) (office: positions, seats, reporting), [AIP-34](/docs/aip-34) (the company tree), [AIP-42](/docs/aip-42) (agents), [AIP-47](/docs/aip-47) (roles) |
 | Spec author | [Paperclip team](https://github.com/paperclipai/paperclip) (`paperclipai/paperclip`) |
 | AIP editor | Jeremy André |
 | Reference Impl | [`@agentproto/company`](https://github.com/paperclipai/paperclip) |
 
 ## Abstract
 
-`company/v1` is an open file-format standard for representing the
-structural primitives of an AI company — the company itself, its roles,
-its objectives, its operators — as a set of markdown-with-frontmatter and
-JSON files in a filesystem-first, vendor-neutral package. Any git
-repository conforming to the layout is a valid company package. AIP-6
-mirrors the upstream spec maintained at
-[paperclipai/paperclip](https://github.com/paperclipai/paperclip) and
-anchors it inside the AIP registry so dependent specs (AIP-7, AIP-8) can
-reference it by AIP number.
+`company/v1` is an open file-format standard for the **static profile** of
+an AI company: who the company is, what it is for, what it values, and the
+objectives it pursues. It is a set of markdown-with-frontmatter files in a
+filesystem-first, vendor-neutral package. Any git repository conforming to
+the layout is a valid company package.
+
+AIP-6 owns the company profile and the objective, and nothing else of an
+organization. Everything that used to be sketched here now has its own home:
+a role is an [AIP-47](/docs/aip-47) `ROLE.md`, the positions (seats) and
+reporting lines of the company are items of its [AIP-22](/docs/aip-22)
+office, an operator is [AIP-9](/docs/aip-9), an agent is
+[AIP-42](/docs/aip-42), and a project is an [AIP-34](/docs/aip-34) node whose
+`work:` is an [AIP-20](/docs/aip-20) `WORK.md`. AIP-6 anchors the format in
+the AIP registry so dependent specs (AIP-7, AIP-8) can reference it by AIP
+number. It started from the specification maintained at
+[paperclipai/paperclip](https://github.com/paperclipai/paperclip); this text
+is normative where the two differ.
 
 ## Motivation
 
@@ -55,67 +64,156 @@ project these files into vendor-specific databases when needed.
 
 ## Specification
 
-> AIP-6 mirrors the canonical specification maintained upstream at
-> [paperclipai/paperclip](https://github.com/paperclipai/paperclip). The
-> normative text will be vendored into this AIP as part of moving
-> Draft → Review, with editorial divergences (if any) called out
-> explicitly.
+### What AIP-6 owns
 
-Doctype shape (sketch):
+AIP-6 is the static company profile. The doctypes of a company package and
+who owns each:
 
-| Doctype | Path | Purpose |
+| Doctype | Path | Owner | Notes |
+|---|---|---|---|
+| `company` | `COMPANY.md` | AIP-6 | Root file: identity, mission, values. Exactly one per package. |
+| `objective` | `objectives/<id>/OBJECTIVE.md` | AIP-6 | An objective the company pursues. |
+| `role` | `roles/<id>/ROLE.md` | [AIP-47](/docs/aip-47) | A role is an AIP-47 `role/v1` document. AIP-6 only keeps the conventional path. |
+| `operator` | `operators/<id>/OPERATOR.md` | [AIP-9](/docs/aip-9) | An agent holding a role. Extends [AIP-42](/docs/aip-42), see AIP-9. |
+| `agent` | `agents/<id>/AGENT.md` | [AIP-42](/docs/aip-42) | A standalone agent, NOT bound to a company role. The legacy `kind: agent` form is covered below. |
+| office, positions, seats | `OFFICE.md` | [AIP-22](/docs/aip-22) | The org chart of the company. |
+| project, work | the `work:` field of a node | [AIP-20](/docs/aip-20) | Not a company/v1 doctype. |
+
+The JSON Schema in `COMPANY.schema.json` validates the `company` and
+`objective` doctypes, and the legacy `agent` marker. It does not validate a
+`ROLE.md`, an `OPERATOR.md`, an `AGENT.md` or an `OFFICE.md`: each has its
+own schema in its own AIP.
+
+### Common frontmatter: `doctype` and `id`
+
+Every doctype file carries `schema: company/v1`, a discriminator and an
+identifier.
+
+| Canonical | Alias | Meaning |
 |---|---|---|
-| `company` | `COMPANY.md` | Root file: identity, mission, structure |
-| `role` | `roles/<slug>/ROLE.md` | A role within the company |
-| `objective` | `objectives/<slug>/OBJECTIVE.md` | An objective the company pursues |
-| `operator` | `operators/<slug>/OPERATOR.md` | A specific AI operator (instance of a role). [AIP-9](/docs/aip-9) runtime; extends [AIP-42 AGENT.md](/docs/aip-42) with role + reports_to + company binding. |
-| `agent` | `agents/<slug>/AGENT.md` | A standalone agent (utility, helper, sub-agent) — [AIP-42](/docs/aip-42). NOT bound to a company role; useful for utilities (researcher, code-reviewer, formatter) the company employs without giving them an org-chart slot. |
+| `doctype` | `kind` | Which doctype the file is: `company`, `objective`, or the legacy `agent`. |
+| `id` | `slug` | The identifier, equal to the folder name (`objectives/<id>/`). |
 
-### `structure.positions` (formerly `structure.roles`)
+- Writers MUST emit `doctype` and `id`.
+- Readers MUST accept `kind` as `doctype` and `slug` as `id`. **AIP-6 sets no
+  removal date for either alias**: they are part of the format for as long as
+  `company/v1` is, because files in the wild use them and a Final format does
+  not break its readers.
+- A file that carries both an alias and its canonical field with different
+  values is refused with `alias_conflict`. The JSON Schema enforces this for
+  `doctype` and `kind`; a host enforces it for `id` and `slug`, which a
+  schema cannot compare.
+- The folder-name rule uses the resolved identifier, whichever spelling
+  carried it.
 
-The company manifest's `structure` block enumerates the org chart:
+### Where the company's organization lives
 
-- **`structure.positions`** — slugs of the company's **seats**, each
-  typically materialized as an operator (`operators/<slug>/OPERATOR.md`).
-  A position is a seat exactly one operator holds; several positions MAY
-  share one [AIP-47](/docs/aip-47) catalog role (e.g. an SDR seat and an
-  AE seat both fulfilling `sales-rep`). See AIP-47 §Role vs Position vs
-  Access role.
-- **`structure.reports_to`** — map of position-slug → position-slug
-  expressing the reporting tree.
-- **`structure.roles`** — DEPRECATED alias of `positions`. Historically
-  documented as role slugs but used in practice for seats. Readers MUST
-  accept both; when both are present, `positions` wins. Writers SHOULD
-  emit `positions`.
+- **Roles.** `roles/<id>/ROLE.md` is an [AIP-47](/docs/aip-47) document
+  (`schema: role/v1`). AIP-6 does not define a role schema any more: the
+  `role` doctype and its `mandate` field are gone from `COMPANY.schema.json`.
+  A file that still declares `schema: company/v1` with `doctype: role` is a
+  legacy role file. A host MAY keep reading it, SHOULD warn
+  `doctype_moved`, and migrates it by rewriting the frontmatter as `role/v1`
+  (`id` becomes `name`, `name` becomes `title`, `mandate` becomes `mission`
+  and `description`). Reading it has no removal date either.
+- **Positions and seats.** A position is a seat one operator holds at a time
+  ([AIP-70](/docs/aip-70) `position`). Seats, their holders and their
+  reporting lines are items of the company's [AIP-22](/docs/aip-22) office,
+  which spans the whole company tree (AIP-22 "An office spans a company
+  tree"). COMPANY.md does not list them.
+  `structure.positions`, its older alias `structure.roles` and
+  `structure.reports_to` stay in the schema as deprecated fields: readers
+  MUST keep accepting them, with no removal date, and when the company has an
+  office the office is authoritative and these fields are only a seed.
+  Writers SHOULD NOT emit them.
+- **Operators.** An operator is an agent holding a role, written as an
+  `operators/<id>/OPERATOR.md` ([AIP-9](/docs/aip-9)). Its home is a node of
+  the company tree and its seats come from the office. COMPANY.md does not
+  list operators either.
+- **Projects.** A project is not an AIP-6 doctype. It is an
+  [AIP-34](/docs/aip-34) workspace node of the company tree, and its board,
+  items and status are the [AIP-20](/docs/aip-20) `WORK.md` its `work:` field
+  points to. An objective MAY be pursued by a project; the link is the
+  objective's `owner` and the work items, never a field of COMPANY.md.
+- **The company is a tree of its own.** A company is an
+  [AIP-34](/docs/aip-34) tree: the root node (type `company`) requires
+  `COMPANY.md`, as the AIP-34 example shows, and the guilds and projects are
+  nodes below it. AIP-6 describes the file at the root; AIP-34 describes the
+  tree.
+
+### Legacy agent slot
+
+Before [AIP-42](/docs/aip-42), an agent in a company package was a
+`agents/<id>/AGENT.md` declaring `schema: company/v1`, `kind: agent` and a
+`slug`. That form stays valid: `kind: agent` is a legacy marker, `slug` is its
+`id`, and AIP-42 sets no removal date for it (AIP-42 "Backward
+compatibility"). `COMPANY.schema.json` recognises the marker so a company
+package with such files still validates; the field set of the agent is
+AIP-42's. New agents use `schema: agent/v1`.
+
+### Conventions
 
 Common conventions adopted by all `company/v1` files:
 
 - **Markdown canonical** with YAML frontmatter
-- **`schema: company/v1`** field on every doctype
+- **`schema: company/v1`** field on every doctype defined here
 - **Slug-based references**, never database IDs
 - **Vendor-specific extensions** under `metadata.<vendor>.*`
 - **Git-native**: any repository hosting these files is a valid company
 
+The implementer's guide is
+[`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-6/draft/ADAPTER.md),
+the schema is
+[`COMPANY.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-6/draft/COMPANY.schema.json),
+and worked packages are in
+[`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-6/draft/EXAMPLES.md).
+
 ## Rationale
 
-*To be authored. Defend: filesystem-first over DB-first, slug references
-over UUIDs, markdown over pure JSON for human-authorable doctypes,
-vendor-extensions namespace.*
+**Filesystem-first over DB-first.** A folder of files is diffable, forkable
+and reviewable in any git host. A database stays a projection that an adapter
+can rebuild.
+
+**Slug references over UUIDs.** A slug survives a fork, a merge and a
+re-import. A database ID does not.
+
+**Markdown over pure JSON.** The doctypes are written by people. Frontmatter
+keeps the structure checkable while the body stays prose.
+
+**A narrow AIP.** The first version of company/v1 carried roles and the org
+chart. Both outgrew it: a role is reused by operators outside any company
+(AIP-47), and an org chart has to span guilds, views and holders from other
+trees (AIP-22). Keeping the profile small is what lets those AIPs evolve
+without a company/v1 revision.
+
+**Why `doctype` and `id` canonical.** The schema and the examples have always
+written them, and `kind`/`slug` are the spelling of the older agent slot. One
+spelling for writers, both for readers, with no removal date, keeps every
+existing package loadable.
 
 ## Reference Implementation
 
-Upstream at
-[paperclipai/paperclip](https://github.com/paperclipai/paperclip) — the
-spec, parsers, validators. Inside the agentik ecosystem, the
-agentik-studio monorepo consumes companies via adapters; concrete usage
-emerges through AIP-8 (agencies engine).
+The spec started from the upstream at
+[paperclipai/paperclip](https://github.com/paperclipai/paperclip). Inside the
+agentik ecosystem, the agentik-studio monorepo consumes companies via
+adapters; concrete usage emerges through AIP-8 (agencies engine).
 
 ## Backwards Compatibility
 
-Not applicable — first AIP-numbered version. If the upstream spec
-revs to v2, AIP-6 stays at v1 and a new AIP supersedes it.
+AIP-6 is amended in place, as a Final spec. Every change below keeps
+existing packages loadable:
+
+| Earlier | Now | Reader behaviour |
+|---|---|---|
+| `kind`, `slug` | `doctype`, `id` canonical | Both spellings accepted, no removal date. |
+| `kind: agent` agent slot | AIP-42 `schema: agent/v1` | The legacy form is recognised, no removal date. |
+| `doctype: role` with `mandate` | AIP-47 `ROLE.md` | MAY be read, `doctype_moved` warning. Not validated by `COMPANY.schema.json`. |
+| `structure.positions`, `structure.roles`, `structure.reports_to` | AIP-22 office seats | Accepted as a seed, the office wins. Deprecated, no removal date. |
+| "sketch" of the doctype shape | the doctype table above | Editorial: the text is normative. |
 
 Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `company/v1`; documents that declare `agentcompanies/v1` remain valid, and hosts MUST accept both.
+
+If the upstream spec revs to v2, AIP-6 stays at v1 and a new AIP supersedes it.
 
 ## Security Considerations
 
@@ -125,3 +223,8 @@ malicious company package fed to a credulous runtime could grant
 inappropriate permissions. Mitigations are runtime-side: signatures
 (via AIP-7), provenance metadata, and human approval gates before
 ingesting external companies.
+
+A legacy `kind: agent` file or a legacy `doctype: role` file is no safer
+than its modern form: a host applies the same checks to it as to an
+`agent/v1` or `role/v1` document, and a role or an office seat never widens
+the policy of its holder (AIP-47, AIP-22).
