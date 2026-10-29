@@ -318,7 +318,7 @@ When binding a layer item to a bearer entity:
 | `ws://operators/<slug>`             | [AIP-9](/docs/aip-9)   | Look up the operator workspace; verify it exists.     |
 | `ws://offices/<slug>`               | [AIP-22](/docs/aip-22) | Resolve the office workspace.                         |
 | `ws://personas/<slug>`              | [AIP-25](/docs/aip-25) | Resolve the persona doctype.                          |
-| `ws://workspaces/<slug>`            | [AIP-20](/docs/aip-20) | Look up the work workspace.                           |
+| `ws://workspaces/@<owner>/<slug>/WORK.md` | [AIP-20](/docs/aip-20) | Resolve the node's WORK.md through its work binding.  |
 | `ws://wikis/<slug>(/KNOWLEDGE.md)?` | [AIP-10](/docs/aip-10) | Resolve the wiki workspace.                           |
 | `ws://skills/<slug>`                | [AIP-3](/docs/aip-3)   | Look up the skill manifest.                           |
 | `ws://collections/<slug>`           | [AIP-18](/docs/aip-18) | Resolve through the collection registry.              |
@@ -693,7 +693,7 @@ defineIdentityWorkspace({
   appliesTo?: string[]                  // ws:// refs or relative paths
   executor?: string                     // ws://operators/<slug>
   governance?: string                   // path or ref
-  work?: string                         // ws://workspaces/<slug>
+  work?: string                         // ws://workspaces/@<owner>/<slug>/WORK.md
   knowledge?: string                    // ws://wikis/<slug>
   collections?: Array<
     | { inline: AIP18CollectionSchema }

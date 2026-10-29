@@ -212,7 +212,7 @@ Guidance:
 ```yaml
 executor: ws://operators/founder
 governance: ../policies/identity-default.yaml
-work: ws://workspaces/main-tracker
+work: ws://workspaces/@acme/main-tracker/WORK.md
 knowledge: ws://wikis/handbook/KNOWLEDGE.md
 ```
 

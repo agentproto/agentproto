@@ -7,8 +7,8 @@ pattern and edit fields rather than draft from scratch.
 ## Patterns covered
 
 1. [Minimal / read-only](#example-1--minimal--read-only)
-2. [With capabilities and scopes](#example-2--with-capabilities-and-scopes)
-3. [With typed inputs and structured outputs](#example-3--with-typed-inputs-and-structured-outputs)
+2. [With compatibility and allowed-tools](#example-2--with-compatibility-and-allowed-tools)
+3. [With caller parameters and a structured result](#example-3--with-caller-parameters-and-a-structured-result)
 4. [Composes other skills](#example-4--composes-other-skills)
 5. [Tool-authoring skill](#example-5--tool-authoring-skill)
 6. [Vendor-specific extension](#example-6--vendor-specific-extension)
@@ -18,7 +18,7 @@ pattern and edit fields rather than draft from scratch.
 ## Example 1 — Minimal / read-only
 
 The simplest possible skill: identity fields, a description, a body of prose. No
-inputs, no tools, no capabilities. Use this shape when the skill is pure
+tools. Use this shape when the skill is pure
 instruction and depends only on the agent's default toolset.
 
 ```md
@@ -61,12 +61,14 @@ registry where authors can't make assumptions about the host's tools.
 
 ---
 
-## Example 2 — With capabilities and scopes
+## Example 2 — With compatibility and allowed-tools
 
-The skill needs network access and a secret. Capabilities are declared up-front
-so the host can gate via AIP-7 before the body ever reaches the agent. The body
-itself never reads env directly — it relies on the host to inject credentials
-into the tool layer.
+The skill needs network access and a secret. The `compatibility` field states
+the environment requirements up front so the host can probe it before the body
+ever reaches the agent, and `allowed-tools` names the tool patterns the skill
+would like pre-approved. The field is a request, not a grant: runtimes apply
+policy mediation (AIP-7) before honoring it. The body itself never reads env
+directly — it relies on the host to inject credentials into the tool layer.
 
 ```md
 ---
@@ -81,10 +83,8 @@ description:
 version: 1.2.0
 author: Jeremy André <jeremy@agentik.net>
 tags: [engineering, github, pull-request, style]
-capabilities:
-  network: ["api.github.com"]
-  secrets: ["github-token"]
-  tools: ["github-list-commits", "github-create-pr"]
+compatibility: Requires network access to api.github.com and a GitHub token the host supplies.
+allowed-tools: github-list-commits github-create-pr
 ---
 
 # Draft a GitHub PR description in house style
@@ -125,18 +125,22 @@ Return the assembled markdown. Do not call `github-create-pr` —
 the user reviews the draft first.
 ```
 
-When to use this pattern: any skill that needs the host to grant network egress,
-file scopes, secrets, or specific tools before activating. The `capabilities`
-block is the safety contract; pair it with narrow grants (named hosts, named
-secrets — never `*` unless the skill genuinely speaks to the open internet).
+When to use this pattern: any skill that needs network egress, host-supplied
+credentials, or specific tools pre-approved. `compatibility` states the
+environmental requirements and `allowed-tools` carries the request; pair it
+with narrow patterns (named tools and hosts, never `*` unless the skill
+genuinely speaks to the open internet). Whether the calls are actually
+approved is the runtime's policy decision, not the file's.
 
 ---
 
-## Example 3 — With typed inputs and structured outputs
+## Example 3 — With caller parameters and a structured result
 
-The skill takes parameters from its caller and reports back a structured result.
-`inputs` describes what the LLM must supply; `outputs` (optional) describes what
-the host can expect to parse from the agent's reply for downstream wiring.
+The skill takes parameters from its caller and reports back a structured
+result. The manifest declares no typed inputs: what the caller supplies is a
+runtime concern, described in the body. The body's Output section states the
+shape the host can expect to parse from the agent's reply for downstream
+wiring.
 
 ```md
 ---
@@ -146,31 +150,19 @@ title: Generate a release note from a diff
 description: Produce a customer-facing release note paragraph from a code diff and an optional issue reference. Use when the user asks for a changelog entry or release blurb; do NOT use for internal commit messages.
 version: 1.0.0
 tags: [release, changelog, communication]
-inputs:
-  - name: diffSummary
-    type: string
-    required: true
-    description: Plain-text summary of the diff. The skill rewrites this into a customer-facing sentence; the LLM should not paste the raw diff.
-  - name: issueRef
-    type: string
-    required: false
-    description: Optional issue or ticket id (e.g. "ENG-1234") to reference in the note.
-  - name: tone
-    type: string
-    required: false
-    default: "neutral"
-    description: One of "neutral", "celebratory", "apologetic". Default "neutral".
-outputs:
-  type: object
-  properties:
-    note:        { type: string, description: "Customer-facing paragraph." }
-    category:    { enum: ["feature", "fix", "improvement"] }
-    breaking:    { type: boolean }
-  required: [note, category, breaking]
-tags: [release, changelog]
 ---
 
 # Generate a release note from a diff
+
+## Parameters
+
+The caller supplies, in prose:
+
+- `diffSummary`: plain-text summary of the diff. The skill rewrites this into a
+  customer-facing sentence; the LLM should not paste the raw diff.
+- `issueRef`: optional issue or ticket id (e.g. "ENG-1234") to reference in
+  the note.
+- `tone`: one of "neutral", "celebratory", "apologetic"; default "neutral".
 
 ## Process
 
@@ -181,13 +173,15 @@ tags: [release, changelog]
 
 ## Output
 
-Return JSON matching the declared `outputs` schema. The host's release tooling
-parses this directly into the changelog.
+Return JSON matching the shape named here: `note` (the customer-facing
+paragraph), `category` (feature, fix, or improvement), `breaking` (boolean).
+The host's release tooling parses this directly into the changelog.
 ```
 
 When to use this pattern: the skill is invoked by another skill, a workflow, or
-a programmatic caller that needs typed I/O. The `outputs` block lets the host
-validate the agent's reply and route the result without fragile regex parsing.
+a programmatic caller that hands over parameters and parses a structured
+reply. Stating the result shape in the body lets the calling side validate the
+agent's reply and route the result without fragile regex parsing.
 
 ---
 
@@ -212,15 +206,6 @@ skills:
   - release-note-from-diff
   - github-pr-house-style
   - announce-release-to-slack
-inputs:
-  - name: diffSummary
-    type: string
-    required: true
-    description: Diff summary forwarded to release-note-from-diff.
-  - name: branchName
-    type: string
-    required: true
-    description: Branch name forwarded to github-pr-house-style.
 ---
 
 # Ship a release end-to-end
@@ -228,7 +213,7 @@ inputs:
 ## Process
 
 1. Activate `release-note-from-diff` with `{ diffSummary, tone: "neutral" }`.
-   Capture `outputs.note` and `outputs.category`.
+   Capture the reply's `note` and `category`.
 2. Activate `github-pr-house-style` for `branchName`. Append the release note
    paragraph from step 1 under "## Summary".
 3. Activate `announce-release-to-slack` with the release note from step 1 and
@@ -251,8 +236,9 @@ an opinionated end-to-end flow.
 
 A skill whose output is a new artifact in the workspace — in this case, a new
 tool. The AIP-14 authoring skill in the sibling `aip-14/` folder follows this
-exact pattern. Tool-authoring skills need fs.write capability and typically call
-no tools themselves (they emit files via the host's workspace adapter).
+exact pattern. Tool-authoring skills need host-granted write access to the
+workspace and typically call no tools themselves (they emit files via the
+host's workspace adapter).
 
 ```md
 ---
@@ -265,23 +251,19 @@ description:
   do NOT use for mutating tools (use the mutating-tool scaffold skill instead).
 version: 1.0.0
 tags: [aip-14, tools, authoring, scaffolding]
-capabilities:
-  fs.write: ["./.tools/"]
-inputs:
-  - name: apiName
-    type: string
-    required: true
-    description:
-      Human name of the API being wrapped. Used in id, name, description.
-  - name: apiDocsUrl
-    type: string
-    required: false
-    description:
-      Optional URL to the upstream API docs. The skill cites this in the
-      manifest's metadata.
+compatibility: Requires host-granted write access to ./.tools/ and the agent's default file toolset.
 ---
 
 # Scaffold a fetch-style read-only tool
+
+## Parameters
+
+The caller supplies, in prose:
+
+- `apiName`: human name of the API being wrapped. Used in id, name,
+  description.
+- `apiDocsUrl`: optional URL to the upstream API docs. The skill cites this in
+  the manifest's metadata.
 
 ## Process
 
@@ -325,16 +307,6 @@ description:
   NOT use for documents that fit in one shot.
 version: 1.0.0
 tags: [summarisation, long-context, retrieval]
-inputs:
-  - name: documentRef
-    type: string
-    required: true
-    description: Reference to the document in the workspace (path or canvas id).
-  - name: targetWordCount
-    type: number
-    required: false
-    default: 300
-    description: Target length of the final summary, in words.
 metadata:
   acme:
     preferredModel: "long-context-large"
@@ -345,6 +317,15 @@ metadata:
 ---
 
 # Summarise a long document with chunked map-reduce
+
+## Parameters
+
+The caller supplies, in prose:
+
+- `documentRef`: reference to the document in the workspace (path or canvas
+  id).
+- `targetWordCount`: optional target length of the final summary, in words;
+  default 300.
 
 ## Process
 
@@ -374,9 +355,9 @@ ignore namespaces they don't recognise.
 
 - **Missing `schema: skill/v1`.** The host's parser dispatches on this field; a
   manifest without it MUST be rejected. Don't rely on format inference.
-- **`capabilities` omitted** when the skill assumes network or secret access.
-  Declare every grant the body relies on, even if the underlying tool already
-  declares them — defence in depth.
+- **Unstated environment requirements** when the skill assumes network or
+  secret access. State everything the body relies on in `compatibility`, even
+  if the underlying tool already declares them — defence in depth.
 - **Vague `description`** like "skill for X" or "useful skill". The host indexes
   descriptions for selection; vague descriptions make the wrong skill picked.
 - **Empty input `description` fields.** The LLM reads these. Empty prose trains
