@@ -331,6 +331,42 @@ configure), [AIP-69](/docs/aip-69) for profiles, and
 table as a permission: the effective decision is still an AIP-38
 policy evaluation.
 
+> **Draft AIP-39 amendment** (2026-10-29). *Normative identifiers
+> (action ids, scope forms) are English and final.*
+
+Messages between sessions had the same gap: hosts decided who may
+message whom with their own switches instead of grants. The standard
+library gains a seventh runtime action:
+
+| id | library entry | category | target_kind | mutates | risk_level | approval | semantics |
+|---|---|---|---|---|---|---|---|
+| `session:message` | `@agentik/actions/standard/session-message` | `runtime` | `session` | `["session:conversation"]` | 1 | `auto` | Deliver a message to another session's inbox. |
+
+**Risk rationale.** A message can cause the receiver to act, so
+`session:message` is evaluated like `session:prompt`, at risk 1, but
+between two sessions and without a spawn.
+
+**Optional scope.**
+
+| id | scope |
+|---|---|
+| `session:message` | target session id, `label:<label>`, `label:<prefix>*`, or `workspace:<slug>` |
+
+`workspace:<slug>` is a typed scope form
+([AIP-38 §Scope matching](/docs/aip-38#scope-matching-added-2026-10-23),
+rule 3) defined for `session:message` only. It matches when the
+workspace binding of the target session, which the host derives as
+[AIP-46 §Session messages](/docs/aip-46#session-messages-added-2026-09-26)
+defines, names the registered workspace `<slug>`. A target bound to no
+registered workspace matches no `workspace:` scope. A host that cannot
+resolve the target's binding MUST fail closed: it evaluates an allow
+grant with this scope as not matching and a deny grant with this scope
+as matching.
+
+**Ownership.** AIP-46 §Session messages defines when `session:message`
+is evaluated and how it combines with the tree edges a host allows
+without a grant.
+
 ## Composition pattern (`inline | ref | file`)
 
 Like every composable block in the AIP series, ACTION refs accept
