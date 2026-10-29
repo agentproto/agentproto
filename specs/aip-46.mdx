@@ -170,7 +170,8 @@ interface Session {
   workspaceSlug: string
   /** The session's ground, as the resolved AIP-54 ref. This is the
    *  value §Delegation's containment check compares against — a
-   *  child's ground MUST resolve inside its parent's. */
+   *  child's ground MUST resolve inside its parent's. It also gives the
+   *  session its node scope (§Node scope). */
   ground: string
   /** Absolute path the agent runs in — `ground` resolved against the
    *  host's filesystem. Reported for observability; it is NOT the
@@ -201,6 +202,11 @@ interface Session {
    *  Persisted: a consumer MUST be able to ask what a live session is
    *  running without replaying its prompt. */
   agentSlug?: string
+  /** The AIP-9 operator this session runs for, as an AIP-54 ref
+   *  (§Operator binding). Absent when the session was not started for an
+   *  operator. It binds the session to the operator; it grants nothing.
+   *  Unrelated to `operatorLabel`. */
+  operator?: string
   /** Set when this session was spawned BY another session. Absent ⇒
    *  a root spawn (a human or an external host started it). This is
    *  the edge the spawn gate keys off — see §Delegation. */
@@ -677,6 +683,51 @@ and policy.
 > and [agentproto/ts#2330](https://github.com/agentproto/ts/pull/2330)),
 > written through `config_set`, which does not yet refuse a session.
 
+#### Operator binding (added 2026-10-29)
+
+`Session.operator` names the [AIP-9](/docs/aip-9) operator the session
+runs for: the organizational binding of an agent holding a role
+([AIP-70](/docs/aip-70) `operator`). It is what lets a host find every
+session of one operator (to refresh them, or to keep one memory across
+respawns) and what makes the operator's `runtime.config` layer 3 of the
+session config (§Layers and precedence).
+
+1. **Form.** The value is an [AIP-54](/docs/aip-54) ref of kind
+   `operator`, written in its compact form `operator:<slug>`. An
+   operator of another workspace carries the cross-workspace suffix of
+   AIP-54's `operator-body`: `operator:<slug>@<workspace>`. The
+   `ws://operators/<slug>` form is also valid, for an operator of the
+   host's own workspace only: it has no suffix, and a host MUST NOT add
+   one while rewriting it to the compact form (AIP-54 §The tenant-scope
+   asymmetry). A bare slug is not a ref.
+2. **Resolved at spawn.** A host that accepts `operator` on a spawn
+   request MUST resolve the ref to an AIP-9 operator before it starts the
+   session, and MUST refuse the spawn with `operator_unresolvable` when
+   it cannot: a session never records a dangling operator ref. `operator`
+   does not replace `agent`: the session's definition is still the agent
+   the request binds, which for an operator is its resolved agent
+   ([AIP-9](/docs/aip-9) §Runtime binding).
+3. **It binds, it does not authorize.** The binding gives the session no
+   spawn authority and no grant: delegation stays the bound agent's
+   `delegates_to` plus policy (§Delegation), and the policy of the
+   operator and of the session's node chain still applies
+   ([AIP-34](/docs/aip-34), [AIP-38](/docs/aip-38)). It does not choose
+   the session's node scope either, which comes from `ground` (§Node
+   scope).
+4. **Who may name it.** The host operator, or `system`, MAY name any
+   operator. A session principal MAY name only the operator of its own
+   session, and a nested spawn that names none starts without one: a
+   child never gains an operator its caller does not hold, and never
+   inherits it silently.
+5. **It follows the lineage.** When a host starts a session as the
+   continuation of another under a new session id (§Apply classes), it
+   MUST copy the source's `operator`, if any, onto the successor, reading
+   it from its own registry and never from the request.
+
+`operator` is a plain reference: the host MAY keep other facts about the
+operator (a digest of the instructions it resolved) beside it; this AIP
+defines none.
+
 #### Operator label (added 2026-10-29)
 
 The operator label (`Session.operatorLabel`) is a durable name the
@@ -684,7 +735,11 @@ operator gives to a session or to a lineage of sessions. It is the
 label the `label:` scopes of [AIP-39](/docs/aip-39) and the
 `session-label://` principal of [AIP-23](/docs/aip-23#reference-schemes)
 match. `Session.label` is distinct: free text any spawner attaches, for
-display only, and a host MUST NOT match a grant against it.
+display only, and a host MUST NOT match a grant against it. Neither is
+`Session.operator`: `operatorLabel` is the label the host user (the
+host operator of AIP-70, a human) gives to a session, and has nothing to
+do with the AIP-9 operator that `Session.operator` names; a host MUST NOT
+derive one from the other.
 
 1. **Only the operator assigns it.** Only the operator or `system` MAY
    assign, change or clear an operator label. A host MUST refuse a
@@ -795,6 +850,7 @@ are normative; hosts MAY add their own.
 | Code | Cause |
 |---|---|
 | `invalid_agent` | `agent` ref does not resolve |
+| `operator_unresolvable` | `operator` ref does not resolve to an AIP-9 operator (§Operator binding) |
 | `delegation_denied` | caller's agent may not spawn the requested child |
 | `cwd_outside_parent` | nested spawn named ground outside its parent's subtree |
 | `max_depth_exceeded` | `depth` would exceed `maxDepth` |
@@ -917,6 +973,10 @@ user never asked for.
    *  policy). Optional; absent ⇒ adapter default + no delegation.
    *  See §Delegation. */
   agent?: string
+  /** The AIP-9 operator the session runs for — an AIP-54 `operator:` ref
+   *  (§Operator binding). Optional; it binds, it does not replace
+   *  `agent` and grants nothing. */
+  operator?: string
   /** WHERE it runs — an AIP-54 ref naming the session's ground.
    *  `ws://workspaces/@<owner>/<slug>` or its compact form, optionally
    *  with a subtree body. Root spawns MAY omit it (§Workspaces
@@ -954,6 +1014,29 @@ it was global. One field, one ref, no precedence rule to get wrong.
 A ref also carries what a slug could not — a subtree
 (`ws://workspaces/@acme/studio/packages/runtime`), which is exactly
 what a parent needs to hand a child less ground than it holds.
+
+#### Node scope
+
+The `ground` also gives the session its node scope, defined by
+[AIP-34 §Node scope of a session](/docs/aip-34#node-scope-of-a-session):
+the nearest declared node whose folder contains the ground, a subtree
+body included (`ws://workspaces/@acme/agentik/simone/docs` is the
+subtree `simone/docs`, written with slashes as in AIP-54's
+`local-body`). This AIP adds the host's side of that rule:
+
+- The host derives the scope from `Session.ground` of the calling
+  session, at spawn for the prompt it composes and on every file,
+  memory, app or tool call that session makes, never from the
+  configuration of the server that executes the call. A call whose
+  caller session it cannot identify is refused, not served unscoped.
+- The scope belongs to the session, not to the operator named by
+  `Session.operator`. A session started through a seat of an
+  [AIP-22](/docs/aip-22) office has the seat's node as its ground, not
+  the operator's home node; one operator can run one session per scope.
+- A nested spawn's ground still narrows (§Delegation), so a child's node
+  scope is its parent's or one nested inside it.
+
+#### The agent and the adapter
 
 `adapter` and `agent` are orthogonal and both may be present: the
 adapter is the runtime (which binary), the agent is the definition
@@ -994,7 +1077,7 @@ table below so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
-| `agent_start` | `{adapter, agent?, ground?, prompt?, label?, config?, preset?, policy?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
+| `agent_start` | `{adapter, agent?, operator?, ground?, prompt?, label?, config?, preset?, policy?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
 | `agent_prompt` | `{sessionId, prompt}` | Fire-and-forget — call `agent_output` to read the reply. A delegation action (§Delegation). |
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
@@ -1593,7 +1676,12 @@ highest layer that sets it), lowest precedence first:
 3. `definition`: the bound [AIP-42](/docs/aip-42) agent's `model`, then,
    above it, the bound [AIP-9](/docs/aip-9) operator's `runtime.config`
    (its `mode` projected onto `posture` or `contextProfile`, then its
-   `options`, `options.model` mapping to `model`);
+   `options`, `options.model` mapping to `model`). The bound operator is
+   the one `Session.operator` names (§Operator binding); a session
+   without one has no such layer. Only the portable `runtime.config`
+   enters here: the preset, the posture and the auth profile are host
+   configuration ([AIP-9](/docs/aip-9) §Runtime binding) and arrive at
+   layers 4 and 5;
 4. `preset`: the session preset whose `defaultFor` names the harness, then
    the named preset, after its `extends` chain is applied;
 5. `request`: explicit fields of the spawn request.
@@ -2049,6 +2137,18 @@ copying it MUST add the copy. A successor declared by a spawn request
 > 3). A caller that names no session is the operator there, so it may
 > record or set a label (§Operator label rule 1; the Session principals
 > section, rule 5).
+
+### The 2026-10-29 session-operator amendment (draft)
+
+§Operator binding adds the optional `Session.operator`, the optional
+`operator` field of the spawn request and of `agent_start`, and the
+error code `operator_unresolvable`. It is additive: a host that never
+receives `operator` records none, and the session config resolves as
+before, with no operator layer. §Layers and precedence now says which
+operator layer 3 means, and states that only its portable
+`runtime.config` enters it. §Node scope adds no wire change: it
+cross-references the AIP-34 rule that already derives a session's node
+from its `ground`.
 
 ## Security Considerations
 
