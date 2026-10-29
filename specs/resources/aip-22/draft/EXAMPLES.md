@@ -12,6 +12,7 @@ fields rather than draft from scratch.
 3. [Multi-collection org — full department / team / role tree](#example-3--multi-collection-org)
 4. [Multi-jurisdiction view — German subsidiary](#example-4--multi-jurisdiction-view)
 5. [Three-level chain — group → company → division (one-way switches)](#example-5--three-level-chain-with-one-way-switches)
+6. [Company tree - one office, node views, seats with a cross-tree holder](#example-6-company-tree)
 
 ---
 
@@ -677,6 +678,108 @@ when the bound governance policy declares `signing.required: true` (refused with
 **When to use.** Three-level (or deeper) compositions where compliance, audit,
 or org-structure invariants must hold across every descendant. The one-way
 switches make the resolution chain trustworthy without re-validating every leaf.
+
+---
+
+## Example 6: Company tree
+
+A company is an [AIP-34](/docs/aip-34) tree. The root node carries the one
+office; each guild node carries a view of it; seats are items of the root office,
+attached to a guild by their containment `parent`; one seat is held by an
+operator defined in the founder's own tree.
+
+```
+acme/                      WORKSPACE.md (tree root, type company)
+├── OFFICE.md              the only workspace-root office
+├── items/role/*.md        the seats
+└── simone/                WORKSPACE.md (node @acme/simone, type guild)
+    └── OFFICE.md          view: extends ../OFFICE.md
+```
+
+`acme/OFFICE.md`:
+
+```yaml
+---
+schema: office.workspace/v1
+name: acme
+title: Acme
+description: The office of the Acme company tree.
+version: 1.0.0
+
+executor: operator:coo
+
+collections:
+  - ref: ws://collections/role
+
+orgTree:
+  containment:
+    enabled: true
+    field: parent
+    rules:
+      allowedKinds: [role]
+      allowedParentKinds:
+        role: [view]
+      maxDepth: 3
+  reporting:
+    enabled: true
+    field: reportsTo
+    cardinality: single
+    rules:
+      mustResolveTo: role
+      circularBan: true
+---
+```
+
+`acme/simone/OFFICE.md` (a view: it holds no items, it rebinds nothing here
+and takes the root's `executor`):
+
+```yaml
+---
+schema: office.workspace/v1
+name: acme-simone
+title: Acme, Simone guild
+description: The lens of the Simone guild on the Acme office.
+version: 1.0.0
+
+extends: ../OFFICE.md
+---
+```
+
+`acme/items/role/pm-simone.md` (attached to the Simone view, reports to the
+coo seat at the root, so the report is intra-office):
+
+```yaml
+---
+schema: collection.item/v1
+collection: role
+id: ROLE-pm-simone
+title: PM Simone
+parent: workspace:@acme/simone
+reportsTo: ROLE-coo
+holder: operator:pm-simone
+---
+```
+
+`acme/items/role/chief-of-staff.md` (at the company node, no `parent`; the holder
+is an operator of the founder's tree, so the compact form carries `@<workspace>`):
+
+```yaml
+---
+schema: collection.item/v1
+collection: role
+id: ROLE-chief-of-staff
+title: Chief of staff
+holder: operator:chief-of-staff@jeremy-root
+---
+```
+
+**Result.** A session started through `ROLE-pm-simone` is scoped to
+`@acme/simone`; one started through `ROLE-chief-of-staff` is scoped to the company
+node, under that node's policy chain. Neither seat opens the founder's tree to the
+office or the office to the founder's tree. A seat with
+`parent: workspace:@other/guild` fails with `office_seat_parent_outside`, and a
+second `OFFICE.md` without `extends:` under `acme/` fails with
+`office_tree_second_root`.
 
 ---
 

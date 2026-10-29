@@ -13,12 +13,14 @@ description: |
 version: 1.0.0
 fields:
   - name: holder
-    type: ref
-    refKind: operator
+    type: string
+    pattern: "^(ws://operators/[a-z][a-z0-9-]*|(operator|user):[^\\s@]+(@[^\\s]+)?)$"
     description: |
-      Operator (or human) currently holding the role. NULL/unset =
-      open / unfilled. AIP-22's ownership axis reads this through
-      ownership.role=holder.
+      Operator or human currently holding the seat: an AIP-54
+      `operator:<slug>` or `user:<id>` compact ref, with `@<workspace>` when
+      the holder is defined in another tree, or `ws://operators/<slug>` for
+      an operator of the same tenant. NULL/unset = open / unfilled.
+      AIP-22's ownership axis reads this through ownership.role=holder.
   - name: reportsTo
     type: ref
     refKind: role
@@ -95,6 +97,9 @@ org-specific fields without mutating this starter.
   multiple roles (or a `team` if the work is collective).
 - The `reportsTo` field MUST point at another `role` item — the workspace's
   reporting axis enforces this.
+- In a company tree (AIP-22 "An office spans a company tree"), a seat may
+  parent under a node's view with `parent: workspace:@<owner>/<slug>`, and its
+  `holder` may be `operator:<slug>@<workspace>` for an operator of another tree.
 - `proposed` status is for roles that have been defined but not yet filled.
   `active` is the steady state. `suspended` is for roles temporarily vacated
   (parental leave, sabbatical). `archived` is terminal.

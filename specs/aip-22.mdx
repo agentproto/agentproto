@@ -23,7 +23,7 @@ layer: coordination
 | Domain | office.sh |
 | Doctypes | `office.workspace/v1` (workspace manifest + view, written as `OFFICE.md`) |
 | Requires | [AIP-18](/docs/aip-18) |
-| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work), [AIP-21](/docs/aip-21) (agencies) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-7](/docs/aip-7) (governance), [AIP-9](/docs/aip-9) (operators), [AIP-34](/docs/aip-34) (workspace tree), [AIP-10](/docs/aip-10) (knowledge), [AIP-12](/docs/aip-12) (playbooks), [AIP-15](/docs/aip-15) (workflows), [AIP-18](/docs/aip-18) (collections), [AIP-20](/docs/aip-20) (work), [AIP-21](/docs/aip-21) (agencies) |
 | Resources | [`./resources/aip-22`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft) — [`OFFICE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/OFFICE.schema.json), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/EXAMPLES.md), [`SKILL.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-22/draft/skills/author-office-workspace/SKILL.md), [`starters/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-22/draft/starters/office-starters) |
 
 ## Abstract
@@ -49,7 +49,11 @@ a knowledge wiki ([AIP-10](/docs/aip-10)), a playbook
 `extends:`, also expresses **per-context views** — a division, a
 jurisdictional subsidiary, an operator-specific lens — so a single
 organisation manifest fans out into many trustworthy views without
-forking. AIP-22 ships a starter library
+forking. In an [AIP-34](/docs/aip-34) company tree the root node carries
+the one office and each child node (a guild, a project) carries a view of
+it; seats are items of that office, attached to a node by their
+containment parent and held by an `operator:` or `user:` ref, including an
+operator of another tree. AIP-22 ships a starter library
 (`starters/office-starters/`) of [AIP-18](/docs/aip-18)
 collections — `role`, `objective`, plus three new starters
 (`department`, `team`, `policy`) — so existing v1 packages remain
@@ -199,6 +203,7 @@ company root:
 divisions/research/OFFICE.md          # extends ../../<company-root>/OFFICE.md
 jurisdictions/us/OFFICE.md            # extends ../../<company-root>/OFFICE.md
 operators/eng-lead/OFFICE.md          # extends ../../<company-root>/OFFICE.md
+simone/OFFICE.md                      # extends ../OFFICE.md (a child node of a company tree)
 ```
 
 A view's `extends:` field points to a parent `OFFICE.md` (workspace
@@ -233,7 +238,8 @@ identity:
   taxId: <string>                           # OPTIONAL — tax / VAT identifier
 
 # Cross-AIP composition (the centre of gravity)
-executor: ws://operators/<slug>             # OPTIONAL — AIP-9 default org operator
+executor: ws://operators/<slug>             # OPTIONAL: AIP-9 default org operator of the whole tree
+                                            #   (or operator:<slug>[@<workspace>], AIP-54)
 governance: <path-or-ref>                   # OPTIONAL — AIP-7 governance binding
 work: ws://workspaces/<slug>                # OPTIONAL — AIP-20 work tracker
 agency: ws://agencies/<slug>                # OPTIONAL — AIP-21 agency context
@@ -540,6 +546,134 @@ Hosts MUST refuse a view whose `appliesTo` references a non-existent
 consumer with `office_appliesto_unresolvable`. This is a HARD
 failure, not a warning.
 
+### An office spans a company tree
+
+A company is an [AIP-34](/docs/aip-34) tree of its own, and it has one
+office. The rules below place that office in the tree. They add no
+frontmatter field: the node views are ordinary view-mode manifests.
+
+- **One office per tree.** The tree root (the company node) carries the
+  workspace-root `OFFICE.md`. A tree MUST NOT hold a second workspace-root
+  `OFFICE.md`: any `OFFICE.md` in a node below the root is a view, its
+  `extends:` resolves to the root office directly or through a chain, and
+  a host refuses a second root with `office_tree_second_root` (HARD). An
+  `extends:` path MUST NOT leave the tree. A user tree, or any other tree,
+  has its own office and shares nothing with this one except through
+  [AIP-34](/docs/aip-34) doors.
+- **Child nodes hold views.** A node below the root (a guild, a project,
+  a department folder that is a declared node) MAY carry an `OFFICE.md`
+  with `extends: ../OFFICE.md` (or the path to its parent view). Its
+  merged form is the lens of that node: the effective office for a session
+  whose [AIP-34](/docs/aip-34) node scope is that node. A node without an
+  `OFFICE.md` takes the lens of its nearest ancestor that has one, up to the
+  root office. A view narrows collections, rebinds `executor` and the other
+  cross-AIP fields, and changes nothing else about the tree: it holds no
+  items of its own and the items stay in the root office.
+- **Seats are items.** A seat is an item of a collection listed in
+  `orgTree.containment.allowedKinds` that carries a holder: the `role`
+  starter collection, or any collection whose `ownership.role` names a
+  holder field. The seat is the position ([AIP-70](/docs/aip-70)
+  `position`); which role its holder follows is [AIP-9](/docs/aip-9)'s and
+  [AIP-47](/docs/aip-47)'s business, not the office's.
+- **A seat's containment `parent`.** It is either an item whose collection
+  is allowed by `allowedParentKinds`, or an [AIP-54](/docs/aip-54)
+  `workspace:` ref to a node of the same tree that carries a view (for
+  example `parent: workspace:@acme/simone`). The matrix names that second
+  case with the reserved parent kind `view`: `role: [team, department, view]`.
+  `view` is not a collection and never appears in `allowedKinds`. A view
+  parent counts as one level in `maxDepth`. A parent that is a node of
+  another tree, a node whose chain of views does not reach this office, or
+  an item that is not in this office is refused with
+  `office_seat_parent_outside` (HARD, per item).
+- **The node of a seat.** A seat belongs to the node of the nearest `view`
+  parent on its containment chain, and to the company node when the chain
+  holds none. A session started through a seat is scoped to that node
+  ([AIP-9](/docs/aip-9) "Home, scope and seats", [AIP-34](/docs/aip-34)
+  "Node scope of a session"), not to the holder's home.
+- **Reporting stays inside the office.** `reportsTo` MUST resolve to an
+  item of this office, so the report of a guild seat to a seat at the root
+  is intra-office and no report crosses a node or a tree. Reporting is
+  authority, not visibility: it opens no read across an AIP-34 wall.
+- **Holders.** The holder field of a seat takes an
+  [AIP-54](/docs/aip-54) compact ref, `operator:<slug>` or `user:<id>`,
+  each with its optional cross-workspace suffix `@<workspace>`
+  (`operator-body` and `user-body`, used exactly as AIP-54 defines them). The
+  suffixed form is how a seat holds a holder defined in another tree, for
+  example the chief of staff of a user tree holding a seat in a company
+  office. `ws://operators/<slug>` stays valid for a holder in the same
+  tenant, and cannot express another workspace (AIP-54 "tenant-scope
+  asymmetry"), so a cross-tree holder MUST use the compact form. A seat has
+  one holder at a time; a `user:` holder is a person and activates nothing.
+- **A holder is a name, not a door.** Holding a seat gives the holder a
+  session scoped to the seat's node, under the policy chain of that node
+  composed with the holder's own policy (AIP-34 "Policy follows the node
+  chain"). It does not make the holder's home tree readable from the office,
+  or the office readable from the home tree: only AIP-34 includes and
+  exports do that. An unresolvable holder leaves the seat unfilled and
+  surfaces `office_holder_unresolvable` (warn).
+- **`executor` across the tree.** `executor` keeps its meaning: the default
+  org-level operator, activated for company-level prompts when no more
+  specific seat or view applies. In a company tree it applies to every node
+  of the tree: for a prompt addressed to node N, the host takes the seat
+  holder the prompt names, otherwise the `executor` of N's lens (the nearest
+  view that sets one, else the root office's). `executor` is an operator
+  reference with the same two spellings as a holder, minus `user:`. It is
+  not itself a seat and grants no node scope: the session it activates is
+  scoped to N like any other.
+
+A company tree `@acme/acme` with one guild node `@acme/simone`:
+
+```yaml
+# acme/OFFICE.md (workspace-root mode, the only one in the tree)
+schema: office.workspace/v1
+name: acme
+title: Acme
+description: The office of the Acme company tree.
+version: 1.0.0
+executor: operator:coo
+orgTree:
+  containment:
+    enabled: true
+    field: parent
+    rules:
+      allowedKinds: [role]
+      allowedParentKinds:
+        role: [view]
+  reporting:
+    enabled: true
+    rules: { mustResolveTo: role }
+```
+
+```yaml
+# acme/simone/OFFICE.md (view of the guild node)
+schema: office.workspace/v1
+name: acme-simone
+title: Acme, Simone guild
+description: The lens of the Simone guild on the Acme office.
+version: 1.0.0
+extends: ../OFFICE.md
+```
+
+```yaml
+# acme/items/role/pm-simone.md (a seat attached to the guild view)
+schema: collection.item/v1
+collection: role
+id: ROLE-pm-simone
+title: PM Simone
+parent: workspace:@acme/simone
+reportsTo: ROLE-coo
+holder: operator:pm-simone
+```
+
+```yaml
+# acme/items/role/chief-of-staff.md (a seat held from another tree)
+schema: collection.item/v1
+collection: role
+id: ROLE-chief-of-staff
+title: Chief of staff
+holder: operator:chief-of-staff@jeremy-root
+```
+
 ### Cross-AIP composition
 
 `OFFICE.md` is the centre of gravity for organisation-level
@@ -548,7 +682,7 @@ the AIP that owns the binding's semantics.
 
 | Field | Target AIP | Purpose |
 |---|---|---|
-| `executor` | [AIP-9](/docs/aip-9) operator | Default org-level operator — the operator the host activates for company-level prompts (e.g. quarterly objective check-ins) when no more-specific operator applies. |
+| `executor` | [AIP-9](/docs/aip-9) operator | Default org-level operator: the operator the host activates for company-level prompts (e.g. quarterly objective check-ins) when no more-specific seat or view applies. In a company tree it covers every node of the tree (see [An office spans a company tree](#an-office-spans-a-company-tree)). |
 | `governance` | [AIP-7](/docs/aip-7) policy / audit | Org-level approvals (role creation, reporting reassignment, jurisdiction change). Workspace-root manifests usually set this; views may override only if the parent's policy permits. |
 | `work` | [AIP-20](/docs/aip-20) `WORK.md` | Work tracker the company runs. Cross-references on items (a role's open tasks, an objective's tracked initiatives) resolve against the bound work workspace. |
 | `agency` | [AIP-21](/docs/aip-21) `AGENCY.md` | Agency workspace — set when the company also operates as a commercial agency selling services to external counterparties. |
@@ -556,6 +690,8 @@ the AIP that owns the binding's semantics.
 | `playbook` | [AIP-12](/docs/aip-12) playbook | Culture / values / operating-rhythm playbook governing how the company makes decisions. |
 | `defaults.workflow` | [AIP-15](/docs/aip-15) `WORKFLOW.md` | Default routine workflow that runs against company items (e.g. monthly reporting-graph integrity sweep). |
 | `collections[].ref` / `collections[].inline` | [AIP-18](/docs/aip-18) `COLLECTION.md` | Per-item-kind schema. EVERY item-schema concern is delegated here. |
+| seat `holder` (an item field) | [AIP-9](/docs/aip-9) operator, [AIP-54](/docs/aip-54) `user` | Who holds the seat. `operator:` and `user:` compact refs, with `@<workspace>` for a holder of another tree. |
+| seat `parent` (an item field) | [AIP-34](/docs/aip-34) node | A `workspace:` ref to the node whose view the seat is attached to. |
 | `appliesTo` | [AIP-3](/docs/aip-3) skill, [AIP-9](/docs/aip-9) operator | View binding. |
 | `extends` | another `OFFICE.md` | Composition. |
 
@@ -802,7 +938,27 @@ authority. Threats:
   inside the same tenant scope as the view file; cross-tenant
   bindings are rejected with `office_xref_unresolvable`. The same
   rule applies to `executor`, `work`, `agency`, `knowledge`,
-  `playbook`, and `defaults.workflow`.
+  `playbook`, and `defaults.workflow`. The one sanctioned way to name
+  an operator or user of another workspace is the AIP-54 compact form
+  with `@<workspace>`, accepted for `executor` and for seat holders
+  only, and resolved in that workspace's own registry.
+
+- **Seat as a back door** - a company office names an operator of
+  another tree as a seat holder to reach its data, or a user tree's
+  operator is named a holder to pull company data into a personal
+  prompt. Mitigation: a seat is a name, not a door. The holder's
+  session is scoped to the seat's node and nothing else, and no read
+  crosses a tree except through AIP-34 includes and exports
+  ([An office spans a company tree](#an-office-spans-a-company-tree)).
+  A host MUST read the scope of every call from the calling session's
+  `ground` ([AIP-34](/docs/aip-34) "Node scope of a session"), not from
+  the seat.
+
+- **Parent outside the office** - a seat claims a containment parent
+  in another tree, or a node whose views do not reach this office, to
+  borrow its node scope. Mitigation: `office_seat_parent_outside`
+  (HARD) at write time, and a second workspace-root `OFFICE.md` in one
+  tree is refused with `office_tree_second_root`.
 
 - **Collection alias collision** — two collection refs resolve to
   the same effective name (e.g. one ref aliased to `team`, another
@@ -839,7 +995,9 @@ in [AIP-18](/docs/aip-18) and not duplicated here.
 - [AIP-3 — SKILL.md](/docs/aip-3)
 - [AIP-6 — company/v1](/docs/aip-6) — the static company profile (companies.sh community standard) that an OFFICE.md may compose via the `company:` binding
 - [AIP-7 — governance, approval, audit](/docs/aip-7)
-- [AIP-9 — agentoperators/v1](/docs/aip-9)
+- [AIP-9 - agentoperators/v1](/docs/aip-9) - an operator's seats come from offices
+- [AIP-34 - workspace/v2](/docs/aip-34) - the tree a company office spans, and the node scope of a session
+- [AIP-54 - ref/v1](/docs/aip-54) - the `operator:` and `user:` compact refs of seat holders
 - [AIP-10 — agentknowledge/v1](/docs/aip-10) — sibling Workspace AIP, mirror composition mechanic
 - [AIP-12 — agentplaybooks/v1](/docs/aip-12)
 - [AIP-15 — WORKFLOW.md](/docs/aip-15)

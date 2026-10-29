@@ -279,6 +279,9 @@ work tracker; the work tracker carries the scope axes for its items.
 | Ref                                 | AIP                    | Resolver                                                                       |
 | ----------------------------------- | ---------------------- | ------------------------------------------------------------------------------ |
 | `ws://operators/<slug>`             | [AIP-9](/docs/aip-9)   | Look up the operator workspace; verify it exists and the host can activate it. |
+| `operator:<slug>[@<workspace>]`     | [AIP-9](/docs/aip-9)   | `executor` and seat holders. With `@<workspace>`, look the operator up in that workspace's registry. |
+| `user:<id>[@<workspace>]`           | [AIP-54](/docs/aip-54) | Seat holders only. Look the user up in the host user registry. |
+| `workspace:@<owner>/<slug>`         | [AIP-34](/docs/aip-34) | A seat's `parent` when the seat is attached to a node: the node must be in the same tree and carry a view of this office. |
 | `ws://workspaces/<slug>`            | [AIP-20](/docs/aip-20) | Look up the work workspace.                                                    |
 | `ws://agencies/<slug>`              | [AIP-21](/docs/aip-21) | Resolve the agency workspace.                                                  |
 | `ws://wikis/<slug>(/KNOWLEDGE.md)?` | [AIP-10](/docs/aip-10) | Resolve the wiki workspace.                                                    |
@@ -299,6 +302,27 @@ host MUST refuse a workspace whose binding does not resolve at load time (HARD,
 `office_xref_unresolvable`). This is strict-load posture: the company workspace
 is the substrate other AIPs build on, and a company with broken cross-AIP refs
 cannot meaningfully coordinate.
+
+## Company tree checks
+
+When the office sits in an [AIP-34](/docs/aip-34) tree, the host also, at load
+and on every seat write:
+
+1. Refuses a second workspace-root `OFFICE.md` in the tree
+   (`office_tree_second_root`, HARD). Only the tree root has one.
+2. Refuses an `extends:` that leaves the tree.
+3. For each seat whose containment `parent` is a `workspace:` ref, checks that
+   the node is in the same tree and carries a view whose chain reaches this
+   office (`office_seat_parent_outside`, HARD, per item). `view` is the
+   reserved name for that case in `allowedParentKinds`; it is not a collection.
+4. Resolves each seat's `holder` (`operator:` or `user:`, with `@<workspace>`
+   for another workspace). An unresolvable holder leaves the seat unfilled
+   (`office_holder_unresolvable`, warn).
+
+The node of a seat is the node of the nearest `view` parent on its containment
+chain, else the tree root. A session started through the seat is scoped to
+that node, and every call it makes is filtered by the session's own `ground`,
+never by the seat.
 
 ## View activation
 
@@ -572,6 +596,9 @@ type CompanyResult<T> =
 | `office_collection_unresolvable`         | HARD                                                                                           | Collection ref does not resolve (file missing, registry has no entry). Delegates the underlying AIP-18 error code where useful.  |
 | `company_collection_disabled_with_items` | warn                                                                                           | Child disables a parent's collection but live items still reference it. Registration proceeds; lint surfaces the orphaned items. |
 | `office_xref_unresolvable`               | HARD (executor / governance / work / agency / knowledge / playbook) / warn (defaults.workflow) | Cross-AIP ref does not resolve.                                                                                                  |
+| `office_tree_second_root`                | HARD                                                                                           | A second workspace-root `OFFICE.md` (no `extends:`) in one AIP-34 tree. Only the tree root carries one; nodes below carry views. |
+| `office_seat_parent_outside`             | HARD (per-item)                                                                                | A seat's containment `parent` is an item outside this office, or a node of another tree or whose views do not reach this office. |
+| `office_holder_unresolvable`             | warn                                                                                           | A seat's `holder` (`operator:` or `user:`, with or without `@<workspace>`) does not resolve. The seat is treated as unfilled.    |
 
 Domain prefixes use a colon (`vendor:specific_code`), never an underscore.
 
@@ -598,7 +625,7 @@ defineOfficeWorkspace({
     defaultCurrency?: string            // ISO 4217
     taxId?: string
   }
-  executor?: string                     // ws://operators/<slug>
+  executor?: string                     // ws://operators/<slug> or operator:<slug>[@<workspace>]
   governance?: string                   // path or ref
   work?: string                         // ws://workspaces/<slug>
   agency?: string                       // ws://agencies/<slug>
