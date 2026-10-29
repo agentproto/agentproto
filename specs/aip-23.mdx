@@ -1167,32 +1167,24 @@ Configs using non-standard schemes declare an explicit host
 dependency.
 
 **`session://<id>` (added 2026-10-28).** The scheme names one agent
-session as the principal of an [AIP-38](/docs/aip-38) grant or decision.
-`<id>` is the session id the host minted at spawn ([AIP-46](/docs/aip-46)
-`Session.id`). The rules:
+session, by the id the host minted at spawn ([AIP-46](/docs/aip-46)
+`Session.id`), as the principal of an [AIP-38](/docs/aip-38) grant:
 
-1. **Opaque.** A consumer MUST treat `<id>` as an opaque string and MUST
-   NOT derive anything from its form (a workspace, a parent, an agent or
-   an order).
-2. **Host-local.** A `session://` ref names a session of the host that
-   resolves it, and nothing else. A host MUST NOT resolve a `session://`
-   ref to a session of another host, and a ref carried to another host
-   names nothing there.
+1. **Opaque.** A consumer MUST NOT derive anything from the form of
+   `<id>` (a workspace, a parent, an agent or an order).
+2. **Host-local.** A host MUST NOT resolve a `session://` ref to a
+   session of another host; carried to another host, it names nothing.
 3. **Authenticated, not asserted.** A host MUST resolve a request to
-   `session://<id>` only from the session credential AIP-46 §Session
-   principals defines. Writing the ref in a request, a header or a
+   `session://<id>` only from the session credential of AIP-46
+   §Session principals. Writing the ref in a request, a header or a
    config entry MUST NOT make the caller that session.
 4. **Its own identity.** A `session://` ref names the session, not the
-   `operator://` operator it runs for nor the `user://` user who
-   started it. Whether a grant to either of those reaches the session
-   is decided by AIP-38 composition and its delegation ceiling, not by
-   this scheme.
-5. **Resolution.** Resolved through the minimal contract below, a
-   `session://` ref yields a display `name` and, since a session has no
-   mailbox, the host-policy `email` of conformance rule 4
-   (`session-<id>@noreply.<host>`). A retired session's credential is
-   revoked (AIP-46), so a ref to it can still label an audit record but
-   no request resolves to it.
+   `operator://` or `user://` it runs for; whether their grants reach
+   it is decided by AIP-38 composition and its delegation ceiling.
+5. **Resolution.** The ref yields a display `name` and the host-policy
+   `email` of conformance rule 4 (`session-<id>@noreply.<host>`). A
+   retired session's ref can label an audit record, but no request
+   resolves to it once its credential is revoked.
 
 ### Minimal resolution contract
 

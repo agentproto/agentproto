@@ -187,10 +187,8 @@ Each `principal` is an [AIP-23 identity-ref](/docs/aip-23#identity-reference-blo
 in any of its forms (inline / ref / file).
 Standard schemes: `operator://<id>`, `user://<id>`, `user://current`,
 `org://<id>`, `guild://<id>`, `bot://<name>`, `group://<name>`,
-`role://owner|editor|viewer` (relative to the resource),
-`session://<id>` (a live session of the host that evaluates the grant,
-[AIP-23](/docs/aip-23) and [AIP-46](/docs/aip-46) §Session principals),
-`*` (wildcard).
+`role://owner|editor|viewer` (relative to the resource), `session://<id>`
+(a live session of this host, [AIP-46](/docs/aip-46)), `*` (wildcard).
 
 Each `action` in `actions` is an [AIP-39 ACTION ref](/docs/aip-39)
 in any of its forms. `*` is a wildcard for "any action in this

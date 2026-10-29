@@ -453,14 +453,6 @@ folder-relative, not id-relative, by design: ids are flat and
 immutable (rule 2), so there is no id pattern that would mean "my
 siblings" or "my descendants" the way a path-relative sentinel does.
 
-Doors are also the authority behind the `door` relation of
-[AIP-46 §Relations](/docs/aip-46#relations-amended-2026-10-28): two
-sessions bound to two workspaces may message each other only through a
-door between those workspaces, the successor of a host link the
-operator configures by hand. The door forms above name files, not
-session messages; until this section defines one that does, AIP-46
-falls back to the operator's link.
-
 ### Apps and consent
 
 `apps[].attach` defaults to `"self"` — the declaring node and its own
