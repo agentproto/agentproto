@@ -1,6 +1,6 @@
 ---
 title: "AIP-42: AGENT (agent/v1): base runnable agent primitive"
-description: A markdown + frontmatter format for declaring a runnable agent — composes identity, persona, model, tools, actions, skills, workflows, runner, memory, governance, policy, and routines into a single manifest. Standalone runnable in any AIP-9 OPERATOR-conforming runtime. Body is the system prompt. Operators (AIP-9) extend AGENT with organizational context (role, company binding, dynamic per-request resolution).
+description: A markdown + frontmatter format for declaring a runnable agent, composing identity, persona, model, tools, actions, skills, workflows, runner, memory, governance, policy, and routines into a single manifest. Standalone runnable in any AIP-9 OPERATOR-conforming runtime. Body is the system prompt. An operator (AIP-9) is an agent holding a role in an organization: it carries every AGENT field and resolves into an effective AGENT.
 aip: 42
 status: Review
 type: Schema
@@ -21,7 +21,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/agent
 | Type | Schema |
 | Domain | agents.sh |
 | Requires | [AIP-9](/docs/aip-9) (runtime), [AIP-14](/docs/aip-14), [AIP-15](/docs/aip-15), [AIP-17](/docs/aip-17), [AIP-23](/docs/aip-23), [AIP-25](/docs/aip-25), [AIP-37](/docs/aip-37), [AIP-38](/docs/aip-38), [AIP-39](/docs/aip-39), [AIP-41](/docs/aip-41) |
-| Extended by | [AIP-9 OPERATOR](/docs/aip-9) (operator = agent + organizational context, dynamically resolved per request) |
+| Extended by | [AIP-9 OPERATOR](/docs/aip-9) (an operator is an agent holding a role in an organization; it resolves into an effective AGENT) |
 | Referenced by | [AIP-6 COMPANY.md](/docs/aip-6) (`agents/<slug>/AGENT.md` doctype), [AIP-24 ASSEMBLY.md](/docs/aip-24) (collective of agents) |
 
 ## Abstract
@@ -40,12 +40,15 @@ role, no assembly required.
 
 The relationship to existing primitives is **extension**:
 
-- [AIP-9 OPERATOR.md](/docs/aip-9) is a **dynamic agent** — one
-  shared shell with persona/role/tools resolved per-request from
-  `requestContext`. An OPERATOR is an AGENT plus organizational
-  binding (role, reports_to, company, structured persona,
-  governance attached). `OPERATOR extends AGENT` — the operator
-  inherits all AGENT fields and adds organizational ones.
+- [AIP-9 OPERATOR.md](/docs/aip-9) is an **organizational binding**:
+  an agent holding a role in an organization. An OPERATOR is an AGENT
+  plus that binding (role, reports_to, where it sits in the
+  organization, structured persona, governance attached).
+  `OPERATOR extends AGENT`: the operator inherits all AGENT fields
+  and adds organizational ones, and resolves into an effective AGENT.
+  How an operator is executed (one harness session each, or one
+  shared in-process shell) is a property of its runtime, not of what
+  an operator is.
 - [AIP-25 PERSONA.md](/docs/aip-25) is the face/voice carrier;
   AGENT references it via `persona: { ref }`.
 - [AIP-23 IDENTITY.md](/docs/aip-23) is the layered identity;
@@ -65,15 +68,16 @@ neither one canonical:
    files but not across runtimes; not git-diff-friendly for non-devs;
    no scan-and-register from a workspace.
 
-2. **As `agents/<role>/AGENT.md`** under
-   [AIP-6 `company/v1`](/docs/aip-6) `kind: agent` doctype.
-   Limited to company contexts; field set ad-hoc; no formal spec.
+2. **As `agents/<role>/AGENT.md`** in an
+   [AIP-6 `company/v1`](/docs/aip-6) package, marked `kind: agent`
+   (a legacy marker). Limited to company contexts; field set ad-hoc;
+   no formal spec.
 
 Five problems compound:
 
 1. **Agents can't be authored without a company.** A solo utility
    agent (researcher, code-reviewer, formatter) needed a fake
-   COMPANY.md wrapper to fit the existing AIP-6 `kind: agent` slot.
+   COMPANY.md wrapper to fit the existing AIP-6 agent slot.
 
 2. **Composition is not uniform.** Tool / persona / identity refs
    scattered as ad-hoc fields without the `inline | ref | file`
@@ -88,8 +92,8 @@ Five problems compound:
 
 5. **OPERATOR vs AGENT confusion.** AIP-9 calls itself an "operator
    runtime protocol" but [AIP-6](/docs/aip-6) introduces a separate
-   `kind: agent` and a separate `kind: operator` doctype, with
-   neither clearly the file form. AIP-42 resolves this: AGENT is the
+   agent slot (`kind: agent`) and a separate operator slot
+   (`kind: operator`), with neither clearly the file form. AIP-42 resolves this: AGENT is the
    base file form; OPERATOR extends it for the company/org context.
 
 `AGENT.md` extracts the base agent into its own primitive — composable
@@ -202,11 +206,11 @@ YAML frontmatter, delimited by `---` lines. All fields are case-sensitive.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `version` | semver | `1.0.0` | Spec version of THIS file. |
-| `extends` | agent-ref | — | Parent AGENT this one extends. Inherits all fields; child overrides win. |
+| `extends` | agent-ref | none | Parent AGENT this one extends (a single ref). Inherits all fields; child overrides win. |
 | `identity` | identity-ref | host default | [AIP-23](/docs/aip-23) identity ref. |
 | `persona` | persona-ref | — | [AIP-25](/docs/aip-25) persona ref (face/voice/character). |
 | `runner` | runner-ref | host default | [AIP-17](/docs/aip-17) runtime engine ref. Default = host's reference runner (Mastra in agentik). |
-| `tools` | tool-ref[] | `[]` | [AIP-14](/docs/aip-14) tool refs. |
+| `tools` | tool-item[] | `[]` | [AIP-14](/docs/aip-14) tool refs, or structured server refs `{ kind: mcp, server, allow?, deny? }`. See [Tools](#tools). |
 | `actions` | object | `{ granted: [] }` | Explicit action allow-list. `granted: <action-ref>[]`. POLICY checks union of this + tools' `implements`. |
 | `skills` | skill-ref[] | `[]` | [AIP-3](/docs/aip-3) skill refs (expertise prose). |
 | `workflows` | workflow-ref[] | `[]` | [AIP-15](/docs/aip-15) workflow refs available to this agent. |
@@ -221,7 +225,7 @@ YAML frontmatter, delimited by `---` lines. All fields are case-sensitive.
 | `on` | object | `{}` | Lifecycle hooks. Map of [AIP-37](/docs/aip-37) event name → action-ref to invoke. |
 | `publish` | object | `{ visibility: private }` | Registry publish config. |
 | `tags` | string[] | `[]` | Free-form discovery tags. |
-| `metadata` | object | `{}` | Free-form, namespaced. |
+| `metadata` | object | `{}` | Free-form, namespaced under `<vendor>`. See [Vendor extensions](#vendor-extensions). |
 
 ### Model
 
@@ -270,6 +274,53 @@ history. `enabled`, `store` and `anchors` bind the agent to
 | `store` | ref | host default | The AIP-72 memory store (section 8) the agent's items are read from and proposed to: a workspace-relative path to a reference-layout directory, or a host-resolved store id. |
 | `anchors` | string[] | host-resolved | Scope anchors in formatted form (`global`, `project:<slug>`, `agent:<slug>`...) added to the ones the host resolves for a session; they select the items of the AIP-72 projection digest (section 9). `global` always applies. |
 
+### Tools
+
+Each item of `tools` is one of two forms.
+
+**An [AIP-14](/docs/aip-14) tool ref**, in any [AIP-54](/docs/aip-54)
+form: a string, `{ ref | file | inline }`, or a `tool` ref naming one
+tool by its server and name (`tool:<server>/<name>`,
+`ws://tools/<server>/<name>`; see AIP-54 §Per-kind bodies).
+
+**A structured server ref** that offers the tools of one server,
+optionally narrowed:
+
+```yaml
+tools:
+  - { kind: mcp, server: katchy }                              # every tool katchy exposes
+  - { kind: mcp, server: agentproto, allow: [session_list] }  # only these
+  - { kind: mcp, server: pygmalion, deny: [cron_create] }     # all but these
+```
+
+| Field | Type | Req | Description |
+|---|---|---|---|
+| `kind` | const `mcp` | yes | Discriminator. |
+| `server` | string | yes | The server that exposes the tools, as the host names it. Mandatory: a structured ref always carries its server. No `/`. |
+| `allow` | string[] | no | Tool names on that server the agent is offered. Absent = every tool the server exposes; `[]` = none. |
+| `deny` | string[] | no | Tool names on that server the agent is never offered. |
+
+Rules:
+
+1. **Names.** An `allow` or `deny` entry is the `<name>` part only; the
+   tool's full name is `<server>/<name>` (AIP-54 `tool-body`). A
+   daemon built-in tool uses the server `agentproto`. An entry with
+   a `/` is invalid.
+2. **Deny wins.** A name in `deny` is never offered, even when `allow`
+   lists it or another `tools` item admits it. When one server appears
+   in several items, a tool is offered when some item admits it and no
+   item denies it.
+3. **Deny is the AGENT-level projection of an AIP-38 explicit deny**
+   ([AIP-38 §Explicit deny](/docs/aip-38)): the same outcome as a
+   grant with `effect: deny` on the tool `<server>/<name>`, which
+   outranks any allow in any composed policy. `allow` and `deny` only
+   narrow what the agent is offered; neither grants permission.
+   POLICY still decides whether a call is allowed (rule 4 below).
+
+A bare string that is not an AIP-54 ref is a legacy spelling some
+hosts read as a daemon built-in tool name; new files SHOULD use the
+structured form.
+
 ### Lifecycle hooks
 
 ```yaml
@@ -285,6 +336,29 @@ on:
 Hook values are action-ref(s) — single ref or array. Hooks fire
 per [AIP-37 LIFECYCLE](/docs/aip-37) event. Errors in hooks are
 logged but do NOT abort the conversation.
+
+### Vendor extensions
+
+Vendor-specific fields live under `metadata.<vendor>`. Hosts MUST
+tolerate unknown `metadata.<vendor>.…` keys; they MUST NOT honour
+metadata fields that override the meaning of any field defined in this
+AIP. The frontmatter schema is closed (`additionalProperties: false`),
+so a vendor key at the top level is a validation error, never an
+extension point. This AIP is the source of truth; vendor namespaces are
+advisory.
+
+### Session configuration is not an AGENT field
+
+Which harness runs the agent, its posture, the saved preset, the auth
+profile and the reasoning effort are properties of a **session**, not of
+the definition. They belong to
+[AIP-46 §Session config, presets and fallback](/docs/aip-46)
+(`SessionConfig`, layers and precedence), and an AGENT.md MUST NOT
+carry them as fields. `model` is the one axis the definition supplies:
+it is the `definition` layer of AIP-46's precedence, and a preset or a
+request overrides it. A host that wants to keep a session setting next
+to the agent file puts it under `metadata.<vendor>` (see above), where
+it is host configuration that changes no AIP-42 field.
 
 ### The `defineAgent` standard signature
 
@@ -304,23 +378,23 @@ interface AgentDefinition {
   persona?:       PersonaRef
   runner?:        RunnerRef
 
-  tools?:         ToolRef[]
+  tools?:         ToolItem[]
   actions?:       { granted?: ActionRef[] }
   skills?:        SkillRef[]
   workflows?:     WorkflowRef[]
   routines?:      RoutineRef[]
-  delegatesTo?:   AgentRef[]
+  delegates_to?:  AgentRef[]
 
   memory?: {
     enabled?:         boolean
     store?:           string
     anchors?:         string[]
     scope?:           "per-conversation" | "per-thread" | "per-workspace" | "none"
-    retentionTurns?:  number
+    retention_turns?: number
     semantic?: {
       enabled?:   boolean
       embedder?:  ModelRef | string
-      topK?:      number
+      top_k?:     number
     }
   }
 
@@ -341,7 +415,19 @@ interface AgentDefinition {
   tags?:          string[]
   metadata?:      Record<string, unknown>
 }
+
+type ToolItem = ToolRef | { kind: "mcp"; server: string; allow?: string[]; deny?: string[] }
+
+// The handle paired with its AGENT.md body (the same shape as AIP-53's AgentEntry).
+interface AgentEntry {
+  agent: AgentHandle
+  body?: string          // the system prompt (rule 3); composed from the structured fields if absent
+}
 ```
+
+Field names are the frontmatter's, in snake_case. The body is not
+frontmatter, so `AgentDefinition` carries none: a body travels with its
+handle as an `AgentEntry`.
 
 ### Conformance rules
 
@@ -349,9 +435,8 @@ interface AgentDefinition {
    `@<owner>/` prefix.
 
 2. **`extends` chain ≤5 deep.** Loader MUST refuse cycles or chains
-   longer than 5 levels. Diamond inheritance (A→B, A→C, B+C in
-   same agent) is allowed; conflict resolution: deeper-in-chain wins,
-   ties broken by source order.
+   longer than 5 levels. `extends` takes a single ref, so a chain is a
+   line and a diamond cannot occur.
 
 3. **Body is the instructions.** The markdown body following the
    frontmatter is concatenated with parent `AGENTS.md` body (if
@@ -532,7 +617,7 @@ operators/<slug>/OPERATOR.md       # operators (agent + role + company binding)
 
 ### OPERATOR.md extends AGENT.md
 
-OPERATOR is the dynamic-agent extension. Same shape; adds organizational
+OPERATOR is the organizational extension. Same shape; adds organizational
 fields:
 
 ```yaml
@@ -552,10 +637,10 @@ governance: { ref: "./GOVERNANCE.md" }
 ---
 ```
 
-The runtime ([AIP-9](/docs/aip-9)) instantiates ONE shared agent
-shell and resolves operator's persona/role/tools per-request from
-`requestContext.operatorId`. AGENT.md is one-instance-per-file;
-OPERATOR is one-instance-per-runtime-shell-with-N-personas.
+A host resolves an operator into an effective AGENT, and the AGENT is
+what runs. Whether the operator then runs as its own harness session or
+inside a shared in-process shell is the operator's `runtime`
+([AIP-9](/docs/aip-9)), not part of its definition.
 
 ### ASSEMBLY.md collection of AGENTs
 
@@ -584,10 +669,12 @@ overridden. The agent's POLICY grants apply to the target.
 
 This AIP is purely additive:
 
-- [AIP-6](/docs/aip-6) `company/v1` `kind: agent` (under
-  `agents/<role>/AGENT.md`) remains supported. Loaders recognise both
-  `schema: company/v1, kind: agent` (legacy) and
-  `schema: agent/v1` (new). Migration is mechanical.
+- The [AIP-6](/docs/aip-6) agent slot (`agents/<role>/AGENT.md`)
+  remains supported. Files written for it declared
+  `schema: company/v1` with a `kind: agent` marker (and `slug` for the
+  identifier), the legacy spelling. Loaders recognise both that legacy
+  form and `schema: agent/v1` (new); this AIP sets no removal date for
+  the legacy form. Migration is mechanical.
 - [AIP-9 OPERATOR](/docs/aip-9) is **re-pointed** to extend AGENT
   (per AIP-9 patch), but its file form (`operators/<slug>/OPERATOR.md`)
   and runtime contract are unchanged.
@@ -596,8 +683,8 @@ This AIP is purely additive:
 
 Migration path:
 1. Move `agents/<role>/AGENT.md` → `.agents/<slug>/AGENT.md`.
-2. Update frontmatter `schema: company/v1, kind: agent` →
-   `schema: agent/v1`.
+2. Update frontmatter `schema: company/v1` with `kind: agent` →
+   `schema: agent/v1`; drop `kind`, and `slug` becomes `id`.
 3. Map `traits.*` / `capabilities[]` / `communicationStyle` from the
    old shape directly (same field names).
 4. Add `runner: { ref: "@agentik/runners-standard/mastra-default" }`
