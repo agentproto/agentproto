@@ -202,7 +202,18 @@ persona-body  = id
 session-body  = id                          ; AIP-46 session id
 eth_tx-body   = chainId ":" txHash          ; EIP-155 chainId; 0x-prefixed lowercase hex
 ots-body      = inner-compact-ref           ; e.g. ots:local:engagements/.../247.ots
+tool-body     = server "/" name             ; the server that exposes the tool, then its name; server is mandatory
+server        = 1*( ALPHA / DIGIT / "_" / "-" / "." )
+name          = 1*( ALPHA / DIGIT / "_" / "-" / "." )
 ```
+
+**Tool names.** A tool is named `<server>/<name>`:
+`tool:agentproto/session_list`, `ws://tools/katchy/search`. A daemon
+built-in tool uses the server `agentproto`. The server is mandatory: a
+bare name such as `session_list` is not a `tool` ref. It is the legacy
+spelling some hosts read as a daemon built-in, and new manifests
+SHOULD NOT emit it. This is the name that [AIP-42](/docs/aip-42)
+`tools` entries and [AIP-38](/docs/aip-38) tool scopes use.
 
 Reserved characters in path/url bodies (`@`, `:`, `#`, `%`) MUST be
 percent-encoded. Kinds MAY carry an optional `sha256` content binding
@@ -239,6 +250,7 @@ ws://wikis/<slug>/KNOWLEDGE.md              ; doc inside a wiki
 ws://workspaces/<slug>/WORK.md              ; doc inside a workspace
 ws://assemblies/<slug>/<member>             ; member inside an assembly
 ws://companies/<slug>/teams/<team>          ; nested collection item
+ws://tools/<server>/<name>                ; tool inside the server that exposes it
 ```
 
 Each kind's body grammar declares its own segment structure.
