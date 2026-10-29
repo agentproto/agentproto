@@ -422,9 +422,12 @@ A spawn request MAY carry `agent: <agent-ref>` — a reference to an
 | `policy` | [AIP-38](/docs/aip-38) binding — the access decision |
 
 A host that resolves an AGENT MUST record it as `agentSlug` on the
-session. Absent `agent`, the host spawns the adapter's default
-behaviour and the session MUST be treated as declaring no
-`delegates_to` — i.e. deny (below).
+session. A host MAY bind a host-configured default AGENT to a spawn
+that names none, and MUST then record it as `agentSlug`; §Who may
+spawn whom rule 3 bounds it like any other binding. A session to which
+no AGENT is bound, by request or by default, runs the adapter's
+default behaviour and MUST be treated as declaring no `delegates_to`,
+that is deny (below).
 
 #### Who may spawn whom
 
@@ -540,7 +543,7 @@ level of proof and at most one principal:
 
 | Proof | The caller presents | Principal |
 |---|---|---|
-| `proven` | a valid session credential, or the operator credential of the host's own auth boundary (§Security Considerations) | `session://<id>` ([AIP-23](/docs/aip-23#reference-schemes)), the session the credential was minted for; or the operator (a host-defined identity-ref), for the operator credential |
+| `proven` | a valid session credential, or the operator credential of the host's own auth boundary (§Security Considerations) | `session://<id>` ([AIP-23](/docs/aip-23#reference-schemes)), the session the credential was minted for; or the host operator (`user://<id>` or another host-defined identity-ref; "the operator" throughout this AIP), for the operator credential |
 | `claimed` | a session id it names (a URL parameter, a header, a body field) without a valid session credential, or a credential that is malformed, unknown or revoked | none once the host enforces (rules 3 and 4); in observe-only mode (rule 6), the session it claims, as a host did before it minted credentials (`anonymous` when it names none) |
 | `none` | no credential and no claim | `anonymous` |
 
@@ -1088,9 +1091,9 @@ be relied upon for identity.
 A send from one session to another is the [AIP-39](/docs/aip-39) action
 `session:message`: its principal is the sender, as the Session
 principals section defines it, and its target is the recipient. The
-human operator and the host itself (`system`) are principals too, not
-pairs of sessions, and a host MUST allow a send from either to any
-session. Between two sessions:
+operator (the host operator of AIP-70) and the host itself (`system`)
+are principals too, not pairs of sessions, and a host MUST allow a send
+from either to any session. Between two sessions:
 
 1. **A tree edge allows.** A host MUST allow a send from a session to
    its parent and from a parent to its direct child, with no grant.
@@ -1843,14 +1846,24 @@ command.
 ### There is no `role` on this surface
 
 Some hosts grew a private `role: executor | supervisor` field carrying
-delegation authority. It is not part of this AIP and MUST NOT be
-introduced: a spawn names an `agent`, and authority comes from that
-agent's `delegates_to` + policy. Hosts carrying the field today should
-replace it — the delegating tier becomes an AGENT declaring
-`delegates_to`, the leaf tier an AGENT declaring none — and delete it
-rather than alias it. Organizational role belongs on the
-[AIP-9](/docs/aip-9) OPERATOR that *owns* the agent, never on the
-spawn; [AIP-47](/docs/aip-47) forbids a role granting access at all.
+delegation authority. It is not part of this AIP and a host MUST NOT
+introduce it: a spawn names an `agent`, and authority comes from that
+agent's `delegates_to` plus policy. A host carrying the field today
+MUST replace it: the delegating tier becomes an AGENT declaring
+`delegates_to`, the leaf tier an AGENT declaring none, each shipped by
+the host as a built-in AGENT a spawn request may name. A host MAY keep
+the field, for a period it states, as a deprecated alias of `agent`
+that behaves exactly like it ([AIP-70](/docs/aip-70) §4): `role: <name>`
+binds the built-in AGENT `<name>`, is bounded by the caller's
+`delegates_to` like any other binding, MUST NOT accept a name that is
+not a built-in AGENT, and MUST NOT grow a new value (a new tier is a
+new AGENT). A privilege level or a lattice between tiers is not a
+delegation authority (§Open Questions): the only authority is the
+caller's `delegates_to`, which the host evaluates for every nested
+spawn on every surface, not only on a scoped gateway. Organizational
+role belongs on the [AIP-9](/docs/aip-9) OPERATOR that *owns* the
+agent, never on the spawn; [AIP-47](/docs/aip-47) forbids a role
+granting access at all.
 
 ### `ground` replaces `workspaceSlug` + `cwd`
 
