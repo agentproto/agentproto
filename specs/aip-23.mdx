@@ -1217,6 +1217,10 @@ resolved from the host's registry and never copied into the grant:
    every session the operator gives that label, now and after any
    restart, so it is exactly as strong as the rule that only the
    operator assigns operator labels (AIP-46 §Operator label rule 1).
+6. **A prefix is not a wildcard.** `<prefix>` MUST be non-empty:
+   `session-label://*` is invalid and matches nothing, as `label:*`
+   does among the AIP-38 scope forms; `*` is the only wildcard
+   principal.
 
 ### Minimal resolution contract
 
