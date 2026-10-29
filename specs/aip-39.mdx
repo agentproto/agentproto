@@ -369,6 +369,66 @@ as matching.
 is evaluated and how it combines with the tree edges a host allows
 without a grant.
 
+> **Draft AIP-39 amendment** (2026-10-29). *Normative identifiers
+> (action id, scope form) are English and final.*
+
+**Problem.** A TOOL that declares no `implements` is an orphan: no
+action covers it, so [AIP-38](/docs/aip-38) can neither grant nor deny
+it. The daemon's built-in tools (`cron_*`, `session_*`, ...) are such
+tools. [AIP-42 §Tools](/docs/aip-42) already defines an AGENT `deny`
+as the AGENT-level projection of an AIP-38 explicit deny on the tool
+`<server>/<name>`, but no action id existed to write that grant on. The
+standard library gains an eighth runtime action:
+
+| id | library entry | category | target_kind | mutates | risk_level | approval | semantics |
+|---|---|---|---|---|---|---|---|
+| `tool:invoke` | `@agentik/actions/standard/tool-invoke` | `runtime` | `tool` | `[]` | 1 | `auto` | Call one tool. |
+
+**Risk rationale.** The declared values describe the gate, not the
+tool. `tool:invoke` names the act of calling a tool; what a call does
+comes from the tool's own manifest, or from the action it implements.
+`mutates: []` and `risk_level: 1` are therefore the floor of the gate
+itself. A TOOL MUST NOT declare `implements: tool:invoke`: a host
+evaluates this action on every call it dispatches, and a tool is never
+an implementor of it.
+
+**Optional scope.**
+
+| id | scope |
+|---|---|
+| `tool:invoke` | tool name `<server>/<name>` ([AIP-54](/docs/aip-54) `tool-body`), or a `*`-suffix glob such as `<server>/*` |
+
+The matching rules are defined in
+[AIP-38 §Tool names](/docs/aip-38#tool-names-toolinvoke-added-2026-10-29).
+They add no scope syntax: an exact name and the `*` suffix of
+[AIP-38 §Scope matching](/docs/aip-38#scope-matching-added-2026-10-23)
+rule 2 are the whole vocabulary. A daemon built-in tool is named with
+the server `agentproto` (`agentproto/cron_create`), so a grant or an
+explicit deny reaches it without any `implements`.
+
+**Evaluation.** The host evaluates `tool:invoke` when it is about to
+dispatch a call, with the tool's full name as the requested scope. The
+server and the name come from the host's own registry of the tool
+being called, never from the arguments of the call. When the tool also
+declares `implements: <action>`, the call is the same operation under
+two names, so the two requests are decided together by the AIP-38
+composition rules: a matching deny on either refuses the call, and a
+matching allow on either admits it. A grant on the implemented action
+therefore keeps working without a `tool:invoke` grant, and a `deny` on
+`tool:invoke` still refuses a tool whose implemented action is
+granted.
+
+`tool:invoke` is not a list of tools an agent is offered. An AIP-42
+`tools` entry decides what the agent sees; this action decides whether
+a call is allowed; neither grants the other
+([AIP-42 §Tools](/docs/aip-42)).
+
+**Ownership.** AIP-39 only declares the id. [AIP-42](/docs/aip-42)
+owns the AGENT `tools` projection, and the host that dispatches the
+call owns the evaluation point. As with the other runtime actions, the
+table is not a permission: the effective decision is an AIP-38 policy
+evaluation.
+
 ## Composition pattern (`inline | ref | file`)
 
 Like every composable block in the AIP series, ACTION refs accept
@@ -564,7 +624,8 @@ This AIP is purely additive:
 
 - TOOL.md `implements: <action-ref>` is OPTIONAL. TOOLs without
   `implements` are "orphan" — usable but not policy-grantable as a
-  group.
+  group. A single orphan tool, or a server's whole set, is still
+  grantable or deniable through `tool:invoke` scoped by tool name.
 - POLICY.md MAY accept bare action ids (`"storage:commit"`) for
   back-compat with pre-AIP-39 manifests; the canonical form is
   `{ action: "<ref>" }`.
@@ -587,6 +648,16 @@ shape. A host that adopts the entries SHOULD map its existing ad-hoc
 grants onto these ids in its migration; it starts declaring verbs it
 previously enforced with ad-hoc mechanisms, and the ids are the only
 new contract.
+
+### The 2026-10-29 tool-invoke amendment (draft)
+
+§Standard runtime actions gains `tool:invoke`. It is additive: no
+existing action id changes shape, and a TOOL that implements an action
+is decided exactly as before, because a grant on the implemented
+action keeps admitting its calls (see §Evaluation there). A host that
+does not publish `tool:invoke` is unaffected. A host that adopts it
+SHOULD map any ad-hoc per-tool allow or deny list it enforces onto
+grants on this id.
 
 ## Security considerations
 

@@ -39,7 +39,10 @@ policy (e.g. `@acme/policies/team-baseline`).
 Grants are made on [AIP-39 ACTION](/docs/aip-39) ids — never on
 TOOL ids directly. This decouples policy from implementation: granting
 `storage:commit` covers every TOOL implementing that action,
-including future ones.
+including future ones. One tool can still be targeted, `implements` or
+not, through the AIP-39 action `tool:invoke` scoped by the tool's name
+(see [§Scope matching](#scope-matching-added-2026-10-23)): that is a
+scope on an action, not a grant on a TOOL id.
 
 The format pairs with the standard entry-point function,
 **`definePolicy(...)`**, whose signature any implementation in any
@@ -478,6 +481,58 @@ Scope vocabularies are action-specific. The standard runtime actions
 define theirs in [AIP-39 §Standard runtime
 actions](/docs/aip-39#standard-runtime-actions-added-2026-10-23).
 
+#### Tool names (`tool:invoke`, added 2026-10-29)
+
+The scope of the AIP-39 action `tool:invoke` is a tool name, and the
+requested scope is the full name of the tool being called:
+`<server>/<name>`, the [AIP-54](/docs/aip-54) `tool-body` grammar. A
+daemon built-in tool uses the server `agentproto`. `tool:invoke`
+defines no typed scope form (rule 3): its scopes are plain names,
+matched by rules 1, 2 and 5 only.
+
+- **Exact name.** `pygmalion/cron_create` matches that one tool and no
+  other. The comparison is on the whole string and is case-sensitive.
+- **A whole server, or a family of names.** Rule 2 already gives these
+  forms, so there is no new syntax: `agentproto/*` matches every tool
+  of the server `agentproto`, and `pygmalion/cron_*` matches every tool
+  of `pygmalion` whose name begins with `cron_`. A server name cannot
+  contain `/`, so `<server>/*` never reaches another server. A scope
+  such as `agentproto*` is a valid rule 2 prefix but also reaches a
+  server named `agentproto-extra`, so authors SHOULD write
+  `<server>/*` for a whole server. A lone `*` matches every tool.
+- **A bare name matches nothing.** A scope without a server, such as
+  `cron_create`, equals no requested scope. A host that holds a legacy
+  bare name for a daemon built-in MUST turn it into
+  `agentproto/<name>` before it forms the requested scope, so the
+  legacy spelling never needs its own grant.
+- **No scope.** A `tool:invoke` grant without `scope` covers every
+  tool (rule 5): an allow admits any tool the rest of the policy does
+  not deny, and a deny refuses every tool.
+- **No selector form.** [AIP-43](/docs/aip-43#selectors-referenced-by-policy)
+  defines no selector over tool names for this action, so a
+  `selector:<id>` scope on `tool:invoke` cannot be resolved. Rule 4's
+  fail-closed behaviour applies: the host evaluates an allow grant
+  with this scope as not matching and a deny grant with this scope as
+  matching.
+
+```yaml
+grants:
+  - principal: "operator://pm-katchy"
+    effect: deny
+    actions:
+      - { action: "tool:invoke", scope: "pygmalion/cron_create" }
+      - { action: "tool:invoke", scope: "pygmalion/cron_*" }
+  - principal: "operator://pm-katchy"
+    actions:
+      - { action: "tool:invoke", scope: "katchy/*" }
+```
+
+The deny wins over any allow (§Explicit deny), including an allow that
+another composed policy grants on `tool:invoke` with a wider scope. An
+[AIP-42](/docs/aip-42) `tools` entry with `deny: [cron_create]` on the
+server `pygmalion` is the AGENT-level projection of the first scope
+above.
+
 ### Delegation ceiling (added 2026-10-23)
 
 A nested principal never holds more authority than its parent. The
@@ -653,6 +708,14 @@ record) and two new reason values (`explicit-deny` and
 unknown. The reference implementation stored the auth-profile spend
 scope as `"profile"`; migration MUST rewrite stored limits to
 `scope: "auth-profile"`.
+
+### The 2026-10-29 tool-invoke amendment (draft)
+
+§Scope matching gains one paragraph, §Tool names, that says how the
+scopes of the new AIP-39 action `tool:invoke` match. Rules 1 to 5 are
+unchanged and a policy that does not name `tool:invoke` is evaluated
+exactly as before. The schema adds no field; it only checks the shape
+of the `scope` of a `tool:invoke` grant.
 
 ## Security considerations
 
