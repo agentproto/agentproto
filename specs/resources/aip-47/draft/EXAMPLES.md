@@ -5,7 +5,7 @@ Four concrete `ROLE.md` manifests, ordered by complexity:
 1. A **builtin** community role — `seo-specialist`.
 2. An **org-scoped override** that inherits the builtin — `our-seo-specialist`.
 3. An **executive** role with reporting line and lifecycle hook — `chief-of-staff`.
-4. A role reused through **typed slots** — `pm`, and two operators that hold it.
+4. A role reused through **typed slots**: `pm`, and two operators that hold it.
 
 ## 1. Builtin — `roles/seo-specialist/ROLE.md`
 
@@ -216,7 +216,7 @@ Sales) — that is what `antiPatterns` excludes.
 - Board-prep pre-read incomplete > 72 h before the meeting.
 ```
 
-## 4. Reuse through typed slots — `roles/pm/ROLE.md`
+## 4. Reuse through typed slots: `roles/pm/ROLE.md`
 
 ```yaml
 ---

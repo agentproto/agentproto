@@ -167,7 +167,7 @@
     "defaultPolicy": {
       "type": "string",
       "minLength": 1,
-      "description": "AIP-38 POLICY ref recommended for operators adopting this role. ADVISORY ONLY, denies included — role declares intent, policy decides effect; it may pre-fill the form that hires an operator and nothing more. The runtime MUST NOT apply defaultPolicy to an operator without the operator's own 'policy:' field or a governance signature attesting the binding. See AIP-47 §Role vs Policy vs Governance."
+      "description": "AIP-38 POLICY ref recommended for operators adopting this role. ADVISORY ONLY, denies included: role declares intent, policy decides effect; it may pre-fill the form that hires an operator and nothing more. The runtime MUST NOT apply defaultPolicy to an operator without the operator's own 'policy:' field or a governance signature attesting the binding. See AIP-47 §Role vs Policy vs Governance."
     },
     "knowledge": {
       "type": "object",
