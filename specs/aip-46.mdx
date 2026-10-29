@@ -1251,6 +1251,10 @@ forged; it does not make the body trustworthy.
 | `steer` | start a turn | inject into the running turn if the adapter supports steering ([AIP-44](/docs/aip-44) `_session/steering`), else as `next-turn` |
 | `interrupt` | start a turn | cancel the turn and deliver ([§Interrupt](#interrupt-added-2026-07-17)) |
 
+A host MAY surface the unread `fyi` messages of a session to the model
+as one bounded digest of ids and counts at the start of the recipient's
+next turn; it MUST NOT inline their bodies.
+
 A recipient blocked in `inbox_wait` with a matching filter MUST receive the
 message as that call's result instead of any of the above, and the message
 MUST NOT also be delivered as a turn.
@@ -1620,7 +1624,7 @@ runs. Other spawn inputs keep their own owners:
 | reference implementation field | owner |
 |---|---|
 | `skills`, `bundles`, `mcpServers`, `browser` | what the agent can use: the AIP-42 agent (`tools`, `skills`) or the spawn request; changing them is a `restart` |
-| `contextContinuity` | the context-continuity amendment of this AIP |
+| `contextSettings` (legacy `contextContinuity`) | §Session context: a block of its own, layered setting by setting |
 | `costBudget`, `maxCostUsd`, a model allow or block list | AIP-38 limits and grants in the spawn `policy` (`spend-usd`, `model:invoke`) |
 | `sandbox`, `cloud`, `worktree` | placement: [AIP-36](/docs/aip-36), [AIP-66](/docs/aip-66) and §Workspaces; not changed by fallback |
 | `turnRetry.action: "migrate"` (move to another sandbox box) | placement; out of scope of fallback |
@@ -1803,6 +1807,116 @@ Two refusal vocabularies, kept apart:
   with the AIP-38 decision record.
 
 On spawn both are client errors (HTTP 400), never server errors.
+
+### Session context (added 2026-10-29)
+
+> **Draft AIP-46 amendment** (2026-10-29). *Normative identifiers
+> (field names, literals, action names) are English and final.*
+
+**Problem.** A compaction, a fresh continuation and a handoff each
+discard context the session built. When the host decides one on its
+own, nobody asked for that loss; when nothing decides, a session that
+fills its window is truncated or refused by the provider. This section
+says what a host owes a session before it discards its context, the
+floor that holds with no setting at all, and how the context settings
+layer.
+
+A **checkpoint** is the record that `POST /sessions/:id/checkpoint` and
+the MCP tool `session_checkpoint` persist: a bounded record of the
+session's state (its goal, decisions, changed files and next step),
+saved next to its transcript, which it never replaces. A session's
+**fill** is its used context tokens over its context window, as its
+harness reports them.
+
+1. **A checkpoint precedes any host-decided context loss.** Before a
+   host compacts a session, continues it fresh or hands it off on its
+   own decision (a token threshold, a quota, the floor of rule 2), it
+   MUST write a checkpoint built from the transcript and the host's own
+   state, with no model call. A host that cannot write it MUST NOT
+   discard the context. A compaction the user or the operator requests
+   explicitly is not host-decided; a host SHOULD checkpoint it too.
+2. **The floor holds without a setting.** A host MUST refuse a prompt
+   to a session whose fill is at or above the floor (`hardStopAtPct`,
+   default 90 percent), whether or not any context setting was ever
+   given for that session, and when it refuses MUST start recovering
+   the session: the checkpoint of rule 1, then a compaction, then a
+   fresh continuation when the compaction left the fill at or above
+   the floor. A compaction prompt is the way out and is not refused by
+   this rule. A host that cannot read the fill (the harness reports no
+   usage or no window) MUST NOT refuse on a guess.
+3. **An absolute token threshold.** A host MAY compact an idle session
+   when its used context tokens reach `autoCompactAtTokens`, an
+   absolute count, independent of the window size; `0` turns it off.
+   Such a compaction is host-decided (rule 1) and MUST NOT start
+   mid-turn. The percent bands that warn, compact or continue fresh at
+   a share of the window are not part of this AIP. A host MAY keep
+   them as host extensions: in the `contextSettings` block their keys MUST be
+   prefixed `x-` (§The `SessionConfig` carrier), and no conformance
+   check reads them.
+4. **The context settings are independent axes.** They form a block of
+   their own, `contextSettings`, outside `SessionConfig` (the table
+   under "What is not in the config"):
+
+   ```ts
+   interface ContextSettings {
+     autoCompactAtTokens?: number      // rule 3; 0 = off
+     hardStopAtPct?: number            // the floor of rule 2; default 90
+     compactRequiresOperator?: boolean // rule 5; default false
+   }
+   ```
+
+   The block is resolved over the layers of §Layers and precedence,
+   and each of its settings is its own axis there: replaced whole by
+   the highest layer that sets it. A request that sets only
+   `contextSettings.autoCompactAtTokens` leaves a lower layer's
+   `contextSettings.hardStopAtPct` in force. A host SHOULD offer a way
+   to print the resolved block with the layer of every setting. The
+   legacy name `contextContinuity` is accepted as an alias of
+   `contextSettings` for the period [AIP-70](/docs/aip-70) §4 allows;
+   its other keys (a `mode`, the percent bands) are host-defined and
+   no conformance check reads them.
+5. **Who may compact.** When `compactRequiresOperator` is true, the
+   action `session:compact` on that session is reserved to the
+   operator. A host MUST refuse a compaction of the session requested
+   by a session principal (§Session principals), the session itself
+   included, on every surface that carries one (a compaction command
+   in a prompt, a compaction tool), as an AIP-38 denial in the form of
+   §Policy evaluation points:
+   `{applied: false, reason: "policy:explicit-deny: <detail>"}`. A
+   host-decided compaction (rules 1 to 3) is not requested by a
+   session principal and is not refused by this rule.
+6. **Conformance.** A host claims this section when it meets rules 1
+   and 2 and resolves every setting of `contextSettings` as its own axis
+   (rule 4). Rule 3 is optional: a host that does not implement it
+   ignores `autoCompactAtTokens`. A host that does not implement rule 5
+   MUST refuse a block that sets `compactRequiresOperator: true`: a
+   reservation dropped in silence leaves the session compactable by
+   any caller.
+
+> **Informative: why each setting is its own axis.** A host that took
+> the whole block from the highest layer that set any of its keys, and
+> filled the rest from built-in defaults, gave a session the threshold
+> its request set and the built-in floor and bands, not those the
+> operator had configured for the host.
+
+> **Informative: the reference implementation.** `@agentproto/runtime`
+> writes a checkpoint (`checkpointBeforeContextLoss`) before every
+> compaction prompt in `runAgentTurn`, refusing the compaction when it
+> cannot, and before a hard stop. `validateAgentTurn` holds the floor
+> with no policy (`CONTEXT_CONTINUITY_DEFAULTS`, 90), skips it when
+> `computeContextPct` returns null, and starts `performContextRescue`
+> (compact, continue fresh, then stop); its refusal is a plain error.
+> `autoCompactAtTokens` defaults to 150000 and a non-zero value is
+> clamped into [1000, 600000] (`AUTO_COMPACT_DEFAULT_TOKENS`,
+> `clampAutoCompactTokens`): the reference's values, not this AIP's.
+> It does not conform yet: it reads only `contextContinuity`; it keeps
+> the percent bands unprefixed (`warnAtPct`, `compactAtPct`,
+> `continueFreshAtPct`); it takes the whole block from the first layer
+> that sets one (`spawn-defaults.ts`) and merges it only over its
+> built-in defaults (`resolveContextContinuityPolicy`); and
+> `assertCompactionAllowed` refuses a session's compaction with a plain
+> error, not the AIP-38 denial form. `session_checkpoint` asks the
+> session for a handoff turn unless `askSource` is false.
 
 ## Rationale
 
@@ -2150,6 +2264,17 @@ operator layer 3 means, and states that only its portable
 cross-references the AIP-34 rule that already derives a session's node
 from its `ground`.
 
+### The 2026-10-29 session-context amendment (draft)
+
+§Session context replaces the context-continuity amendment this AIP
+used to name. A host that reads `contextContinuity` and runs the percent
+bands keeps working: `contextContinuity` is an alias of `contextSettings`, and
+the bands leave the normative surface without being forbidden, as host
+extensions. An existing host gains no new MUST beyond rules 1 and 2 of
+§Session context, the checkpoint before a host-decided context loss and
+the floor that holds without a setting; the other rules bind a host
+that claims the section (rule 6).
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -2317,10 +2442,6 @@ from its `ground`.
   own sessions cannot write, and an operator opt-in naming that
   workspace, as AIP-38 §Security considerations requires before a child
   policy relaxes a parent.
-- **Should `fyi` messages reach the model at all?** An `fyi` never
-  wakes the recipient; the reference implementation surfaces a one-line
-  digest at the start of its next turn. Whether that digest belongs in
-  the model's context, or only in the host's UI, is unsettled.
 - **A portable steering capability.** Steering is advertised today
   through an AIP-44 extension (`_meta.steering`), and adapters disagree
   on idle semantics — one honours "prompt required", another starts a
@@ -2332,3 +2453,10 @@ from its `ground`.
   without steering them has no way to say so. Possibly two actions
   with separate grants; unclear whether the distinction earns its
   keep.
+- **Idle compaction and a cold wake.** §Session context does not say
+  what a host does for a session that idles past its prompt cache, nor
+  for a prompt that wakes it after the cache lapsed. The evidence that
+  decides is the extra input cost of a cold wake against a warm one,
+  measured over a week of real transcripts from their cache-creation
+  versus cache-read tokens. Until then a host SHOULD NOT invent a wire
+  format for it.

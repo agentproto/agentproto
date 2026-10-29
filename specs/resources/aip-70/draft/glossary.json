@@ -69,6 +69,12 @@
       "neverMeans": "a label; a session id; an AIP-9 operator, or its slug"
     },
     {
+      "term": "context settings",
+      "means": "the `contextSettings` block of a session: the context floor, the absolute compaction threshold and the reservation of compaction to the operator, each layered as its own axis",
+      "owner": 46,
+      "neverMeans": "the `contextProfile` axis of a session config; a prompt's context window"
+    },
+    {
       "term": "session config",
       "means": "how a session runs: harness, model, effort, posture, context, route, auth profile, retry, fallback",
       "owner": 70,
