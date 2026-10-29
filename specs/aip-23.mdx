@@ -1159,6 +1159,7 @@ resolver dispatches by scheme:
 | `guild://<id>` | A guild / team | host's guilds table |
 | `bot://<name>` | A system bot | host config (e.g. `bot://agentik` = `Agentik <noreply@agentik.net>`) |
 | `session://<id>` | A live agent session on this host, as an [AIP-38](/docs/aip-38) principal | host's session registry ([AIP-46](/docs/aip-46) §Session principals) |
+| `session-label://<label>`, `session-label://<prefix>*` | The set of live sessions on this host whose operator label equals `<label>` (or begins with `<prefix>`), as an [AIP-38](/docs/aip-38) principal | host's session registry ([AIP-46](/docs/aip-46) §Operator label) |
 | `@<owner>/identities/<slug>` | A registry-published identity | address resolver per AIP-34 |
 | `./<path>.IDENTITY.md` | A local AIP-23 IDENTITY.md workspace | filesystem read |
 
@@ -1185,6 +1186,37 @@ session, by the id the host minted at spawn ([AIP-46](/docs/aip-46)
    `email` of conformance rule 4 (`session-<id>@noreply.<host>`). A
    retired session's ref can label an audit record, but no request
    resolves to it once its credential is revoked.
+
+**`session-label://<label>` (added 2026-10-29).** The scheme names a
+set of sessions by the operator label of [AIP-46](/docs/aip-46)
+§Operator label. `session-label://<prefix>*` (a trailing `*`) is a
+prefix match, as in the AIP-38 scope forms `label:<label>` and
+`label:<prefix>*`. It matches every live session whose operator label
+equals `<label>` (or begins with `<prefix>`) at evaluation time,
+resolved from the host's registry and never copied into the grant:
+
+1. **Host-local.** A host MUST NOT resolve a `session-label://` ref to
+   a session of another host.
+2. **Authenticated, not asserted.** A host MUST match a
+   `session-label://` ref only against a caller that is a `proven`
+   session principal (AIP-46 §Session principals), never against a
+   `claimed` session id. Naming a label in a request MUST NOT give the
+   caller that label.
+3. **A set, not an identity.** A ref matches only live sessions; a
+   retired session matches nothing. It is usable only as the
+   `principal` of an AIP-38 grant and in the host allow lists that spell
+   such grants. It does not resolve to a single identity, so the
+   `name` and `email` of conformance rule 4 do not apply, and a host
+   MUST refuse it where a single identity is required (for example as
+   the author of a record).
+4. **Its own identity.** A `session-label://` ref names the sessions,
+   not the `operator://` or `user://` they run for; whether their grants
+   reach them is decided by AIP-38 composition and its delegation
+   ceiling.
+5. **As strong as the label.** A grant naming a label is a grant to
+   every session the operator gives that label, now and after any
+   restart, so it is exactly as strong as the rule that only the
+   operator assigns operator labels (AIP-46 §Operator label rule 1).
 
 ### Minimal resolution contract
 

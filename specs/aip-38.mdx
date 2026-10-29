@@ -188,7 +188,10 @@ in any of its forms (inline / ref / file).
 Standard schemes: `operator://<id>`, `user://<id>`, `user://current`,
 `org://<id>`, `guild://<id>`, `bot://<name>`, `group://<name>`,
 `role://owner|editor|viewer` (relative to the resource), `session://<id>`
-(a live session of this host, [AIP-46](/docs/aip-46)), `*` (wildcard).
+(a live session of this host, [AIP-46](/docs/aip-46)),
+`session-label://<label>` and `session-label://<prefix>*` (the live
+sessions of this host carrying that operator label, AIP-46 §Operator
+label), `*` (wildcard).
 
 Each `action` in `actions` is an [AIP-39 ACTION ref](/docs/aip-39)
 in any of its forms. `*` is a wildcard for "any action in this
@@ -456,10 +459,11 @@ host MUST match it as follows:
    scope sharing the prefix (a lone `*` matches every scope). A `*` in
    any other position is not a wildcard.
 3. **Typed scope forms**: an action MAY define typed scope forms
-   `<kind>:<value>`. `label:<label>` matches when the operator-assigned
-   label of the target session equals `<label>`; `label:<prefix>*`
-   matches when that label begins with `<prefix>`. AIP-39 declares both
-   forms for the session actions.
+   `<kind>:<value>`. `label:<label>` matches when the operator label of
+   the target session ([AIP-46](/docs/aip-46) §Operator label, never its
+   free-text `label`) equals `<label>`; `label:<prefix>*` matches when
+   that label begins with `<prefix>`. AIP-39 declares both forms for the
+   session actions.
 4. **`selector:<id>`**: the requested scope is a member of the set
    resolved from the saved selector named `<id>`. Selector resolution
    is defined by [AIP-43 § Selectors referenced by policy](/docs/aip-43#selectors-referenced-by-policy). Matching is
