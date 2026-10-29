@@ -1,6 +1,6 @@
 ---
 title: "AIP-64: PACK (pack/v1): the installable capability bundle: plugin, apps, knowledge, playbook, pricing"
-description: "Names the pack, the commercial assemblage that ships a plugin (built inline from `./skills/` or merged from published `@agentproto/skill-pack-*` includes) together with zero or more AIP-53 apps, a knowledge workspace selection, an optional playbook to generate, legacy pricing data, and non-technical blockers, as a first-class doctype. Fixes the PACK.md frontmatter (`pack/v1`), every cross-field rule a conformant parser enforces, the two authoring paths (`definePack` and `parsePackManifest`) over one shared zod schema, the frozen `PackHandle` with its derived `status` (`planned | assembling | ready | gated`), the `aip://64/<name>[@version]` artifact-ref grammar and the git pin grammar reused from AIP-62, the `review.pack-digest/v1` content digest over the PACK.md and each declared app's APP.md source, and the installation contract (apps install through AIP-42 `app_install`, the plugin installs through the skill install verb, knowledge resolves at query time, the playbook generates on demand, and re-applying a pack replaces it, never duplicates it)."
+description: "Names the pack, the commercial assemblage that ships a plugin (built inline from `./skills/` or merged from published `@agentproto/skill-pack-*` includes) together with zero or more AIP-53 apps, catalog members (AIP-47 roles, AIP-25 personas, AIP-38 policies) that become resolvable by ref once the pack is installed, a knowledge workspace selection, an optional playbook to generate, legacy pricing data, and non-technical blockers, as a first-class doctype. Instances (an AIP-6 company, an AIP-22 office, an AIP-9 operator) are never pack content. Fixes the PACK.md frontmatter (`pack/v1`), every cross-field rule a conformant parser enforces, the two authoring paths (`definePack` and `parsePackManifest`) over one shared zod schema, the frozen `PackHandle` with its derived `status` (`planned | assembling | ready | gated`), the `aip://64/<name>[@version]` artifact-ref grammar and the git pin grammar reused from AIP-62, the `review.pack-digest/v1` content digest over the PACK.md, each declared app's APP.md source and each declared catalog member's file, and the installation contract (apps install through AIP-42 `app_install`, the plugin installs through the skill install verb, catalog members register with the host's role, persona and policy sources, knowledge resolves at query time, the playbook generates on demand, and re-applying a pack replaces it, never duplicates it)."
 aip: 64
 status: Draft
 type: Schema
@@ -21,7 +21,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/pack
 | Status | Draft |
 | Type | Schema |
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-10](/docs/aip-10) (ids and slugs; the pack `name` shape), [AIP-42](/docs/aip-42) (AGENT-SESSIONS, and the app lifecycle tools the declared apps install through), [AIP-53](/docs/aip-53) (APP: the app bundles a pack assembles), [AIP-54](/docs/aip-54) (REF: the artifact-ref model the pack ref grammar reuses), [AIP-62](/docs/aip-62) (REVIEW: the git pin grammar and the pack digest recipe it already shipped) |
-| Composes with | [AIP-18](/docs/aip-18) (COLLECTION: the item typing primitive a pack's knowledge selection sits on), [AIP-55](/docs/aip-55) (PRODUCT: the pricing mechanism the manifest's legacy `pricing` data is superseded by), [AIP-57](/docs/aip-57) (MODEL-ROUTING: the unrelated RoutingPack whose name collides) |
+| Composes with | [AIP-47](/docs/aip-47) (ROLE), [AIP-25](/docs/aip-25) (PERSONA) and [AIP-38](/docs/aip-38) (POLICY): the catalog members a pack carries; [AIP-9](/docs/aip-9) (OPERATOR), [AIP-6](/docs/aip-6) (COMPANY) and [AIP-22](/docs/aip-22) (OFFICE): the instances a pack never carries; [AIP-18](/docs/aip-18) (COLLECTION: the item typing primitive a pack's knowledge selection sits on), [AIP-55](/docs/aip-55) (PRODUCT: the pricing mechanism the manifest's legacy `pricing` data is superseded by), [AIP-57](/docs/aip-57) (MODEL-ROUTING: the unrelated RoutingPack whose name collides) |
 | Created | 2026-09-30 |
 | Package | `@agentproto/pack` (manifest schema, `definePack`, `parsePackManifest`, handle construction) |
 
@@ -36,6 +36,9 @@ assembles, under one identity and one version:
   `@agentproto/skill-pack-*` packages;
 - zero or more **apps**: [AIP-53](/docs/aip-53) app directories inside
   the pack, each installed through the AIP-42 app lifecycle tools;
+- zero or more **catalog members**: [AIP-47](/docs/aip-47) roles,
+  [AIP-25](/docs/aip-25) personas and [AIP-38](/docs/aip-38) policies,
+  which installing the pack makes resolvable by ref;
 - a **knowledge** selection: a workspace name with tag and kind filters
   that scopes what the pack's agents read;
 - an optional **playbook** directive: the title, root, and chapter
@@ -45,12 +48,17 @@ assembles, under one identity and one version:
 - **blockers**: non-technical reasons a pack cannot ship, which force
   its status to `gated`.
 
+A pack carries templates, never instances: a company, an office or an
+operator is data owned by the organization that holds it, and no pack
+contains one (§Instances are never pack content).
+
 This AIP fixes the `PACK.md` frontmatter (`pack/v1`), every cross-field
 rule a conformant parser enforces, the two authoring paths (a TS
 `definePack` and an md `parsePackManifest`) that run one shared schema,
 the frozen `PackHandle` and its derived `status`, the
 `aip://64/<name>[@version]` artifact-ref grammar, the content digest
-that binds a pack to its own bytes and its apps' bytes, and the
+that binds a pack to its own bytes and the bytes of its declared apps
+and catalog members, and the
 installation contract a host implements.
 
 ## Motivation
@@ -74,6 +82,15 @@ none of them had a wrapper:
    identity (the pack's `name`, and each app's `id`) and a defined
    replace rule.
 
+4. **No vehicle for the catalog.** Roles, personas and policies are
+   templates an organization reuses across many instances (one `pm`
+   role for every project's product manager). They had a format each
+   ([AIP-47](/docs/aip-47), [AIP-25](/docs/aip-25),
+   [AIP-38](/docs/aip-38)) and no way to ship, version and install
+   them as a set, so every host kept its own in-code list. A pack is
+   that vehicle: the catalog is code, shipped as packs, while the
+   instances built from it are data.
+
 The pack is deliberately the thin assemblage layer. It declares what
 goes together; [AIP-53](/docs/aip-53) still defines what an app is,
 [AIP-42](/docs/aip-42) still owns how an app installs, and
@@ -89,7 +106,7 @@ concept each one owns, because the distinctions are load-bearing:
 | [AIP-53](/docs/aip-53) APP | One executable product bundle | Agents, workflows, and an optional UI surface, shipped as `.agentproto/APP.md` on disk and `.agentapp` as a packaged distributable. Runnable on its own. |
 | [AIP-18](/docs/aip-18) COLLECTION | Item typing primitive | The on-disk schema system (`COLLECTION.md` + `ITEM.md`) any workspace AIP composes on. Not a bundle at all. |
 | [AIP-62](/docs/aip-62) review-pack | The review specialization | A reusable set of review checks a REVIEW.md imports through `uses`. Its format is private to AIP-62. |
-| **AIP-64 PACK** (this AIP) | The commercial assemblage | Plugin + apps + knowledge + playbook + pricing + blockers, under one name and version, installable as a unit. |
+| **AIP-64 PACK** (this AIP) | The commercial assemblage | Plugin + apps + catalog members (roles, personas, policies) + knowledge + playbook + pricing + blockers, under one name and version, installable as a unit. |
 
 So there are two bundles on purpose: an **APP is one executable
 product**; a **PACK is the thing you sell**, which contains apps among
@@ -134,9 +151,14 @@ re-merges them.
    plugin, and a non-positive bundle price are errors at parse time,
    never silent defaults.
 8. **The digest binds the declared surface.** The content digest covers
-   the PACK.md source and each declared app's APP.md source: exactly
-   the bytes a consumer needs to verify that the assemblage it was
-   promised is the assemblage it received.
+   the PACK.md source, each declared app's APP.md source and each
+   declared catalog member's file: exactly the bytes a consumer needs
+   to verify that the assemblage it was promised is the assemblage it
+   received.
+9. **Templates, never instances.** A pack carries what an organization
+   reuses (roles, personas, policies, skills, apps). It never carries
+   what an organization is or holds (a company, an office, an
+   operator). Installing a pack changes the catalog and nothing else.
 
 ## Specification
 
@@ -167,6 +189,9 @@ object is a parse error.
 | `version` | string | Required. Semantic version of the pack, at least one character. |
 | `plugin` | object | Required. `{ inline?, includes? }`. See §Plugin. |
 | `apps` | array | Optional. Each entry `{ id, path }`. See §Apps. |
+| `roles` | array | Optional. Each entry `{ path }`, a `ROLE.md`. See §Catalog members. |
+| `personas` | array | Optional. Each entry `{ path }`, a `PERSONA.md`. See §Catalog members. |
+| `policies` | array | Optional. Each entry `{ path }`, a `POLICY.md`. See §Catalog members. |
 | `knowledge` | object | Optional. `{ workspace, anyOf?, allOf?, kinds? }`. See §Knowledge. |
 | `playbook` | object | Optional. `{ title, root?, targetChapters? }`. See §Playbook. |
 | `pricing` | object | Optional. `{ ebook?, bundle, step? }`. See §Pricing. |
@@ -210,6 +235,112 @@ capability surface and cannot be installed.
 The declared apps' `APP.md` sources are the pack digest's other inputs
 (§Content digest). An app id MUST be unique within a pack; a repeated
 id is a parse error.
+
+### Catalog members
+
+`roles`, `personas` and `policies` are the pack's **catalog members**:
+reusable templates that an organization binds to many instances. Each is
+an optional array of entries `{ path }`, and a pack MAY carry any
+combination of them, with or without apps.
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Required, at least one character. The member's file, relative to the pack root. It MUST end with the filename the owning AIP makes normative: `ROLE.md`, `PERSONA.md` or `POLICY.md` respectively. |
+
+| Member | Doctype (owner) | Identity, from the file itself | Resolvable by |
+|---|---|---|---|
+| `roles` | `role/v1` ([AIP-47](/docs/aip-47)) | `name` | `ws://roles/<name>`, `role:<name>`, `{aip: 47, id: <name>}` |
+| `personas` | `persona/v1` ([AIP-25](/docs/aip-25)) | `name` | `ws://personas/<name>`, `persona:<name>`, `{aip: 25, id: <name>}` |
+| `policies` | `policy/v1` ([AIP-38](/docs/aip-38)) | `id` | `ws://policies/<id>`, `policy:<id>`, and the policy `ref` forms AIP-38 defines |
+
+The pack names files and the files name themselves: a member's identity
+is the key its owning AIP and the [AIP-54](/docs/aip-54) family
+`keyBy` derive from the file, and the manifest never restates it. A
+ref's id and its registry key therefore cannot drift (AIP-54
+Resolution rule 1). The `ws://` spellings are the ones the AIP-54
+collection table assigns (`roles`, `personas`, `policies`); the
+`{aip, id}` artifact form resolves where the host registers the family
+in its `RefCatalog`. A standalone policy file carries an `id` (AIP-38),
+so a policy listed in a pack MUST have one.
+
+**Parse rules.** A conformant parser MUST reject, with no I/O:
+
+- a `path` that is absolute, has a `..` segment, or does not end with
+  the member's filename;
+- a `path` declared twice, within a member or across `apps`, `roles`,
+  `personas` and `policies` (each `path` is a digest label, §Content
+  digest).
+
+**Install rules.** A conformant host:
+
+1. MUST read every catalog member and validate it against its owning
+   AIP's schema (`schema` equal to `role/v1`, `persona/v1` or
+   `policy/v1`, and that AIP's rules) before it registers any of them.
+   One invalid member refuses the whole catalog part of the install and
+   names the member.
+2. MUST register the members with its role, persona and policy sources
+   as installed-pack sources, so that the refs in the table above
+   resolve to them. The mechanism (copy into a catalog folder,
+   register in place) is host-defined; the observable behavior is not.
+3. MUST refuse an install whose member identity is already provided by
+   another installed pack or by a host builtin catalog, with a typed
+   conflict error that names both sources. Re-applying the same pack
+   replaces its own members (§Idempotence). Within one pack, two members
+   of the same kind with the same identity are an install error.
+4. MUST NOT let an installed member shadow a more local source of the
+   same kind. Role sources are searched nearest node first and the
+   host's catalog sources, installed packs among them, come after the
+   tree ([AIP-47](/docs/aip-47) §Role sources within a company tree). A
+   role of the company or of a guild therefore overrides a pack's role
+   without publishing anything. A host that keeps persona or policy
+   sources in a tree applies the same order to them.
+5. MUST scope resolution to where the pack is installed. A pack
+   attached to an [AIP-34](/docs/aip-34) node (the `attach` of its
+   `agentproto.lock` entry) is a catalog source for that node and its
+   descendants within the tree; a pack installed without an attach point
+   is a source for the installing tenant. Resolution never crosses a
+   tenant (AIP-54 `ws://` rule 2).
+6. MUST treat a ref that names no installed member as unresolvable, with
+   the typed failure of the owning AIP or of AIP-54 (`role_unresolvable`
+   for a role, `RefUnresolvableError` in strict `aip://` resolution).
+   Installing a pack adds no fallback and no default.
+
+**Installing is registering, not binding.** Making a role, persona or
+policy resolvable hires nobody, assigns no persona and applies no
+policy. A policy from a pack governs nothing until an operator, a node
+or a company binds it by ref, and a role's `defaultPolicy` stays
+advisory ([AIP-47](/docs/aip-47)): neither the pack nor its roles change
+the effective policy of anything that already exists.
+
+**Refs are held, not copied.** An instance that uses a pack role holds
+the ref (`role: { ref: ws://roles/pm }`), never a copy of the role. A
+new version of the pack is therefore what the instance resolves the next
+time it is resolved; how a running session learns of it is the host's
+concern (AIP-46 and AIP-9 own that).
+
+#### Instances are never pack content
+
+A pack carries templates and never instances. An **instance** is data
+that belongs to one organization or one hired agent: an
+[AIP-6](/docs/aip-6) company, an [AIP-22](/docs/aip-22) office, an
+[AIP-9](/docs/aip-9) operator. Concretely:
+
+- `pack/v1` defines no member that holds a company, an office or an
+  operator, and a later minor of `pack/v1` MUST NOT add one. A manifest
+  that carries such a key is an unknown-key parse error like any other.
+- A host MUST NOT treat a `COMPANY.md`, `OFFICE.md` or `OPERATOR.md`
+  found anywhere under a pack root as installable content, whether it
+  sits next to a catalog member, inside a declared app or inside the
+  plugin's `./skills/`.
+- Installing, re-applying or removing a pack MUST NOT create, update or
+  delete a company, an office or an operator.
+
+This is the line between the catalog and the organization. A pack
+install is an upsert keyed by `name` that replaces what it installed; an
+instance carries state the pack's author does not own (its bindings,
+its seats, the memory anchored on it), and a re-applied pack that
+carried one would overwrite that state. An instance is created from the
+catalog, by a user or a host, pointing at pack members by ref.
 
 ### Knowledge
 
@@ -378,7 +509,10 @@ here is the pack-scoped variant:
    - the pack's own `PACK.md` source text, labeled `PACK.md`;
    - each **declared app's** `APP.md` source text, read from the app's
      `path` resolved against the pack root, labeled with that `path`
-     exactly as declared.
+     exactly as declared;
+   - each **declared catalog member's** file (`ROLE.md`, `PERSONA.md`
+     or `POLICY.md`), read from the member's `path` resolved against the
+     pack root, labeled with that `path` exactly as declared.
    A line is `<label>` followed by a NUL byte (`0x00`) followed by the
    lowercase hex SHA-256 of that input's raw bytes.
 2. Sort the lines lexicographically.
@@ -386,11 +520,21 @@ here is the pack-scoped variant:
 4. The digest is the lowercase hex SHA-256 of the UTF-8 encoding of
    that string.
 
-The digest covers the manifest and each declared app's manifest, which
-is the declared surface of the assemblage. Skill files, knowledge
-entries, and playbook output are deliberately outside it: they change
-independently and are covered by their own AIPs' mechanisms. A pack
-with no declared apps digests its PACK.md alone.
+The digest covers the manifest, each declared app's manifest and each
+declared catalog member's file, which is the declared surface of the
+assemblage. A role, a persona and a policy are declared by path and are
+prompt and governance text a host will act on, so they are bound like an
+app manifest is. Skill files, knowledge entries, and playbook output are
+deliberately outside it: they change independently and are covered by
+their own AIPs' mechanisms. A pack with no declared apps and no
+catalog members digests its PACK.md alone.
+
+Adding the catalog members to the inputs does not change the recipe
+(line format, sort, join, hash) and does not bump `alg`. A pack that
+declares none of them digests exactly as it did before, and a pack that
+declares one is rejected by a parser that predates them (§Backward
+compatibility), so no verifier ever computes `review.pack-digest/v1` of
+such a pack over the older input set.
 
 A consumer that records a pack digest MUST also record `alg` (the
 literal `review.pack-digest/v1`). A consumer that does not
@@ -432,6 +576,12 @@ copied to its destination, overwriting without prompting, so a
 re-applied pack replaces its skills rather than stopping on an
 overwrite question.
 
+**Catalog members register with the host's catalog sources.** The roles,
+personas and policies of the pack are validated and registered as
+installed-pack sources (§Catalog members), so a ref to one of them
+resolves from then on. Nothing is bound by this step, and no company,
+office or operator is touched (§Instances are never pack content).
+
 **Knowledge resolves at query time.** Installing a pack records the
 knowledge selection; it resolves `workspace`, tags, and kinds against
 the live workspace whenever a pack agent queries knowledge. The
@@ -446,7 +596,11 @@ Re-applying a pack with the same `name` **replaces, never duplicates**:
 
 - the pack itself is upserted by `name`;
 - each declared app is upserted by its app `id` (above);
-- each skill is overwritten by the `--force` fan-out (above).
+- each skill is overwritten by the `--force` fan-out (above);
+- each catalog member is replaced by identity: a re-applied pack
+  registers the current role, persona and policy files under the same
+  identities, and a member the new version no longer declares stops
+  resolving from this pack.
 
 A conformant host MUST make every step of a pack application
 idempotent, so applying a pack N times converges to the same state as
@@ -461,6 +615,7 @@ applying it once.
 - A host **MUST surface the blockers** it refused on: a refusal that
   does not name the blockers is a bug report waiting to happen. The
   blocker strings are surfaced verbatim.
+- A refused pack registers none of its catalog members.
 - `ready`, `assembling`, and `planned` packs are installable at the
   host's discretion; `assembling` is expected and ordinary (a pack
   whose plugin is still being pulled together installs and gets
@@ -513,6 +668,39 @@ selection and the playbook directive, and prices the pack at the legacy
 bundle price until an [AIP-55](/docs/aip-55) product carries the
 authoritative price.
 
+### Example catalog PACK.md
+
+```md
+---
+schema: pack/v1
+name: product-team
+title: "Product Team"
+description: "Roles, a persona and a baseline policy for running a product team."
+version: 0.3.0
+plugin:
+  inline: true
+roles:
+  - path: ./roles/pm/ROLE.md
+  - path: ./roles/designer/ROLE.md
+personas:
+  - path: ./personas/marcus/PERSONA.md
+policies:
+  - path: ./policies/no-cron/POLICY.md
+---
+```
+
+Its artifact ref is `aip://64/product-team@0.3.0` and its status derives
+to `ready`. Installing it validates the four files, then registers them:
+`ws://roles/pm`, `ws://roles/designer` and `ws://personas/marcus` now
+resolve (from the pack's attach node and below, or tenant-wide without
+one), and so does the policy by the `id` its `POLICY.md` declares. An
+operator in some company tree can then declare
+`role: { ref: ws://roles/pm }`; that operator is not part of the pack
+and the pack never lists it. Nothing is hired, no persona is assigned,
+and the policy governs nothing until something binds it. The content
+digest runs over four lines besides the PACK.md line, one per declared
+file, each labeled by its declared path (`./roles/pm/ROLE.md`, ...).
+
 ## Reference implementation
 
 | Concern | Source (in `agentproto/ts`) |
@@ -531,6 +719,12 @@ authoritative price.
 This AIP is additive: it introduces a new artifact and adds no field to
 any existing AIP's schema. A host that does not implement it never sees
 a PACK.md; a caller that never installs one sees no change.
+
+The `roles`, `personas` and `policies` members are additive and optional.
+The reference implementation's schema (`packages/pack/src/schema.ts`)
+does not carry them yet, so until it does its strict parse rejects a
+manifest that declares one, which is the behavior of any host that
+predates them.
 
 The manifest is strict: an unknown key is a parse error, so new fields
 require a host that knows them. Within `pack/v1`, optional members
@@ -574,6 +768,20 @@ cannot clobber skills it does not own.
 ([AIP-53](/docs/aip-53)). Installing a pack is installing its apps; a
 host's app trust rules apply unchanged, and the pack adds none.
 
+**Catalog members are instructions and governance.** A role body and a
+persona become prompt text for every instance that references them, and
+a policy is authorization text. A pack is therefore a way to reach into
+every operator that holds one of its refs. Three rules bound that: an
+installed member never shadows a more local source, so a pack cannot
+capture a name a company or guild already defines; a member whose
+identity another source already provides is refused, never merged; and
+installing a policy binds it to nothing, so a pack cannot widen or narrow
+what an existing operator may do by being installed. A host applying an
+untrusted pack SHOULD show the user the members it is about to register
+before registering them, and SHOULD scope the install to an attach node
+rather than the whole tenant. The digest binds the member files to the
+pack (§Content digest) and authenticates nothing.
+
 **Blockers are surfaced, not executed.** Blocker strings are data. A
 host MUST surface them verbatim and MUST NOT parse them into decisions
 beyond the gate itself.
@@ -603,6 +811,25 @@ Apps install through the [AIP-42](/docs/aip-42) app lifecycle tools
 keying, the data dir retention, and the sha pinning. The pack's
 installation contract is a delegation to those tools, one `app_install`
 per declared app.
+
+### AIP-47 ROLE, AIP-25 PERSONA and AIP-38 POLICY: the catalog members
+
+A pack's `roles`, `personas` and `policies` are files of these AIPs, and
+each AIP keeps owning what its file means, how it validates and how it
+composes (`extends`, slots, `defaultPolicy`). The pack owns only that
+these files travel together under one name and version, and that
+installing the pack makes them resolvable by the refs
+[AIP-54](/docs/aip-54) assigns (§Catalog members). A pack role is one
+of the host's catalog sources in the AIP-47 source chain, after the
+tree.
+
+### AIP-9 OPERATOR, AIP-6 COMPANY and AIP-22 OFFICE: the instances
+
+Operators, companies and offices are instances and are never pack
+content (§Instances are never pack content). They point into the
+catalog by ref: an operator's `role` ref names a pack role, a persona
+ref a pack persona, a policy ref a pack policy. Nothing points the other
+way, and a pack never lists the instances that use it.
 
 ### AIP-54 REF: the artifact grammar
 
@@ -661,19 +888,42 @@ never conflated.
    uninstall verb exists (removing the plugin, apps, and recorded
    selections as one transaction, with the apps' data dirs' retention
    following [AIP-42](/docs/aip-42) rules) is open; today removal is
-   per-member.
+   per-member. Removing or replacing a pack also makes its catalog
+   members unresolvable, and the refs that instances hold then fail
+   loudly (§Catalog members, install rule 6). Whether a host warns
+   before it removes a pack whose members are still referenced, and how
+   it finds the referencing instances, is open.
 6. **Pricing removal.** Whether the legacy `pricing` block is dropped
    from `pack/v1` in a future minor once [AIP-55](/docs/aip-55)
    adoption is universal, or retained indefinitely, is open.
+7. **Plugin for a catalog-only pack.** `plugin` stays required and
+   resolvable, so a pack that carries only roles, personas or policies
+   still declares `inline: true` or `includes`. Whether `plugin` should
+   become optional when at least one other member is present is open;
+   it would change the plugin-resolvable rule and the derived `status`.
+8. **Other catalog doctypes.** This AIP adds roles, personas and
+   policies. Whether a pack also carries [AIP-23](/docs/aip-23)
+   identities, [AIP-42](/docs/aip-42) agents or [AIP-12](/docs/aip-12)
+   playbook overlays as members, on the same path-and-identity model,
+   is open.
 
 ## See also
 
 - [AIP-1](/docs/aip-1): process, RFC 2119
 - [AIP-10](/docs/aip-10): ids and slugs; the envelope the pack `name`
   shape narrows
+- [AIP-6](/docs/aip-6): COMPANY; an instance, never pack content
+- [AIP-9](/docs/aip-9): OPERATOR; an instance, never pack content, that
+  refs pack roles, personas and policies
 - [AIP-18](/docs/aip-18): COLLECTION; the item typing primitive
+- [AIP-22](/docs/aip-22): OFFICE; an instance, never pack content
+- [AIP-25](/docs/aip-25): PERSONA; a catalog member a pack carries
+- [AIP-34](/docs/aip-34): WORKSPACE; the node a pack is attached to
+- [AIP-38](/docs/aip-38): POLICY; a catalog member a pack carries
 - [AIP-42](/docs/aip-42): AGENT-SESSIONS; the app lifecycle tools the
   installation contract delegates to
+- [AIP-47](/docs/aip-47): ROLE; a catalog member a pack carries, and the
+  role source order installed packs sit in
 - [AIP-53](/docs/aip-53): APP; the executable bundle a pack assembles
 - [AIP-54](/docs/aip-54): REF; the `aip://` artifact-ref grammar
 - [AIP-55](/docs/aip-55): PRODUCT; the pricing mechanism superseding
