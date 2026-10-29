@@ -215,8 +215,8 @@ The decisions behind the format, in the order the schema presents them:
   [`ADAPTER.md`](./draft/ADAPTER.md) holds normative for hosts (a real YAML
   parser, never home-rolled). YAML keeps single-field manifests almost free and
   matches how agentskills.io declines the same shape.
-- **No separate `runtime` field.** Host targeting is expressed with
-  `metadata.aip3.compatibility` (free-form environment requirements) rather
+- **No separate `runtime` field.** Host targeting is expressed with the
+  top-level `compatibility` field (free-form environment requirements) rather
   than a structured runtime field; there is no capability negotiation to
   compute against, so a free-form field matches reality. A skill whose needs
   are tool-shaped declares them in `allowed-tools` and runtimes apply policy
