@@ -163,7 +163,9 @@ interface Session {
   id: string
   /** Adapter slug from the AIP-45 manifest the session wraps. */
   adapterSlug: string
-  /** Workspace handle (AIP-46 §workspaces) this session binds to.
+  /** Workspace handle (§Workspaces) this session binds to. A host
+   *  evaluating a workspace-scoped grant derives the binding itself and
+   *  does not read it from this field (§Who may message whom rule 5).
    *  "default" when the host has no workspace registry. */
   workspaceSlug: string
   /** The session's ground, as the resolved AIP-54 ref. This is the
@@ -466,7 +468,12 @@ This is the normative core.
   session that can reach it, including sessions the host believes it
   denied. Co-located children can reach loopback by construction;
   "local" is not an authentication boundary when the thing being
-  authenticated is a process the host itself spawned.
+  authenticated is a process the host itself spawned. §Session
+  principals rule 5 names the one residual a host MAY accept by
+  configuration, an anonymous loopback caller evaluated as the
+  operator. A host that accepts it does not satisfy this bullet for
+  the sessions that can reach loopback, and MUST NOT describe its gate
+  as binding them (the opening paragraph of that section).
 - **Removing the actions from the surface the host injects is defence
   in depth, and MUST NOT be the only mechanism.** An adapter that
   carries its own configuration for the host's endpoint will connect
@@ -534,7 +541,7 @@ level of proof and at most one principal:
 | Proof | The caller presents | Principal |
 |---|---|---|
 | `proven` | a valid session credential, or the operator credential of the host's own auth boundary (§Security Considerations) | `session://<id>` ([AIP-23](/docs/aip-23#reference-schemes)), the session the credential was minted for; or the operator (a host-defined identity-ref), for the operator credential |
-| `claimed` | a session id it names (a URL parameter, a header, a body field) without a valid session credential, or a credential that is malformed, unknown or revoked | none once the host enforces (rules 3 and 4); in observe-only mode (rule 6), the principal the host resolved before this amendment |
+| `claimed` | a session id it names (a URL parameter, a header, a body field) without a valid session credential, or a credential that is malformed, unknown or revoked | none once the host enforces (rules 3 and 4); in observe-only mode (rule 6), the session it claims, as a host did before it minted credentials (`anonymous` when it names none) |
 | `none` | no credential and no claim | `anonymous` |
 
 The rules:
@@ -552,9 +559,10 @@ The rules:
 3. **A claim is not an identity.** A host MUST NOT evaluate a request
    as a session on the strength of a claim. Once it enforces this
    section, a host MUST refuse with `identity_unverified` a request
-   that claims a session id and presents no valid credential, and MUST
-   refuse with `identity_mismatch` a request whose claim names a
-   session other than the one its credential was minted for. A host
+   that claims the id of a session the host spawned (an external
+   identifier is not a claim, rule 7) and presents no valid credential,
+   and MUST refuse with `identity_mismatch` a request whose claim names
+   a session other than the one its credential was minted for. A host
    MUST NOT resolve either request to `anonymous` or to the operator
    instead. When the caller presents a session credential, the `:id` of
    a route that acts on the caller's own session, at least
@@ -612,9 +620,13 @@ The rules:
 9. **A host may require proof.** A host MAY require `proven` for any
    action it lists (for example the [AIP-39](/docs/aip-39)
    `session:spawn`, `session:control` and `auth-profile:use`), and then
-   MUST refuse a `claimed` or `none` caller of a listed action with
-   `identity_unverified`, or with `identity_mismatch` when its claim
-   names another session. The requirement holds only against a caller
+   MUST refuse with `identity_unverified` a `claimed` caller of a listed
+   action, and a `none` caller the host does not evaluate as the
+   operator under rule 5, or with `identity_mismatch` when the claim
+   names another session. Where the host evaluates the anonymous
+   loopback caller as the operator (rule 5), a listed action binds a
+   session that omits its credential only once the operator withdraws
+   that treatment. The requirement holds only against a caller
    that cannot reach the host without a credential, not against a
    session that can read the operator credential or reach an
    unenforced surface.
@@ -637,7 +649,9 @@ The rules:
 > valid until the old row retires (credential rule 4). It evaluates
 > every `anonymous` local caller as the operator with no switch
 > (rule 5). It honours a `callerSessionId` claim on loopback without a
-> credential (rule 3).
+> credential (rule 3). It counts a request naming an external
+> identifier as `claim only`, not `anonymous` (rule 7): its observer
+> does not consult the registry.
 
 #### Operator-only configuration (added 2026-10-28)
 
@@ -687,7 +701,9 @@ display only, and a host MUST NOT match a grant against it.
    only under this rule.
 3. **Not unique.** Several live sessions MAY carry the same operator
    label (a pool, or a lineage while its previous row retires). A
-   consumer MUST NOT read an operator label as naming one session.
+   consumer MUST NOT read an operator label as naming one session. A
+   host that wants one live session per name refuses or reuses the
+   second spawn; it does not reserve the label.
 4. **It follows the lineage.** When a host starts a session as the
    continuation of another under a new session id (a restart, a resume,
    a continuation or a handoff, §Apply classes), the host MUST copy
@@ -970,8 +986,8 @@ and writes the transcript record.
 ### MCP tools
 
 Hosts that already expose an MCP server (the common case for daemons
-also serving fs/exec tools) MUST register the following five tools
-so MCP clients can drive sessions through the same connection:
+also serving fs/exec tools) MUST register the first five tools of the
+table below so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
@@ -1043,8 +1059,8 @@ interface SessionMessage {
   from: {
     sessionId?: string       // absent only for relation "human" | "system"
     label?: string           // display only
-    role?: string
-    relation: "child" | "parent" | "sibling" | "human" | "system"
+    agentSlug?: string       // the sender's AIP-42 agent, when one was bound
+    relation: "child" | "parent" | "sibling" | "granted" | "human" | "system"
   }
   kind: "report" | "question" | "blocker" | "done" | "notice"
   urgency: "fyi" | "next-turn" | "steer" | "interrupt"   // as requested
@@ -1057,12 +1073,15 @@ interface SessionMessage {
 }
 ```
 
-`from` MUST be derived by the host from the authenticated caller identity
-(the session credential of [§Session principals](#session-principals-added-2026-10-28),
-the scope credential or host-attested session binding). A send request MUST
-NOT be able to set any `from` field; hosts MUST reject one that tries.
-`relation` is computed relative to `to` from the session forest. `label` is
-display-only and MUST NOT be relied upon for identity.
+`from` MUST be derived by the host from the principal it resolved for the
+request ([§Session principals](#session-principals-added-2026-10-28); in
+observe-only mode, the session a `claimed` caller claims), never from the
+request body. A send request MUST NOT be able to set any `from` field;
+hosts MUST reject one that tries. `relation` is computed relative to `to`
+from the session forest. It is `parent`, `child` or `sibling` when that
+structural relation holds, and `granted` when none does and a grant of
+`session:message` allowed the send. `label` is display-only and MUST NOT
+be relied upon for identity.
 
 #### Who may message whom (amended 2026-10-29)
 
@@ -1089,13 +1108,14 @@ session. Between two sessions:
 4. **Never to itself.** A host MUST refuse a send whose sender is the
    recipient.
 5. **The binding is the host's.** A session's workspace binding is the
-   most specific registered workspace (§Workspaces) whose path contains
-   the real path of the session's working directory. A host evaluating
-   a `workspace:` scope MUST derive the binding itself, through its
-   workspace registry, and MUST NOT take it from a slug the session or
-   any caller supplies (the `workspaceSlug` of a spawn request, a
-   header, a parameter, or a slug recorded on a descriptor from such
-   input). The `default` bucket of §Bucket resolution is not a
+   workspace its `ground` resolves into (§Session data model); a host
+   that does not resolve `ground` to a workspace derives it as the most
+   specific registered workspace (§Workspaces) whose path contains the
+   real path of the session's working directory. A host evaluating
+   a `workspace:` scope MUST derive the binding itself and MUST NOT take
+   it from a slug the session or any caller supplies (the `workspaceSlug`
+   of a spawn request, a header, a parameter, or a slug recorded on a
+   descriptor from such input). The `default` bucket of §Bucket resolution is not a
    registered workspace and MUST NOT satisfy a workspace-scoped grant.
 6. **A workspace owner may only narrow.** An [AIP-34](/docs/aip-34)
    workspace `policy` MAY deny `session:message` for the sessions bound
@@ -1990,9 +2010,10 @@ adds `Session.operatorLabel` and `agent_set_operator_label`. A host that
 lets a session set a label that a grant matches, or that matches a grant
 against the free-text `Session.label`, MUST stop: that is the hole this
 amendment closes. A host that copies the label through its own restart
-and continuation paths conforms to §Operator label rule 4; a host that
-mints a successor under a new session id without copying it MUST add the
-copy.
+and continuation paths conforms to §Operator label rule 4; a host whose
+restart, resume or continuation path mints a new session id without
+copying it MUST add the copy. A successor declared by a spawn request
+(`succeeds`) is a spawn, not such a path (§Operator label rule 2).
 
 > **Informative: the reference implementation.** `@agentproto/runtime`
 > keeps `SessionDescriptor.operatorLabel` (`sessions.ts`). `agent_start`
@@ -2169,19 +2190,20 @@ copy.
   so "any session bound to W may message sessions of X" still needs the
   operator to label the sessions of W, or a `*` principal that also
   admits senders bound elsewhere. Whether a principal form derived from
-  the host's workspace binding is worth its cost is open.
-- **Unique operator labels.** §Operator label rule 3 lets several live
-  sessions share a label, so a grant to a label cannot single out one
-  session. Whether a host should be able to reserve a label to one live
-  lineage, and refuse a second holder, is open.
-- **The `relation` of a granted message.** `from.relation` has no value
-  for a pair that no tree edge or sibling link joins (a cousin, or two
-  sessions linked only by a workspace grant). Whether the envelope
-  gains a value for it, or drops `relation` for such a send, is open.
+  the host's workspace binding is worth its cost is open. The evidence
+  that closes it is the report of effective grants (§Backwards
+  Compatibility) of a host after its same-workspace allowance is set to
+  deny: a pair that still needs the allowance and whose sender was
+  spawned by a session, so could carry no operator label at spawn,
+  decides for the form; none decides against it.
 - **A workspace owner enabling messages.** §Who may message whom rule 6
   lets an AIP-34 workspace `policy` deny `session:message` but not
   allow it. Whether a workspace owner may allow sends among its own
-  sessions without the operator is open.
+  sessions without the operator is open. The evidence that closes it is
+  a host that reads the workspace `policy` from a source the workspace's
+  own sessions cannot write, and an operator opt-in naming that
+  workspace, as AIP-38 §Security considerations requires before a child
+  policy relaxes a parent.
 - **Should `fyi` messages reach the model at all?** An `fyi` never
   wakes the recipient; the reference implementation surfaces a one-line
   digest at the start of its next turn. Whether that digest belongs in
