@@ -14,7 +14,7 @@ existing AIP-9 OPERATOR runtime:
 | `role.resolve(ref)` | Resolve a ROLE.md ref (slug, `ws://` ref, file path, http URL) to a merged effective config + resolution chain. |
 | `role.list(scope)` | List role refs available in a scope (workspace, org, public). |
 | `role.validate(content)` | Validate a `ROLE.md` content string against `ROLE.schema.json` and `extends`-chain rules. |
-| `role.hire(operator, role)` | Bind an operator (AIP-9) to a role. MUST fire `onAssign` if declared. |
+| `role.hire(operator, role)` | Bind an operator (AIP-9) to a role. MUST validate the operator's `role.bind` and `role.with` against the role's slots, and MUST fire `onAssign` if declared. |
 
 `role.resolve` is the load-bearing primitive — every other verb sits on
 top of it.
@@ -39,6 +39,11 @@ The order is opinionated:
 - **DB second** because per-org custom roles authored via UI live there
   and override builtins for that org.
 - **Builtin last** as the always-available floor.
+- **Nearest node first within a company tree** (informative). For an
+  operator that lives in an AIP-34 company tree, the `file://` source is
+  walked from the operator's `home` node up to the root of the tree, never
+  outside it, and the nearest `roles/<slug>/ROLE.md` wins. See AIP-47
+  §Role sources within a company tree.
 - **HTTP optional** for federated catalogues; runtimes that ship without
   it are still conformant.
 
@@ -74,22 +79,28 @@ When `role.hire(operator, role)` is called, the adapter MUST:
 1. Resolve the role (above).
 2. Validate the operator's `appliesTo[]` declaration (if present) admits
    this operator.
-3. Hoist resolved role fields into the operator's runtime configuration
+3. Validate the operator's `role.bind` and `role.with` against the
+   merged slots of the resolved role (AIP-47 §Slots): unknown key
+   (`role_slot_unknown`), required slot unbound (`role_slot_unbound`),
+   wrong type (`role_slot_type_mismatch`). Any of the three refuses the
+   hire; none of them touches the role itself. The check reads refs and
+   never fetches them.
+4. Hoist resolved role fields into the operator's runtime configuration
    per [AIP-9](/docs/aip-9):
    - `mission`, `responsibilities`, body → instruction context
    - `tools[]`, `skills[]` → operator's **declared intent registry**
-     (NOT the effective grant — see step 4)
+     (NOT the effective grant — see step 5)
    - `kpis[]` → scorers registered against the operator
-4. **Policy gate (load-bearing).** Evaluate every tool / skill / action
+5. **Policy gate (load-bearing).** Evaluate every tool / skill / action
    the operator may invoke against the operator's resolved
    [AIP-38](/docs/aip-38) POLICY — NOT against the role. A tool listed
    on the role but not granted by policy MUST NOT be invocable; the
-   adapter emits `role_intent_unsatisfied` to the operator/admin
-   debug surface but does NOT silently elevate. The role is a *hint
+   adapter drops the tool and emits `intent_unsatisfied` to the
+   operator/admin debug surface, and does NOT silently elevate. The role is a *hint
    for the policy author*, never a substitute for the policy itself.
-5. Fire the role's `onAssign` action if declared (subject to AIP-7
+6. Fire the role's `onAssign` action if declared (subject to AIP-7
    governance).
-6. If the operator was previously bound to a different role, fire that
+7. If the operator was previously bound to a different role, fire that
    role's `onDemotion` action; then fire the new role's `onPromotion`
    action.
 
@@ -188,7 +199,11 @@ covered in the agentik-studio repo's role-catalog package.
 | `role_default_persona_unresolvable` | `defaultPersona` did not resolve. | Warning; operator's own `persona` field wins. |
 | `role_default_identity_unresolvable` | `defaultIdentity` did not resolve. | Warning; operator's own `identity` field wins. |
 | `role_default_policy_unresolvable` | `defaultPolicy` did not resolve. | Warning; the role's tool/skill intents stay declarative; the operator's own `policy` (if any) governs effect. |
-| `role_intent_unsatisfied` | A role-declared `tools[]` / `skills[]` entry is NOT granted by the operator's resolved policy. | Warning to operator/admin; tool/skill MUST NOT be invoked. The role's declaration is intent, not grant. |
+| `intent_unsatisfied` | A role-declared `tools[]` / `skills[]` entry is NOT granted by the operator's resolved policy (the code AIP-9 §Tools and policy uses). | Warning to operator/admin; the tool/skill is dropped and MUST NOT be invoked. The role's declaration is intent, not grant. |
+| `role_slot_unknown` | A `role.bind` key names no non-scalar slot, or a `role.with` key names no scalar slot. | Error on the operator: refuse the hire. |
+| `role_slot_unbound` | A required slot has no value. | Error on the operator: refuse the hire. |
+| `role_slot_type_mismatch` | A slot value does not match its declaration (AIP family, collection, tool shape, scalar type or `enum`). | Error on the operator: refuse the hire. |
+| `role_slot_unresolvable` | A well-typed slot ref did not resolve. | Warning; the bindings block names the ref unresolved. |
 | `role_reports_to_unresolvable` | `reports_to` did not resolve. | Warning; render org chart with broken link. |
 | `role_merge_form_conflict` | A field uses both the short list form and the long `{add,remove}` form. | Warning; use the long form, ignore the short. |
 | `role_merge_remove_missed` | A `remove` entry did not match any inherited entry. | Warning. |
@@ -200,7 +215,8 @@ covered in the agentik-studio repo's role-catalog package.
   on author save, on package install, on PR review.
 - **Resolution-time** — `extends` chain walk, cycle detection, merge
   strategy.
-- **Bind-time** — `appliesTo[]` evaluation, lifecycle hook firing,
+- **Bind-time** — `appliesTo[]` evaluation, slot validation of the
+  operator's `role.bind` and `role.with`, lifecycle hook firing,
   governance gate against [AIP-7](/docs/aip-7).
 
 Adapters MUST run static validation before resolution and resolution

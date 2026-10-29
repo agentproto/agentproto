@@ -1,10 +1,11 @@
 # AIP-47 — Worked examples
 
-Three concrete `ROLE.md` manifests, ordered by complexity:
+Four concrete `ROLE.md` manifests, ordered by complexity:
 
 1. A **builtin** community role — `seo-specialist`.
 2. An **org-scoped override** that inherits the builtin — `our-seo-specialist`.
 3. An **executive** role with reporting line and lifecycle hook — `chief-of-staff`.
+4. A role reused through **typed slots** — `pm`, and two operators that hold it.
 
 ## 1. Builtin — `roles/seo-specialist/ROLE.md`
 
@@ -214,6 +215,77 @@ Sales) — that is what `antiPatterns` excludes.
 - Cross-functional initiative blocked > 14 days with no owner movement.
 - Board-prep pre-read incomplete > 72 h before the meeting.
 ```
+
+## 4. Reuse through typed slots — `roles/pm/ROLE.md`
+
+```yaml
+---
+schema: role/v1
+name: pm
+title: "Product Manager"
+description: Owns one product's board and objective and keeps the team aligned on both.
+version: 1.0.0
+department: product
+seniority: senior
+mission: |
+  Keep one product moving toward its current objective, with a board that
+  tells the truth.
+responsibilities:
+  - Keep the board of the product current
+  - Break the objective into work items and chase blockers
+tools:
+  - tool:agentproto/session_list
+slots:
+  board:         { aip: 18, description: "The work board of the product" }
+  objective:     { aip: 18, description: "The current objective" }
+  product_tools: { tool: mcp, optional: true, description: "The product's tool server" }
+  language:      { scalar: string, enum: [fr, en], default: fr }
+defaultPolicy: ws://policies/pm-baseline   # ADVISORY, denies included: it pre-fills the hire form only.
+---
+
+## Working principles
+
+- The board is the source of truth; a decision that is not on it did not happen.
+```
+
+Two operators hold this one role. Each fills the slots in its AIP-9 `role`
+binding; the rest of the operator is instance prose.
+
+```yaml
+# operators/pm-katchy/OPERATOR.md (frontmatter excerpt)
+role:
+  ref: ws://roles/pm
+  bind:
+    board:         ws://collections/katchy-board
+    objective:     ws://collections/katchy-relaunch
+    product_tools: { kind: mcp, server: katchy }
+  with: { language: fr }
+policy: ws://policies/no-cron          # bound on the operator, not taken from the role
+```
+
+```yaml
+# operators/pm-lawhub/OPERATOR.md (frontmatter excerpt)
+role:
+  ref: ws://roles/pm
+  bind:
+    board:         ws://collections/lawhub-board
+    objective:     ws://collections/lawhub-q4
+policy: ws://policies/no-cron
+```
+
+Validation (AIP-47 §Slots) on these bindings:
+
+- `pm-lawhub` leaves `product_tools` (optional) and `language` (default
+  `fr`) unbound: valid.
+- A `bind` with `colour: red` fails with `role_slot_unknown`; a `bind` that
+  omits `board` fails with `role_slot_unbound`; `board: ws://skills/triage`
+  fails with `role_slot_type_mismatch` (a skill is AIP-3, the slot wants
+  AIP-18); `with: { language: de }` fails with `role_slot_type_mismatch`
+  (not in `enum`).
+- The role's `tools` entry is intent: an operator whose policy does not grant
+  `agentproto/session_list` has it dropped with `intent_unsatisfied`. The
+  `product_tools` binding is the operator's own request: ungranted, it is a
+  registration error.
 
 ## Notes on the worked examples
 
