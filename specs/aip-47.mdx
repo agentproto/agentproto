@@ -1,6 +1,6 @@
 ---
 title: "AIP-47: ROLE (role/v1): organizational role manifest"
-description: A single-doc markdown + frontmatter format for portable organizational roles — mission, responsibilities, capabilities, tools, KPIs, seniority, reporting line, lifecycle hooks. Sibling to AIP-25 PERSONA (face) and AIP-23 IDENTITY (substance); referenced by AIP-9 OPERATOR (`role:` field) and AIP-6 COMPANY (`roles/<slug>/ROLE.md` doctype). Roles describe what a job is — independent of who holds it (persona/identity) and which instance is hired (operator).
+description: A single-doc markdown + frontmatter format for portable organizational roles — mission, responsibilities, capabilities, tools, KPIs, seniority, reporting line, lifecycle hooks. Sibling to AIP-25 PERSONA (face) and AIP-23 IDENTITY (substance); referenced by AIP-9 OPERATOR (its `role` binding) and AIP-6 COMPANY (`roles/<slug>/ROLE.md` doctype). Roles describe what a job is — independent of who holds it (persona/identity) and which instance is hired (operator).
 aip: 47
 status: Review
 type: Schema
@@ -23,8 +23,8 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/role
 | Domain | roles.sh |
 | Doctype | `role/v1` (single-doc, written as `ROLE.md`) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
-| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies, hosts the `role` doctype), [AIP-7](/docs/aip-7) (governance — gates effect), [AIP-9](/docs/aip-9) (operators — consume the role via `role:` field), [AIP-14](/docs/aip-14) (tools), [AIP-23](/docs/aip-23) (identity), [AIP-25](/docs/aip-25) (persona), [AIP-37](/docs/aip-37) (lifecycle), [AIP-38](/docs/aip-38) (policy — defaultPolicy advisory only), [AIP-39](/docs/aip-39) (actions) |
-| Referenced by | [AIP-6](/docs/aip-6) (`roles/<slug>/ROLE.md` doctype), [AIP-9](/docs/aip-9) (operator `role:` field) |
+| Composes with | [AIP-3](/docs/aip-3) (skills), [AIP-6](/docs/aip-6) (companies, hosts the `role` doctype), [AIP-7](/docs/aip-7) (governance — gates effect), [AIP-9](/docs/aip-9) (operators — hold the role through the `role` binding), [AIP-14](/docs/aip-14) (tools), [AIP-23](/docs/aip-23) (identity), [AIP-25](/docs/aip-25) (persona), [AIP-37](/docs/aip-37) (lifecycle), [AIP-38](/docs/aip-38) (policy — defaultPolicy advisory only), [AIP-39](/docs/aip-39) (actions) |
+| Referenced by | [AIP-6](/docs/aip-6) (`roles/<slug>/ROLE.md` doctype), [AIP-9](/docs/aip-9) (operator `role` binding) |
 | Resources | [`./resources/aip-47`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-47/draft) — [`ROLE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ROLE.schema.json), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/EXAMPLES.md), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ADAPTER.md) |
 
 ## Abstract
@@ -38,10 +38,12 @@ operator).
 
 [AIP-6](/docs/aip-6) introduces `role` as a primitive of the company
 package (`roles/<slug>/ROLE.md`) and [AIP-9](/docs/aip-9) declares that
-an operator carries a required `role:` slug, but neither AIP specifies
+an operator holds a role through its `role: {ref, bind?, with?}` binding
+(required after AIP-9's [alias period](/docs/aip-9#alias-period), optional
+with a fallback and a warning until then), but neither AIP specifies
 the body of a `ROLE.md`. AIP-47 fills that gap by defining `role/v1`:
-the schema, body conventions, composition, and cross-AIP binding rules
-that make roles portable across runtimes.
+the schema, body conventions, composition, typed slots, and cross-AIP
+binding rules that make roles portable across runtimes.
 
 AIP-47 is the **lighter sibling** of [AIP-23](/docs/aip-23) IDENTITY
 and [AIP-25](/docs/aip-25) PERSONA — all three describe one facet of an
@@ -80,9 +82,8 @@ on top of it.
 
 [AIP-6](/docs/aip-6) anticipates the gap by listing `role` as a doctype
 of the company package — `roles/<slug>/ROLE.md` — but defers the body
-schema. [AIP-9](/docs/aip-9) anticipates the gap by mandating an
-operator `role:` field but specifies the field only as a slug. AIP-47
-completes the trio.
+schema. [AIP-9](/docs/aip-9) anticipates the gap by giving the operator a
+`role` binding that points at a role by ref. AIP-47 completes the trio.
 
 Beyond the immediate gap, three design pressures point at a standalone
 role spec:
@@ -108,8 +109,9 @@ written as `ROLE.md`. The role is a single file, not a workspace —
 every role-level concern fits in one manifest. Role-level concerns are:
 identity (id, title, description, version), org placement (department,
 reports_to, seniority), job content (mission, responsibilities,
-capabilities), bindings (tools, skills, KPIs), composition (`extends`),
-lifecycle hooks (on_promotion, on_demotion), and cross-AIP refs.
+capabilities), bindings (tools, skills, KPIs), slots (the typed holes an
+operator fills), composition (`extends`), lifecycle hooks (on_promotion,
+on_demotion), and cross-AIP refs.
 Per-operator behaviour, runtime state, and identity substance are
 deliberately out of scope.
 
@@ -182,6 +184,13 @@ knowledge:                           # OPTIONAL — generic corpus this role con
   packs:                             #   AIP-10 pack refs, mounted read-only beneath the operator's corpus
     - <pack-ref>
 
+# Slots: typed holes the operator fills when it holds this role (see §Slots)
+slots:                               # OPTIONAL, merge by key under extends
+  <slot-name>: { aip: <n> }          #   a ref to an artifact of AIP family <n>
+  <slot-name>: { collection: <c> }   #   a ref to a kind of ws:// collection <c>
+  <slot-name>: { tool: mcp | ref }   #   a tool binding (AIP-42 tool item)
+  <slot-name>: { scalar: string | number | boolean }
+
 # Job-side prose (small, structured; long-form goes in body)
 strengths:                           # OPTIONAL — append-and-dedupe
   - <string>
@@ -235,6 +244,7 @@ metadata: {}                         # OPTIONAL — vendor extensions under name
 | `skills` | ws ref[] | `[]` | [AIP-3](/docs/aip-3) skill refs. Append-and-dedupe. |
 | `kpis` | string[] | `[]` | Scorer slugs (forward AIP). Append-and-dedupe. |
 | `knowledge.packs` | ref[] | `[]` | [AIP-10](/docs/aip-10) knowledge-pack refs this role mounts as its generic corpus floor — read-only, layered UNDER the operator's own editable corpus. Distinct from `skills` (what the role knows how to DO): knowledge is what it CONSULTS. Append-and-dedupe across `extends`. Absent = host convention (e.g. a pack named after the role slug). |
+| `slots` | map | `{}` | Typed slots an operator fills with its `role.bind` and `role.with`. Merged by key across `extends` (the child's declaration of a key replaces the parent's). See [Slots](#slots). |
 | `strengths` | string[] | `[]` | Job-side strengths in prose. Append-and-dedupe. |
 | `antiPatterns` | string[] | `[]` | What the role explicitly does NOT do. Append-and-dedupe. |
 | `onPromotion` | ws ref | none | [AIP-39](/docs/aip-39) action ref. Fired on promotion INTO this role. |
@@ -243,7 +253,7 @@ metadata: {}                         # OPTIONAL — vendor extensions under name
 | `appliesTo` | ws ref[] | `[]` | Cross-AIP bindings — restrict the role to specific operators. |
 | `defaultPersona` | ws ref | none | [AIP-25](/docs/aip-25) PERSONA recommended for operators adopting this role. Advisory. |
 | `defaultIdentity` | ws ref | none | [AIP-23](/docs/aip-23) IDENTITY recommended for operators adopting this role. Advisory. |
-| `defaultPolicy` | ws ref | none | [AIP-38](/docs/aip-38) POLICY recommended for operators adopting this role. **Advisory only** — role declares intent; policy decides effect. See [Role vs Policy vs Governance](#role-vs-policy-vs-governance). |
+| `defaultPolicy` | ws ref | none | [AIP-38](/docs/aip-38) POLICY recommended for operators adopting this role. **Advisory only, denies included**: role declares intent; policy decides effect. It may pre-fill the form that hires an operator and nothing more. See [Role vs Policy vs Governance](#role-vs-policy-vs-governance). |
 | `tags` | string[] | `[]` | Catalog tags. Lowercase kebab-case. Append-and-dedupe across `extends`. |
 | `metadata` | object | `{}` | Vendor extensions, namespaced under `<vendor>`. |
 
@@ -319,6 +329,7 @@ replaces the parent's).
 | `skills` | append + dedupe | Lineage accumulates refs. |
 | `kpis` | append + dedupe | Lineage accumulates KPI slugs. |
 | `knowledge.packs` | append + dedupe | Lineage accumulates pack refs. |
+| `slots` | merge by key | A key the child redeclares replaces the parent's declaration; other keys accumulate. The `{add, remove}` long form applies to list fields only. |
 | `strengths` | append + dedupe | Lineage accumulates strings. |
 | `antiPatterns` | append + dedupe | Lineage accumulates strings. |
 | `onPromotion`, `onDemotion`, `onAssign` | override | Single action; child wins. |
@@ -355,6 +366,97 @@ accumulator at the point this manifest is folded in. Removing an entry
 that does not exist is a no-op and SHOULD emit
 `role_merge_remove_missed` as a warning.
 
+### Slots
+
+One role is reused by many operators: every project manager holds the same
+`pm` role, and what differs between them is mostly references to things of
+the organization (the board, the objective, the product's tool server). A
+role declares those holes as **slots**, each typed the way
+[AIP-54](/docs/aip-54) types refs, and the operator fills them in its
+[AIP-9](/docs/aip-9) `role` binding (`bind` for refs and tools, `with` for
+scalars). Slots are typed on purpose: a JSON Schema `parameters` block would
+turn into a template language, and a typed ref is what a hiring UI can offer
+as a picker.
+
+```yaml
+# roles/pm/ROLE.md (frontmatter excerpt)
+slots:
+  board:         { aip: 18, description: "The work board of the project" }
+  objective:     { aip: 18, description: "The current objective" }
+  product_tools: { tool: mcp, optional: true, description: "The product's tool server" }
+  language:      { scalar: string, enum: [fr, en], default: fr }
+```
+
+```yaml
+# OPERATOR.md (frontmatter excerpt, AIP-9 §Role binding)
+role:
+  ref: ws://roles/pm
+  bind:
+    board:         ws://collections/katchy-board
+    objective:     ws://collections/katchy-relaunch
+    product_tools: { kind: mcp, server: katchy }
+  with: { language: fr }
+```
+
+A slot name matches `^[a-z][a-z0-9_]*$` (at most 64 characters) and is unique
+in the merged role. Exactly one type key is set:
+
+| Declaration | The value an operator gives | Filled through |
+|---|---|---|
+| `{ aip: <n> }` | An AIP-54 ref, in any spelling, to an artifact whose doctype is owned by AIP `<n>`. | `role.bind` |
+| `{ collection: <c> }` | An AIP-54 ref whose kind belongs to `<c>`: a `ws://` collection of the AIP-54 table (`skills`, `wikis`, ...) or a base collection (`file`, `identity`, ...). | `role.bind` |
+| `{ tool: mcp }` | A structured server ref `{ kind: mcp, server, allow?, deny? }`, as [AIP-42](/docs/aip-42) `tools` accepts. | `role.bind` |
+| `{ tool: ref }` | One tool named `<server>/<name>` (AIP-54 `tool-body`), as a `tool:` or `ws://tools/` ref. | `role.bind` |
+| `{ scalar: string \| number \| boolean }` | A JSON scalar of that type. MAY carry `enum` (the allowed values) and `default`. | `role.with` |
+
+Every slot MAY carry a `description` (the label the bindings block and a
+hiring UI show) and `optional: true`. A slot is **required** unless it is
+optional or, for a scalar, has a `default`.
+
+#### Validating a binding
+
+A host that binds an operator to a role (`role.hire`, and `resolveOperator`
+in [AIP-9](/docs/aip-9) §Resolution) MUST validate the operator's `role.bind`
+and `role.with` against the **merged** slots of the resolved role, after its
+`extends` chain. The validation is pure: it reads the refs, never fetches
+them.
+
+1. **Known keys.** Every `bind` key MUST name a declared non-scalar slot and
+   every `with` key MUST name a declared scalar slot. Otherwise
+   `role_slot_unknown`.
+2. **Required slots.** Every required slot MUST be bound. Otherwise
+   `role_slot_unbound`.
+3. **Type.** Each value MUST match its slot's declaration. The family of a
+   ref is read from the ref itself: `aip://<n>/...` carries its AIP number,
+   and a `ws://<collection>/...` or `<kind>:...` ref carries its collection,
+   which the AIP-54 table maps to a doctype and its owning AIP. A tool value
+   has the shape the slot names; a scalar has the JSON type and, when the slot
+   lists `enum`, one of its values. Otherwise `role_slot_type_mismatch`.
+
+These three are **errors of the operator**, not of the role: the operator
+does not load, and the role itself still loads and stays usable by other
+operators. A ref that is well typed but does not resolve is the warning
+`role_slot_unresolvable`, with the same graceful degradation as the other
+cross-AIP refs.
+
+#### What a slot does not do
+
+- **A slot grants nothing.** A ref slot only names an artifact. A tool slot
+  adds its tool to the operator's tools, where AIP-9 §Tools and policy
+  applies unchanged: the operator's policy still decides, deny wins, and a
+  tool the operator binds that the policy does not grant is a registration
+  error ([AIP-42](/docs/aip-42) rule 4), not a silent drop. That differs from
+  the role's own `tools[]`, which are intent and are dropped with
+  `intent_unsatisfied`.
+- **A slot never carries a policy.** A slot MUST NOT be declared
+  `{ aip: 38 }` or `{ collection: policies }`: a role that could take a
+  policy through a slot would change an operator's effective policy by the
+  back door. Policy is bound on the operator and on the node chain only
+  (see [Role vs Policy vs Governance](#role-vs-policy-vs-governance)).
+- **A slot is not a template language.** Values render as a bindings block
+  (AIP-9 merge step 5), labelled with the slot name and `description`. The
+  body of a role does not interpolate them.
+
 ### Cross-AIP refs
 
 A role composes with the rest of the AIP family through several ref
@@ -371,7 +473,7 @@ the binding's semantics.
 | `appliesTo[]` (`ws://operators/<slug>`) | [AIP-9](/docs/aip-9) operator | Restrict the role to specific operators. By default a role applies to any operator that names it. |
 | `defaultPersona` | [AIP-25](/docs/aip-25) persona | Advisory binding — recommended persona for operators adopting this role. The operator's own `persona:` field overrides. |
 | `defaultIdentity` | [AIP-23](/docs/aip-23) identity | Advisory binding — recommended identity workspace for operators adopting this role. The operator's own `identity:` field overrides. |
-| `defaultPolicy` | [AIP-38](/docs/aip-38) policy | **Advisory binding** — recommended policy for operators adopting this role. The operator's own `policy:` field overrides. **Role declares intent; policy decides effect** — runtimes MUST NOT derive access grants from the role alone. See [Role vs Policy vs Governance](#role-vs-policy-vs-governance). |
+| `defaultPolicy` | [AIP-38](/docs/aip-38) policy | **Advisory binding** — recommended policy for operators adopting this role. The operator's own `policy:` field overrides. **Role declares intent; policy decides effect** — runtimes MUST NOT derive access grants, or denies, from the role alone. See [Role vs Policy vs Governance](#role-vs-policy-vs-governance). |
 
 A host MUST verify that every cross-AIP ref it loads resolves —
 unresolvable refs surface as warnings (`role_tool_unresolvable`,
@@ -381,6 +483,20 @@ unresolvable refs surface as warnings (`role_tool_unresolvable`,
 Refs that fail to resolve MUST NOT block load: a role is usable without
 its declared bindings, and graceful degradation is preferable to
 refusal when the registry is partial.
+
+### Role sources within a company tree (informative)
+
+A bare slug or a `ws://roles/<slug>` ref names a role without saying where it
+lives, and a host resolves it through its role sources (see
+[`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ADAPTER.md)).
+For an operator that lives in a company tree ([AIP-34](/docs/aip-34)), a host
+SHOULD look in the `roles/` folder of the nearest node first: the operator's
+`home` node ([AIP-9](/docs/aip-9)), then each ancestor up to the root of the
+tree, and never outside the tree. The host's catalog sources (builtin roles,
+installed packs) come after the tree. The nearest match wins, so a guild can
+override a role of its company, and the company can override the catalog,
+without publishing. This is informative: it changes nothing about the role
+format, and a host with one flat `roles/` folder is conformant.
 
 ### Departments (informative)
 
@@ -451,7 +567,11 @@ want to ship a *hired* operator that binds a role, persona, identity,
 and runtime together.
 
 **How they compose.** An [AIP-9](/docs/aip-9) operator binds one role
-via its required `role:` field. The operator MAY ALSO bind a persona
+through its `role: {ref, bind?, with?}` binding, which is required after
+AIP-9's [alias period](/docs/aip-9#alias-period) and, until then, optional
+with the `metadata.roleSlug` then `profile.role` fallback and a
+`role_fallback` warning (`role_missing` when neither resolves). The binding
+fills the role's [slots](#slots). The operator MAY ALSO bind a persona
 (`persona:`) and an identity (`identity:`). The role MAY *recommend*
 default persona and identity bindings (`defaultPersona`,
 `defaultIdentity`); the operator's own fields override.
@@ -473,7 +593,8 @@ researcher, formatter), OPERATOR is the upgraded shape that adds
 organizational binding. A standalone agent that needs a role is, by
 definition, an operator — the upgrade path is AGENT → OPERATOR, not
 "AGENT with optional role". AIP-47 is consumed by AIP-9 OPERATOR's
-required `role:` field; AIP-42 AGENT has no role binding.
+`role` binding (required after the alias period, optional with a fallback
+and a warning until then); AIP-42 AGENT has no role binding.
 
 ## Role vs Position vs Access role
 
@@ -481,7 +602,7 @@ Three host-side concepts orbit the word "role" and MUST stay distinct:
 
 | Concept | What it is | Authored by | Attachment-selector axis? |
 |---|---|---|---|
-| **Role** (this AIP) | The catalog job template — `ROLE.md`, bound by slug from the operator's `role:` field. Many operators can hold one role. | Catalog / HR | YES — axis `role` |
+| **Role** (this AIP) | The catalog job template — `ROLE.md`, bound by the operator's `role.ref`. Many operators can hold one role. | Catalog / HR | YES — axis `role` |
 | **Position** | The host-assigned, user-settable seat label on a specific operator instance ("Growth AE — EMEA"). Not a doctype — carried by the host (typically the operator's editable display title) and matched by its slugified form. | End user | YES — axis `position` |
 | **Access role** | Membership RBAC tier of a human or operator inside the host's org structure (`owner`, `admin`, `editor`, `viewer`, …). | Security / admin | **NEVER** |
 
@@ -517,7 +638,7 @@ collapsing them is a security mistake.
 | Mutability | Bumped on org redesign | Tightened on threat / loosened on grant | Append-only |
 | Edited by | Hiring manager / HR | Security / admin | Approver (human or agent) |
 | Grants permission? | **NO** — declarative intent only | **YES** — the access primitive | NO — records decisions about grants |
-| Required on the operator? | YES — `role:` field is mandatory per [AIP-9](/docs/aip-9) | Optional — operators inherit org defaults if absent | Optional — governance binding wraps the operator |
+| Required on the operator? | Required after the [AIP-9](/docs/aip-9) alias period; until then optional, with the `metadata.roleSlug` then `profile.role` fallback and a `role_fallback` warning | Optional — operators inherit org defaults if absent | Optional — governance binding wraps the operator |
 
 ### The contract: role declares intent, policy gates effect
 
@@ -534,9 +655,10 @@ In practice:
 
 - If a role declares `tools: [ws://tools/ahrefs]` but the operator's
   policy does not grant the corresponding [AIP-39](/docs/aip-39) ACTION
-  ids, the operator MUST NOT invoke the tool. The role's declaration
-  surfaces as an `intent_unsatisfied` warning to a human reviewer; it
-  does NOT silently grant the access.
+  ids, the operator MUST NOT invoke the tool. The tool is dropped from
+  the operator's tool set (AIP-9 §Tools and policy) and the role's
+  declaration surfaces as an `intent_unsatisfied` warning to a human
+  reviewer; it does NOT silently grant the access.
 - Conversely, if a policy grants more than the role declares (e.g. an
   admin-elevated operator), that is allowed: policy is the floor for
   what is permitted, role is the floor for what is expected.
@@ -551,6 +673,16 @@ operators in this job want this policy. It is **not** the operator's
 effective policy. The operator's own `policy:` field overrides; the
 runtime resolves the operator's policy ref through its own source
 chain, not through the role.
+
+The recommendation is advisory **in both directions**: a `defaultPolicy`
+neither adds a grant nor adds a deny to the operator's effective policy,
+because a role that could add a deny could just as well remove one, and
+either changes that policy. "These operators have no
+cron tools" is therefore a policy bound on each operator's own `policy:`,
+or on the node chain that contains the operator (AIP-38 composition, most
+restrictive wins), never a property of the role. What `defaultPolicy` may
+do is pre-fill the form that hires an operator; the person hiring then
+binds the policy on the operator, and that binding is what applies.
 
 Rationale:
 
@@ -688,16 +820,23 @@ For [AIP-6](/docs/aip-6) implementations that previously embedded
 role fields directly on `OPERATOR.md` or on a `role: <enum>` field of
 the operator: those implementations SHOULD migrate to extracting role
 data into `ROLE.md` files and replacing the operator field with a slug
-reference (the field [AIP-9](/docs/aip-9) already declares). AIP-6 did
+reference (the `role` binding [AIP-9](/docs/aip-9) declares). AIP-6 did
 not formally specify role-on-operator beyond the doctype mention, so
 this is a clarification, not a break.
 
 For [AIP-9](/docs/aip-9) implementations that resolve the operator
-`role:` field against an internal enum (Guilde's `ceo | cmo | cto | …`):
-those implementations SHOULD continue to honour the existing slugs as
-canonical role names and ship `ROLE.md` files at the matching slugs.
-The slug surface stays stable while the resolution target migrates from
-an enum to a doc.
+role against an internal enum (Guilde's `ceo | cmo | cto | …`) or read it
+from `metadata.roleSlug`: those implementations SHOULD continue to honour
+the existing slugs as canonical role names and ship `ROLE.md` files at the
+matching slugs. The slug surface stays stable while the resolution target
+migrates from an enum to a doc. During AIP-9's alias period an operator
+without `role` is still read through the `metadata.roleSlug` then
+`profile.role` fallback with a `role_fallback` warning, and a reader MUST
+NOT fall back to a default role; after the alias period `role` is
+required.
+
+The `slots` field is new and optional: a `ROLE.md` without it is unchanged,
+and an operator whose role declares no required slot needs no `bind`.
 
 ## Security Considerations
 
@@ -715,10 +854,10 @@ surface lies in what runtimes do with role contents:
   AIP-47 — see [Role vs Policy vs Governance](#role-vs-policy-vs-governance).
 - **`defaultPolicy` elevation abuse.** A malicious role's
   `defaultPolicy` field points at a permissive policy.
-  *Mitigation:* `defaultPolicy` is **advisory** — the runtime MUST NOT
-  apply it to an operator without the operator's own `policy:` field
-  pointing at the same ref OR a governance signature attesting the
-  binding. Hiring an operator into a role MUST NOT, by itself, change
+  *Mitigation:* `defaultPolicy` is **advisory**, denies included: the
+  runtime MUST NOT apply it to an operator without the operator's own
+  `policy:` field pointing at the same ref OR a governance signature
+  attesting the binding. Hiring an operator into a role MUST NOT, by itself, change
   the operator's effective policy. Policy changes are a separate
   workflow under [AIP-7](/docs/aip-7) governance.
 - **Prompt injection via body markdown.** A role body is fed verbatim
@@ -727,6 +866,11 @@ surface lies in what runtimes do with role contents:
   metadata (`metadata.signed_by`, `metadata.source`), runtime-side role
   allow-listing for un-vetted sources, and prompt layering that places
   the role body below the runtime's operator-shell instructions.
+- **Policy by slot.** A role declares a slot that takes a policy, or a
+  tool slot whose binding is read as a grant. *Mitigation:* a slot MUST NOT
+  be typed as a policy; a slot grants nothing, and a tool bound through a
+  slot is evaluated by the operator's policy like any tool the operator
+  declares (see [Slots](#slots)).
 - **Inheritance loop or explosion.** Malicious `extends` chains could
   exhaust parser resources or yield enormous merged roles.
   *Mitigation:* cycle detection mandatory; depth limit recommended
@@ -751,7 +895,7 @@ surface lies in what runtimes do with role contents:
 - [AIP-3](/docs/aip-3) — SKILL.md (skills referenced by role)
 - [AIP-6](/docs/aip-6) — COMPANY.md (hosts the role doctype)
 - [AIP-7](/docs/aip-7) — GOVERNANCE.md (signatures, audit, approval — wraps the policy decisions)
-- [AIP-9](/docs/aip-9) — OPERATOR.md (consumes the role via the required `role:` field)
+- [AIP-9](/docs/aip-9) — OPERATOR.md (holds the role through its `role` binding: required after the alias period, optional with a fallback and a warning until then)
 - [AIP-14](/docs/aip-14) — TOOL.md (tools referenced by role)
 - [AIP-23](/docs/aip-23) — IDENTITY.md (sibling — inner substance)
 - [AIP-25](/docs/aip-25) — PERSONA.md (sibling — public face)
