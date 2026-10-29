@@ -187,8 +187,12 @@ interface Session {
    *  sessions or sessions still alive. */
   exitCode?: number
   /** Free-text label the spawner attaches (conversation id, operator
-   *  name, …) so consumers can group/filter. */
+   *  name, …) so consumers can group/filter. Display only: a grant
+   *  never matches it. */
   label?: string
+  /** The operator label: a durable name only the operator assigns
+   *  (§Operator label). No session can set, change or clear it. */
+  operatorLabel?: string
 
   /** The AIP-42 AGENT this session runs, when one was bound at spawn.
    *  Absent for a bare adapter spawn (adapter default behaviour).
@@ -656,6 +660,44 @@ and policy.
 > and [agentproto/ts#2330](https://github.com/agentproto/ts/pull/2330)),
 > written through `config_set`, which does not yet refuse a session.
 
+#### Operator label (added 2026-10-29)
+
+The operator label (`Session.operatorLabel`) is a durable name the
+operator gives to a session or to a lineage of sessions. It is the
+label the `label:` scopes of [AIP-39](/docs/aip-39) and the
+`session-label://` principal of [AIP-23](/docs/aip-23#reference-schemes)
+match. `Session.label` is distinct: free text any spawner attaches, for
+display only, and a host MUST NOT match a grant against it.
+
+1. **Only the operator assigns it.** Only the operator or `system` MAY
+   assign, change or clear an operator label. A host MUST refuse a
+   request from a session principal that would assign, change or clear
+   any operator label (its own, a child's or another session's), on
+   every surface (a rename, a configuration write, a tool,
+   `agent_set_operator_label` included).
+2. **A spawn records it only for the operator.** A host MAY record the
+   `label` of a spawn request as the operator label of the new session
+   only when the caller is the operator and the new session has no
+   `parentSessionId`. A host MUST NOT record an operator label from a
+   spawn requested by a session principal. A child never inherits its
+   parent's operator label: a session spawned by a session starts
+   without one, and only the operator may give it one later (rule 1). A
+   session started by a spawn request is not a continuation (rule 4),
+   whatever lineage the request declares: it receives an operator label
+   only under this rule.
+3. **Not unique.** Several live sessions MAY carry the same operator
+   label (a pool, or a lineage while its previous row retires). A
+   consumer MUST NOT read an operator label as naming one session.
+4. **It follows the lineage.** When a host starts a session as the
+   continuation of another under a new session id (a restart, a resume,
+   a continuation or a handoff, §Apply classes), the host MUST copy
+   the source's operator label, if it has one, onto the successor,
+   reading it from its own registry and never from the request, whoever
+   requested the transition. The session id and the credential are not
+   carried (the Session principals section, credential rule 4): the
+   operator label is the only name that survives. A successor of an
+   unlabelled source has none until the operator assigns one.
+
 #### A nested spawn inherits its parent's ground
 
 Identity is not the only thing a nested spawn must carry down. A host
@@ -938,6 +980,7 @@ so MCP clients can drive sessions through the same connection:
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
 | `agent_kill` | `{sessionId}` | Returns `{ok, sessionId}` |
+| `agent_set_operator_label` | `{sessionId, operatorLabel}` | Sets the operator label; an empty string clears it. Returns `{ok, sessionId, operatorLabel}`. Registered by a host that supports operator labels, in addition to the five tools above. Operator only: a host MUST refuse it from a session principal (§Operator label). |
 | `message_*`, `inbox_*` | see [§Session messages](#session-messages-added-2026-09-26) | Typed messages between sessions. Not delegation actions. |
 
 The MCP tools and the HTTP routes target the same underlying
@@ -1059,12 +1102,16 @@ session. Between two sessions:
    to that workspace, and MUST NOT allow a send the operator's policy
    leaves at deny.
 
-A grant names its sender through its `principal`. AIP-38 lists
-`group://<name>` as a principal scheme, but no AIP defines a group whose
-members are sessions chosen by workspace binding or by operator label,
-so no single grant says "any two sessions of W" (§Open Questions). A link between
-two workspaces is expressed as a grant scoped `workspace:<slug>` until
-AIP-34 defines a door form that names session messages.
+A grant names its sender through its `principal`. A sender that
+survives a restart is named by its operator label (§Operator label),
+through the `session-label://` principal of
+[AIP-23](/docs/aip-23#reference-schemes); `group://<name>` is not used
+for sessions. A sender chosen by workspace binding cannot be named: a
+workspace is not a principal, so no single grant says "any two sessions
+of W" unless the operator gives those sessions an operator label
+(§Open Questions). A link between two workspaces is expressed as a grant
+scoped `workspace:<slug>` until AIP-34 defines a door form that names
+session messages.
 
 #### Recording
 
@@ -1909,10 +1956,9 @@ can read.
 > **Informative: the reference implementation.** In `@agentproto/runtime`,
 > `allowPromptFrom` is a list kept on the target session that names the
 > callers allowed to prompt or control it, by session id, `any`, or
-> `label:` entries matched against the caller's immutable operator
-> label. The `label:` scope of AIP-39 names the target instead, so those
-> entries are the principal side of a `session:prompt` or
-> `session:control` grant, for which AIP-38 has no form yet.
+> `label:` entries. Its `label:` entries are the `session-label://`
+> principal side of a `session:prompt` or `session:control` grant,
+> matched against the caller's `operatorLabel` (§Operator label).
 > `defaults.messaging.allowSiblings`, `allowSameWorkspace` and
 > `peerGroups` are its spelling of `session:message` grants, and
 > `defaults.messaging.peerBinding` (`slug` or `verified`) is the
@@ -1935,6 +1981,40 @@ caller is; on the wire they add only the error codes
 `identity_unverified` and `identity_mismatch`. Deliberately, a session
 that names itself by a claim alone is refused once the host enforces,
 and observe-only mode lets the operator count those callers first.
+
+### The 2026-10-29 operator-label amendment (draft)
+
+§Operator label defines the label AIP-38 §Scope matching already called
+operator-assigned, and AIP-23 gains `session-label://`. On the wire it
+adds `Session.operatorLabel` and `agent_set_operator_label`. A host that
+lets a session set a label that a grant matches, or that matches a grant
+against the free-text `Session.label`, MUST stop: that is the hole this
+amendment closes. A host that copies the label through its own restart
+and continuation paths conforms to §Operator label rule 4; a host that
+mints a successor under a new session id without copying it MUST add the
+copy.
+
+> **Informative: the reference implementation.** `@agentproto/runtime`
+> keeps `SessionDescriptor.operatorLabel` (`sessions.ts`). `agent_start`
+> (`agent-tools.ts`) and `POST /sessions/agent` (`http-server.ts`)
+> record the request `label` as the operator label only when the call
+> names no caller session, the new descriptor has no `parentSessionId`
+> and the spawn was not deduplicated. `agent_set_operator_label`
+> (`agent-tools.ts`) refuses a call naming a caller session. The new-id
+> restarts (`session-restart-core.ts`, two sites) and continue-fresh
+> (`session-continue-fresh.ts`), which `session_migrate` goes through,
+> copy it; continue-interrupted resumes the same row. A successor
+> declared with `agent_start` `succeeds` is a spawn: it receives a label
+> only through the spawn rule above.
+
+> **Informative: where the reference implementation does not conform.**
+> `checkSessionOwnerGate` (`session-owner.ts`) matches `label:` entries
+> through `matchesSessionGrant` on the `callerSessionId` claim, not a
+> `proven` principal, and checks no liveness, so a claimed id of a
+> retired labelled row matches (AIP-23 `session-label://` rules 2 and
+> 3). A caller that names no session is the operator there, so it may
+> record or set a label (§Operator label rule 1; the Session principals
+> section, rule 5).
 
 ## Security Considerations
 
@@ -2084,15 +2164,16 @@ and observe-only mode lets the operator count those callers first.
   (two workers negotiating a shared interface) is a real use, but it
   bypasses the supervisor that owns the plan. Revisit if hosts report
   siblings routing everything through the parent as the binding friction.
-- **A sender-side group form.** `group://<name>` is a standard AIP-38
-  principal scheme, but no AIP defines a group whose members are
-  sessions chosen by workspace binding or by operator label. Without
-  one, "any two sessions of W" and "sessions of W may message sessions
-  of X" need one grant per sender or a `*` principal that also admits
-  senders bound elsewhere. In the reference implementation a restart or
-  continuation mints a new session id, so a grant naming `session://<id>`
-  does not follow a long-lived session. Whether to define such a group
-  form in AIP-23 or AIP-38 is open.
+- **A sender chosen by workspace binding.** `session-label://` names
+  the senders the operator labelled, but a workspace is not a principal,
+  so "any session bound to W may message sessions of X" still needs the
+  operator to label the sessions of W, or a `*` principal that also
+  admits senders bound elsewhere. Whether a principal form derived from
+  the host's workspace binding is worth its cost is open.
+- **Unique operator labels.** §Operator label rule 3 lets several live
+  sessions share a label, so a grant to a label cannot single out one
+  session. Whether a host should be able to reserve a label to one live
+  lineage, and refuse a second holder, is open.
 - **The `relation` of a granted message.** `from.relation` has no value
   for a pair that no tree edge or sibling link joins (a cousin, or two
   sessions linked only by a workspace grant). Whether the envelope
