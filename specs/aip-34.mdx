@@ -397,7 +397,7 @@ never changes for an AIP-34 node short of a future AIP revision — see
 | Level | Name | What crosses | Mechanism |
 |---|---|---|---|
 | 0 | `shared` | This node's **siblings** — the other children of the same parent — read the whole node. | The PARENT behaves as though it had declared `exports: [{ path: <this node's relative path>, to: "children", mode: "read" }]` on itself. See "Includes and exports" for why the declaring node matters. |
-| 1 | `isolated` (**default**) | Nothing, without an explicit include + matching export (or an apps/secrets grant). Ancestors still see everything (no restriction applies upward). | Host-side resolver filters every file/memory/app-tool call by the requesting session's node scope. |
+| 1 | `isolated` (**default**) | Nothing, without an explicit include + matching export (or an apps/secrets grant). Ancestors still see everything (no restriction applies upward). | Host-side resolver filters every file/memory/app-tool call by the requesting session's node scope (see "Node scope of a session"). |
 | 2 | `sealed` | Like `isolated`, **and** ancestors ALSO lose raw-file visibility: they read only this node's `EXPORT.md`. Inbound `includes` from elsewhere require host-side approval (AIP-7 `approval_request`). | Same process/daemon; sessions scoped to this node carry a node-scoped token. |
 | 3 | `hard` | Like `sealed`, **and** enforced by a separate process/identity: no shared daemon, no shared auth profile, no shared MCP surface. The only traffic in or out is a declared export, delivered as a message, never mounted. | Second daemon, or a dedicated OS user/sandbox. |
 
@@ -406,6 +406,56 @@ its `TYPES.md.default_wall` would otherwise give it, but MUST NOT set
 a level looser than that floor (conformance rule 7). `agentproto
 workspace check` flags a looser-than-floor `wall` as a hard error, not
 a warning.
+
+### Node scope of a session
+
+The walls above filter by "the requesting session's node scope". That
+scope is defined here, once.
+
+- **A session has at most one node scope: the nearest declared node
+  whose folder contains the session's [AIP-46](/docs/aip-46)
+  `ground`.** "Declared" means a folder with a `WORKSPACE.md` (rule 1);
+  a folder without one belongs to its nearest declared ancestor. The
+  `ground` is an [AIP-54](/docs/aip-54) ref and MAY carry a subtree
+  body, written with slashes as in `local-body`:
+  `ws://workspaces/@acme/agentik/simone/docs` is the subtree
+  `simone/docs` of workspace `@acme/agentik`. The node scope is the
+  nearest declared node containing that folder, which is `simone` if it
+  declares a `WORKSPACE.md` and `@acme/agentik` otherwise. No other
+  syntax names a subtree.
+- **The scope is read from the caller.** A host MUST derive it from the
+  calling session's `ground`: at spawn for the prompt it composes, and on
+  every file, memory, app or tool call from the session that makes the
+  call. It MUST NOT take it from the configuration of the server that
+  executes the call (a tool server, an MCP server, a store), which serves
+  many sessions. A call whose caller session cannot be identified MUST be
+  refused, never served as unscoped.
+- **Sessions are scoped, operators are not.** A principal that has a
+  home node or seats in a node (an [AIP-9](/docs/aip-9) operator, an
+  [AIP-42](/docs/aip-42) agent) is not itself subject to a wall. Its
+  sessions are: the same principal running one session in `@acme/agentik`
+  and another in `@jeremy/perso` is read as two scopes. The walls and
+  the policy cascade of this AIP apply to a session's node scope only.
+- **No declared node, no node scope.** A session whose `ground` lies in
+  no declared node (a workspace with no `WORKSPACE.md`) has no node scope
+  and the wall rules of this AIP do not apply to it. Declaring a tree is
+  what turns them on.
+
+**Host duty.** A host that serves memory, file, app or tool reads
+MUST filter every one of them by the requesting session's node scope
+(the duty stated in the `isolated` row above), before results are
+paginated, ranked or excerpted.
+
+**What `sealed` guarantees.** For a `sealed` node, the data of that
+node never enters a prompt, a memory projection or a host tool answer
+of a session whose node scope is outside it, apart from what the node
+declares in its `EXPORT.md` and in matching `exports`. This is a
+guarantee about what the host composes and returns, not an OS wall. A
+harness with native shell or file tools, or a host command tool that is
+not confined, runs as the same OS user and can read the node's files on
+disk; a local process can claim another session's caller id. A host
+that needs more than this declares the node `hard`, which moves the
+boundary to a separate process or identity.
 
 ### Includes and exports (two-sided consent)
 
@@ -528,6 +578,28 @@ parent's own limit is consumed first when several children spend
 concurrently. `agentproto workspace check` reports the effective
 (resolved) ceiling per node, not just the locally-declared one.
 
+### Policy follows the node chain
+
+A node's `policy` is not only the node's own. A session scoped to a
+node (see "Node scope of a session") is evaluated under the
+[AIP-38](/docs/aip-38) composition of the `policy` of every node on its
+chain: the node itself and each ancestor up to the root of its tree. The
+composition is AIP-38's, applied once over the whole chain: a matching
+deny in any node wins, `default: deny` in any node prevails, and every
+requirement applies. A node therefore cannot lift a deny, a default or a
+requirement declared above it, the same direction as "Budgets aggregate"
+takes for numeric limits.
+
+The chain stops at the tree root. A door (`includes`/`exports`) never
+makes the including node a child, so a node reached through a door adds
+nothing to the chain, and the policy of a node outside the chain (a
+sibling, a descendant, another tree) is never consulted. Walls hide
+files and memory from ancestors; they do not hide a node from its
+ancestors' policy. Because it is the session that is scoped, an
+operator's own policy ([AIP-9](/docs/aip-9)) is composed with the chain of
+the node the session runs in, and the policy of the operator's home node
+does not travel with it into another tree.
+
 ### Node type registry: TYPES.md
 
 Exactly one `TYPES.md` per tree, at the root, `schema:
@@ -569,6 +641,57 @@ sibling files `agentproto workspace check` expects at a node of this
 type. Each entry conceptually compiles to an [AIP-40](/docs/aip-40)
 `EXTENSION.md`; TYPES.md is the authoring surface for that compilation,
 not a competing mechanism.
+
+A type that declares `extends: <other>` inherits the fields of `<other>`
+(itself resolved through its own `extends`) that it leaves unset:
+`parents`, `default_wall`, `requires_files` and `starter`, and likewise
+`max_per_tree` and `adds_fields`. A field the type sets replaces the
+inherited one as a whole; nothing is merged. An omitted or empty
+`requires_files` counts as unset. Inheritance is a property of the
+registry, so rule 6 and rule 7 apply to the resolved entry: a `client`
+type that extends `project` nests where `project` nests and cannot set
+a `wall` looser than `project`'s floor.
+
+**Example (informative): a user tree and a company tree.** Each tree has
+its own `TYPES.md`. The user tree redeclares `perso` with a `sealed`
+floor, a deliberate downgrade from the `hard` floor in the registry
+above, for a host where one daemon serves the personal staff; see "What
+`sealed` guarantees" for what that does and does not give. The company
+tree declares a `guild` type that adds nothing to `project`:
+
+```yaml
+# user tree: jeremy/TYPES.md
+---
+schema: workspace.types/v1
+types:
+  root:
+    parents: []
+    max_per_tree: 1
+  perso:
+    parents: [root]
+    default_wall: sealed
+---
+```
+
+```yaml
+# company tree: agentik/TYPES.md
+---
+schema: workspace.types/v1
+types:
+  company:
+    parents: []
+    max_per_tree: 1
+    default_wall: isolated
+    requires_files: [COMPANY.md]
+  project:
+    parents: [company]
+    default_wall: isolated
+    starter:
+      agents: [{ template: "@pygmalion/staff/project-lead" }]
+  guild:
+    extends: project          # inherits parents, default_wall, starter
+---
+```
 
 ### Node status: `work:`
 
@@ -1058,6 +1181,7 @@ slugs; a document that carries a token inline is invalid.
 - [AIP-14 — TOOL.md](/docs/aip-14) — sibling manifest the workspace hosts
 - [AIP-15 — WORKFLOW.md](/docs/aip-15) — sibling manifest the workspace hosts
 - [AIP-7 - GOVERNANCE.md](/docs/aip-7): approval requests and signatures behind a presence document's `approval` block
+- [AIP-9 - OPERATOR.md](/docs/aip-9): an operator's home node and seats; its sessions, not the operator, carry a node scope
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18) — item storage for the collection(s) a `work:` WORK.md declares
 - [AIP-19 — SECRETS.md](/docs/aip-19) — `secrets:`/`uses_secrets:`; `workspace:` access entries pair with `uses_secrets`
 - [AIP-20 — WORK.md](/docs/aip-20) — referenced from `work:`; a project node's status/board, not a flat status file
@@ -1072,5 +1196,6 @@ slugs; a document that carries a token inline is invalid.
 - [AIP-40 — EXTENSION.md](/docs/aip-40) — compilation target of each TYPES.md entry
 - [AIP-41 — ROUTINE.md](/docs/aip-41) — sibling manifest declared under `routines:`
 - [AIP-42 — AGENT.md](/docs/aip-42) — sibling manifest declared under `agents:`
+- [AIP-46 - SESSION](/docs/aip-46): the `ground` that gives a session its node scope
 - [AIP-53 — APP.md](/docs/aip-53) — referenced from `apps:`/`accepted_apps:` and `agentproto.lock`
 - [AIP-54 — ws:// resource scheme](/docs/aip-54) — grammar for `includes[].ref`
