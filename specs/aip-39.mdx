@@ -429,6 +429,58 @@ call owns the evaluation point. As with the other runtime actions, the
 table is not a permission: the effective decision is an AIP-38 policy
 evaluation.
 
+> **Draft AIP-39 amendment** (2026-10-30). *Normative identifiers
+> (action ids, scope forms) are English and final.*
+
+**Problem.** A host performs three more operations on a session that
+have no standard id. It writes a checkpoint, a bounded record of the
+session's state ([AIP-46 §Session context](/docs/aip-46#session-context-added-2026-10-29)).
+It compacts the session's context. And it archives a finished session,
+which drops it out of the default session listing. AIP-46 already
+reserves the compaction to the operator by naming an action,
+`session:compact`, that this library did not declare, and
+[AIP-71](/docs/aip-71) reactions already name `session:archive` as a
+host action they may target. The standard library gains three runtime
+actions:
+
+| id | library entry | category | target_kind | mutates | risk_level | approval | semantics |
+|---|---|---|---|---|---|---|---|
+| `session:checkpoint` | `@agentik/actions/standard/session-checkpoint` | `runtime` | `session` | `["session:conversation"]` | 1 | `auto` | Write a checkpoint of a session: a bounded record of its state, saved next to its transcript. |
+| `session:compact` | `@agentik/actions/standard/session-compact` | `runtime` | `session` | `["session:conversation"]` | 2 | `auto` | Compact a session's context: the harness replaces the earlier turns with a summary. |
+| `session:archive` | `@agentik/actions/standard/session-archive` | `runtime` | `session` | `["session:*"]` | 1 | `auto` | Hide a finished session from the default session listing. Its history stays readable. |
+
+**Risk rationale.** `session:checkpoint` is risk 1: it writes one record
+next to the session's transcript, which it never replaces, and it may
+add one handoff turn to the session's conversation. `session:compact`
+is risk 2: the harness replaces the earlier turns of the context with a
+summary, a loss the model cannot undo; a checkpoint written first is
+what makes it recoverable
+([AIP-46 §Session context](/docs/aip-46#session-context-added-2026-10-29),
+rule 1). `session:archive` is risk 1: it hides a finished session from
+the default listing and touches neither its history nor any process.
+
+**Optional scope.** A grant MAY narrow any of these actions with
+`scope`, using the same forms as `session:prompt` and
+`session:control` above:
+
+| id | scope |
+|---|---|
+| `session:checkpoint` | session id, `label:<label>`, or `label:<prefix>*` |
+| `session:compact` | session id, `label:<label>`, or `label:<prefix>*` |
+| `session:archive` | session id, `label:<label>`, or `label:<prefix>*` |
+
+**Evaluation.** [AIP-46 §Session context](/docs/aip-46#session-context-added-2026-10-29)
+rule 5 reserves `session:compact` on a session to the operator when
+`compactRequiresOperator` is set, and a compaction the host decides
+itself is not requested by a principal and is not refused by that rule.
+
+**Ownership.** AIP-39 only declares the ids.
+[AIP-46](/docs/aip-46) §Session context owns the checkpoint and the
+compaction, and [AIP-71](/docs/aip-71) names `session:archive` as a host
+action a reaction may target. As with the other runtime actions, the
+table is not a permission: the effective decision is an AIP-38 policy
+evaluation.
+
 ## Composition pattern (`inline | ref | file`)
 
 Like every composable block in the AIP series, ACTION refs accept
@@ -658,6 +710,17 @@ action keeps admitting its calls (see §Evaluation there). A host that
 does not publish `tool:invoke` is unaffected. A host that adopts it
 SHOULD map any ad-hoc per-tool allow or deny list it enforces onto
 grants on this id.
+
+### The 2026-10-30 session-actions amendment (draft)
+
+§Standard runtime actions gains `session:checkpoint`, `session:compact`
+and `session:archive`. It is additive: no existing action id changes
+shape, and a host that does not publish them is unaffected.
+[AIP-46](/docs/aip-46) §Session context used `session:compact` before
+this library declared it; a host that already reserves compaction to the
+operator keeps doing so, and the declaration only gives the id a home. A
+host that adopts the entries SHOULD map any ad-hoc rule about who may
+checkpoint, compact or archive a session onto grants on these ids.
 
 ## Security considerations
 
