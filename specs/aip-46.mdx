@@ -161,7 +161,7 @@ harness invocation. Required fields:
 interface Session {
   /** Stable id for the lifetime of the session. Caller-opaque. */
   id: string
-  /** Adapter slug from the AIP-45 manifest the session wraps. */
+  /** Harness slug from the AIP-45 manifest the session wraps. */
   adapterSlug: string
   /** Workspace handle (§Workspaces) this session binds to. A host
    *  evaluating a workspace-scoped grant derives the binding itself and
@@ -641,26 +641,39 @@ The rules:
    unenforced surface.
 
 > **Informative: the reference implementation.** `@agentproto/runtime`
-> mints the credential in observe-only mode
+> mints the credential in observe-only mode by default
 > ([agentproto/ts#2335](https://github.com/agentproto/ts/pull/2335)): a
 > random `apst_` token, stored as a SHA-256 hash in
 > `session-credentials.json`, sent in the `x-agentproto-session-token`
 > header on the daemon self-mount but not yet in the process
 > environment, so a native hook callback ([AIP-71](/docs/aip-71) §8)
 > still authenticates as the operator. `defaults.identity.sessionTokens`
-> (`"shadow"`, the default, or `"off"`) selects it; `GET /identity`
-> reports the five classes as `verified`, `mismatch`, `invalid_token`,
-> `claim_only` and `anonymous`. Enforcement has not landed.
+> (`"shadow"`, the default, `"enforce"`, or `"off"`) selects it
+> ([agentproto/ts#2371](https://github.com/agentproto/ts/pull/2371));
+> under `"enforce"` it refuses an invalid token, a mismatching claim and
+> a claim without token naming a session it delivered a token to, while
+> `anonymous`, `verified` and the other claim-only classes are never
+> refused. `GET /identity` reports the five classes as `verified`,
+> `mismatch`, `invalid_token`, `claim_only` and `anonymous`, splits
+> `claim_only` into `external`, `delivered`, `undelivered` and `unknown`
+> (`claimOnlyByClass`), and reports which surfaces it `enforces`; its
+> totals persist in `identity-observations.json` under the daemon home
+> and add up across restarts, with `since` the first recorded boot and
+> `bootedAt` and `boots` adding the restart history
+> ([agentproto/ts#2398](https://github.com/agentproto/ts/pull/2398)).
 
 > **Informative: where the reference implementation does not conform.**
 > It delivers the credential only to unsandboxed `claude-code` and
 > `hermes` sessions (rule 2). A restart leaves the previous credential
 > valid until the old row retires (credential rule 4). It evaluates
 > every `anonymous` local caller as the operator with no switch
-> (rule 5). It honours a `callerSessionId` claim on loopback without a
-> credential (rule 3). It counts a request naming an external
-> identifier as `claim only`, not `anonymous` (rule 7): its observer
-> does not consult the registry.
+> (rule 5). By default it honours a `callerSessionId` claim on loopback
+> without a credential (rule 3); under `"enforce"` it refuses a claim
+> naming a session it delivered a token to, while a claim naming a
+> session it could not deliver to still resolves to that session
+> (rule 8). It counts a request naming a registered external identifier
+> as `claim_only` in the `external` class, not as `anonymous` (rule 7),
+> and one naming an identifier it has not registered as `unknown`.
 
 #### Operator-only configuration (added 2026-10-28)
 
@@ -681,7 +694,14 @@ and policy.
 > live under `defaults.messaging.*` in `config.json` (with `peerBinding`
 > from [agentproto/ts#2326](https://github.com/agentproto/ts/pull/2326)
 > and [agentproto/ts#2330](https://github.com/agentproto/ts/pull/2330)),
-> written through `config_set`, which does not yet refuse a session.
+> written through `config_set`, which refuses a session principal's
+> write to `defaults.messaging`, `defaults.identity` and
+> `defaults.tasks.operatorDelegates`, and their ancestors, with the code
+> `operator_only`, whatever the `sessionTokens` mode
+> ([agentproto/ts#2371](https://github.com/agentproto/ts/pull/2371)).
+> `operator_only` is the reference implementation's own code, not a
+> normative one, and hosts can add their own, as the error-code
+> paragraph says.
 
 #### Operator binding (added 2026-10-29)
 
@@ -2002,9 +2022,14 @@ Daemons started via `agentproto serve` (or built directly through
   `runtime/src/identity-defaults.ts` and `observeCallerIdentity` in
   `runtime/src/http-server.ts`, the credentials of §Session principals
 
-§[Delegation](#delegation-and-the-spawn-gate) is specified ahead of
-its reference implementation — `@agentproto/runtime` does not yet
-conform. Divergences are tracked in that repository's issues rather
+§[Delegation](#delegation-and-the-spawn-gate) now has a partial
+reference implementation in `@agentproto/runtime`: `agent_start` accepts
+an `agent` ref, every session records `meta.agentSlug`, the built-in
+`executor` and `supervisor` agents declare `delegatesTo`, and a
+delegation gate evaluates the calling session's bound agent, in
+`observe` mode by default (counting, refusing nothing) with `enforce`
+available. It does not conform by default. Divergences are tracked in
+that repository's issues rather
 than here: a spec carrying an implementation's bug list goes stale the
 moment the bugs close, which is how this document's tool names drifted
 in the first place.
@@ -2201,12 +2226,18 @@ can read.
 > ([agentproto/ts#2326](https://github.com/agentproto/ts/pull/2326),
 > [agentproto/ts#2330](https://github.com/agentproto/ts/pull/2330),
 > [agentproto/ts#2165](https://github.com/agentproto/ts/pull/2165)). It
-> does not conform yet: what it calls `peer` messaging is on by default
+> does not conform yet: the same-workspace allowance is on by default
 > (`allowSameWorkspace: true`); it checks the tree edge first, so a
 > denied sibling pair gains nothing from the same-workspace allowance,
-> while this text has no precedence; it reports a `peerGroups` link as
-> the relation `peer`; and with `peerBinding: "slug"` two sessions that
-> recorded the same slug, a recorded `default` slug included, are peers.
+> while this text has no precedence; and with `peerBinding: "slug"` two
+> sessions that recorded the same slug, a recorded `default` slug
+> included, are peers. It reports a `peerGroups` link as the relation
+> `granted` and the envelope carries `from.agentSlug`
+> ([agentproto/ts#2379](https://github.com/agentproto/ts/pull/2379));
+> `GET /permissions/grants` reports the effective grants derived from
+> `defaults.messaging.*` and each session's `allowPromptFrom`, plus the
+> configured entries no grant expresses
+> ([agentproto/ts#2393](https://github.com/agentproto/ts/pull/2393)).
 
 
 ### The 2026-10-28 session-principals amendment (draft)
@@ -2417,7 +2448,8 @@ that claims the section (rule 6).
   field. If a real cast outgrows enumeration, the lattice should
   return as an AIP-42 concern (a computed `delegates_to`), not as a
   second authority in AIP-46. Revisit when a host reports the
-  allowlist as the binding constraint.
+  allowlist as the binding constraint. The reference implementation
+  keeps the lattice for agents that declare no `delegatesTo`.
 - **Sibling messaging default.** §Who may message whom allows two
   siblings only through a grant of `session:message`. Peer coordination
   (two workers negotiating a shared interface) is a real use, but it
