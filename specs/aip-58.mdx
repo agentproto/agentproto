@@ -185,7 +185,7 @@ interface StepRecord {
   status:     RunStatus | "skipped"  // pending|running|succeeded|failed|suspended|cancelled, or "skipped"
   driver?: {
     kind:       string               // e.g. "tool", "agent", "gate"
-    adapter?:   string                // AIP-45 adapter slug, when agent-backed
+    adapter?:   string                // AIP-45 harness slug, when agent-backed
     model?:     string
     sessionId?: string                // AIP-46 session id, when agent-backed
   }
