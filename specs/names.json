@@ -601,6 +601,13 @@
       "file": "MEMORY.md",
       "package": "@agentproto/memory",
       "layer": "memory"
+    },
+    {
+      "aip": 73,
+      "name": "TUNNEL",
+      "specId": "tunnel/v1",
+      "package": "@agentproto/tunnel",
+      "layer": "host"
     }
   ],
   "pending": []

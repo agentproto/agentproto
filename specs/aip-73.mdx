@@ -1,0 +1,261 @@
+---
+title: "AIP-73: TUNNEL (tunnel/v1): the tunnel provider contract"
+description: "Fixes the contract a tunnel provider implements to give a locally running service a stable public URL: the TunnelProvider interface (create, list, delete, status, health) with its idempotency rules, the three authentication modes (apiKey, token, oidc), the per-slug credential store under ~/.agentproto/tunnel-creds with its file modes, provider discovery and registration, the lifecycle from setup to delete, the v1 HTTP contract of a remote provisioner (GET/PUT/DELETE /v1/tunnels), and the security and conformance rules."
+aip: 73
+status: Draft
+type: Schema
+created: 2026-11-02
+author: Jeremy André <jeremy@agentik.net>
+requires: [1]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+layer: host
+package: "@agentproto/tunnel"
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/tunnel
+---
+
+| Field | Value |
+|---|---|
+| AIP | 73 |
+| Title | TUNNEL (tunnel/v1): the tunnel provider contract |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process) |
+| Composes with | [AIP-59](/docs/aip-59) (PAIRING: the end-to-end encrypted path that a plain tunnel does not provide), [AIP-60](/docs/aip-60) (SENTINEL: webhook sentinels receive their pushes through a named tunnel) |
+| Created | 2026-11-02 |
+| Package | `@agentproto/tunnel` (contract, auth modes, credential store, HTTP client); `@agentproto/tunnel-agentik` (a provider for the `tunnels.agentik.net` provisioner) |
+
+## Abstract
+
+A **tunnel provider** exposes a stable public URL for a locally running
+service. This AIP fixes the provider contract, the authentication modes,
+the on-disk credential store, provider discovery, the lifecycle every
+implementation follows, and the HTTP contract of a remote provisioner. A
+provider is intentionally small: it owns the remote tunnel state and the
+connector that publishes a local target, and nothing about sessions, apps
+or routing.
+
+## Motivation
+
+The reference runtime ships several tunnel backends inline (quick
+Cloudflare tunnels, named Cloudflare tunnels, a remote Cloudflare
+provisioner, ngrok). A third party cannot add a backend without patching
+the runtime. Fixing the contract as a public primitive gives every backend
+the same shape, lets a daemon list and query them uniformly, and makes a
+provider implementable in a package with no dependency on the runtime.
+
+## Terminology
+
+| Term | Meaning |
+| --- | --- |
+| **Provider** | An implementation of the `TunnelProvider` interface, identified by a stable `slug`. |
+| **Key** | A caller-chosen, stable tunnel identity. It survives restarts and namespaces remote state. |
+| **Target** | The local `host:port` (and optional protocol) the tunnel forwards to. |
+| **Connector** | The process or sidecar that maintains the tunnel (for example `cloudflared`). |
+| **Hostname** | A public DNS name routed to the tunnel, primary first. |
+| **Connector token** | A secret the provider returns so the caller can start the connector. Never logged. |
+
+## Provider interface
+
+```ts
+interface TunnelProvider {
+  readonly slug: string
+  readonly name: string
+  readonly capabilities: TunnelCapabilities
+
+  create(input: CreateTunnelInput): Promise<TunnelInfo>
+  list(): Promise<TunnelInfo[]>
+  delete(key: string): Promise<void>
+  status(key: string): Promise<TunnelInfo | null>
+  health(): Promise<TunnelHealth>
+}
+
+interface CreateTunnelInput {
+  key: string
+  service?: string | null          // "http://127.0.0.1:3000", or null to keep the origin
+  hostnames?: string[]             // a request, primary first; empty = assign one
+  target?: TunnelTarget            // convenience; providers may derive service from it
+  metadata?: Record<string, string> // stored remotely when the provider supports it
+}
+
+interface TunnelInfo {
+  key: string
+  tunnelId?: string
+  status: "active" | "starting" | "stopped" | "error" | "unknown"
+  publicUrl?: string
+  hostnames: string[]
+  service?: string | null
+  createdAt?: string
+  updatedAt?: string
+  connectorToken?: string          // sensitive
+}
+
+interface TunnelHealth {
+  state: "active" | "degraded" | "error" | "unknown"
+  reason?: string
+  checkedAt: string                // ISO-8601
+  latencyMs?: number
+  hostnames?: Array<{ hostname: string; ok: boolean; reason?: string }>
+}
+
+interface TunnelCapabilities {
+  stableUrl: boolean
+  autostart: boolean
+  customDomain: boolean
+  requiresAuth: boolean
+  hasApi: boolean
+}
+```
+
+Rules:
+
+- `create` is **idempotent** on `key`: creating an existing tunnel again
+  updates it and returns the current state.
+- `delete` is **idempotent**: deleting an unknown key is not an error.
+- `status` returns `null` for an unknown key; transport and auth failures
+  throw.
+- `health` reports a state, not an error: an unreachable provider returns
+  `{ state: "error" }` rather than throwing.
+- `status` in the result of `create` reflects what the provider knows. A
+  provider that cannot confirm the connector is up reports `starting`, not
+  `active`.
+- A provider never logs credentials, connector tokens or full request
+  bodies.
+
+## Authentication modes
+
+A configured provider instance uses exactly one auth mode:
+
+| Mode | Shape | Transport | Use |
+| --- | --- | --- | --- |
+| `apiKey` | `{ mode: "apiKey", apiKey }` | `Authorization: Bearer <apiKey>` | A long-lived key issued by the server (for example `sk-...`). |
+| `token` | `{ mode: "token", token, expiresAt? }` | `Authorization: Bearer <token>` | A short-lived token supplied by the caller. |
+| `oidc` | `{ mode: "oidc", issuer, clientId, scopes?, accessToken(), logout?() }` | `Authorization: Bearer <accessToken()>` | RFC 8628 device login. |
+
+- In `oidc` mode, a `401` on an authenticated request triggers one token
+  refresh and one retry. A request sent without credentials is never
+  retried that way.
+- In `token` mode, a token whose `expiresAt` has passed is not sent: the
+  call fails with an error that says the token expired.
+- An implementation that accepts more than one mode in its setup fields
+  documents which one wins. `apiKey` SHOULD take precedence over `oidc`.
+
+## Credential store
+
+Provider configuration is stored outside any repository, one file per
+slug:
+
+```
+~/.agentproto/tunnel-creds/<slug>.json
+```
+
+- Directory mode `0700`, file mode `0600`. Both are enforced on every
+  write, including when the directory or the file already exists with a
+  looser mode.
+- The file is a flat JSON object of setup fields (`baseUrl`, `apiKey`,
+  `oidcIssuer`, `oidcClientId`, `oidcScopes`, ...).
+- `apiKey`, `token` and any connector token are secrets: never echo them in
+  logs, errors, CLI output or HTTP responses.
+- A provider may keep refreshed OIDC sessions under
+  `~/.agentproto/tunnel-sessions/<slug>.json`; the long-lived API key does
+  not belong there.
+- `AGENTPROTO_HOME` overrides the `~/.agentproto` root.
+
+## Discovery and registration
+
+- **Slug:** lowercase, `^[a-z0-9][a-z0-9._-]*$`, unique per host.
+- **Package:** first-party providers publish as `@agentproto/tunnel-<slug>`
+  and export a provider factory and, optionally, a
+  `fromTunnelCredentials(record)` helper.
+- **Declared metadata:** `slug`, `name`, `capabilities`, and a list of
+  setup fields, each with `name`, `description`, `required` and
+  `sensitive`.
+- **Registration:** the daemon discovers installed `@agentproto/tunnel-*`
+  packages and validates their declared setup fields before it persists
+  credentials. A provider whose declared fields are invalid is not
+  registered.
+
+The slugs built into the reference runtime are `cloudflare-quick`,
+`cloudflare-named`, `cloudflare-provisioned` and `ngrok`; the reference
+package `@agentproto/tunnel-agentik` adds `agentik`.
+
+## Lifecycle
+
+```
+setup -> auth -> create -> start connector -> health -> stop -> delete
+```
+
+1. **setup**: collect the setup fields, validate URLs and slugs, persist
+   them to `~/.agentproto/tunnel-creds/<slug>.json` (`0700` / `0600`).
+2. **auth**: resolve a bearer credential. OIDC may need an interactive
+   device flow first; the auth state is `pending`, `logged_in` or
+   `logged_out`.
+3. **create**: `PUT` the tunnel identity and the requested hostnames; get
+   back the routed hostnames and a connector token.
+4. **start connector**: spawn and supervise the provider's connector, with
+   the token in its environment only, never in argv.
+5. **health**: probe the public URL or the provider API; report `active`,
+   `degraded` or `error`, with per-hostname results.
+6. **stop**: terminate the connector. Idempotent.
+7. **delete**: remove the remote state. Idempotent. It does not stop a
+   connector that is still running unless the caller asked for it.
+
+Starting a tunnel is abort-safe: if `stop()` lands while `create()` is in
+flight, the provider does not leak a connector, and a caller signal that
+is already aborted when a call starts aborts that call before any request
+is sent.
+
+## HTTP contract (provisioner v1)
+
+A provider backed by a remote provisioner uses these three endpoints. Every
+call carries `Authorization: Bearer <credential>`.
+
+```
+GET    {baseUrl}/v1/tunnels
+       200 { tunnels: [{ key, tunnelId, hostnames, createdAt }, ...] }
+
+PUT    {baseUrl}/v1/tunnels/{key}
+       body { service: "http://127.0.0.1:<port>" | null, hostnames: string[] }
+       201 (created) or 200 (updated) { tunnelId, hostnames: string[], token }
+
+DELETE {baseUrl}/v1/tunnels/{key}
+       204, or 404 when the key is unknown (the client treats both as done)
+```
+
+- `key` is URL-encoded. The server namespaces it per caller: two callers
+  using the same key never share a tunnel.
+- `hostnames` is a request; the server returns what it actually routed,
+  and may assign its own hostname instead of the requested one.
+- `PUT` is idempotent and is replayed on every start.
+- Errors are JSON `{ error, message, checkoutUrl? }`:
+  - `400`: invalid key, service or hostname.
+  - `401`: credential invalid or expired (OIDC: refresh once, then prompt).
+  - `402`: payment required; `checkoutUrl` is shown to the user.
+  - `409`: hostname already taken.
+  - `429`: rate limited, with a `Retry-After` header in seconds.
+
+## Security considerations
+
+- HTTPS only, except for loopback hosts (`localhost`, `127.0.0.1`,
+  `[::1]`).
+- Credentials and connector tokens never travel in argv or logs.
+- Credential files are `0600`; their directory is `0700`.
+- A connector token is scoped to one tunnel.
+- A provisioner validates `hostnames` and `service` on the server side; it
+  never trusts them as sent.
+- A public URL is reachable by anyone who has it. A provisioner that
+  guards its tunnels (an access token in the URL, a cookie set on first
+  visit) documents that guard; a tunnel without one is public.
+
+## Conformance
+
+An implementation is conformant when:
+
+1. It implements every method of `TunnelProvider`.
+2. `create` and `delete` are idempotent, and `status` returns `null` for
+   an unknown key.
+3. `health` returns a state instead of throwing on a transport failure.
+4. Credentials are stored as the credential store section says, with
+   `0700` / `0600` enforced on every write.
+5. No secret appears in error messages, logs, or `TunnelInfo` other than
+   the declared `connectorToken` field.
