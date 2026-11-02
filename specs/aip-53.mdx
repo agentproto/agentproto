@@ -5,9 +5,9 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-10-28
+updated: 2026-11-02
 author: Jeremy André <jeremy@agentik.net>
-requires: [1, 2, 14, 15, 34, 42]
+requires: [1, 2, 14, 15, 34, 42, 73]
 resources: ./resources/aip-53/draft
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/app
 layer: surfaces
@@ -21,7 +21,7 @@ package: "@agentproto/app"
 | Status | Review |
 | Type | Schema |
 | Domain | apps.sh |
-| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-42](/docs/aip-42) (AGENT) |
+| Requires | [AIP-14](/docs/aip-14) (TOOL), [AIP-15](/docs/aip-15) (WORKFLOW), [AIP-34](/docs/aip-34) (WORKSPACE), [AIP-42](/docs/aip-42) (AGENT), [AIP-73](/docs/aip-73) (TUNNEL, for exposed services) |
 | Resources | [`./resources/aip-53`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft) — `ADAPTER.md`, `APP.schema.json` |
 | Reference Impl | [`@agentproto/app`](https://github.com/agentproto/ts/tree/main/packages/app) |
 
@@ -345,8 +345,10 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
 11. **`services` non-empty, names unique, one launch form each.** When
     `services` is present it MUST be non-empty and every `name` MUST be
     unique within it. Each entry MUST declare exactly one of `entry` and
-    `command`; `args` MUST NOT be set alongside `entry`. `defineApp` and
-    the loader MUST refuse a definition that violates any of these.
+    `command`; `args` MUST NOT be set alongside `entry`. An entry that
+    sets `expose` MUST set `port`, and `expose` MUST carry only `auth`
+    (`guard` or `service`) and `hostname`. `defineApp` and the loader
+    MUST refuse a definition that violates any of these.
     Like rules 9 and 10, validating `services` performs no I/O: nothing
     in `services` is executed or contacted until a host's install path
     starts it (see [Services](#services-services)).
@@ -772,6 +774,13 @@ services:
     port: 4321
   - name: bridge
     entry: pnpm --filter bridge start
+  - name: miniapp
+    command: node
+    args: [dist/miniapp.js]
+    port: 8788
+    expose:
+      auth: service
+      hostname: session-chat
 ```
 
 Each entry is an object with exactly these keys; any other key is
@@ -785,6 +794,7 @@ rejected.
 | `entry` | one of `command` / `entry` | Legacy form. A non-empty shell command line, run by the host as `sh -c <entry>`. Use `command` unless you need shell syntax. |
 | `cwd` | no | Working directory, a non-empty path relative to the installed app directory. Defaults to the app directory. |
 | `port` | no | The TCP port the service listens on, an integer from 1 to 65535. Omitted means a service that does not listen. Bookkeeping only: the host records it, and this AIP does not define passing it to the process (for example as an environment variable), so the service binds its own port. |
+| `expose` | no | Ask the host for a public URL that reaches this service's `port`. An object, see [Exposure](#exposure-expose). Requires `port`. Omitted means the host publishes nothing. |
 
 Exactly one of `command` and `entry` MUST be present on every entry.
 
@@ -822,12 +832,80 @@ requirements below codify it:
 A host that does not run services still MUST reject a malformed
 `services` block when it loads an app.
 
+#### Exposure (`expose`)
+
+A service is reachable only on the machine it runs on unless it declares
+`expose`. With `expose`, the host gives it a public URL through an
+[AIP-73](/docs/aip-73) tunnel. The app states *that* it needs a public
+URL and how requests are authenticated; *which* tunnel provider carries
+it is the host's configuration, never the app's.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `auth` | no | Who authenticates a request that reaches the URL. `guard` (default): the host puts its access guard in front of the tunnel, and only an entry link the host hands out opens it. `service`: no guard, the URL is public and the service authenticates every request itself. |
+| `hostname` | no | A hostname request: a DNS label (`session-chat`) or a full name (`app.example.com`), lowercase. Passed as the primary entry of the AIP-73 `hostnames`. The provider decides what it routes and may assign another name, so an app MUST NOT depend on getting it and reads its URL from the environment instead. |
+
+`expose` is an object with exactly these keys; any other key is
+rejected. `expose: {}` is valid and means a guarded URL on a hostname
+the provider assigns.
+
+A host that starts services behaves as follows for an exposed service:
+
+1. **No `expose`, nothing public.** A host MUST NOT publish a service that
+   does not declare `expose`. Such a service SHOULD bind the loopback
+   interface.
+2. **One tunnel per exposed service, stable key.** The host creates an
+   AIP-73 tunnel whose `key` is `app:<appId>:<name>`, whose `service` is
+   `http://127.0.0.1:<port>`, and whose `hostnames` is `[hostname]` when
+   `hostname` is set. Because `create` is idempotent on the key, a
+   reinstall or a host boot gets the same tunnel back, and the same URL
+   when the provider has `stableUrl`. A host SHOULD use a provider with
+   `stableUrl: true`; when it falls back to one without, it MUST report
+   the exposure as not stable.
+3. **Tunnel before process.** The host creates the tunnel before it
+   starts the process and passes the public origin (`https://<host>`, no
+   path and no access token) in `AGENTPROTO_PUBLIC_URL`. A service that
+   builds links to itself (a Telegram button, an OAuth callback) reads
+   them from there. A restart of the process reuses the tunnel.
+4. **A failed tunnel does not fail the install.** When the tunnel cannot
+   be created, the host MUST report it (service name and reason), MUST
+   still start the process, without `AGENTPROTO_PUBLIC_URL`, and MUST NOT
+   roll the install back.
+5. **Guard.** With `auth: guard`, a request that does not carry the
+   guard's credential MUST NOT reach the process. The entry link (the URL
+   with its access token) is handed to a caller who asks for it; it is
+   never placed in the service's environment. With `auth: service`, the
+   host MUST present the exposure as public wherever it reports it.
+6. **Status.** For each exposed service the host reports the public
+   origin, `auth`, whether the URL is stable, and the tunnel state.
+7. **Boot and removal.** On boot the host re-establishes the tunnels of
+   the services it re-establishes. Uninstalling the app, removing the
+   service, or removing its `expose` stops the connector and deletes the
+   tunnel (AIP-73 `delete`).
+8. **Services in a sandbox.** When the host runs the service inside an
+   [AIP-36](/docs/aip-36) sandbox, the URL MUST reach the process where it
+   runs. The party that holds the tunnel provider's credentials creates
+   the tunnel and gives the sandbox only the connector token, which
+   AIP-73 scopes to one tunnel; the connector runs inside the sandbox,
+   next to the service. Provider credentials MUST NOT be copied into the
+   sandbox. A host MAY use the sandbox provider's own port exposure
+   (`extraPorts`) instead, but only for `auth: service`, because such a
+   URL carries no guard.
+
+`auth: service` is for a service that has its own authentication on
+every route. A Telegram Mini App is the typical case: Telegram opens a
+saved URL without the guard's token (Telegram Desktop drops the query
+string), and the service validates the signed `initData` of each
+request instead. A guard with an expiring token would break the saved
+button.
+
 #### Errors
 
 A malformed `services` block is rejected at load and at install with an
 error that starts with `invalid services declaration`, whichever gate
 sees it first. The message names the offending entry by index
 (`services[1].port`), and a duplicate name reads `two services named 'x'`.
+An `expose` without `port` reads `services[1].expose requires a port`.
 
 #### Schema note
 
@@ -838,7 +916,8 @@ declares `services` as an array of strict objects. "Exactly one of
 array; `uniqueItems` only rejects entries that are identical in full, so
 a validator that stops at the schema accepts two services with the same
 `name` and different commands. The loader is the authority on that rule
-(conformance rule 11).
+(conformance rule 11). `expose` requiring `port` is expressed with
+`dependentRequired`.
 
 The schema is stricter than the reference implementation in one place:
 the reference implementation resolves any non-empty `cwd`, including an
@@ -1358,6 +1437,14 @@ to protect.
 
 ## Backward compatibility
 
+**`services[].expose` amendment (2026-11-02).** Purely additive: `expose`
+is a new OPTIONAL key of a service entry, and a service without it is
+unaffected. A host built against the earlier closed schema rejects a
+service that carries `expose` rather than ignoring it, which is the
+intended fail-safe: an app that needs a public URL must not be installed
+by a host that would silently leave it unreachable. The `schema: app/v1`
+string is unchanged.
+
 **`setup[]` amendment (2026-10-18).** Purely additive: `setup` is a new
 OPTIONAL frontmatter field, no existing field changes meaning, and an
 `APP.md` without it is unaffected and is `ready` on install exactly as
@@ -1377,6 +1464,13 @@ claimed the `app/v1` or `agentapp/v1` schema strings or the
 supersede.
 
 ## Security considerations
+
+- **An exposed service is on the internet.** A tunnel is an outbound
+  connection, so the host's address is never published and nothing
+  listens on a public interface; but anyone who holds the URL reaches
+  the service. `auth: guard` keeps the host's guard in front of it.
+  `auth: service` removes it: a host SHOULD show that choice to the user
+  at install, and the service is then the only boundary.
 
 - **The UI tools allowlist is the primary security boundary.** A UI
   surface runs arbitrary, often third-party-authored, JavaScript inside
