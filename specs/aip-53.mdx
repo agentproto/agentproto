@@ -855,7 +855,8 @@ A host that starts services behaves as follows for an exposed service:
    does not declare `expose`. Such a service SHOULD bind the loopback
    interface.
 2. **One tunnel per exposed service, stable key.** The host creates an
-   AIP-73 tunnel whose `key` is `app:<appId>:<name>`, whose `service` is
+   AIP-73 tunnel whose `key` is derived from the app id and the service
+   name (see [Tunnel key](#tunnel-key) below), whose `service` is
    `http://127.0.0.1:<port>`, and whose `hostnames` is `[hostname]` when
    `hostname` is set. Because `create` is idempotent on the key, a
    reinstall or a host boot gets the same tunnel back, and the same URL
@@ -866,7 +867,11 @@ A host that starts services behaves as follows for an exposed service:
    starts the process and passes the public origin (`https://<host>`, no
    path and no access token) in `AGENTPROTO_PUBLIC_URL`. A service that
    builds links to itself (a Telegram button, an OAuth callback) reads
-   them from there. A restart of the process reuses the tunnel.
+   them from there. A restart of the process reuses the tunnel. When the
+   origin a running process was started with is no longer the current
+   one (`expose` added to a running service, or a provider that handed
+   out a new URL), the host restarts the process so it sees the new
+   value.
 4. **A failed tunnel does not fail the install.** When the tunnel cannot
    be created, the host MUST report it (service name and reason), MUST
    still start the process, without `AGENTPROTO_PUBLIC_URL`, and MUST NOT
@@ -891,6 +896,25 @@ A host that starts services behaves as follows for an exposed service:
    sandbox. A host MAY use the sandbox provider's own port exposure
    (`extraPorts`) instead, but only for `auth: service`, because such a
    URL carries no guard.
+
+##### Tunnel key
+
+App ids carry characters a provisioner may refuse in a key (`@`, `/`),
+so the key is not the raw id. It is `app.<a>.<s>.<h>`:
+
+- `<a>`: the app id lowercased, every run of characters outside
+  `[a-z0-9-]` replaced by `-`, leading and trailing `-` removed, cut to
+  24 characters;
+- `<s>`: the service name cut to 24 characters;
+- `<h>`: the first 8 hexadecimal digits of the SHA-256 of the UTF-8
+  string `<appId>:<name>`, with the original app id.
+
+The result always matches `^[a-z0-9][a-z0-9._-]{0,62}$`, the narrowest
+key alphabet of the reference provisioner, and `<h>` keeps apart two
+apps whose ids reduce to the same `<a>`. For `@agentik/pygmalion` and
+`telegram-miniapp` the key is
+`app.agentik-pygmalion.telegram-miniapp.f29069fe`. A host MUST derive the key exactly this way,
+so that another host of the same user finds the same tunnel.
 
 `auth: service` is for a service that has its own authentication on
 every route. A Telegram Mini App is the typical case: Telegram opens a
