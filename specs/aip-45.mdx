@@ -5,7 +5,7 @@ aip: 45
 status: Review
 type: Schema
 created: 2026-05-08
-updated: 2026-10-28
+updated: 2026-11-03
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 29, 36, 44]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/harness
@@ -337,9 +337,11 @@ mirrors ACP `session/request_permission`:
 ```
 
 The caller answers with `respondPermission(toolCallId, resolution)`,
-where `resolution` is either `{ optionId, feedback? }` (one of the
-offered options, plus optional free text) or `{ cancelled: true }`.
-`feedback` is the only place free text travels.
+where `resolution` is `{ optionId, feedback? }` (one of the offered
+options, plus optional free text), `{ answers }` (only for a question
+with `fields`, see [Multi-field questions](#multi-field-questions-2026-11-03))
+or `{ cancelled: true }`. Outside `answers`, `feedback` is the only place
+free text travels.
 
 `request` names what the agent is asking for. It is OPTIONAL and an
 absent value reads as `tool-permission`, so every existing event stays
@@ -361,6 +363,7 @@ type QuestionRequest = {
   }>
   allowFreeText: boolean       // a typed answer is accepted
   freeTextOptionId?: string    // REQUIRED when allowFreeText; MUST appear in options
+  fields?: QuestionField[]     // multi-field form (2026-11-03), see below
 }
 
 type PlanApprovalRequest = {
@@ -404,6 +407,92 @@ prompt with named options, picks one by `optionId`, and may attach
 `feedback`. For a question it picks a choice, or the free-text option
 with its text; for a plan it picks approve or reject. Only the
 rendering is generic.
+
+##### Multi-field questions (2026-11-03)
+
+A harness question is often more than one single-choice line: Claude
+Code's `AskUserQuestion` asks up to four questions at once, each single
+or multiple choice, each with an "Other" box. `QuestionRequest` carries
+such a form in its OPTIONAL `fields` array.
+
+```ts
+type QuestionFieldInput = "single" | "multi" | "text" | "boolean" | "number"
+
+type QuestionField = {
+  id: string                   // stable key, unique in the prompt
+  input: QuestionFieldInput
+  header?: string              // short chip label
+  prompt: string               // the question text for this field
+  choices?: Array<{            // REQUIRED, non-empty, for single / multi
+    value: string              // what goes back to the harness
+    label: string
+    description?: string
+    preview?: string           // e.g. a code snippet shown on focus
+  }>
+  allowFreeText?: boolean      // single / multi: a typed answer is accepted too
+  required?: boolean
+  recommended?: string         // a choices[].value, see rule 4
+}
+
+// The answer, keyed by field id. An absent field is skipped.
+type QuestionAnswers = Record<string, {
+  selected?: string[]          // single: 0 or 1 value, multi: 0..n values
+  text?: string                // free text, a text input, or String(number)
+  value?: boolean | number     // boolean / number inputs
+}>
+```
+
+Rules:
+
+1. When `fields` is present it is the source of truth. `prompt` is then
+   the overall message, and `choices`, `allowFreeText` and
+   `freeTextOptionId` are a projection for callers that predate
+   `fields`: filled from the only field when the form is exactly one
+   `single` field (one option per choice, plus the free-text option when
+   that field allows free text, every one of them in `options`), and
+   `choices: []`, `allowFreeText: false` otherwise.
+2. A prompt with `fields` MUST offer a submit option of kind
+   `allow_once` and a skip option of kind `reject_once`, so a caller
+   that only understands `options` can always unblock the harness. The
+   projection of rule 1 MAY add more.
+3. The caller submits the form with `{ answers }`. `selected` holds
+   `choices[].value`s (at most one for `single`), `text` the typed
+   answer (only where `allowFreeText` is true, or for a `text` /
+   `number` field), `value` a `boolean` or `number` answer. A harness
+   MUST reject answers naming an unknown field or value, and MUST reject
+   `{ answers }` on a prompt without `fields`. Selecting the skip option
+   declines the whole form; `{ cancelled: true }` cancels it.
+4. `recommended` is set by the party relaying the prompt (for example
+   the daemon), from what it knows. A client renders it as a marker and
+   MUST NOT invent one.
+
+Mapping an ACP form elicitation (informative). ACP's `elicitation/create`
+with `mode: "form"` carries a JSON Schema; claude-agent-acp and
+codex-acp use it for `AskUserQuestion`. A client that advertises
+`clientCapabilities.elicitation.form` maps each schema property to a
+field:
+
+| Property | Field |
+|---|---|
+| `type: "string"` with `oneOf` (or `enum`) | `single`; `oneOf[].const` → `value`, `title` → `label` |
+| `type: "array"` with `items.anyOf` (or `items.enum`) | `multi` |
+| `type: "string"` whose `_meta._askUserQuestionCustomAnswer.questionId` names a choice field | not a field: sets `allowFreeText` on that field; its text goes back under this property |
+| other `type: "string"` | `text` |
+| `type: "boolean"` | `boolean` |
+| `type: "number"` / `"integer"` | `number` |
+
+`prompt` is the property `description`; a lone field without one takes
+the elicitation `message` (claude-agent-acp puts a single question
+there), else its `title`. `header` is the `title` when it is not the
+prompt. `required` comes from the schema's `required` list, `preview`
+from the option's `_meta["_claude/askUserQuestionOption"].preview`.
+`{ answers }` is sent back as an `accept` whose `content` holds a string
+per `single` field, a string array per `multi` field and the typed text
+under the companion property; the skip option becomes `decline` and a
+cancel becomes `cancel`. A client SHOULD advertise
+`elicitation.form` only when someone can answer the prompt: without it
+the harness keeps its own fallback. `mode: "url"` elicitations are out
+of scope here.
 
 ### Lifecycle
 
@@ -866,6 +955,15 @@ meant before. A caller that ignores them still answers with an
 `optionId` from `options`. `capabilities.mode_events` and
 `capabilities.typed_prompts` are OPTIONAL and read as `false` when
 absent, so existing manifests keep validating and keep their meaning.
+
+### The 2026-11-03 multi-field questions amendment (draft)
+
+Additive. `fields` is a new OPTIONAL member of `QuestionRequest` and
+`{ answers }` a new resolution, valid only for a prompt that carries
+`fields`. Such a prompt still fills the legacy members and offers a
+skip option of kind `reject_once`, so a caller that ignores `fields`
+can still answer a lone single-choice question by `optionId`, or skip
+the form.
 
 ### The 2026-10-23 presentable auth methods amendment (draft)
 
