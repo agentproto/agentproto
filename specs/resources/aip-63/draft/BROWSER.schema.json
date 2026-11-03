@@ -316,7 +316,7 @@
       "type": "object",
       "additionalProperties": false,
       "description": "A consent grant. The only way session material enters a store or a remote instance (C1), and the authority to attach to a browser the user already runs (attach true, C14). The scope is EITHER an explicit domain list, OR fullProfile true, OR attach true with a profileRef: a wildcard is not a value of domains.",
-      "required": ["id", "sessionId", "source", "sinks", "grantedAt", "grantedVia", "cookieCount"],
+      "required": ["id", "sessionId", "sinks", "grantedAt", "grantedVia"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "sessionId": { "type": "string", "minLength": 1 },
@@ -342,8 +342,8 @@
         "revokedAt": { "type": "string", "format": "date-time" }
       },
       "oneOf": [
-        { "required": ["domains"], "not": { "anyOf": [{ "required": ["fullProfile"] }, { "required": ["attach"] }] } },
-        { "required": ["fullProfile"], "not": { "anyOf": [{ "required": ["domains"] }, { "required": ["attach"] }] } },
+        { "required": ["domains", "source", "cookieCount"], "not": { "anyOf": [{ "required": ["fullProfile"] }, { "required": ["attach"] }] } },
+        { "required": ["fullProfile", "source", "cookieCount"], "not": { "anyOf": [{ "required": ["domains"] }, { "required": ["attach"] }] } },
         { "required": ["attach", "profileRef"], "not": { "anyOf": [{ "required": ["domains"] }, { "required": ["fullProfile"] }] } }
       ],
       "allOf": [
@@ -433,10 +433,10 @@
         {
           "if": { "properties": { "event": { "const": "grant" } } },
           "then": {
-            "required": ["grantId", "sessionId", "cookieCount"],
+            "required": ["grantId", "sessionId"],
             "oneOf": [
-              { "required": ["domains"], "not": { "anyOf": [{ "required": ["fullProfile"] }, { "required": ["attach"] }] } },
-              { "required": ["fullProfile"], "not": { "anyOf": [{ "required": ["domains"] }, { "required": ["attach"] }] } },
+              { "required": ["domains", "cookieCount"], "not": { "anyOf": [{ "required": ["fullProfile"] }, { "required": ["attach"] }] } },
+              { "required": ["fullProfile", "cookieCount"], "not": { "anyOf": [{ "required": ["domains"] }, { "required": ["attach"] }] } },
               { "required": ["attach", "profileRef"], "not": { "anyOf": [{ "required": ["domains"] }, { "required": ["fullProfile"] }] } }
             ],
             "properties": { "domains": { "minItems": 1 } }

@@ -371,7 +371,10 @@ the distinction MAY ignore this section.
 of its own sessions. The request MUST be authenticated with the device
 credential and carries the device's session id (`sessionId`, an opaque
 string chosen by the device, at most 200 characters) and an optional
-lifetime. The host answers with an opaque `token`, the `sessionId`, the
+lifetime. Only the device's own orchestrator (the process that starts its
+sessions) holds the device credential; it MUST NOT hand that credential to
+the sessions it mints tokens for, since a holder of the credential can mint
+a token for any session id. The host answers with an opaque `token`, the `sessionId`, the
 `deviceId` it is bound to and `expiresAt`. A host MUST bind the token to
 the pair `(deviceId, sessionId)` and MUST NOT mint one for an
 unauthenticated caller.
@@ -395,7 +398,8 @@ identity.
 8.4. **Device-level calls.** A call with the device credential and no token
 is a call by the device itself. It has no `callerSessionId`. A host MUST NOT
 let such a call act on a resource owned by one of the device's sessions
-(AIP-63 answers `browser:not_owner`).
+(AIP-63 answers `browser:not_owner`), except on an operator channel, which
+AIP-63 exempts (L5, L15, T6).
 
 8.5. **Lifetime and revocation.** A token MUST expire; the host chooses the
 maximum lifetime and SHOULD default to 24 hours. The device SHOULD revoke a
@@ -416,9 +420,19 @@ same two values in their own envelope.
 
 8.7. **Trust boundary.** A host cannot see which process holds a token. The
 guarantee is between sessions that do not share their tokens: one session
-cannot act as another without that session's token. A device that leaks
-tokens between its sessions defeats the separation, and nothing in this
-section can detect it.
+cannot act as another without that session's token. The guarantee holds
+only while the orchestrator mints correctly: a device that leaks tokens
+between its sessions, hands its credential to a session, or mints a token
+for a session id it did not start defeats the separation, and nothing in
+this section can detect it.
+
+8.8. **Conformance.** A host that mints sub-session tokens is tested by:
+`pair.subsession.mint-bound` (a token minted for one session, or by one
+device, is refused for another), `pair.subsession.present` (a device
+credential with no token never yields a `callerSessionId`; a bad token is
+refused, not downgraded), `pair.subsession.revoke` (revoking a session or
+the device refuses its tokens at once) and `pair.subsession.secrecy` (the
+store and the logs never contain a token).
 
 ## Threat model
 

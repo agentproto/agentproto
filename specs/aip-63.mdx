@@ -93,6 +93,7 @@ provider is in use.
 | **Grant** | A recorded consent, by a human, that lets named session material enter a store or an instance, or (an `attach` grant, S1) lets a host attach to a browser the user already runs. |
 | **Account** | A host record of one account on one site inside one profile (`linkedin.com`, as some user, in a given profile), with the observed state of its login (`session`), the grants that authorize its use and where its cookies came from (`source`). A record, not a manifest field; it never authorizes anything by itself (C17). |
 | **Attached instance** | An instance the host did not launch: a browser the user already runs, reached through a user-mediated opt-in (for Chrome, `chrome://inspect/#remote-debugging`). |
+| **Profile reference** | `profileRef`: `<instance>/<profile>`, naming one profile inside one instance (for example `chrome-user/perso`). |
 | **Caller session** | The agent session on whose behalf a tool call runs, identified by `callerSessionId`. Distinct from the ledger `actor` (who decided) and from a grant's `sessionId` (a saved browser identity). |
 | **Sink** | Somewhere session material can end up: `local` (this host) or `remote` (a third party's machine). |
 | **Host** | The process that runs providers and exposes the tools: an agentproto daemon, or a standalone browser server. |
@@ -193,7 +194,7 @@ requires `capabilities.cookies` or `capabilities.storageState`.
 
 **M6** (core). Each claimed `conformance` level needs the capability it
 tests: `network` needs `cdp`, `download` needs `downloads`, `profile`
-needs `cookies` or `storageState`, `recording` needs `capabilities.recording`
+needs `cookies`, `storageState`, or `attach` in `profiles.modes`, `recording` needs `capabilities.recording`
 other than `none`.
 
 Manifest keys and the AIP-30 universal fields cooperate rather than
@@ -255,7 +256,8 @@ provider without a CDP endpoint answers `browser.list_requests` with
 `browser:consent_required` (names the domain), `browser:transform_failed` (a required observer transform failed, section 7),
 `browser:awaiting_consent` (retryable: an attach waits for the user's
 click in the browser, L14) and `browser:not_owner` (the target belongs to
-another caller session, L15). They follow AIP-14's
+another caller session, L15) and `browser:command_refused` (a protocol
+method outside an attached instance's allowlist, § Security considerations). They follow AIP-14's
 domain-prefix convention.
 
 **T5** (core). `browser.list_instances` and `browser.list_accounts` MUST
@@ -263,8 +265,9 @@ NOT return a cookie value, a storage value, a token or anything derived
 from one (C9). `list_instances` returns, per instance, its name, its
 engine (provider id), its L1 state, its profile names and the operator's
 free-text purpose when one is configured. `list_accounts` returns account
-records (`$defs/account`) only. Both are read-only and MUST NOT launch,
-attach or probe as a side effect beyond what `health()` allows (L4).
+records (`$defs/account`) only. Both are read-only and MUST NOT launch or
+attach; `list_accounts` MAY perform the read-only login probe C17 permits,
+and neither tool probes anything else (L4).
 
 **T6** (interaction). `browser.list_owned_tabs` called by an agent MUST
 return only the targets whose owner is its caller session (L15). Called
@@ -398,10 +401,14 @@ then a per-connection "Allow"). A host that attaches:
 - MUST hold an active `attach` grant for that browser and profile (C14)
   before it connects;
 - MUST report the instance as `starting` while the browser waits for the
-  user's click, and a call that arrives meanwhile MUST wait as in L10, then
-  fail with retryable `browser:awaiting_consent`. There is no eighth state
-  (L1). `browser:awaiting_consent` is distinct from
-  `browser:consent_required`, which stays the per-domain consent of § 4;
+  user's click. A call that arrives meanwhile MUST wait up to the host's
+  consent bound, then fail with retryable `browser:awaiting_consent`; while
+  the instance waits for consent, that code replaces L3's
+  `browser:not_ready` and L10's `browser:starting`. If no click comes within
+  the bound, the attempt fails and the instance moves to `stopped` (L1); it
+  does not count toward L6. There is no eighth state (L1).
+  `browser:awaiting_consent` is distinct from `browser:consent_required`,
+  which stays the per-domain consent of § 4;
 - MUST report `wasAlreadyRunning: true`, and MUST NOT terminate, restart or
   close the browser, its windows or any target it did not open (L5 for
   `force`);
@@ -423,11 +430,13 @@ driven, read or closed by an agent call. An operator channel is not bound
 by this rule.
 
 **L16** (interaction). Ownership MUST be persisted with the instance's
-`bootId`, so a host restart does not forget it. When a caller session
-ends, the host MAY close the targets that the session is proven to have
-opened during the current boot, and MUST NOT close any other target. A
-target whose owner is unknown (opened by the page, or from a previous
-boot) MUST NOT be closed by cleanup, by the same reasoning as L12.
+`bootId`, so a host restart does not forget who opened what. When a caller
+session ends, the host MAY close the targets that the session is proven to
+have opened during the current boot, except a target opened with
+`keepAlive: true` (L11), and MUST NOT close any other target. A target whose
+owner is unknown (opened by the page), or that was opened in a previous boot
+(`bootId` differs), MUST NOT be closed by cleanup, by the same reasoning as
+L12.
 
 ### 4. Profile and consent
 
@@ -445,7 +454,8 @@ transfer into a remote instance.
 
 Grant and ledger records have the shape of `$defs/grant` and
 `$defs/ledgerRecord` in `BROWSER.schema.json`. A grant's scope is either
-an explicit `domains` list or `fullProfile: true`; a wildcard is not a
+an explicit `domains` list, `fullProfile: true`, or `attach: true` beside a
+`profileRef` (an attached browser and profile, C14); a wildcard is not a
 value of `domains`.
 
 **C1** (profile). Session material MUST enter a store only through a
@@ -462,7 +472,8 @@ sufficient).
 grant** (`fullProfile: true`). It MUST be requested by name (a dedicated
 flag or control, never implied by omitting domains), MUST show a warning
 that the entire profile including every domain is exposed, MUST have a
-ledger record, and MUST NOT include a remote sink.
+ledger record, and MUST NOT include a remote sink. An attach grant (C14)
+is a separate scope, not an exception to C2.
 
 **C4** (profile). A non-interactive request without an explicit domain
 list or the named full-profile request MUST fail. It MUST NOT default to
@@ -502,7 +513,7 @@ name hashes are allowed.
 
 **C10** (profile). The consent ledger MUST be append-only: one JSON
 record per line, a monotonic `seq`, records for `grant`, `refresh`,
-`revoke`, `sink-ack` and `deny`. The host MUST NOT rewrite or truncate
+`revoke`, `sink-ack`, `attach-ack` and `deny`. The host MUST NOT rewrite or truncate
 it. Records SHOULD carry `prev`, the SHA-256 of the previous line.
 
 **C11** (profile). On POSIX, files holding session material, the ledger
@@ -535,8 +546,9 @@ or re-target an attach grant.
 
 **C15** (profile). Revoking an attach grant MUST detach the host from
 that browser and close every target agents opened under it (L15) before
-it reports success, and MUST append a `revoke` record. It MUST NOT close
-the user's own targets.
+it reports success, MUST delete the recordings that list the grant (R13,
+R16), and MUST append a `revoke` record. It MUST NOT close the user's own
+targets.
 
 **C16** (profile). An attached profile is never session material for a
 sink: a host MUST NOT export its cookies or storage, and MUST NOT route
@@ -545,9 +557,9 @@ an attached instance through a `remote` sink.
 **C17** (profile). An **account** record (`$defs/account`) describes one
 account on one site in one profile: `site`, optional `account` (a display
 name or an address), `profileRef`, `session` (`valid`, `expired` or
-`unknown`) with `verifiedAt`, `source` (`native`: the user logged in
-there; `synced`: material copied in under a grant, with `syncedFrom` and
-`syncedAt`) and `grantIds`. Three rules:
+`unknown`) with `verifiedAt` when it was checked, `source` (`native`: the
+user logged in there; `synced`: material copied in under a grant, with
+`syncedFrom`, and `syncedAt` when known) and `grantIds`. Three rules:
 
 - an account authorizes nothing: only grants do (C1, C14);
 - `session` is indicative. A host MAY probe it, read-only; this AIP does
@@ -701,19 +713,19 @@ previous run: set `status: "interrupted"`, set `endedAt` to the last
 analogy). A closed recording is immutable except for `exports` and the
 purge of R10.
 
-**R16** (recording). A recording of an attached instance (L14) MUST be
-off by default; the operator turns it on per instance. Its manifest
-MUST list the `attach` grant in `grantIds`, so that revoking that grant
-deletes it (R13, C15). Manifests and action lines SHOULD carry
-`callerSessionId`, the caller session (L15) that drove the target, so a
-viewer can tell sessions apart. Any copy of a recording off the host
-stays under R10 to R12; a host SHOULD link to it rather than copy it.
-
 **R15** (recording). A video export (`exports/*.mp4`, `exports/*.webm`) is
 derived. A host MAY build it on demand and MAY cache it under `exports/`,
 listing it in `manifest.exports`. It MUST be reproducible from frames and
 `tMs`, MUST be deleted with the recording, and MUST NOT contain pixels
 that the frames do not (so it inherits R8 and R9).
+
+**R16** (recording). A recording of an attached instance (L14) MUST be
+off by default; the operator turns it on per instance. Its manifest
+MUST list the `attach` grant in `grantIds`, so that revoking that grant
+makes it derived material to delete (R13, C15). Manifests and action lines SHOULD carry
+`callerSessionId`, the caller session (L15) that drove the target, so a
+viewer can tell sessions apart. Any copy of a recording off the host
+stays under R10 to R12; a host SHOULD link to it rather than copy it.
 
 ### 6. Conformance
 
@@ -977,9 +989,15 @@ user has, so an attach needs its own grant and ledger record (C14), is
 never stopped or copied (L14, C16), and its agents only see the targets
 they opened (L15). A host SHOULD hold a single upstream connection per
 attached browser, so the user clicks once per browser launch rather than
-once per agent, and SHOULD filter what that connection forwards with an
-allowlist of protocol methods: the attach grant authorizes driving pages,
-not reading the cookie jar.
+once per agent. It MUST filter what reaches that browser with an allowlist
+of protocol methods: the attach grant authorizes driving pages, not reading
+the cookie jar. The allowlist MUST NOT contain a cookie or storage read or
+write (`Network.getAllCookies`, `Network.getCookies`, `Network.setCookies`,
+`Storage.getCookies` and the like), `Page.close`,
+`Target.createBrowserContext`, `Target.disposeBrowserContext`, or a target
+command on a target outside the caller's own set (L15). On an attached
+instance `browser.cdp_send` MUST refuse those methods with
+`browser:command_refused` (C9, C16).
 
 **Caller identity.** A host that serves several agent sessions through
 one paired device MUST NOT take the caller session from a header or a
@@ -1064,8 +1082,11 @@ C14 to C17, R16 and the three `browser.list_*` ids are additive: an
 existing provider that never attaches and serves one caller is
 unaffected. `sessionId` on grants and recordings keeps its meaning;
 `profileRef`, `attach`, `callerSessionId` and `$defs/account` are new and
-optional. The one tightening is L5: `force: true` on an attached instance
-is now operator-only.
+optional. The tightenings are L5 (`force: true` on an attached instance is
+operator-only) and L15/L16 (a target belongs to the caller session that
+opened it): a host that serves several sessions through one device
+credential either establishes caller sessions under AIP-59 § 8 or answers
+`browser:not_owner` across them.
 
 Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.recording/v1`; documents that declare `browser-recording/v1` remain valid, and hosts MUST accept both.
 
