@@ -5,7 +5,7 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-11-02
+updated: 2026-11-03
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42, 73]
 resources: ./resources/aip-53/draft
@@ -229,7 +229,13 @@ interface AppService {
   args?:    string[]      // structured form only: argv after `command`
   entry?:   string        // legacy form: a shell command line, run as `sh -c`
   cwd?:     string        // relative to the installed app dir; default the app dir
-  port?:    number        // 1..65535, bookkeeping only
+  port?:    number        // 1..65535; bookkeeping, or the port the host owns when activation is on-demand
+  expose?:  { auth?: "guard" | "service"; hostname?: string }   // a public URL, see "Exposure"
+  activation?: {          // when the host runs the process, see "Activation"
+    mode:            "always" | "on-demand"
+    idleStopMs?:     number
+    startTimeoutMs?: number
+  }
 }
 
 interface AppUiDefinition {
@@ -347,7 +353,11 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     unique within it. Each entry MUST declare exactly one of `entry` and
     `command`; `args` MUST NOT be set alongside `entry`. An entry that
     sets `expose` MUST set `port`, and `expose` MUST carry only `auth`
-    (`guard` or `service`) and `hostname`. `defineApp` and the loader
+    (`guard` or `service`) and `hostname`. An entry that sets `activation`
+    MUST give it a `mode` of `always` or `on-demand`; `mode: on-demand`
+    MUST come with a `port`, and `idleStopMs` and `startTimeoutMs` MUST
+    NOT be set with `mode: always` (see [Activation](#activation-activation)
+    for their bounds). `defineApp` and the loader
     MUST refuse a definition that violates any of these.
     Like rules 9 and 10, validating `services` performs no I/O: nothing
     in `services` is executed or contacted until a host's install path
@@ -755,11 +765,14 @@ would ignore the setup.
 `services` is OPTIONAL. When present it declares the **long-running
 processes** an app needs alongside its agents and workflows: a web
 server, a bridge, a worker. A service is a process the app *declares* and
-the host *starts with the app* and keeps running; `defineApp`, `emit` and
+the host *starts with the app* and keeps running, unless the entry opts
+into [`activation`](#activation-activation) `on-demand`, in which case the
+host runs the process only while it is being used; `defineApp`, `emit` and
 `loadAppHandle` only validate and carry the declaration, they never run
 it. One entry is one process. There is no dependency graph between
-services, no scaling (no replica count) and no scheduler (no cron, no
-queue) behind the field.
+services, no replica count and no scheduler (no cron, no queue) behind
+the field; `activation` only chooses between a process that is kept
+running and one that is started on demand.
 
 It is not `dev.launch`. `dev.launch` holds dev-only launch recipes and is
 never executed by a host that installs the app; `services` is the
@@ -781,6 +794,13 @@ services:
     expose:
       auth: service
       hostname: session-chat
+  - name: viewer
+    command: node
+    args: [dist/viewer.js]
+    port: 8789
+    activation:
+      mode: on-demand
+      idleStopMs: 600000
 ```
 
 Each entry is an object with exactly these keys; any other key is
@@ -793,8 +813,9 @@ rejected.
 | `args` | no | Structured form only. A non-empty array of strings, the argv after `command`, passed verbatim. Not valid alongside `entry`. |
 | `entry` | one of `command` / `entry` | Legacy form. A non-empty shell command line, run by the host as `sh -c <entry>`. Use `command` unless you need shell syntax. |
 | `cwd` | no | Working directory, a non-empty path relative to the installed app directory. Defaults to the app directory. |
-| `port` | no | The TCP port the service listens on, an integer from 1 to 65535. Omitted means a service that does not listen. Bookkeeping only: the host records it, and this AIP does not define passing it to the process (for example as an environment variable), so the service binds its own port. |
+| `port` | no | The TCP port the service listens on, an integer from 1 to 65535. Omitted means a service that does not listen. For a service that is kept running this is bookkeeping only: the host records it, and this AIP does not define passing it to the process (for example as an environment variable), so the service binds its own port. With `activation.mode: on-demand` the host listens on this port itself and gives the process another one in `PORT` (see [Activation](#activation-activation)). |
 | `expose` | no | Ask the host for a public URL that reaches this service's `port`. An object, see [Exposure](#exposure-expose). Requires `port`. Omitted means the host publishes nothing. |
+| `activation` | no | When the host runs the process: kept running (`always`, the default) or started on the first request and stopped when idle (`on-demand`). An object, see [Activation](#activation-activation). `on-demand` requires `port`. |
 
 Exactly one of `command` and `entry` MUST be present on every entry.
 
@@ -808,7 +829,9 @@ requirements below codify it:
    MUST attempt to start every declared service before the install
    returns. Services are started in declaration order; the host does not
    wait for a service to become ready, so a service MUST NOT assume that
-   an earlier one is listening.
+   an earlier one is listening. For an `on-demand` service, starting means
+   taking the listening side of its `port`; the process itself starts
+   later (see [Activation](#activation-activation)).
 2. **A service that fails to start does not fail the install.** The host
    MUST report the failure (name and reason) and MUST NOT roll the install
    back or mark the app uninstalled because of it.
@@ -818,9 +841,9 @@ requirements below codify it:
    service the manifest no longer declares MUST be stopped.
 4. **Environment.** A service runs with the host's environment. A
    relative `cwd` is resolved against the installed app directory.
-5. **Restart.** On an unexpected exit a host SHOULD restart the service
-   with a bounded, increasing delay, and give up after repeated failures
-   so the next install or host boot replaces it. The reference
+5. **Restart.** On an unexpected exit a host SHOULD restart a service that
+   is kept running with a bounded, increasing delay, and give up after
+   repeated failures so the next install or host boot replaces it. The reference
    implementation waits 1s doubling up to 60s, and gives up after 5
    failures within 10 minutes; those numbers are not normative.
 6. **Boot.** When the host itself starts, it SHOULD re-establish the
@@ -923,13 +946,104 @@ string), and the service validates the signed `initData` of each
 request instead. A guard with an expiring token would break the saved
 button.
 
+#### Activation (`activation`)
+
+By default a service is **kept running**: the host starts its process at
+install and at boot, and restarts it when it exits. A service that is only
+used now and then, such as a viewer behind a bot button, can ask not to be:
+with `activation.mode: on-demand` the host owns the service's port and runs
+the process only while somebody is using it. Nothing runs when it is
+unused, so there is nothing to crash-loop at boot and no process left
+behind holding the port after a host restart.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `mode` | yes | `always` (default when `activation` is omitted): the process is kept running, as described under [Host behaviour](#host-behaviour). `on-demand`: the host starts the process on the first inbound connection and stops it when idle. Requires `port`. |
+| `idleStopMs` | no | `on-demand` only. An integer from 1000 to 86400000, default 300000: how long the service stays up after its last open request or connection ended. |
+| `startTimeoutMs` | no | `on-demand` only. An integer from 1000 to 300000, default 30000: how long a request waits for the process to start listening. |
+
+`activation` is an object with exactly these keys; any other key is
+rejected. `{ mode: always }` is the same as omitting it, and `idleStopMs`
+and `startTimeoutMs` are rejected under `mode: always`.
+
+Only a service whose work is driven entirely by inbound requests may be
+`on-demand`. A service that polls, consumes a queue, keeps a connection to
+a third party open or runs on a timer does its work while nobody is
+calling it: the host would stop it as idle, and it MUST stay `always`.
+
+A host that starts services behaves as follows for an `on-demand` service:
+
+1. **The host owns the port.** At install and at boot the host listens on
+   `port` on the loopback interface and starts no process. When it cannot
+   bind the port, it reports the failure like a service that failed to
+   start (Host behaviour, rule 2).
+2. **The first request starts the process.** When an HTTP request or an
+   upgrade arrives and no process is running, the host starts one, with the
+   environment of Host behaviour rule 4 plus `PORT`, set to a free loopback
+   port the host picked for this start. The process MUST listen on `PORT`,
+   SHOULD bind the loopback interface only, and cannot bind the declared
+   `port`, which the host holds. A service that hardcodes its port cannot
+   be `on-demand`.
+3. **Requests wait for the start, with a bound.** A request that arrives
+   while the process is starting waits for it, and one start serves every
+   request waiting. The process is ready when it accepts connections on
+   `PORT`. When it exits first, or has not done so after `startTimeoutMs`,
+   the host answers every waiting request `503 Service Unavailable` with a
+   `Retry-After` header. The response MUST NOT carry the cause (command,
+   path, error text); that goes to the host's log.
+4. **The host is a transparent proxy.** It forwards the request as it
+   received it: method, target and headers other than the hop-by-hop ones,
+   including `Host`, with the body streamed in both directions, and streams
+   the response back. An `Upgrade` request (WebSocket) is forwarded and the
+   connection becomes an opaque byte stream. The process sees what it would
+   have seen listening on `port` itself. When the process has accepted the
+   connection but fails, the host answers `502 Bad Gateway`.
+5. **Busy, then idle.** The service is busy while a forwarded request is
+   open (until its response has ended) or an upgraded connection is open.
+   Once it has not been busy for `idleStopMs`, the host stops the process
+   and every child it spawned, as it does at uninstall, and the next
+   request starts it again. A request is never cut by the idle timer,
+   however long it runs; an open streaming response or WebSocket keeps the
+   service up until it ends. A quiet keep-alive connection that carries no
+   request does not.
+6. **No restart, backoff instead.** A process that exits unexpectedly,
+   before it listens or while it runs, is not restarted by the host: the
+   service goes back to idle and the next request starts it. So that a
+   crashing service is not restarted at the rate requests arrive, a host
+   SHOULD refuse a start with `503` and `Retry-After` for an increasing
+   delay after each unexpected exit, and MUST NOT give up for good: it keeps
+   listening, and a request after the delay starts the process. The
+   reference implementation reuses the numbers of rule 5 (1s doubling up to
+   60s, failures counted within 10 minutes); they are not normative. An
+   exit an operator caused is not a failure.
+7. **Exposure is unchanged.** The tunnel of an exposed service still
+   targets `http://127.0.0.1:<port>`, now the host's listener, so the URL
+   works while no process runs and the first request through it starts the
+   process. With `auth: guard`, a request the guard refuses never reaches
+   the listener and starts nothing; with `auth: service` whoever holds the
+   URL can start the process. `AGENTPROTO_PUBLIC_URL` is set at every
+   start, and when the origin changes while the process runs, the host
+   stops it so the next start sees the new value.
+8. **Reinstall, boot, mode change, uninstall.** Re-running the install
+   keeps the host and does not start a process. A manifest that changes a
+   running service between `always` and `on-demand` replaces it: the
+   process is stopped first, so that the port is free for whichever side
+   holds it. At boot the host takes the port and starts nothing. Uninstall
+   and removal of the service stop the host and its process.
+9. **Stopping the host stops its processes.** The listener was the only way
+   in, so a process the host started on demand MUST NOT outlive the host.
+10. **Status.** The host reports each `on-demand` service's state: `idle`,
+    `starting`, `running` or `stopping`.
+
 #### Errors
 
 A malformed `services` block is rejected at load and at install with an
 error that starts with `invalid services declaration`, whichever gate
 sees it first. The message names the offending entry by index
 (`services[1].port`), and a duplicate name reads `two services named 'x'`.
-An `expose` without `port` reads `services[1].expose requires a port`.
+An `expose` without `port` reads `services[1].expose requires a port`, and
+an `on-demand` activation without one reads `services[1].activation.mode
+'on-demand' requires a port`.
 
 #### Schema note
 
@@ -941,7 +1055,10 @@ array; `uniqueItems` only rejects entries that are identical in full, so
 a validator that stops at the schema accepts two services with the same
 `name` and different commands. The loader is the authority on that rule
 (conformance rule 11). `expose` requiring `port` is expressed with
-`dependentRequired`.
+`dependentRequired`. `activation` is a closed object; `idleStopMs` and
+`startTimeoutMs` being refused under `mode: always` is an `if`/`then`
+inside it, and `mode: on-demand` requiring `port` is an `allOf` `if`/`then`
+on the service entry.
 
 The schema is stricter than the reference implementation in one place:
 the reference implementation resolves any non-empty `cwd`, including an
@@ -1461,6 +1578,17 @@ to protect.
 
 ## Backward compatibility
 
+**`services[].activation` amendment (2026-11-03).** Purely additive:
+`activation` is a new OPTIONAL key of a service entry, and a service
+without it is kept running exactly as before. A host built against the
+earlier closed schema rejects a service that carries `activation` rather
+than ignoring it, which is the intended fail-safe: a service that needs
+the host to own its port must not be installed by a host that would start
+it as a keep-alive process on its own, or the other way round. For an
+`on-demand` service, `port` stops being bookkeeping only: the host holds
+it and passes the process another one in `PORT`. The `schema: app/v1`
+string is unchanged.
+
 **`services[].expose` amendment (2026-11-02).** Purely additive: `expose`
 is a new OPTIONAL key of a service entry, and a service without it is
 unaffected. A host built against the earlier closed schema rejects a
@@ -1533,6 +1661,16 @@ supersede.
   an app from an untrusted source is installing code to run. A host
   SHOULD show the declared services of an app before installing it, and
   SHOULD NOT resolve a `cwd` outside the app directory.
+
+- **An `on-demand` service lets a request start a process.** The host's
+  listener is loopback-only and every request that reaches it can start
+  the process, so with `auth: service` anyone who holds the URL can cost
+  the host a process start. The backoff of Activation rule 6 stops a
+  crashing service from being started at the rate requests arrive, and the
+  refusal body carries no internals (rule 3). The process `PORT` is also
+  reachable on any interface it binds: a service that binds all of them
+  exposes itself without the host in front, which is why rule 2 says
+  SHOULD bind the loopback interface only.
 
 - **`.agentapp` integrity is checksum, not signature.** The aggregate
   SHA-256 (see [`unpack`](#unpack)) detects corruption and
