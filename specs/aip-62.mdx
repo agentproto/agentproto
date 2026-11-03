@@ -921,6 +921,42 @@ Both are best-effort notifications over an already-complete, already-signed
 attestation — delivery failing or being skipped does not change the verdict,
 does not retry the review, and is not itself recorded on the attestation.
 
+### Applying changes against a review
+
+A review is about `baseSha..headSha`. A change computed from that review (a
+fix, a changeset, a formatting commit) is only meaningful on top of that
+`headSha`. A **writer** is any actor that delivers such a change to the
+target ref, a person, a bot, or an agent session. A writer delivering a
+change computed from a review over `headSha`:
+
+- MUST update the target ref only if the ref still equals `headSha`
+  advanced only by that writer's own earlier updates for the same review
+  (compare-and-swap). The check and the update MUST be one atomic ref
+  operation, not a read followed by an unconditional write.
+- MUST NOT re-apply, rebase, merge or retry the change onto a different head.
+  Whoever moved the ref owns the new head, and the new head needs its own
+  review.
+- MUST report exactly one outcome:
+
+| Outcome | Meaning |
+|---|---|
+| `pushed` | the ref matched, the update was applied |
+| `noop` | the ref already equals the writer's tip, nothing to write |
+| `head_moved` | the ref differs from the expected value (or, for a new ref, already exists), nothing was written |
+| `rejected_other` | the update was refused for a reason other than a moved head (not a descendant, protected ref, declined by a hook, authentication, network) |
+
+On `head_moved` the change is **parked**: it is kept out of band (a patch or
+an artifact, never a ref) and is not delivered. The writer MUST NOT push
+again for that review. Delivery is not retried and does not trigger a new
+review by itself.
+
+Informative: with git, the update is
+`git push --force-with-lease=<ref>:<sha> <remote> <tip>:<ref>`, preceded by
+an ancestry check (`git merge-base --is-ancestor <sha> <tip>`) so a tip that
+does not descend from the expected head is `rejected_other` rather than a
+force-push over it. Workspace sync (`push` and `conflict.policy` in
+[AIP-35](/docs/aip-35)) is a different mechanism and is out of scope here.
+
 ### Signing
 
 Only the host that ran the review signs. Owners, sessions, models, and
