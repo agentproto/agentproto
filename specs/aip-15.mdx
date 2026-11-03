@@ -11,7 +11,7 @@ aip: 15
 status: Review
 type: Schema
 created: 2026-04-28
-updated: 2026-10-08
+updated: 2026-11-03
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 7, 14, 16, 30, 58]
 resources: ./resources/aip-15/draft
@@ -1075,6 +1075,14 @@ in-process privilege, egress enforcement), see
    inside a workflow — surfaced as `outputs.stream` on the step?
 3. **Distributed runtimes**: do we need a `placement` hint
    (`local` / `worker:<queue>` / `serverless`) or punt to runtime?
+   *Partly answered (2026-11-03):* for `agent` steps, the runtime ships a
+   step-level `placement` that is an [AIP-36](/docs/aip-36) v1.4 placement
+   ladder (an ordered list of sandboxes for the step's session, mutually
+   exclusive with the step's `sandbox`; agentproto/ts
+   `packages/workflow-runtime/src/types.ts:366-376`, `:457-462`). That
+   chooses where the step's agent session runs, not where the workflow
+   runtime itself executes, so the question stays open for the runtime
+   hint (`worker:<queue>`, `serverless`) and for non-agent steps.
 4. **Cross-workflow signals**: a workflow in run A waits for an event
    raised by run B — same workflow id, different runs. Adapters
    handle this differently; spec is silent for now.
