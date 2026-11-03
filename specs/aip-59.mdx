@@ -357,6 +357,83 @@ authenticate as a client. It MUST NOT be accepted:
 - Stored v1 credentials MUST be treated as legacy: never dialed, never
   served, never upgraded in place. The only remedy is to pair again.
 
+### 8. Sub-session tokens
+
+A paired device can be a process that serves many sessions of its own: an
+agent daemon that runs dozens of agent sessions behind one pairing. The
+device credential (§4, or the local-device bearer of § Implementation
+notes) identifies the device, never which of its sessions made a call. A
+host that must tell those sessions apart (for example to give each its own
+browser tabs, AIP-63 L15) uses sub-session tokens. A host that does not need
+the distinction MAY ignore this section.
+
+8.1. **Minting.** A device MAY ask the host for a sub-session token for one
+of its own sessions. The request MUST be authenticated with the device
+credential and carries the device's session id (`sessionId`, an opaque
+string chosen by the device, at most 200 characters) and an optional
+lifetime. Only the device's own orchestrator (the process that starts its
+sessions) holds the device credential; it MUST NOT hand that credential to
+the sessions it mints tokens for, since a holder of the credential can mint
+a token for any session id. The host answers with an opaque `token`, the `sessionId`, the
+`deviceId` it is bound to and `expiresAt`. A host MUST bind the token to
+the pair `(deviceId, sessionId)` and MUST NOT mint one for an
+unauthenticated caller.
+
+8.2. **Secrecy.** A token MUST carry at least 128 bits of entropy. The host
+MUST store only what it needs to verify it (a hash), MUST compare in
+constant time and MUST NOT log it. The token is a bearer secret of the
+device: the device MUST hand it only to the session it was minted for and
+MUST NOT expose it to another session.
+
+8.3. **Presentation.** A call on behalf of a session presents the device
+credential **and** the sub-session token. The host MUST accept the token
+only when it is valid, unexpired, and bound to the same device as the
+credential presented with it; otherwise it MUST refuse the call with
+`subsession_invalid` (or `subsession_expired`), not downgrade it to a
+device-level call. From a valid token, and only from one, the host derives
+the caller session id (`callerSessionId`). A session id carried in any
+other header, a query parameter or a tool argument MUST NOT be used as an
+identity.
+
+8.4. **Device-level calls.** A call with the device credential and no token
+is a call by the device itself. It has no `callerSessionId`. A host MUST NOT
+let such a call act on a resource owned by one of the device's sessions
+(AIP-63 answers `browser:not_owner`), except on an operator channel, which
+AIP-63 exempts (L5, L15, T6).
+
+8.5. **Lifetime and revocation.** A token MUST expire; the host chooses the
+maximum lifetime and SHOULD default to 24 hours. The device SHOULD revoke a
+token when its session ends, and MAY mint a fresh one for a long session.
+Revoking the device (§6) MUST revoke every sub-session token bound to it
+at once.
+
+8.6. **HTTP binding.** A host serving HTTP on loopback SHOULD expose:
+
+| Request | Auth | Effect |
+|---|---|---|
+| `POST /pair/subsessions` with `{ "sessionId": "...", "ttlSeconds": 3600 }` | device credential | mint; answers `{ "token", "sessionId", "deviceId", "expiresAt" }` |
+| `DELETE /pair/subsessions/<sessionId>` | device credential | revoke every token of that session |
+
+and read the token from the `Agentproto-Subsession` request header, next
+to the device credential in `Authorization`. Other transports carry the
+same two values in their own envelope.
+
+8.7. **Trust boundary.** A host cannot see which process holds a token. The
+guarantee is between sessions that do not share their tokens: one session
+cannot act as another without that session's token. The guarantee holds
+only while the orchestrator mints correctly: a device that leaks tokens
+between its sessions, hands its credential to a session, or mints a token
+for a session id it did not start defeats the separation, and nothing in
+this section can detect it.
+
+8.8. **Conformance.** A host that mints sub-session tokens is tested by:
+`pair.subsession.mint-bound` (a token minted for one session, or by one
+device, is refused for another), `pair.subsession.present` (a device
+credential with no token never yields a `callerSessionId`; a bad token is
+refused, not downgraded), `pair.subsession.revoke` (revoking a session or
+the device refuses its tokens at once) and `pair.subsession.secrecy` (the
+store and the logs never contain a token).
+
 ## Threat model
 
 | Adversary | Capability | Outcome |
@@ -420,6 +497,9 @@ change what a conforming host or client MUST do.
   files written before the feature load unchanged.
 
 ## Backwards Compatibility
+
+Sub-session tokens (§8, added 2026-11) are optional and additive: a host
+that does not mint them, and a device that never asks, behave as before.
 
 This AIP has no `replaces`. It introduces `pair/v2`, which is deliberately
 incompatible with `pair/v1` (§7): v1 offers and credentials are refused and

@@ -90,7 +90,11 @@ provider is in use.
 | **Driver handle** | The object `attach` returns: a page-control interface bound to an instance. |
 | **Context** | An isolated cookie and storage jar inside an instance. |
 | **Profile** | Persistent or seeded browser state (cookies, storage) a context starts from. |
-| **Grant** | A recorded consent, by a human, that lets named session material enter a store or an instance. |
+| **Grant** | A recorded consent, by a human, that lets named session material enter a store or an instance, or (an `attach` grant, S1) lets a host attach to a browser the user already runs. |
+| **Account** | A host record of one account on one site inside one profile (`linkedin.com`, as some user, in a given profile), with the observed state of its login (`session`), the grants that authorize its use and where its cookies came from (`source`). A record, not a manifest field; it never authorizes anything by itself (C17). |
+| **Attached instance** | An instance the host did not launch: a browser the user already runs, reached through a user-mediated opt-in (for Chrome, `chrome://inspect/#remote-debugging`). |
+| **Profile reference** | `profileRef`: `<instance>/<profile>`, naming one profile inside one instance (for example `chrome-user/perso`). |
+| **Caller session** | The agent session on whose behalf a tool call runs, identified by `callerSessionId`. Distinct from the ledger `actor` (who decided) and from a grant's `sessionId` (a saved browser identity). |
 | **Sink** | Somewhere session material can end up: `local` (this host) or `remote` (a third party's machine). |
 | **Host** | The process that runs providers and exposes the tools: an agentproto daemon, or a standalone browser server. |
 | **Supervisor** | The host component that health-checks, restarts and reaps instances. |
@@ -147,7 +151,7 @@ own `kind`.
 | `instances` | Yes | `single` \| `multi` | Whether more than one instance of this provider can run at once. |
 | `endpoints` | No | object | `rest` and `cdp`, each `{ url?, discovered? }`. `discovered: true` means the URL is only known after launch (for example a remote session's CDP URL). A local provider SHOULD default to a loopback URL. |
 | `capabilities` | Yes | object | See below. Absent boolean means false. |
-| `profiles` | Yes | object | `modes` (`ephemeral`, `persistent`, `import`, `native-login`, `clone`) and optional `storedBy` (`host` or `provider`). |
+| `profiles` | Yes | object | `modes` (`ephemeral`, `persistent`, `import`, `native-login`, `clone`, `attach`) and optional `storedBy` (`host` or `provider`). |
 | `lifecycle` | No | object | `launch`, `health`, `stop`, `supervision`. See § Instance lifecycle. |
 | `sinks` | Iff `remote` | object[] | `{ id, kind, operator?, region?, ack }`. Every `remote` sink MUST declare `ack: required`. |
 | `conformance` | No | string[] | Levels the provider claims, always including `core`. |
@@ -190,7 +194,7 @@ requires `capabilities.cookies` or `capabilities.storageState`.
 
 **M6** (core). Each claimed `conformance` level needs the capability it
 tests: `network` needs `cdp`, `download` needs `downloads`, `profile`
-needs `cookies` or `storageState`, `recording` needs `capabilities.recording`
+needs `cookies`, `storageState`, or `attach` in `profiles.modes`, `recording` needs `capabilities.recording`
 other than `none`.
 
 Manifest keys and the AIP-30 universal fields cooperate rather than
@@ -222,8 +226,13 @@ this AIP fixes ids, gates and levels.
 | `browser.profile.list` | `cookies` or `storageState` | profile | List grants (never values). |
 | `browser.profile.refresh` | `cookies` or `storageState` | profile | Re-read granted domains from the granted source. |
 | `browser.profile.revoke` | `cookies` or `storageState` | profile | Revoke a grant or some of its domains. |
+| `browser.list_instances` | none | core | List the instances the host serves: name, engine, state, profiles, purpose. |
+| `browser.list_accounts` | none | core | List account records: site, account, profile, `session`, `source`, grant ids. Never a value. |
+| `browser.list_owned_tabs` | none | interaction | List the targets owned by the caller session, or, for an operator, every target grouped by owner. |
 
 There is deliberately no tool that creates or widens a grant (C7).
+`browser.tabs` keeps its meaning and gate (T1); the three `list_*` ids
+are new and do not change it.
 
 **T1** (core). Tool ids in this table MUST keep their meaning and
 gates. A provider MAY add vendor tools under its own namespace.
@@ -244,8 +253,26 @@ provider without a CDP endpoint answers `browser.list_requests` with
 **T4** (core). Browser-specific error codes are `browser:unsupported`,
 `browser:starting` (retryable), `browser:not_ready`,
 `browser:crash_looping`, `browser:target_gone` and
-`browser:consent_required` (names the domain) and `browser:transform_failed` (a required observer transform failed, section 7). They follow AIP-14's
+`browser:consent_required` (names the domain), `browser:transform_failed` (a required observer transform failed, section 7),
+`browser:awaiting_consent` (retryable: an attach waits for the user's
+click in the browser, L14) and `browser:not_owner` (the target belongs to
+another caller session, L15) and `browser:command_refused` (a protocol
+method outside an attached instance's allowlist, § Security considerations). They follow AIP-14's
 domain-prefix convention.
+
+**T5** (core). `browser.list_instances` and `browser.list_accounts` MUST
+NOT return a cookie value, a storage value, a token or anything derived
+from one (C9). `list_instances` returns, per instance, its name, its
+engine (provider id), its L1 state, its profile names and the operator's
+free-text purpose when one is configured. `list_accounts` returns account
+records (`$defs/account`) only. Both are read-only and MUST NOT launch or
+attach; `list_accounts` MAY perform the read-only login probe C17 permits,
+and neither tool probes anything else (L4).
+
+**T6** (interaction). `browser.list_owned_tabs` called by an agent MUST
+return only the targets whose owner is its caller session (L15). Called
+from an operator channel it MAY return every target, grouped by
+`callerSessionId`, with targets of unknown owner in their own group.
 
 ### 3. Instance lifecycle
 
@@ -315,6 +342,8 @@ then sweep orphans: terminate every process carrying the instance's
 `supervision.orphanMarker`, and MUST NOT terminate processes without
 the marker. `stop` on an instance the host did not launch (a
 `wasAlreadyRunning` attach) MUST NOT terminate it unless `force: true`.
+On an attached instance (L14), `force: true` MUST come from an operator
+channel: a tool call or any other agent-controlled input MUST NOT set it.
 
 **L6** (core). The supervisor MUST count consecutive failed launches
 within `crashLoop.windowMs` (defaults: 3 failures, 300000 ms). On
@@ -353,20 +382,67 @@ MUST fail with `browser:target_gone`. A host MUST NOT silently rebind a
 stale handle to a new target. A provider SHOULD expose `bootId` in
 `health()` so clients can detect the restart.
 
-**L13** (core). A provider that drives a Chrome-family browser over CDP
-MUST launch it on a fresh, non-default user-data directory. Chrome 136
+**L13** (core). A provider that **launches** a Chrome-family browser to
+drive it over CDP MUST launch it on a fresh, non-default user-data
+directory. Chrome 136
 and later refuse `--remote-debugging-port` on the default user-data
 directory, so this is required, not a preference. Session material
 reaches such an instance only through granted injection (C1), for
 example CDP `Network.setCookies`; a provider MUST NOT satisfy a
 profile request by copying a whole user profile unless a recorded
-full-profile grant covers it (C3).
+full-profile grant covers it (C3). L13 governs launching; attaching to a
+browser the user already runs is L14.
+
+**L14** (core). An **attached instance** is one the host did not launch:
+the user's own browser, reached through an opt-in the user performs in
+that browser (for Chrome 144 and later, `chrome://inspect/#remote-debugging`,
+then a per-connection "Allow"). A host that attaches:
+
+- MUST hold an active `attach` grant for that browser and profile (C14)
+  before it connects;
+- MUST report the instance as `starting` while the browser waits for the
+  user's click. A call that arrives meanwhile MUST wait up to the host's
+  consent bound, then fail with retryable `browser:awaiting_consent`; while
+  the instance waits for consent, that code replaces L3's
+  `browser:not_ready` and L10's `browser:starting`. If no click comes within
+  the bound, the attempt fails and the instance moves to `stopped` (L1); it
+  does not count toward L6. There is no eighth state (L1).
+  `browser:awaiting_consent` is distinct from `browser:consent_required`,
+  which stays the per-domain consent of § 4;
+- MUST report `wasAlreadyRunning: true`, and MUST NOT terminate, restart or
+  close the browser, its windows or any target it did not open (L5 for
+  `force`);
+- MUST NOT copy the profile, and MUST NOT send material from it to a
+  `remote` sink (C16).
+
+How the host finds the endpoint (a port file, a fixed endpoint), whether
+it shares one upstream connection between callers, and how it reconnects
+after the browser restarts are implementation choices.
+
+**L15** (interaction). A target opened through a tool call belongs to the
+caller session that opened it (its `callerSessionId`, established as in
+AIP-59 § 8, never from a header or a tool argument). A tool call from
+another caller session that names that target MUST fail with
+`browser:not_owner` and MUST NOT act on it. A popup opened by an owned
+target belongs to the same owner. A target the host did not open (the
+user's own tabs in an attached instance) has no owner and MUST NOT be
+driven, read or closed by an agent call. An operator channel is not bound
+by this rule.
+
+**L16** (interaction). Ownership MUST be persisted with the instance's
+`bootId`, so a host restart does not forget who opened what. When a caller
+session ends, the host MAY close the targets that the session is proven to
+have opened during the current boot, except a target opened with
+`keepAlive: true` (L11), and MUST NOT close any other target. A target whose
+owner is unknown (opened by the page), or that was opened in a previous boot
+(`bootId` differs), MUST NOT be closed by cleanup, by the same reasoning as
+L12.
 
 ### 4. Profile and consent
 
 This section applies to a provider or host that can seed a context from
 a user's profile or persist session material: `profiles.modes` includes
-`import`, `native-login` or `clone`, or `capabilities.cookies` or
+`import`, `native-login`, `clone` or `attach`, or `capabilities.cookies` or
 `capabilities.storageState` is set. Its rules are tested at the
 `profile` level.
 
@@ -378,7 +454,8 @@ transfer into a remote instance.
 
 Grant and ledger records have the shape of `$defs/grant` and
 `$defs/ledgerRecord` in `BROWSER.schema.json`. A grant's scope is either
-an explicit `domains` list or `fullProfile: true`; a wildcard is not a
+an explicit `domains` list, `fullProfile: true`, or `attach: true` beside a
+`profileRef` (an attached browser and profile, C14); a wildcard is not a
 value of `domains`.
 
 **C1** (profile). Session material MUST enter a store only through a
@@ -395,7 +472,8 @@ sufficient).
 grant** (`fullProfile: true`). It MUST be requested by name (a dedicated
 flag or control, never implied by omitting domains), MUST show a warning
 that the entire profile including every domain is exposed, MUST have a
-ledger record, and MUST NOT include a remote sink.
+ledger record, and MUST NOT include a remote sink. An attach grant (C14)
+is a separate scope, not an exception to C2.
 
 **C4** (profile). A non-interactive request without an explicit domain
 list or the named full-profile request MUST fail. It MUST NOT default to
@@ -435,7 +513,7 @@ name hashes are allowed.
 
 **C10** (profile). The consent ledger MUST be append-only: one JSON
 record per line, a monotonic `seq`, records for `grant`, `refresh`,
-`revoke`, `sink-ack` and `deny`. The host MUST NOT rewrite or truncate
+`revoke`, `sink-ack`, `attach-ack` and `deny`. The host MUST NOT rewrite or truncate
 it. Records SHOULD carry `prev`, the SHA-256 of the previous line.
 
 **C11** (profile). On POSIX, files holding session material, the ledger
@@ -453,6 +531,44 @@ absent (`browser:consent_required`).
 **C13** (profile). When AIP-59 revokes a pairing, the host MUST stop
 honoring grants scoped to that device at once and SHOULD revoke them
 under C8.
+
+**Attach.** C3 does not cover an attach: an attach copies nothing into a
+store, yet it lets an agent act in the user's own, logged-in profile.
+It therefore has its own grant and ledger record.
+
+**C14** (profile). Before it attaches to a browser it did not launch
+(L14), a host MUST hold an active grant with `attach: true` naming the
+browser instance and the profile (`profileRef`), created by a human on
+an operator channel, and the ledger MUST hold an `attach-ack` record for
+it carrying `instance`, `profileRef`, `deviceId` when the grant is device
+scoped (C12), and `purpose`. C7 applies: an agent MUST NOT create, widen
+or re-target an attach grant.
+
+**C15** (profile). Revoking an attach grant MUST detach the host from
+that browser and close every target agents opened under it (L15) before
+it reports success, MUST delete the recordings that list the grant (R13,
+R16), and MUST append a `revoke` record. It MUST NOT close the user's own
+targets.
+
+**C16** (profile). An attached profile is never session material for a
+sink: a host MUST NOT export its cookies or storage, and MUST NOT route
+an attached instance through a `remote` sink.
+
+**C17** (profile). An **account** record (`$defs/account`) describes one
+account on one site in one profile: `site`, optional `account` (a display
+name or an address), `profileRef`, `session` (`valid`, `expired` or
+`unknown`) with `verifiedAt` when it was checked, `source` (`native`: the
+user logged in there; `synced`: material copied in under a grant, with
+`syncedFrom`, and `syncedAt` when known) and `grantIds`. Three rules:
+
+- an account authorizes nothing: only grants do (C1, C14);
+- `session` is indicative. A host MAY probe it, read-only; this AIP does
+  not require a probe;
+- `account` may be personal data (an address). It is not a secret and may
+  be listed; C9 still forbids every cookie, token and storage value.
+
+A grant MAY carry `profileRef` next to `sessionId`. `sessionId` keeps its
+meaning, and no ledger line is rewritten (C10).
 
 ### 5. Recording artifact
 
@@ -603,6 +719,14 @@ listing it in `manifest.exports`. It MUST be reproducible from frames and
 `tMs`, MUST be deleted with the recording, and MUST NOT contain pixels
 that the frames do not (so it inherits R8 and R9).
 
+**R16** (recording). A recording of an attached instance (L14) MUST be
+off by default; the operator turns it on per instance. Its manifest
+MUST list the `attach` grant in `grantIds`, so that revoking that grant
+makes it derived material to delete (R13, C15). Manifests and action lines SHOULD carry
+`callerSessionId`, the caller session (L15) that drove the target, so a
+viewer can tell sessions apart. Any copy of a recording off the host
+stays under R10 to R12; a host SHOULD link to it rather than copy it.
+
 ### 6. Conformance
 
 Conformance is claimed per level in `browser.conformance`. A claimed
@@ -613,12 +737,12 @@ deliberately broken fake, which it MUST fail.
 
 | Level | Applies to | Tests |
 |---|---|---|
-| `core` | every provider | manifest rules M1 to M6; tool gate T1 to T4 (including that a provider without `cdp` answers `browser.list_requests` with `browser:unsupported`); lifecycle L1 to L10 and L13; `browser.navigate`, `browser.evaluate`, `browser.get_dom`, `browser.screenshot` |
-| `interaction` | providers serving input tools | `browser.click`, `browser.fill`, `browser.act`, `browser.tabs`; L11, L12 |
+| `core` | every provider | manifest rules M1 to M6; tool gate T1 to T4 (including that a provider without `cdp` answers `browser.list_requests` with `browser:unsupported`); lifecycle L1 to L10, L13 and L14; T5; `browser.list_instances`, `browser.list_accounts`; `browser.navigate`, `browser.evaluate`, `browser.get_dom`, `browser.screenshot` |
+| `interaction` | providers serving input tools | `browser.click`, `browser.fill`, `browser.act`, `browser.tabs`, `browser.list_owned_tabs`; L11, L12, L15, L16; T6 |
 | `network` | providers with `cdp` | `browser.list_requests`, `browser.get_request_body`, `browser.cdp_send` |
 | `download` | providers with `downloads` | `browser.download` |
-| `profile` | providers with `cookies` or `storageState` | C1 to C13; `browser.profile.list`, `.refresh`, `.revoke` |
-| `recording` | providers with `recording` other than `none`, and the host recorder that writes their recordings | R1 to R15, against the sample recording and against a deliberately broken one (a value in a password `fill`, a gap in `i`, an unmasked password frame), which it MUST reject |
+| `profile` | providers with `cookies` or `storageState`, and hosts that attach | C1 to C17; `browser.profile.list`, `.refresh`, `.revoke` |
+| `recording` | providers with `recording` other than `none`, and the host recorder that writes their recordings | R1 to R16, against the sample recording and against a deliberately broken one (a value in a password `fill`, a gap in `i`, an unmasked password frame), which it MUST reject |
 
 Rule index (every rule names its level; this table is the fixture):
 
@@ -634,6 +758,8 @@ Rule index (every rule names its level; this table is the fixture):
 | T2 | core | `core.tools.resolver-filter` |
 | T3 | core | `core.tools.unsupported` |
 | T4 | core | `core.tools.error-codes` |
+| T5 | core | `core.tools.list-never-values` |
+| T6 | interaction | `interaction.tools.owned-tabs-scope` |
 | L1 | core | `core.lifecycle.states` |
 | L2 | core | `core.lifecycle.launch-idempotent` |
 | L3 | core | `core.lifecycle.attach-not-ready` |
@@ -647,6 +773,9 @@ Rule index (every rule names its level; this table is the fixture):
 | L11 | interaction | `interaction.targets.keepalive` |
 | L12 | interaction | `interaction.targets.stale-handle` |
 | L13 | core | `core.lifecycle.chrome-fresh-userdir` |
+| L14 | core | `core.lifecycle.attach-never-stopped` |
+| L15 | interaction | `interaction.targets.not-owner` |
+| L16 | interaction | `interaction.targets.cleanup-proven-owned` |
 | C1 | profile | `profile.consent.grant-required` |
 | C2 | profile | `profile.consent.domains-explicit` |
 | C3 | profile | `profile.consent.full-profile` |
@@ -660,6 +789,10 @@ Rule index (every rule names its level; this table is the fixture):
 | C11 | profile | `profile.consent.perms-and-encryption` |
 | C12 | profile | `profile.consent.device-scope` |
 | C13 | profile | `profile.consent.pairing-revoked` |
+| C14 | profile | `profile.consent.attach-grant` |
+| C15 | profile | `profile.consent.attach-revoke-detaches` |
+| C16 | profile | `profile.consent.attach-no-sink` |
+| C17 | profile | `profile.consent.account-not-authority` |
 | R1 | recording | `recording.layout.directory` |
 | R2 | recording | `recording.manifest.schema` |
 | R3 | recording | `recording.jsonl.append-only` |
@@ -675,6 +808,7 @@ Rule index (every rule names its level; this table is the fixture):
 | R13 | recording | `recording.access.grant-revoke` |
 | R14 | recording | `recording.lifecycle.interrupted` |
 | R15 | recording | `recording.export.derived` |
+| R16 | recording | `recording.attach.off-by-default` |
 | O1 | core | `core.observers.optional-empty` |
 | O2 | core | `core.observers.operator-only` |
 | O3 | core | `core.observers.process-scope` |
@@ -686,7 +820,7 @@ Rule index (every rule names its level; this table is the fixture):
 
 The C9 hook plants a canary cookie value and greps tool results, error
 messages, logs and the ledger for it. The C7 hook drives every tool as
-an agent caller and asserts that no call changes the domain set. The O1 hook runs the full tool suite with and without the seam and diffs the results. The O7 hook fills a password field through the seam and searches every event for the typed canary and for its length. The O6 hook registers a transform that halves the image and asserts the caller never receives the original size. The R7
+an agent caller and asserts that no call changes the domain set. The L15 hook opens a target as one caller session and drives, reads and closes it as another, expecting `browser:not_owner` each time. The L16 hook restarts the host between opening and session end and asserts no target is closed. The O1 hook runs the full tool suite with and without the seam and diffs the results. The O7 hook fills a password field through the seam and searches every event for the typed canary and for its length. The O6 hook registers a transform that halves the image and asserts the caller never receives the original size. The R7
 and R8 hooks plant a canary password in a test page, fill it through the
 recorder and search every file of the recording for it, and check the
 pixels of the masked region.
@@ -706,7 +840,7 @@ An observer is an object with any of these members, all optional.
 |---|---|---|
 | `onAttach` | after the provider instance is registered and usable (`start_browser` returned a session) | `sessionId`, `provider`, `instanceId`, `adapter`, and `capture` (`screenshot`, `evaluate`) when the provider implements both. `capture` is for the observer's own frames and page probes; it is never reachable from a tool call |
 | `onDetach` | when the session ends for any reason: `stop_browser`, crash, host shutdown | `sessionId`, `reason` (`stop`, `crash`, `shutdown`) |
-| `beforeCall` | before a `browser.*` tool executes | `sessionId`, `tool` (without the `browser.` prefix), `args`, `tabId` when known, `callId` |
+| `beforeCall` | before a `browser.*` tool executes | `sessionId`, `callerSessionId` when the host established one (L15), `tool` (without the `browser.` prefix), `args`, `tabId` when known, `callId` |
 | `afterCall` | after it executed, before the result is returned | the `beforeCall` fields plus `durationMs`, `ok`, and `error.code` when it failed. Never the result body |
 | `transformScreenshot` | in `browser.screenshot`, after capture, before the image is placed in the result | `sessionId`, `tabId`, `image` (`data` base64, `mimeType`); returns the replacement image |
 
@@ -848,6 +982,29 @@ browser and every logged-in session in it. Chrome 136 and later refuse
 provider MUST therefore use a fresh user-data directory (L13) and MUST
 bind the debugging port to loopback.
 
+**Attaching to the user's own browser.** Chrome 144 and later let the
+user expose their everyday profile through `chrome://inspect/#remote-debugging`
+and a click per connection. That reaches the most sensitive state the
+user has, so an attach needs its own grant and ledger record (C14), is
+never stopped or copied (L14, C16), and its agents only see the targets
+they opened (L15). A host SHOULD hold a single upstream connection per
+attached browser, so the user clicks once per browser launch rather than
+once per agent. It MUST filter what reaches that browser with an allowlist
+of protocol methods: the attach grant authorizes driving pages, not reading
+the cookie jar. The allowlist MUST NOT contain a cookie or storage read or
+write (`Network.getAllCookies`, `Network.getCookies`, `Network.setCookies`,
+`Storage.getCookies` and the like), `Page.close`,
+`Target.createBrowserContext`, `Target.disposeBrowserContext`, or a target
+command on a target outside the caller's own set (L15). On an attached
+instance `browser.cdp_send` MUST refuse those methods with
+`browser:command_refused` (C9, C16).
+
+**Caller identity.** A host that serves several agent sessions through
+one paired device MUST NOT take the caller session from a header or a
+tool argument; only a sub-session token minted under AIP-59 § 8
+establishes `callerSessionId`. Without it, any session could drive or
+close another session's targets (L15).
+
 **Threat model**
 
 - **Clone leakage.** A full-profile clone exposes every domain, including
@@ -886,6 +1043,11 @@ bind the debugging port to loopback.
   a one-time code in text), and no masking rule finds them all: do not
   record a session that must never show them. A recording the user shares
   is outside this AIP's control.
+- **Attach is not a copy, and not a C3 grant.** An attach copies nothing,
+  so the C3 ledger (cookie counts, derived-material deletion) cannot
+  describe it. Treating C3 as covering an attach would leave the
+  riskiest case unledgered. C14 and C15 give it a grant whose revoke
+  detaches and closes the agents' targets.
 - **Host-side secrecy.** Cookie values never appear in results, logs,
   ledger or telemetry (C9). Error messages from providers SHOULD be
   scrubbed before they cross the host boundary, since a provider may echo
@@ -915,6 +1077,17 @@ follow AIP-14's domain-prefix convention.
 
 **With AIP-52.** No relation (see § Terminology).
 
+**Attach, accounts and owned targets (2026-11).** L14 to L16, T5, T6,
+C14 to C17, R16 and the three `browser.list_*` ids are additive: an
+existing provider that never attaches and serves one caller is
+unaffected. `sessionId` on grants and recordings keeps its meaning;
+`profileRef`, `attach`, `callerSessionId` and `$defs/account` are new and
+optional. The tightenings are L5 (`force: true` on an attached instance is
+operator-only) and L15/L16 (a target belongs to the caller session that
+opened it): a host that serves several sessions through one device
+credential either establishes caller sessions under AIP-59 § 8 or answers
+`browser:not_owner` across them.
+
 Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.recording/v1`; documents that declare `browser-recording/v1` remain valid, and hosts MUST accept both.
 
 ## Open questions
@@ -932,6 +1105,10 @@ Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.re
 - Whether `browser.record` deserves a tool contract of its own (today the recorder is a host component, § 5).
 - Whether grants should be able to carry an expiry the host enforces by
   automatic revoke, rather than only recording `expiresAt`.
+- Profile choice in an attached browser with several profiles open. CDP
+  `Target.createTarget` cannot name a profile: Chrome opens the target in
+  the last active window, so `profileRef` on an attach grant states intent
+  but a host cannot yet guarantee which profile a new target lands in.
 
 ## See also
 
