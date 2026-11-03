@@ -86,7 +86,7 @@
     },
     "conformanceLevel": {
       "type": "string",
-      "enum": ["core", "interaction", "network", "download", "profile", "recording"]
+      "enum": ["core", "interaction", "network", "download", "profile", "recording", "recipes"]
     },
     "capabilities": {
       "type": "object",
