@@ -229,10 +229,15 @@ this AIP fixes ids, gates and levels.
 | `browser.list_instances` | none | core | List the instances the host serves: name, engine, state, profiles, purpose. |
 | `browser.list_accounts` | none | core | List account records: site, account, profile, `session`, `source`, grant ids. Never a value. |
 | `browser.list_owned_tabs` | none | interaction | List the targets owned by the caller session, or, for an operator, every target grouped by owner. |
+| `browser.close_tab` | none | interaction | Close one target the caller session owns. Input `{ tabId?: string }`. |
+| `browser.press_key` | none | interaction | Send a key press to a target the caller session owns. Input `{ key: string, modifiers?: ("Alt" \| "Control" \| "Meta" \| "Shift")[], tabId?: string }`. |
 
 There is deliberately no tool that creates or widens a grant (C7).
 `browser.tabs` keeps its meaning and gate (T1); the three `list_*` ids
-are new and do not change it.
+are new and do not change it. `browser.close_tab` and `browser.press_key`
+are tab-scoped and inherit L15 ownership; `browser.press_key` takes
+`key` as a DOM `KeyboardEvent.key` name (`Escape`, `Enter`, `Tab`,
+`ArrowDown`, or a single character).
 
 **T1** (core). Tool ids in this table MUST keep their meaning and
 gates. A provider MAY add vendor tools under its own namespace.
@@ -256,9 +261,14 @@ provider without a CDP endpoint answers `browser.list_requests` with
 `browser:consent_required` (names the domain), `browser:transform_failed` (a required observer transform failed, section 7),
 `browser:awaiting_consent` (retryable: an attach waits for the user's
 click in the browser, L14) and `browser:not_owner` (the target belongs to
-another caller session, L15) and `browser:command_refused` (a protocol
-method outside an attached instance's allowlist, § Security considerations). They follow AIP-14's
-domain-prefix convention. The recipe codes (§ 8) are
+another caller session, L15), `browser:command_refused` (a protocol
+method outside an attached instance's allowlist, § Security considerations)
+and `browser:target_obscured` (a click whose point does not hit the
+resolved element or one of its descendants, T7). They follow AIP-14's
+domain-prefix convention. A `browser:target_obscured` error carries the
+body `{ code, error, tool, covering: { tag, role?, text? } }`;
+`covering.text` is cut at 80 characters and any URL in it is reduced to
+its origin. The recipe codes (§ 8) are
 `browser:origin_denied`, `browser:approval_required`,
 `browser:confirm_required`, `browser:account_required`,
 `browser:account_denied` and `recipe:error`; they follow the same
@@ -277,6 +287,13 @@ and neither tool probes anything else (L4).
 return only the targets whose owner is its caller session (L15). Called
 from an operator channel it MAY return every target, grouped by
 `callerSessionId`, with targets of unknown owner in their own group.
+
+**T7** (interaction). A host MUST NOT dispatch a selector click whose
+point does not hit the resolved element or a node inside it (crossing
+open shadow roots; a label of the element counts), and MUST return
+`browser:target_obscured` (T4) instead. The point is the centre of the
+element's first client rect after scrolling it into view; the hit node
+is what `document.elementFromPoint` returns there.
 
 ### 3. Instance lifecycle
 
@@ -430,8 +447,13 @@ another caller session that names that target MUST fail with
 `browser:not_owner` and MUST NOT act on it. A popup opened by an owned
 target belongs to the same owner. A target the host did not open (the
 user's own tabs in an attached instance) has no owner and MUST NOT be
-driven, read or closed by an agent call. An operator channel is not bound
-by this rule.
+driven, read or closed by an agent call; that call MUST fail with
+`browser:not_owner`, and so MUST a close of another caller's target.
+`browser.close_tab` and `browser.press_key` are scoped by this rule; an
+unknown tab MUST fail with `browser:target_gone`. A host MAY close an
+owned target itself (for example through `Target.closeTarget` when raw
+target-closing CDP methods are refused to agents). An operator channel is
+not bound by this rule.
 
 **L16** (interaction). Ownership MUST be persisted with the instance's
 `bootId`, so a host restart does not forget who opened what. When a caller
@@ -742,7 +764,7 @@ deliberately broken fake, which it MUST fail.
 | Level | Applies to | Tests |
 |---|---|---|
 | `core` | every provider | manifest rules M1 to M6; tool gate T1 to T4 (including that a provider without `cdp` answers `browser.list_requests` with `browser:unsupported`); lifecycle L1 to L10, L13 and L14; T5; `browser.list_instances`, `browser.list_accounts`; `browser.navigate`, `browser.evaluate`, `browser.get_dom`, `browser.screenshot` |
-| `interaction` | providers serving input tools | `browser.click`, `browser.fill`, `browser.act`, `browser.tabs`, `browser.list_owned_tabs`; L11, L12, L15, L16; T6 |
+| `interaction` | providers serving input tools | `browser.click`, `browser.fill`, `browser.act`, `browser.tabs`, `browser.list_owned_tabs`, `browser.close_tab`, `browser.press_key`; L11, L12, L15, L16; T6, T7 |
 | `network` | providers with `cdp` | `browser.list_requests`, `browser.get_request_body`, `browser.cdp_send` |
 | `download` | providers with `downloads` | `browser.download` |
 | `profile` | providers with `cookies` or `storageState`, and hosts that attach | C1 to C17; `browser.profile.list`, `.refresh`, `.revoke` |
@@ -765,6 +787,7 @@ Rule index (every rule names its level; this table is the fixture):
 | T4 | core | `core.tools.error-codes` |
 | T5 | core | `core.tools.list-never-values` |
 | T6 | interaction | `interaction.tools.owned-tabs-scope` |
+| T7 | interaction | `interaction.tools.click-hit-test` |
 | L1 | core | `core.lifecycle.states` |
 | L2 | core | `core.lifecycle.launch-idempotent` |
 | L3 | core | `core.lifecycle.attach-not-ready` |
@@ -1302,6 +1325,18 @@ operator-only) and L15/L16 (a target belongs to the caller session that
 opened it): a host that serves several sessions through one device
 credential either establishes caller sessions under AIP-59 § 8 or answers
 `browser:not_owner` across them.
+
+**Click hit-test, close tab and key press (2026-11).** T7,
+`browser.close_tab`, `browser.press_key` and `browser:target_obscured` are
+additive to `browser/v1`: no existing tool id or schema changes shape. A
+provider that dispatches a selector click MUST now hit-test it first and
+answer `browser:target_obscured` when the point does not hit the target,
+so a click that previously landed on an overlay is refused instead of
+being sent to the overlay. The two new tools are interaction-level and
+follow L15: closing an unowned or another caller's tab answers
+`browser:not_owner`, an unknown tab answers `browser:target_gone`, and a
+host MAY close an owned target itself even when raw target-closing CDP
+methods stay refused to agents.
 
 Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.recording/v1`; documents that declare `browser-recording/v1` remain valid, and hosts MUST accept both.
 
