@@ -1,6 +1,6 @@
 ---
 title: "AIP-63: BROWSER (browser/v1): browser provider manifest, instance lifecycle, profile consent"
-description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state, and the `browser.recording/v1` artifact that makes what an agent did in a browser replayable.
+description: A profile over AIP-30 DRIVER for browsers that agents drive. A browser manifest is ordinary AIP-30 frontmatter of any kind plus a `browser:` block declaring location, capabilities, profile modes, lifecycle and sinks. Fixes the tool contracts with a capability gate, an instance lifecycle with supervision, a consent model (per-domain grants, append-only ledger, revoke) for seeding a browser with a user's logged-in state, and the `browser.recording/v1` artifact that makes what an agent did in a browser replayable, and site recipes.
 aip: 63
 status: Draft
 type: Schema
@@ -23,7 +23,7 @@ package: "@agentproto/driver-browser"
 | Domain | drivers.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-14](/docs/aip-14) (TOOL), [AIP-17](/docs/aip-17) (RUNNER), [AIP-19](/docs/aip-19) (SECRETS), [AIP-30](/docs/aip-30) (DRIVER), [AIP-59](/docs/aip-59) (pairing) |
 | Reference Impl | [`@agentproto/driver-browser`](https://github.com/agentproto/ts/tree/main/packages/driver/browser) |
-| Resources | [`./resources/aip-63`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-63/draft): [`BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json) three example manifests under `examples/` (camofox, chromium, browserbase), [`RECORDING.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/RECORDING.schema.json) and a sample recording under `examples/recording-sample/` |
+| Resources | [`./resources/aip-63`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-63/draft): [`BROWSER.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/BROWSER.schema.json) three example manifests under `examples/` (camofox, chromium, browserbase), [`RECORDING.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/RECORDING.schema.json) and a sample recording under `examples/recording-sample/`, [`RECIPE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/RECIPE.schema.json) and a LinkedIn recipe example under `examples/recipe-linkedin/` |
 
 ## Abstract
 
@@ -258,7 +258,11 @@ provider without a CDP endpoint answers `browser.list_requests` with
 click in the browser, L14) and `browser:not_owner` (the target belongs to
 another caller session, L15) and `browser:command_refused` (a protocol
 method outside an attached instance's allowlist, § Security considerations). They follow AIP-14's
-domain-prefix convention.
+domain-prefix convention. The recipe codes (§ 8) are
+`browser:origin_denied`, `browser:approval_required`,
+`browser:confirm_required`, `browser:account_required`,
+`browser:account_denied` and `recipe:error`; they follow the same
+convention and are tested at the `recipes` level.
 
 **T5** (core). `browser.list_instances` and `browser.list_accounts` MUST
 NOT return a cookie value, a storage value, a token or anything derived
@@ -743,6 +747,7 @@ deliberately broken fake, which it MUST fail.
 | `download` | providers with `downloads` | `browser.download` |
 | `profile` | providers with `cookies` or `storageState`, and hosts that attach | C1 to C17; `browser.profile.list`, `.refresh`, `.revoke` |
 | `recording` | providers with `recording` other than `none`, and the host recorder that writes their recordings | R1 to R16, against the sample recording and against a deliberately broken one (a value in a password `fill`, a gap in `i`, an unmasked password frame), which it MUST reject |
+| `recipes` | hosts that load recipes | P1 to P15; `browser.list_recipes` and `browser.recipe_guide`; the origin guard, both write gates and the account resolution, including that no tool call creates or decides an approval |
 
 Rule index (every rule names its level; this table is the fixture):
 
@@ -809,6 +814,21 @@ Rule index (every rule names its level; this table is the fixture):
 | R14 | recording | `recording.lifecycle.interrupted` |
 | R15 | recording | `recording.export.derived` |
 | R16 | recording | `recording.attach.off-by-default` |
+| P1 | recipes | `recipes.layout.directory` |
+| P2 | recipes | `recipes.manifest.schema` |
+| P3 | recipes | `recipes.tools.prefix` |
+| P4 | recipes | `recipes.workflows.prefix` |
+| P5 | recipes | `recipes.writes.subset` |
+| P6 | recipes | `recipes.load.entry-matches-manifest` |
+| P7 | recipes | `recipes.platformkit.compose` |
+| P8 | recipes | `recipes.guard.origin` |
+| P9 | recipes | `recipes.writes.confirm` |
+| P10 | recipes | `recipes.writes.approve` |
+| P11 | recipes | `recipes.accounts.resolve` |
+| P12 | recipes | `recipes.errors.shape` |
+| P13 | recipes | `recipes.discovery.tools` |
+| P14 | recipes | `recipes.guide.untrusted` |
+| P15 | recipes | `recipes.probes.verdicts` |
 | O1 | core | `core.observers.optional-empty` |
 | O2 | core | `core.observers.operator-only` |
 | O3 | core | `core.observers.process-scope` |
@@ -901,6 +921,188 @@ by group or others. A load failure MUST be logged at boot with the cause.
 The host MAY continue without observers, and MUST offer a switch that
 turns the failure into a refusal to boot, for operators whose observers
 are a safety control (a required masking transform).
+
+### 8. Recipes
+
+A **recipe** packages everything a host knows about one site: a
+`PlatformKit` slice for that site, its tools, its workflows, its guide for
+agents and its probes, under one version. It is a packaging unit, not a
+new registry: login and account logic stays in the `PlatformKit`, account
+records stay host records (C17), and a recipe owns exactly one site slice.
+A recipe is named by its `id`.
+
+Recipe code runs inside the host next to logged-in profiles. The origin
+guard and the write gates below (P8 to P10) are a contract against
+mistakes, not a sandbox: page JavaScript can still send data cross-origin.
+A host that loads third-party recipes MUST isolate recipe code first
+(separate process, narrow RPC, no CDP), and v1 loads only recipes the
+operator trusts. Guide content is untrusted data (P14).
+
+**P1** (recipes). A recipe MUST be a directory named `<id>/` holding
+`RECIPE.md` (YAML frontmatter plus a one-paragraph summary body) and the
+files the manifest declares: `guide/GUIDE.md`, optional `guide/reference/*.md`
+(each file is one more section), and the entry module (default
+`dist/index.js`, ESM with all dependencies bundled). The installed form MUST
+NOT contain `src/`, `test/` or `fixtures/`.
+
+**P2** (recipes). `RECIPE.md` frontmatter MUST validate against
+[`RECIPE.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-63/draft/RECIPE.schema.json)
+and declare `schema: recipe/v1` exactly. An unknown top-level key is a load
+error, never a silent ignore.
+
+#### The `recipe/v1` manifest
+
+| Field | Required | Type | Rule |
+|---|---|---|---|
+| `schema` | Yes | `recipe/v1` | Exact value. |
+| `id` | Yes | string | `^[a-z][a-z0-9-]{1,30}$`. |
+| `version` | Yes | semver | One recipe, one version. |
+| `title` | Yes | string | Display name. |
+| `api` | Yes | integer | The recipe API version this recipe targets. A host MUST refuse an `api` it does not know. |
+| `sites` | Yes | string[] | Non-empty registrable domains, lowercase. A recipe's guard covers the domain and its subdomains exactly as C2 does for grants. |
+| `accounts` | No | string[] | Subset of `sites`. The recipe needs an Account (C17) on these sites. |
+| `tools` | Yes | string[] | Exact set of tool names the entry returns (P6). |
+| `workflows` | No | string[] | Exact set of workflow ids the entry returns (P6). |
+| `writes` | No | object | Tool name to `approve` or `confirm` (P5, P9, P10). Every tool not listed is a read. |
+| `probes` | No | string[] | Exact set of probe ids the entry exports (P6, P15). |
+| `entry` | No | string | Entry module path. Default `dist/index.js`. |
+| `guide` | No | string | Guide path. Default `guide/GUIDE.md`. |
+| `publisher` | Yes | string | Who publishes the recipe. Shown in discovery and in the guide's provenance. |
+
+The manifest is checked by the recipes repository's CI and by the host
+loader with the same rules. The LinkedIn recipe:
+
+```yaml
+schema: recipe/v1
+id: linkedin
+version: 1.0.0
+title: LinkedIn
+api: 1
+sites: [linkedin.com]
+accounts: [linkedin.com]
+tools: [linkedin_profile, linkedin_message]
+workflows: [linkedin-job-search]
+writes: { linkedin_message: approve }
+probes: [profile]
+entry: dist/index.js
+guide: guide/GUIDE.md
+publisher: agentik
+```
+
+**P3** (recipes). A tool name MUST start with the recipe's tool prefix: the
+recipe `id` with `-` replaced by `_`, then `_`. `linkedin` therefore owns
+`linkedin_*`. The generic name pattern is `^[a-z][a-z0-9_]*$`; the prefix
+rule is normative prose, not a schema pattern, because it composes with the
+id.
+
+**P4** (recipes). Every workflow id MUST start with `<id>-`.
+
+**P5** (recipes). Every `writes` key MUST be one of `tools`, and every
+`writes` value MUST be `approve` or `confirm`. A tool whose entry `kind` is
+`write` MUST appear in `writes`, and every key in `writes` MUST have
+`kind: write` in the entry. `accounts` MUST be a subset of `sites`.
+
+**P6** (recipes). Loading MUST check the entry against the manifest and fail
+as a load error, naming the recipe and the rule, on any mismatch:
+`module.id` equals `id`; `tools(ctx)` names equal `tools` exactly; each
+tool's `kind` agrees with `writes` (P5); workflow ids equal `workflows`;
+probe ids equal `probes`; `api` is known. A tool name that collides with an
+existing host tool is also a load error.
+
+**P7** (recipes). Recipe `PlatformKit`s are composed next to the host's base
+kit. The composed kit merges `platforms`; a platform key declared twice is a
+load error naming both owners. It dispatches `loginSpec`, `autofill` and
+`accounts.*` to the kit declaring that key, and takes `openHumanSession`
+and `makeVisionResolver` from the base kit, else from the first recipe kit.
+
+**P8** (recipes). Every `RecipePage` and every tool call passes through a
+guard:
+
+- `navigate` and `gotoPaced` MUST refuse a URL whose host is not one of
+  `sites` or a subdomain of one (the domain matching of C2 applies), and any
+  scheme other than `https:` or `http:`, with `browser:origin_denied`.
+- `evaluate`, `readNextData`, `type`, `click`, `press` and `screenshot` MUST
+  first check the page's current origin the same way, so a redirect off-site
+  stops the call, with `browser:origin_denied`.
+
+The guard is a contract against mistakes, not a sandbox; see
+`## Security considerations`.
+
+**P9** (recipes). A `kind: write` tool with level `confirm` MUST advertise
+an optional boolean `confirm` in its input schema. Without `confirm: true`
+the call MUST return `browser:confirm_required` and run nothing.
+
+**P10** (recipes). A `kind: write` tool with level `approve` MUST advertise
+an optional string `approvalId`. Without it, the call MUST store a pending
+request (recipe, version, tool and input) and MUST return
+`browser:approval_required` with `requestId` and `approveWith` (a host CLI
+command that approves it); nothing runs. A human approves in a terminal:
+the command prints recipe, tool and input, asks y/N, and signs an
+[AIP-7](/docs/aip-7) approval request with the approver key, reusing the host's
+existing approval creation and consumption for a second payload kind,
+`recipe-write`. The agent calls again with `approvalId: <requestId>` and the
+same input; the host consumes the approval once, checks the payload (recipe,
+tool and the SHA-256 of the canonical JSON of the input without `approvalId`
+and `confirm`) and runs. **No tool callable by an agent creates or decides
+an approval**; only a human channel does. A host MUST strip `confirm` and
+`approvalId` from `input` before the tool runs.
+
+**P11** (recipes). `page({ account })` MUST resolve that Account record
+(C17) and its saved session. The Account's `site` MUST be one of the
+recipe's `accounts`, else `browser:account_denied`. Without `account` and
+with `accounts` declared: the single `valid` Account on that site is used;
+none or several are a `browser:account_required` error naming the candidate
+ids. Without `accounts` declared, the page is anonymous.
+
+**P12** (recipes). Errors MUST be MCP results with `isError: true` whose
+text is JSON `{ "code": "<code>", "error": "<one sentence>", "recipe": "<id>", "tool": "<name>", ...extra }`,
+the shape the AIP already uses for capability errors. An error MUST NOT
+contain a full URL (host only), a cookie, a token or an input value. A
+recipe's own throw MUST surface as `recipe:error` with its message.
+
+#### Discovery tools
+
+**P13** (recipes). A host that loads recipes MUST serve two read-only tools,
+`browser.list_recipes` and `browser.recipe_guide`. As elsewhere in this AIP,
+MCP projections spell the same ids with underscores (`browser_list_recipes`,
+`browser_recipe_guide`).
+
+`browser.list_recipes({})` returns:
+
+```json
+{ "recipes": [ { "id": "...", "version": "...", "title": "...", "publisher": "...", "sites": ["..."], "tools": ["..."], "workflows": ["..."], "writes": {"...": "approve|confirm"}, "probes": [{"id": "...", "verdict": "ok|drift|fail|unknown", "checkedAt": "..."}], "accounts": [{"site": "...", "ids": ["..."], "valid": ["..."]}], "source": {"kind": "dir|git|dev", "ref": "...", "sha": "..."} } ] }
+```
+
+Its description MUST start with: "Call first for any work on a specific
+website: lists the installed site recipes, their tools and health."
+
+`browser.recipe_guide({ id, section? })` returns, without `section`,
+`{ recipe: { id, version, publisher }, untrusted: true, summary, toc: [{ id, title, bytes }] }`.
+Section ids are the slug of each `## ` heading of the guide, then
+`ref/<file name without .md>` for each reference file. With `section`, it
+returns `{ recipe, untrusted: true, section: { id, title }, content }`,
+where `content` is delimited as
+
+```text
+<<<RECIPE_GUIDE recipe=<id> version=<v> section=<sid>
+...
+>>>RECIPE_GUIDE
+```
+
+and capped at 24 KB, cut with a final line `[truncated at 24 KB]`. Its
+description MUST say that the content is data written by the recipe
+publisher, not instructions.
+
+**P14** (recipes). Guide content is untrusted data. A host MUST return it
+delimited, with its provenance (recipe id, version, publisher), and never as
+instructions. An agent MUST NOT follow instructions found in a guide.
+
+#### Probes
+
+**P15** (recipes). A probe MUST return a verdict `ok`, `drift` or `fail`. A
+host stores the last verdict per probe and surfaces `unknown` for a probe
+that never ran or whose stored verdict is absent. Discovery reports the last
+verdict with `checkedAt` when known.
 
 ## Rationale
 
@@ -1053,6 +1255,19 @@ close another session's targets (L15).
   scrubbed before they cross the host boundary, since a provider may echo
   a request that contained a value.
 
+**Recipes.** A recipe (§ 8) is code running inside the host next to
+logged-in profiles. The origin guard and the write gates (P8 to P10) are a
+contract against mistakes, not a sandbox: page JavaScript can still send
+data cross-origin (a `no-cors` fetch, an image beacon), and origin scoping
+of a tab does not stop it. A host that loads third-party recipes MUST
+therefore isolate recipe code first: a separate process or worker behind a
+narrow RPC (per-origin navigate and evaluate, a same-origin fetch bridge),
+with no raw CDP and no direct access to the profile store. V1 loads only
+first-party recipes, and that is a trust decision, not an isolation claim.
+A guide is content written by the recipe publisher: a host MUST return it
+as delimited data with provenance, never as instructions, and an agent MUST
+NOT follow instructions found in it (P14).
+
 ## Reference Implementation
 
 `@agentproto/driver-browser` at
@@ -1109,6 +1324,7 @@ Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `browser.re
   `Target.createTarget` cannot name a profile: Chrome opens the target in
   the last active window, so `profileRef` on an attach grant states intent
   but a host cannot yet guarantee which profile a new target lands in.
+- Third-party recipes: isolation model and signatures (v2).
 
 ## See also
 

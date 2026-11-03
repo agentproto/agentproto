@@ -610,5 +610,9 @@
       "layer": "host"
     }
   ],
-  "pending": []
+  "pending": [
+    "aip-63:schema:recipe:aip-63.mdx",
+    "aip-63:schema:recipe:resources/aip-63/draft/RECIPE.schema.json",
+    "aip-63:schema:recipe:resources/aip-63/draft/examples/recipe-linkedin/RECIPE.md"
+  ]
 }
