@@ -1647,7 +1647,21 @@ runs. Other spawn inputs keep their own owners:
 | `contextSettings` (legacy `contextContinuity`) | §Session context: a block of its own, layered setting by setting |
 | `costBudget`, `maxCostUsd`, a model allow or block list | AIP-38 limits and grants in the spawn `policy` (`spend-usd`, `model:invoke`) |
 | `sandbox`, `cloud`, `worktree` | placement: [AIP-36](/docs/aip-36), [AIP-66](/docs/aip-66) and §Workspaces; not changed by fallback |
+| `placement` (an ordered ladder of sandboxes) | placement: AIP-36 v1.4 §1; walked before the agent starts, never by fallback |
 | `turnRetry.action: "migrate"` (move to another sandbox box) | placement; out of scope of fallback |
+
+Placement and fallback split on whether the agent has started. The AIP-36
+v1.4 placement ladder chooses a sandbox (and optionally a `model`, `access`
+and `turnRetry` per rung) before the agent starts; fallback changes the
+config of a session that is already running. A ladder rung's `turnRetry` is
+the policy of the session placed on that rung: it replaces the spawn's
+top-level `turnRetry` for that session, and its `fallback` entries are
+overlays in the sense of this section, walked by §Fallback on that session
+only (AIP-36 v1.4 §4; agentproto/ts
+`packages/runtime/src/placement-ladder.ts:122-155`). A fallback step never
+re-walks the ladder. A metered model reached either way, as a rung `model`
+or as a fallback overlay, MUST be admitted only through an owner-controlled
+allowlist (AIP-36 v1.4 §5).
 
 #### Apply classes
 
@@ -2191,7 +2205,8 @@ flat field and the same axis in `config` as one layer (the flat field wins
 when both are present). User presets and harness presets map to session
 presets (a harness preset is a session preset with `defaultFor`).
 `turnRetry.rotate` maps to `fallback` overlays on `model`;
-`turnRetry.action: "migrate"` has no mapping (placement is out of scope).
+`turnRetry.action: "migrate"` has no mapping (placement is out of scope;
+the before-start placement ladder is AIP-36 v1.4 §1).
 `modelPolicy` and `costBudget` map to the spawn `policy` (AIP-38 grants on
 `model:invoke`, `spend-usd` limits); a `costBudget` that today trips a
 completion check at turn end becomes a limit that refuses the next

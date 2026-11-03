@@ -5,7 +5,7 @@ aip: 36
 status: Review
 type: Schema
 created: 2026-05-02
-updated: 2026-10-20
+updated: 2026-11-03
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 35]
 discussions-to: https://github.com/agentproto/agentproto/discussions/36
@@ -805,3 +805,408 @@ config:
 ```
 
 Credentials are SECRETS.md refs only, never inline values.
+
+---
+
+## Amendment v1.4: placement ladder, preflight probes, egress health (2026-11-03)
+
+Amendment v1.3 lets a spawn pick one sandbox and one egress address.
+Once a fleet is finite and some models are capped per source address,
+one choice is not enough: the box may not fit, its address may already
+be capped for the model, or the model may not answer from it at all.
+Amendment v1.4 specifies what the reference runtime already ships for
+that case: an ordered **placement ladder** of sandboxes tried before the
+agent starts, **preflight probes** that test a booted box before the
+agent runs on it, and an **egress health** ledger that remembers which
+addresses are cooling down for which model.
+
+Every normative statement below cites the reference implementation it
+mirrors, as `path:line` in
+[agentproto/ts](https://github.com/agentproto/ts) at commit `0380c2b`
+(`main` after PR #2488). Paths are under `packages/` unless they start
+with `.github/`. The JSON Schema of the spawn input is
+[`resources/aip-36/draft/PLACEMENT.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-36/draft/PLACEMENT.schema.json).
+
+### 1. Placement ladder (`placement`)
+
+A session spawn (AIP-46 `SpawnAgentRequest`; in the reference
+implementation the `agent_start` tool and its HTTP twin
+`POST /sessions/agent`) MAY carry `placement`:
+
+```ts
+interface PlacementInput {
+  ladder: PlacementRung[]          // 1 to 8 rungs, tried in order
+}
+
+interface PlacementRung {
+  sandbox: string | SandboxSpec    // provider slug or AIP-36 inline spec
+  model?: string
+  access?: { profileRef?: string; profileRefs?: string[] }
+  preflight?: string[]             // probe ids, §2
+  turnRetry?: TurnRetryInput | null // mid-run policy, §4
+}
+```
+
+Source: `runtime/src/placement-ladder.ts:17-40`,
+`runtime/src/agent-start-schema.ts:535-539`,
+`runtime/src/http-server.ts:6408-6415`.
+
+**Validation.**
+
+- `ladder` MUST hold between 1 and 8 rungs, and a rung or the
+  `placement` object with an unknown key MUST be refused with
+  `placement_invalid` (`runtime/src/placement-ladder.ts:17`,
+  `:26-40`; `runtime/src/http-server.ts:7233-7241`).
+- `placement` and a top-level `sandbox` are mutually exclusive. A spawn
+  carrying both MUST be refused with `placement_invalid`, before any box
+  is booted (`runtime/src/session-spawn.ts:2487-2492`,
+  `runtime/src/http-server.ts:7242-7247`).
+- A rung boots a fresh box. A rung whose inline spec sets `reuse` MUST
+  be refused with `placement_invalid`
+  (`runtime/src/placement-ladder.ts:114-120`,
+  `runtime/src/session-spawn.ts:2504-2507`).
+
+**Inheritance.** A rung that omits `model`, `access`, `preflight` or
+`turnRetry` inherits the spawn's own top-level value for that axis. A
+value the rung sets replaces the top-level one; the two are never
+merged. The host MUST resolve the ladder this way before walking it, so
+each resolved rung is self-contained
+(`runtime/src/placement-ladder.ts:122-136`,
+`runtime/src/session-spawn.ts:2497-2503`). Every other spawn field
+(adapter, cwd, `modelPolicy`, ...) is shared by all rungs
+(`runtime/src/session-spawn.ts:2511`).
+
+**The walk.** The host tries rung 1 as an ordinary single-sandbox spawn
+with the rung's axes applied, then rung 2, and so on
+(`runtime/src/session-spawn.ts:2508-2521`):
+
+1. If the rung returns a session, the walk stops. No later rung is
+   tried and nothing moves the session afterwards: a failure after the
+   agent started is `turnRetry`'s concern (§4), never the ladder's
+   (`runtime/src/placement-ladder.ts:1-6`, `:170-195`).
+2. If the rung fails with one of the **advance codes** below, the host
+   records the attempt and tries the next rung
+   (`runtime/src/placement-ladder.ts:67-92`, `:197-210`).
+3. If the rung fails with any other code (bad cwd, unknown probe id,
+   policy refusal, ...), the walk stops and the spawn fails with that
+   code and message, plus the attempts so far in `details.attempts`
+   (`runtime/src/placement-ladder.ts:210`,
+   `runtime/src/session-spawn.ts:2533-2538`). Such a failure would
+   repeat on every rung, or is a decision to stop.
+4. If every rung failed with an advance code, the spawn fails with
+   `sandbox_placement_exhausted` and `details.attempts`
+   (`runtime/src/placement-ladder.ts:211-217`,
+   `runtime/src/session-spawn.ts:2522-2531`).
+
+Advance codes (`runtime/src/placement-ladder.ts:71-82`). All of them
+are raised before the agent started:
+
+| Code | Raised when |
+|---|---|
+| `sandbox_preflight_failed` | a preflight probe said `ko` (§2) |
+| `sandbox_boot_failed` | the provider's boot threw, including a typed refusal such as `sandbox_capacity` (v1.3 §3) or `sandbox_egress_pool_exhausted` (v1.3 §1), carried as `details.errorClass` |
+| `sandbox_provider_not_found` | the rung's provider is not set up on this host |
+| `sandbox_proxy_failed`, `sandbox_workspace_setup_failed`, `sandbox_app_serve_failed` | the box booted but the session's plumbing on it failed |
+| `sandbox_overflow_refused`, `sandbox_egress_pool_exhausted` | the provider refused the placement with that typed code |
+| `sandbox_egress_all_cooling` | every egress address is cooling down for the model (§3); nothing was booted |
+| `device_offline` | the rung targets a device that is not connected |
+
+The criterion MUST be a typed code, never a match on a provider's
+message (`runtime/src/placement-ladder.ts:8-10`). When the provider
+throws an error carrying a `sandbox_*` code, the host reports
+`sandbox_boot_failed` with that code as `details.errorClass`, and the
+attempt records the more specific class
+(`runtime/src/session-spawn.ts:7746-7756`,
+`runtime/src/placement-ladder.ts:94-108`).
+
+**Record.** Once the walk succeeds, the session record gains
+`placement` (`runtime/src/sessions.ts:3148`,
+`runtime/src/session-spawn.ts:2542-2543`):
+
+```ts
+interface SessionPlacement {
+  rung: number                 // 0-based index of the rung in use
+  ladder: PlacementRung[]      // the resolved ladder, so a restart can re-place
+  attempts: PlacementAttempt[]
+}
+
+interface PlacementAttempt {
+  rung: number                 // 0-based
+  provider: string
+  model?: string
+  outcome: "ok" | "failed"
+  errorClass?: string          // failure code, or its more specific details.errorClass
+  egressIp?: string            // the box's public address, when the failure reported one
+  durationMs: number
+}
+```
+
+Source: `runtime/src/placement-ladder.ts:45-65`, `:184-208`. When at
+least one rung was skipped, the spawn result SHOULD carry a warning
+naming the rung in use and the skipped attempts
+(`runtime/src/session-spawn.ts:2544-2556`).
+
+**Restart.** A restart that must boot a fresh box for a session whose
+record carries `placement` walks the recorded ladder again, under the
+same advance rules (`runtime/src/session-restart-core.ts:2386-2412`).
+
+### 2. Preflight probes (`preflight`)
+
+A preflight probe is a cheap check run against a freshly booted box
+before the agent starts, so that a placement that cannot work fails in
+seconds with a typed code instead of mid-run
+(`runtime/src/sandbox-preflight.ts:1-29`). A spawn names probes by id,
+either at top level with a `sandbox` or on a ladder rung
+(`runtime/src/agent-start-schema.ts:530-534`).
+
+**Verdicts.** A probe answers one of
+(`runtime/src/sandbox-preflight.ts:12-20`, `:34-44`):
+
+| Verdict | Meaning |
+|---|---|
+| `ok` | the box passes this check |
+| `ko` | the box demonstrably cannot do it; carries the same failure class a live turn would (`usage-limit`, `rate-limit`, ...) |
+| `unknown` | the probe could not decide (timeout, missing binary, unclassified failure) |
+
+`unknown` MUST NOT be treated as `ko`: a probe that cannot run never
+vetoes a placement (`runtime/src/sandbox-preflight.ts:18-20`). A probe
+that throws or exceeds its budget is `unknown`, and every command it
+runs in the box is clamped to that budget
+(`runtime/src/sandbox-preflight.ts:188-223`).
+
+**Running.** Probes run in the order given, duplicates removed,
+stopping at the first `ko` (`runtime/src/sandbox-preflight.ts:240-257`).
+
+- An id that no probe is registered under MUST fail the spawn with
+  `sandbox_preflight_invalid` before the box is booted
+  (`runtime/src/session-spawn.ts:7394-7405`). It is not an advance
+  code, so it ends a ladder walk.
+- When the provider cannot run commands in the box, or the spawn
+  carries an explicit credential the probe cannot present, the probes
+  are skipped with a warning; they do not fail the spawn
+  (`runtime/src/session-spawn.ts:7821-7833`).
+- On `ko`, the host MUST release the box (detach when other sessions
+  share it, otherwise stop a fresh box or pause a reused one) and fail the spawn with `sandbox_preflight_failed`
+  (`runtime/src/session-spawn.ts:7863-7880`), whose `details` carry
+  `probe`, `errorClass`, `probeDetail`, `egressIp`, `provider`,
+  `sandboxId` and the full `outcomes` list
+  (`runtime/src/sandbox-preflight.ts:259-293`). Probe output MUST be
+  scrubbed of credential-shaped text before it leaves the host
+  (`runtime/src/sandbox-preflight.ts:103-118`).
+
+**The `model-answers` probe.** The one built-in probe
+(`runtime/src/sandbox-preflight.ts:93-99`, `:120-178`):
+
+- It sends the one-line prompt `reply ok` to the session's model
+  through the session's own harness, from inside the box, so the
+  answer travels from the box's egress address.
+- It knows a one-line command for the `opencode` adapter only. Any other
+  adapter yields `unknown` (`runtime/src/sandbox-preflight.ts:120-128`,
+  `:141-144`).
+- A model id outside `^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$` is not probed
+  (`unknown`): the id reaches a shell command line
+  (`runtime/src/sandbox-preflight.ts:98-99`, `:145-147`).
+- `ko` requires a classified failure. A non-zero exit or an empty answer
+  is held to the full classification; a zero-exit answer is `ko` only
+  for a usage cap, since a harness can print the provider's refusal and
+  still exit 0 (`runtime/src/sandbox-preflight.ts:153-163`).
+- Default budget: 90 s (`runtime/src/sandbox-preflight.ts:94-95`).
+
+### 3. Egress health and cooling
+
+This section extends v1.3 §1 (`network.egressIp`). Some providers cap a
+model per source address, so "model M is capped" really means "model M
+is capped from this address". A host MAY keep an **egress health
+ledger** of such observations. The reference implementation does
+(`runtime/src/egress-health.ts:1-15`).
+
+**Entries.** One entry per `(publicIp, model, errorClass)` with an
+expiry (`runtime/src/egress-health.ts:39-51`):
+
+| `errorClass` | Default cooldown |
+|---|---|
+| `usage-limit` | 60 min |
+| `rate-limit` | 10 min |
+
+A cooldown is clamped to at most 6 h, and recording a cooldown MUST NOT
+shorten an active one for the same key
+(`runtime/src/egress-health.ts:22-34`, `:147-168`). Ledger writes are
+best-effort: a ledger failure MUST NOT fail a spawn or a turn
+(`runtime/src/egress-health.ts:11-14`, `:111-120`).
+
+**Writers.** A cooldown is recorded when:
+
+1. a preflight `ko` with class `usage-limit` or `rate-limit` happens on a
+   box that reports a public address, for a spawn that names a model
+   (`runtime/src/session-spawn.ts:7849-7862`);
+2. a live turn of a sandboxed session ends in an error classified
+   `usage-limit` or `rate-limit`, whatever the session's own `turnRetry`
+   policy opted into; a `retry-after` hint on a rate limit sets the
+   duration (`runtime/src/turn-retry.ts:1296-1314`);
+3. an operator-requested probe of the pool says `ko` (below).
+
+An `ok` from that probe clears every cooldown on the address for the
+model (`runtime/src/egress-health-report.ts:123-189`).
+
+**Readers: `egressIp: "auto"`.** v1.3 §1 defines `auto` as "one address
+from the host's pool, least used". When the spawn names a model, the
+host MAY pass the provider a read view of the ledger for that model
+(`runtime/src/session-spawn.ts:7653-7655`). A provider given that view:
+
+- MUST NOT place the box on a slot whose address is cooling down for the
+  model; it names a healthy slot explicitly, least loaded first, ties by
+  slot id (`sandbox-computer/src/provider.ts:1082-1140`), and moves to
+  the next healthy slot when the controller refuses one as dedicated or
+  full (`sandbox-computer/src/provider.ts:1251-1263`);
+- MUST fail with `sandbox_egress_all_cooling`, **without creating a
+  box**, when every slot of a readable pool is cooling. The error
+  carries the model and, for each slot, `slot`, `publicIp`, `until` and
+  `errorClass` (`sandbox/src/agent-session-host.ts:338-375`,
+  `runtime/src/session-spawn.ts:7657-7667`);
+- falls back to the controller's own `auto` when the pool cannot be read
+  (`sandbox-computer/src/provider.ts:1129-1133`).
+
+`sandbox_egress_all_cooling` is an advance code (§1), so a ladder moves
+to its next rung without paying for a box.
+
+**Read and re-probe.** A host that keeps the ledger SHOULD expose it
+read-only. The reference implementation's `sandbox_egress_health` tool
+lists the provider's pool slots, their public addresses and the active
+cooldowns, and boots nothing (`runtime/src/egress-health-report.ts:85-107`,
+`:210-233`). A re-probe boots one box per slot, one at a time, runs
+`model-answers` from it, and sets or clears the cooldown from the
+verdict; `unknown` and boot errors change nothing. There is no
+scheduler: a re-probe boots real boxes, so it runs only when asked
+(`runtime/src/egress-health-report.ts:1-8`, `:123-189`).
+
+### 4. Ladder versus `turnRetry`
+
+The two mechanisms split on one line: whether the agent has started.
+
+| | Placement ladder (§1) | `turnRetry` |
+|---|---|---|
+| When | before the agent starts | after a turn failed on a live session |
+| Moves | to another sandbox (and the rung's model, access) | same session: retry, rotate the model, apply a `fallback` overlay, or `migrate` to a fresh box |
+| Trigger | typed boot / preflight codes (§1) | turn failure classes `rate-limit`, `upstream-5xx`, `no-output-stall`, `usage-limit` |
+
+Source: `runtime/src/placement-ladder.ts:1-6`,
+`runtime/src/turn-retry-policy.ts:22-30`, `:83-95`.
+
+A rung's `turnRetry` is the policy of a session placed on that rung, so
+a session started on a metered rung can carry a different mid-run policy
+from one started on a free rung (`runtime/src/placement-ladder.ts:146-155`).
+Its `fallback` entries are config overlays (`model`, `access.profileRef`,
+`harness`), the reference implementation's subset of the AIP-46
+`ConfigOverlay` (`runtime/src/turn-retry-policy.ts:90-95`, `:214-227`).
+They are walked by AIP-46 §Fallback rules on the session that the ladder
+placed; the ladder itself is never re-walked by a turn failure.
+
+### 5. Metered rungs
+
+A **metered** model is one that bills per use (in the reference CI lane,
+any id that does not end in `-free` and is not `big-pickle`,
+`.github/agentproto-workflows/lib/sandbox-agent.mjs:208-209`; the test
+is host policy, not part of this AIP).
+
+- A rung whose `model` is metered, and a rung or top-level
+  `turnRetry.fallback` overlay whose `model` is metered, MUST be admitted
+  only when an **owner-controlled allowlist** names that exact model id.
+  The allowlist MUST be set by the owner of the account that pays (for
+  example a repository variable a pull request cannot set), never by the
+  caller that supplies the ladder alone.
+- An unlisted metered rung or overlay MUST be dropped before the spawn,
+  fail closed. It MUST NOT be spawned and then refused.
+- A ladder left with no rung after that filtering MUST fail loudly; it
+  MUST NOT degrade to a host spawn.
+
+Source: `.github/agentproto-workflows/lib/sandbox-agent.mjs:193-233`
+(allowlist `AGENT_ALLOWED_METERED_MODELS`, exact match), `:274-281`
+(fallback overlays), `:333-353` (rungs, empty ladder throws).
+
+This is the placement form of AIP-68 §4.2, which never suggests a paid
+fallback for a free-only model when relaunching a session. In the
+reference implementation the gate sits where the ladder is built (the
+CI lane), not in the daemon: the daemon does not classify a model as
+metered. A host that accepts ladders from callers it does not trust MUST
+apply the gate itself, for example through the spawn's AIP-38 model
+policy (`modelPolicy` in the reference implementation). Note that a
+model-policy refusal (`model_policy_refused`,
+`runtime/src/session-spawn.ts:4646-4659`) is not an advance code, so it
+stops the walk instead of skipping the rung.
+
+### 6. Workflow agent steps
+
+An AIP-15 `agent` step MAY carry `placement`, with the same shape, as
+an alternative to its `sandbox` field. The two are mutually exclusive,
+and a host without placement support MUST fail the spawn loudly
+(`workflow-runtime/src/types.ts:366-376`, `:457-462`). The daemon host
+forwards it to the same spawn path as `agent_start.placement`
+(`runtime/src/sessions-registry-agent-host.ts:306-339`) and refuses
+it, like `sandbox`, inside an app boundary
+(`runtime/src/sessions-registry-agent-host.ts:273-276`).
+
+### 7. Worked example (non-normative): the agentic review lane
+
+The reference repository's PR review lane places its reviewer with this
+ladder (`.github/agentic-review.json:114-189`, trimmed):
+
+```json
+{
+  "reviewerModel": "opencode/deepseek-v4.1-flash-free",
+  "reviewerPlacement": {
+    "ladder": [
+      { "sandbox": { "provider": "computer",
+                     "config": { "template": "agentproto-workstation", "egressIp": "auto" } },
+        "preflight": ["model-answers"] },
+      { "sandbox": { "provider": "e2b" },
+        "preflight": ["model-answers"] },
+      { "sandbox": { "provider": "computer",
+                     "config": { "template": "agentproto-workstation", "egressIp": "auto" } },
+        "model": "opencode-go/deepseek-v4.1-flash" }
+    ]
+  }
+}
+```
+
+1. Rung 1: the self-hosted fleet with the free model, on a pool address
+   not cooling for that model (§3), checked with `model-answers` (§2).
+2. Rung 2: e2b with the same free model, same probe.
+3. Rung 3: the fleet again with the metered
+   `opencode-go/deepseek-v4.1-flash`, kept only when the owner's
+   allowlist names it (§5). It carries no probe.
+
+Mid-run, the lane's `reviewerTurnRetry` rotates among free models on
+rate limits, 5xx and stalls, and applies the metered model as a
+`fallback` overlay on a usage cap, under the same allowlist
+(`.github/agentic-review.json:194-223`,
+`.github/agentproto-workflows/lib/sandbox-agent.mjs:308-315`). A runner
+without the fleet's controller URL drops the `computer` rungs and runs
+on e2b (`.github/agentproto-workflows/lib/sandbox-agent.mjs:341-344`).
+The review step hands the ladder to the spawn through the AIP-15
+`placement` field (`.github/agentproto-workflows/pr-review/entry.mjs:33-36`,
+`:310-317`).
+
+### 8. Error codes
+
+| Code | Ends the walk | Section |
+|---|---|---|
+| `placement_invalid` | yes, before any boot | §1 |
+| `sandbox_placement_exhausted` | (result of an exhausted walk) | §1 |
+| `sandbox_preflight_invalid` | yes | §2 |
+| `sandbox_preflight_failed` | no, advances | §2 |
+| `sandbox_egress_all_cooling` | no, advances | §3 |
+
+### 9. Open questions (v1.4)
+
+1. **Probe coverage.** `model-answers` only knows the `opencode`
+   harness. Other harnesses answer `unknown`, so their rungs are never
+   skipped by a probe.
+2. **`egressIp` and third-party limits.** v1.3 §1 says `egressIp` MUST
+   NOT be used to evade third-party rate limits. Skipping an address
+   that is cooling for a model is close to that line. The ledger only
+   records what a provider already answered, and the lane in §7 falls
+   back to a paid model rather than cycling addresses, but where the
+   line sits is not yet written down.
+3. **A daemon-side metered gate.** §5 is enforced where the ladder is
+   built. Whether the daemon itself should know which models are
+   metered (for example through the AIP-43 model registry) is open.

@@ -262,6 +262,18 @@ answer from observable system state (a route is reachable or it is not), not
 a judgement call, so modeling it as a judge ladder would be the wrong tool
 (see AIP-65 §Connecting to other AIPs).
 
+One conformant host policy is the [AIP-36](/docs/aip-36) v1.4 placement
+ladder (AIP-36 §Amendment v1.4 §1): the check's session is spawned with an
+ordered list of sandboxes instead of one `sandbox`, each rung optionally
+checked by a preflight probe (for example `model-answers`, "does the model
+answer from this box") before the reviewer starts. It stays a deterministic
+policy over typed boot and probe codes, so it fits this section and not
+AIP-65. A rung whose model is metered MUST be gated by an owner-controlled
+allowlist (AIP-36 v1.4 §5). The reference implementation's review lane is
+the worked example in AIP-36 v1.4 §7 (agentproto/ts
+`.github/agentic-review.json:114-189`). Whatever rung the reviewer lands on,
+the retrieval order above applies unchanged.
+
 #### Placeholders
 
 Inside a command check's `run`:
