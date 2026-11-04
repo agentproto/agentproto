@@ -205,8 +205,15 @@ NOT rely on the pairing until the daemon confirms it.
   fingerprint, truncated to a short, human-comparable prefix). The phone MUST
   show the same code while it waits.
 - The operator confirms with `pair_confirm` (MCP tool, HTTP route, and
-  `agentproto pair confirm <id>` CLI verb), or declines with `pair_decline`.
-  Confirming promotes the pending pairing: the daemon writes it to
+  `agentproto pair confirm <code|fingerprint>` CLI verb), or declines with
+  `pair_decline`. Both accept only the short code or the full fingerprint.
+  The client-supplied name MUST NOT be a confirmation handle: it is chosen
+  by the client, so accepting it would let an attacker's handshake be
+  promoted by a name the operator recognizes.
+- If a short code matches more than one pending pairing, the daemon MUST
+  refuse the action as ambiguous, tell the operator to use the full
+  fingerprint, and change nothing.
+- Confirming promotes the pending pairing: the daemon writes it to
   `pairings.json` and starts serving it, including autoconnect on later
   boots. Declining drops it.
 - The offer's TTL bounds the pending state: when the offer expires, the
