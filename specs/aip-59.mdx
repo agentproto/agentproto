@@ -310,21 +310,38 @@ publish a manifest at `/.well-known/agentproto-pair-page.json` on every
 pair-page origin:
 
 ```json
-{ "version": "<release version>", "sha256": "<64 lowercase hex>", "builtAt": "<ISO 8601>" }
+{
+  "version": "<release version>",
+  "sha256": "<64 lowercase hex>",
+  "builtAt": "<ISO 8601>",
+  "files": ["<sorted relative paths that were hashed>"]
+}
 ```
 
 `sha256` is the SHA-256 of the built static bundle the Worker serves (the
 document, the hashed assets, the service worker, the manifest and the icons),
-computed over those files in sorted relative-path order, each path followed
-by a NUL byte and then the file bytes, excluding the manifest file itself.
-The same digest MUST appear in the release notes for that version.
+computed over the files listed in `files` in sorted relative-path order, each
+path followed by a NUL byte and then the file bytes, excluding the manifest
+file itself. `files` is part of the manifest so a monitor can fetch each path
+from the origin and recompute the digest.
+
+The check is: fetch the manifest, fetch every path in `files` from the same
+origin, recompute the digest with the algorithm above, then compare it with
+the release notes or a previously recorded value. Reading `sha256` alone
+proves nothing: an altered origin can serve a genuine-looking manifest next
+to altered files. Only recomputing from the served files detects that.
+
+The digest SHOULD be recorded in the release notes for that version. Today no
+automated release path covers the pair page (it is deployed separately from
+the npm packages), so the build-produced
+`dist/.well-known/agentproto-pair-page.json` is the record, and whoever
+publishes release notes SHOULD copy `version` and `sha256` from it.
 
 A web origin cannot be pinned by the daemon: the browser trusts whatever the
 origin serves when it loads the page. This manifest does not change that, and
 it is not a substitute for TLS or for per-daemon origins (§5.8). What it
-gives a careful user or an external monitor is a cheap check: fetch the
-manifest, compare `sha256` with the release notes or a previously recorded
-value, and notice an unexpected change in what is being served.
+gives a careful user or an external monitor is a cheap check: recompute from
+the served files and notice an unexpected change in what is being served.
 
 ### 6. Revocation
 
