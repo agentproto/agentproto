@@ -840,7 +840,13 @@ requirements below codify it:
    running. A service whose recorded process has died is replaced. A
    service the manifest no longer declares MUST be stopped.
 4. **Environment.** A service runs with the host's environment. A
-   relative `cwd` is resolved against the installed app directory.
+   relative `cwd` is resolved against the installed app directory. The
+   reference host sets `AGENTPROTO_SESSION_ID` to the id of the session it
+   opened for the process, after merging every other source, so a service
+   cannot override it: a value of that name in the service's own
+   environment file is shadowed (Node's `--env-file` keeps a variable that
+   is already set). A service SHOULD NOT use that name for its own
+   configuration.
 5. **Restart.** On an unexpected exit a host SHOULD restart a service that
    is kept running with a bounded, increasing delay, and give up after
    repeated failures so the next install or host boot replaces it. The reference
