@@ -305,6 +305,27 @@ pairing.
 origin under `/d/<fingerprint>/`. A shared-origin deployment MUST document
 the cross-pairing exposure to its users.
 
+5.9. **Release integrity.** Every release of the pair-page bundle MUST
+publish a manifest at `/.well-known/agentproto-pair-page.json` on every
+pair-page origin:
+
+```json
+{ "version": "<release version>", "sha256": "<64 lowercase hex>", "builtAt": "<ISO 8601>" }
+```
+
+`sha256` is the SHA-256 of the built static bundle the Worker serves (the
+document, the hashed assets, the service worker, the manifest and the icons),
+computed over those files in sorted relative-path order, each path followed
+by a NUL byte and then the file bytes, excluding the manifest file itself.
+The same digest MUST appear in the release notes for that version.
+
+A web origin cannot be pinned by the daemon: the browser trusts whatever the
+origin serves when it loads the page. This manifest does not change that, and
+it is not a substitute for TLS or for per-daemon origins (§5.8). What it
+gives a careful user or an external monitor is a cheap check: fetch the
+manifest, compare `sha256` with the release notes or a previously recorded
+value, and notice an unexpected change in what is being served.
+
 ### 6. Revocation
 
 6.1. When a pairing is revoked, the daemon MUST stop serving it at once. It
