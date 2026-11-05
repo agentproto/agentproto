@@ -224,6 +224,30 @@ NOT rely on the pairing until the daemon confirms it.
   with a different client fingerprint. The code shown on the phone then does
   not match the one on the operator's screen, and the operator declines.
 
+3.5.1. **Frame padding.** Once both peers have negotiated it, the plaintext
+carried in an `e2e` envelope is padded to one of 256 B, 1 KiB, 4 KiB or
+16 KiB, or to the next multiple of 16 KiB above 16 KiB. The padded plaintext
+begins with the 8-byte ASCII magic `APPAIRP1`, then a 32-bit big-endian length
+of the unpadded frame, then the frame bytes, then zero bytes to the bucket.
+The AEAD tag is computed over the padded plaintext, so the padding is
+authenticated; ciphertext is one bucket plus the 16-byte tag.
+
+A receiver MUST strip the padding using the length field. A plaintext that
+does not begin with the magic is an old, unpadded frame and MUST be decoded
+as-is. A plaintext that begins with the magic but whose length field is
+larger than the remaining bytes MUST fail the channel closed.
+
+Negotiation is in the tunnel `hello` frame, which is itself always sent
+unpadded. A daemon that supports padding sets
+`capabilities.e2ePadding = true`. A host enables padding for its own sends
+after seeing that flag; a daemon enables padding for its own sends after it
+receives a padded frame. Until then both sides use the old format. This keeps
+the change backward compatible in both directions: an old peer is never sent
+a padded frame (it never advertises the capability and never sends one), and
+a new peer still decodes an old peer's unpadded frames. Adding an optional
+capability to `hello` is the smallest change that does this without a new
+handshake version or a new frame type.
+
 ### 4. Credential storage
 
 4.1. A credential contains the fingerprint, the pinned `pk` and `sk`, the
@@ -510,7 +534,7 @@ store and the logs never contain a token).
 
 | Adversary | Capability | Outcome |
 |---|---|---|
-| Broker operator (or anyone logging its upgrade URLs) | reads, drops, delays, reorders and replays messages; learns every route; can dial any route and seal a hello to `pk` | Learns route tokens, both peers' IP addresses, message sizes and timing, and when a pairing is in use. Cannot read, inject or alter frames (§3.5), cannot pair or reconnect (it holds no auth token, §2), and can neither forge nor elicit `pairing_revoked` (§6.2, §6.3). Can deny service. Epoch routes rotate daily, which limits linking a pairing's sessions across days. |
+| Broker operator (or anyone logging its upgrade URLs) | reads, drops, delays, reorders and replays messages; learns every route; can dial any route and seal a hello to `pk` | Learns route tokens, both peers' IP addresses, message sizes (bucketed by padding, §3.5.1) and timing, and when a pairing is in use. Cannot read, inject or alter frames (§3.5), cannot pair or reconnect (it holds no auth token, §2), and can neither forge nor elicit `pairing_revoked` (§6.2, §6.3). Can deny service. Epoch routes rotate daily, which limits linking a pairing's sessions across days. |
 | Network attacker (between a peer and the broker) | the same as the broker, over TLS-stripped or `ws:` links | The same as the broker. `wss:` SHOULD be used. |
 | Offer-URL thief, before expiry and first use | pairs as a new client | Mitigated by the short TTL, the single use, the short fingerprint code shown to the operator for confirmation (§3.7), and `pair revoke`. After the legitimate client has paired, the offer is spent. |
 | Swapped QR (evil daemon) | substitutes its own `pk`/`sk`/`id` | The user confirms a fingerprint they have never seen; the keys are pinned after the first pair. `id` = `fingerprint(pk)` catches a partial swap. |
