@@ -185,10 +185,44 @@ before `n` reaches 2³² and rekey by reconnecting.
 
 3.6. **Confirmation.** Before the first network I/O, the pair page MUST
 display the offer's fingerprint. After the handshake, it MUST display the
-daemon's name (from the tunnel `hello` frame) next to that fingerprint. It
-MUST then obtain an explicit user confirmation before it persists any
-credential. If the user declines, the page MUST discard the pair root. The
-client MUST abort if the authenticated peer fingerprint differs from `id`.
+daemon's name (from the tunnel `hello` frame) next to that fingerprint, and
+the client's **short fingerprint code** (§3.7). The client MUST abort if the
+authenticated peer fingerprint differs from `id`.
+
+A successful first-contact handshake creates a **pending** pairing, not a
+usable one. The client receives the pair root from the handshake but MUST
+NOT rely on the pairing until the daemon confirms it.
+
+3.7. **Pending pairing and operator confirmation.**
+
+- The daemon holds a pending pairing in memory only. It MUST NOT write it to
+  `pairings.json`, MUST NOT include it in `pair_list`, MUST NOT autoconnect
+  it on boot, and MUST NOT add it to the serve set. A pending pairing can
+  drive nothing.
+- The daemon MUST show the client's short fingerprint code with a confirm
+  prompt on the operator's own screen. The code is derived from the client's
+  first-handshake ephemeral public key (the same value as the pairing
+  fingerprint, truncated to a short, human-comparable prefix). The phone MUST
+  show the same code while it waits.
+- The operator confirms with `pair_confirm` (MCP tool, HTTP route, and
+  `agentproto pair confirm <code|fingerprint>` CLI verb), or declines with
+  `pair_decline`. Both accept only the short code or the full fingerprint.
+  The client-supplied name MUST NOT be a confirmation handle: it is chosen
+  by the client, so accepting it would let an attacker's handshake be
+  promoted by a name the operator recognizes.
+- If a short code matches more than one pending pairing, the daemon MUST
+  refuse the action as ambiguous, tell the operator to use the full
+  fingerprint, and change nothing.
+- Confirming promotes the pending pairing: the daemon writes it to
+  `pairings.json` and starts serving it, including autoconnect on later
+  boots. Declining drops it.
+- The offer's TTL bounds the pending state: when the offer expires, the
+  daemon MUST drop the pending pairing and its pair root. A restart also
+  drops every pending pairing, because nothing about it is persisted.
+- The short code is also the control against phishing. An attacker who talks
+  a user into pasting an offer into a lookalike page gets a pending pairing
+  with a different client fingerprint. The code shown on the phone then does
+  not match the one on the operator's screen, and the operator declines.
 
 ### 4. Credential storage
 
@@ -440,7 +474,7 @@ store and the logs never contain a token).
 |---|---|---|
 | Broker operator (or anyone logging its upgrade URLs) | reads, drops, delays, reorders and replays messages; learns every route; can dial any route and seal a hello to `pk` | Learns route tokens, both peers' IP addresses, message sizes and timing, and when a pairing is in use. Cannot read, inject or alter frames (§3.5), cannot pair or reconnect (it holds no auth token, §2), and can neither forge nor elicit `pairing_revoked` (§6.2, §6.3). Can deny service. Epoch routes rotate daily, which limits linking a pairing's sessions across days. |
 | Network attacker (between a peer and the broker) | the same as the broker, over TLS-stripped or `ws:` links | The same as the broker. `wss:` SHOULD be used. |
-| Offer-URL thief, before expiry and first use | pairs as a new client | Mitigated by the short TTL, the single use, the fingerprint and name shown to the operator, and `pair revoke`. After the legitimate client has paired, the offer is spent. |
+| Offer-URL thief, before expiry and first use | pairs as a new client | Mitigated by the short TTL, the single use, the short fingerprint code shown to the operator for confirmation (§3.7), and `pair revoke`. After the legitimate client has paired, the offer is spent. |
 | Swapped QR (evil daemon) | substitutes its own `pk`/`sk`/`id` | The user confirms a fingerprint they have never seen; the keys are pinned after the first pair. `id` = `fingerprint(pk)` catches a partial swap. |
 | Malicious or compromised pair-page origin | serves script to the pair page and the service worker | **Trusted:** it can read the fragment, the credential and all plaintext, and can act as the client. The origin is a trust anchor equal to the device. Self-hosting the pair page removes the third party (§4.4). |
 | XSS on the pair origin | runs script in the origin | The same as a malicious origin for as long as the XSS lasts. A non-extractable pair root (§4.3) prevents exfiltrating the secret, but not using it while the XSS lasts. |
@@ -539,9 +573,10 @@ This AIP was titled MOBILE PAIRING until 2026-10-23 ([AIP-70](/docs/aip-70)).
   let a thief answer only as that revoked pairing, and only until the window
   ends. They cannot derive later epochs or serve anything, and the
   tombstone is dropped once the window ends.
-- `pairFromOffer` finishes the handshake, and so creates the daemon-side
-  pairing record, before the user confirms. If the user declines at §3.6,
-  the daemon still holds a record, which the operator must revoke.
+- `pairFromOffer` finishes the handshake, which creates a pending daemon-side
+  pairing held in memory only (§3.7). It is not usable, not persisted and not
+  listed until the operator confirms it. A decline, an expired offer or a
+  daemon restart drops it.
 
 ## Open issues
 
@@ -553,9 +588,9 @@ This AIP was titled MOBILE PAIRING until 2026-10-23 ([AIP-70](/docs/aip-70)).
 2. **No post-compromise security.** There is no ratchet. A stolen pair root
    lets its holder derive future epoch tokens until revocation, and a
    stolen session key exposes that connection.
-3. **Declined confirmation leaves a daemon record** (see Security
-   Considerations). A future revision may add an in-channel `pair_confirm`
-   step before the daemon persists the pairing.
+3. **Pending pairing state is in memory only.** A daemon restart drops a
+   pending pairing, so the phone must start from a fresh offer (§3.7). This
+   is deliberate: nothing half-confirmed is persisted.
 4. **Traffic analysis.** Frame sizes and timing are visible to the broker.
    Padding is not specified.
 5. **Reference deployment.** The reference deployment is moving to
