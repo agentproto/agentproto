@@ -189,7 +189,7 @@ interface AppDefinition {
   name?:         string
   version?:      string                            // default "0.1.0" when `id` is set
   description?:  string                             // becomes the APP.md body
-  requires?:     string[]                            // app ids this app depends on
+  requires?:     AppRequires                         // host needs and app dependencies, see "Requirements"
 
   ui?:           AppUiDefinition
   artifact?:     AppArtifactSurface
@@ -289,7 +289,7 @@ frontmatter is `.strict()` and carries no `systemPrompt` field, so the
 free-text prompt only ever lives in an `AGENT.md` body.
 
 `workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`,
-`data`, `category`, `setup`, `services`, `exposes`, and `workspace` are all optional. An app with agents
+`data`, `category`, `setup`, `services`, `exposes`, `requires`, and `workspace` are all optional. An app with agents
 and nothing else is still a conforming app, as is a UI-only app with an
 empty `agents` array.
 
@@ -406,6 +406,21 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     of these. Nothing is registered or dispatched until a host's gateway
     does it (see [Exposed tools and resources](#exposed-tools-and-resources)).
 
+13. **`requires` takes one of two forms, and `apps` entries are closed.**
+    When `requires` is present it MUST be either an array of non-empty
+    strings or an object with no key besides `browser`, `fs`, `gpu`,
+    `secrets` and `apps`, where `browser`, `fs` and `gpu` are booleans and
+    `secrets` is an array of non-empty strings. Each `apps` entry MUST be
+    a non-empty string or an object with a non-empty `id` and no key
+    besides `id`, `version`, `workflows` and `tools`; two entries MUST NOT
+    name the same `id`. `version` MUST be an exact, caret or tilde range,
+    `workflows` an array of non-empty strings, and `tools` an array of
+    MCP names (`<prefix>_<n>`, at most 64 characters). `defineApp` and the
+    loader MUST refuse a definition that violates any of these. Checks
+    that need the installed provider (every `tools` name exposed by it)
+    belong to the host and run when it installs or reloads the app (see
+    [Requirements](#requirements-requires)).
+
 ### Emitted layout
 
 `emit(dir)` (equivalently, a conforming host's install/write path) MUST
@@ -450,7 +465,8 @@ workflows:
   - id: workflow-id
     path: .agentproto/workflows/workflow-id/WORKFLOW.md
 workspace: "@owner/workspace-id"   # only when `workspace` is set
-requires: ["@owner/other-app"]     # only when `requires` is set
+requires: ["@owner/other-app"]     # only when `requires` is set: a list of ids, or
+                                   # { browser, fs, gpu, secrets, apps }, see "Requirements"
 ui:                                 # only when `ui` is set
   path: .agentproto/ui/index.html
   title: "…"
@@ -1148,8 +1164,9 @@ exposes:
 Each is an array of non-empty strings. Every entry MUST be the `id` of an
 agent, respectively a workflow, the same app declares; the loader MUST
 refuse an entry that names anything else. `workflows` is the callable
-surface other apps' `requires` entries may name when they invoke a
-provider's workflow. Neither key declares an exposed tool.
+surface other apps' `requires.apps[].workflows` entries may name when
+they invoke a provider's workflow (see [`app_call`](#app_call)). Neither
+key declares an exposed tool.
 
 #### Prefix and MCP names
 
@@ -1367,6 +1384,225 @@ computed name, a computed name over 64 characters, a duplicate `id`, a
 prefix or an `id` that collides with a host's own tool names, and a
 description whose length differs between UTF-16 code units and code
 points. The loader is the authority on all of them (conformance rule 12).
+
+### Requirements (`requires`)
+
+`requires` says what an app needs from its host and from other apps. It
+takes one of two forms.
+
+**A list of app ids.** Each entry is a non-empty app id. The list names
+dependencies only: no version range, no callable workflow, and nothing
+granted. It is equivalent to the object form with every id written as a
+bare `apps` entry.
+
+```yaml
+requires: ["@agentik/bureau"]
+```
+
+**An object.** Every key is optional and the object is closed:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `browser` | boolean, default `false` | Needs the user's real browser. |
+| `fs` | boolean, default `false` | Needs the user's local filesystem beyond the app data dir. |
+| `gpu` | boolean, default `false` | Needs a GPU. |
+| `secrets` | string[], default `[]` | Env or secret names the app needs. |
+| `apps` | entry[], default `[]` | Apps this app depends on, see below. |
+
+`browser`, `fs`, `gpu` and `secrets` are declarations a host MAY show
+before install and MAY use to decide where an app can run. This AIP
+attaches no enforcement to them.
+
+```ts
+type AppRequires = string[] | {
+  browser?: boolean
+  fs?:      boolean
+  gpu?:     boolean
+  secrets?: string[]
+  apps?:    (string | AppRequirement)[]
+}
+
+interface AppRequirement {
+  id:         string      // the provider app id
+  version?:   string      // exact, caret or tilde range, see below
+  workflows?: string[]    // provider workflows this app may call with app_call
+  tools?:     string[]    // provider tool MCP names granted to this app's agents
+}
+```
+
+```yaml
+requires:
+  browser: true
+  secrets: [OPENAI_API_KEY]
+  apps:
+    - "@acme/notes"                       # a dependency only
+    - id: "@agentik/bureau"
+      version: "^0.3"
+      workflows: [capture-page]
+      tools: [bureau_navigate, bureau_click, bureau_fill, bureau_screenshot]
+```
+
+In this section the app that declares `requires` is the **consumer** and
+the app an `apps` entry names is the **provider**.
+
+#### `apps` entries
+
+An entry is a bare provider id, which means the same as `{ id }`, or an
+object with `id` and any of `version`, `workflows` and `tools`. The object
+is closed: any other key is refused. Two entries of the same `apps` list
+MUST NOT name the same `id`.
+
+- `id` is the provider's APP.md `id`, matched exactly.
+- `version` is a range the provider's installed version MUST satisfy. Three
+  shapes are accepted, and the loader MUST refuse anything else:
+  - an exact version, `1.2.3` (a prerelease or build suffix is allowed,
+    as in the APP.md `version` pattern);
+  - a caret, `^1`, `^1.2` or `^1.2.3`: at least that version, and the same
+    leftmost non-zero component, so `^1.2` accepts `1.9.0` but not
+    `2.0.0`, `^0.3` accepts `0.3.7` but not `0.4.0`, and `^0.0.4` accepts
+    only `0.0.4`;
+  - a tilde, `~1`, `~1.2` or `~1.2.3`: at least that version, the same
+    major, and the same minor when a minor is written, so `~1` accepts
+    `1.9.0` and `~1.2` accepts `1.2.9` but not `1.3.0`.
+
+  Missing components count as `0`. A suffix on the installed version is
+  ignored when comparing, so `1.2.3-rc1` satisfies `^1`. Omitting
+  `version` accepts any installed version. A provider with no recorded
+  version satisfies no range.
+- `workflows` is the allowlist for `app_call`, the call a consumer makes
+  to run one of a provider's workflows. Each entry is a workflow id from
+  the provider's `exposes.workflows`. Omitted or empty, the consumer may
+  call no workflow of that provider.
+- `tools` lists provider tools the host grants to the consumer's own
+  agents, see [Granted tools](#granted-tools-requiresappstools). Omitted
+  or empty, nothing is granted.
+
+#### Granted tools (`requires.apps[].tools`)
+
+Each `tools` entry is the MCP name of one of the provider's `exposes.tools`
+entries: the name `<prefix>_<n>` the provider's manifest computes under
+[Prefix and MCP names](#prefix-and-mcp-names), for example
+`bureau_navigate`. A host matches an entry by computing the MCP name of
+every provider `exposes.tools` entry with that rule and comparing exactly,
+case included. The provider's tool `id` (`bureau.navigate`,
+`imported:browser/browser_navigate`) is not accepted.
+
+The MCP name is the form because it is the provider's public contract and
+the id is not:
+
+- it is the name the consumer's agents see and call, and the name an
+  AGENT.md already uses to opt in to a `write` or `approve` tool, so a
+  grant and an opt-in name the same thing;
+- every host computes it the same way from the provider's manifest, and
+  the loader already refuses two entries of one app that compute the same
+  name, so it is unique;
+- the id carries the provider's internals: whether a tool is bundled or
+  imported, and the alias of the server it is imported from. A provider
+  can move a tool from an import to a bundled TOOL.md, or rename an
+  import, without breaking its consumers, as long as the MCP name stays.
+
+A host MUST apply these rules:
+
+1. **Every name is exposed.** When the provider is installed, each
+   `tools` entry MUST equal the computed MCP name of one of its
+   `exposes.tools` entries. Otherwise the host MUST refuse to install or
+   reload the consumer, with an error that names the entry by index and
+   the provider, for example `requires.apps[0].tools[2]: "bureau_type" is
+   not exposed by "@agentik/bureau" (exposes: bureau_navigate,
+   bureau_click, ...)`. The loader alone cannot run this check, because
+   it needs the installed provider; a loader MUST still refuse a name that
+   does not have the shape of an MCP name.
+2. **Who receives the grant.** The grant applies to the consumer's own
+   agents only: sessions the host runs from an AGENT.md the consumer
+   bundles, attributed to the consumer by the host when it starts them.
+   For each such session the host behaves as if the AGENT.md had opted in
+   to every granted name, exactly, by name. No other caller gains
+   anything: not the consumer's UI (its reach stays `ui.tools`), not an
+   agent of another app, not an external MCP client, not a session that
+   only claims to belong to the consumer.
+3. **At the provider's access class.** A granted tool keeps the `access`
+   the provider declares. The consumer cannot raise or lower it, and the
+   entry carries no access of its own. A `read` tool is already visible to
+   every caller, so granting it changes nothing; a `write` or `approve` tool becomes visible and callable
+   for the consumer's agents.
+4. **Approvals still apply.** A granted `approve` tool keeps its approval
+   requirement. The grant never decides, consumes or skips an approval;
+   the host's approval engine checks the reference on every call exactly
+   as for an AGENT.md opt-in.
+5. **The operator and deny rules still win.** The grant is an opt-in and
+   nothing more. When the operator has turned exposure `off`, nothing is
+   granted. A deny grant, deny list or allow subset that applies to the
+   session wins over a granted name, as it wins over any opt-in.
+6. **The version range gates the grant.** When the entry sets `version`
+   and the provider's installed version does not satisfy it, the host
+   grants nothing from that entry and reports it (see below).
+7. **All or nothing per entry.** When any rule above fails for an entry,
+   the host grants none of that entry's tools. It never keeps the names
+   that still look valid.
+
+#### Missing providers
+
+Installing a consumer whose `requires.apps` names a provider that is not
+installed MUST succeed. The host MUST report every unmet entry, both in
+the install result and in its app listing, and MUST grant nothing from
+that entry until the provider is installed. The reference shape is a list
+on the installed-app record:
+
+```json
+{
+  "unmetRequires": [
+    { "id": "@agentik/bureau", "reason": "not-installed" }
+  ]
+}
+```
+
+`reason` is one of `not-installed`, `version-mismatch` (the installed
+version does not satisfy `version`; the entry also carries `installed`)
+and `tool-not-exposed` (a later provider change dropped a granted name;
+the entry also carries `tools`, the names no longer exposed). The list is
+recomputed whenever a provider is installed, reinstalled or uninstalled.
+Installing the provider later makes the grant apply to sessions started
+from then on, with no action on the consumer, once rule 1 holds.
+
+When a provider is uninstalled, its grants disappear: the host stops
+listing and running its tools for the consumer's agents, and adds the
+entry back to `unmetRequires` as `not-installed`. The consumer keeps
+loading and running. When a provider is reinstalled at a version that no
+longer exposes a granted name, or no longer satisfies the range, the
+consumer also keeps loading, the entry grants nothing and is reported as
+`tool-not-exposed` or `version-mismatch`, and the next install or reload
+of the consumer applies rule 1.
+
+A host that binds apps to scopes MAY additionally refuse to apply a
+consumer to a scope before its providers are applied there, and MUST
+refuse when a provider's installed version does not satisfy the declared
+range (reference: `app_apply`).
+
+#### `app_call`
+
+`app_call` runs a provider workflow on behalf of a consumer. The host
+MUST refuse the call, with a distinct error for each case, when the
+consumer is not installed, when it declares no `apps` entry for the
+provider, when the workflow is not in that entry's `workflows`, when the
+provider is not installed, when the workflow is not in the provider's
+`exposes.workflows`, or when the provider's version does not satisfy the
+entry's `version`. Unlike `tools`, `workflows` is checked when a call is
+made, not at install: a grant applies to every session the consumer's
+agents start, so it is checked before any of them runs, whereas a call
+names its workflow and is checked on its own. Like a grant, `app_call`
+checks a declaration: it says what a consumer may ask of a provider, and
+does not authenticate which app is calling.
+
+#### What the schema checks
+
+[`APP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft)
+expresses both forms of `requires` with `oneOf`, the closed object and the
+closed `apps` entry, the three `version` shapes, and the shape of an MCP
+name in `tools` (`<prefix>_<n>`, at most 64 characters). It cannot express
+the checks that need the installed provider (every `tools` name exposed
+by it, every `workflows` id in its `exposes.workflows`, the version
+satisfied) or two `apps` entries with the same `id`. The host is the
+authority on those (conformance rule 13).
 
 ## The `.agentapp` package format (`agentapp/v1`)
 
@@ -1880,6 +2116,18 @@ to protect.
 
 ## Backward compatibility
 
+**`requires` object form and `requires.apps[].tools` amendment
+(2026-11-08).** Purely additive: an `APP.md` whose `requires` is a list of
+app ids is unaffected and keeps its meaning, a dependency only with
+nothing granted. The object form, the object `apps` entry with `version`
+and `workflows`, and `tools` are new and OPTIONAL. A host built against
+the earlier schema rejects an `APP.md` whose `requires` is an object
+rather than ignoring it, which is the intended fail-safe: an app whose
+agents need granted tools must not be installed by a host that would run
+them without those tools. Installing an app whose provider is missing now
+succeeds with the dependency reported. The `schema: app/v1` string is
+unchanged.
+
 **`exposes` amendment (2026-11-08).** Purely additive: `exposes` is a new
 OPTIONAL frontmatter field, and an `APP.md` without it is unaffected. An
 app that declares none of `prefix`, `tools` and `resources` registers
@@ -2046,11 +2294,24 @@ supersede.
   before it is opened. Because the app's `ui` cannot answer a step, a
   compromised UI cannot complete a pairing or read a token.
 
+- **`requires.apps[].tools` widens what the consumer's agents can do,
+  and nothing else.** Installing a consumer that grants itself a
+  provider's `write` tools gives that consumer's agents the provider's
+  side effects, so a host SHOULD show the granted names and their access
+  classes before install, as it shows services. The grant cannot reach
+  past the provider's own `exposes.tools`, cannot raise an access class,
+  cannot reach the consumer's UI or any other caller, and cannot skip an
+  approval. Attribution of a session to the consumer is the host's, made
+  when it starts the session from one of the consumer's AGENT.md files;
+  a host MUST NOT accept an app id a caller supplies about itself as the
+  basis of a grant.
+
 - **`extends`-style cross-app trust is out of scope for v1.** Unlike
   [AGENT.md's `extends`](/docs/aip-42#conformance-rules), an app has no
-  inheritance mechanism in this AIP — `requires[]` names a dependency
-  relationship (another app must be applied to the same scope first) but
-  does not pull in or execute that app's code. There is therefore no
+  inheritance mechanism in this AIP. `requires` names a dependency
+  relationship, and its `workflows` and `tools` let the consumer use the
+  provider's exposed surface through the host, but it does not pull in or
+  execute the provider's code inside the consumer. There is therefore no
   parent-SHA-pinning concern analogous to AIP-42's for apps in v1.
 
 ## Open questions
@@ -2074,11 +2335,9 @@ supersede.
    entry points (e.g. an admin view and an end-user view) is deferred
    until real demand appears.
 
-4. **`requires[]` version constraints.** Today `requires` is a bare list
-   of app ids with no version range — an applied dependency satisfies it
-   regardless of version. Whether this needs `^`/`~`-style constraints
-   (as `AGENT.md extends` pinning is flagged as an open question in
-   [AIP-42](/docs/aip-42#open-questions)) is open.
+4. **Version ranges beyond exact, caret and tilde.** `requires.apps[].version`
+   accepts three shapes. Whether compound ranges (`>=1.2 <2`, `||`) are
+   worth a larger grammar is open until an app needs one.
 
 5. **Setup `choice` of a different shape.** `choice` options carry no
    per-option sub-steps; branching is expressed with `when`. Whether

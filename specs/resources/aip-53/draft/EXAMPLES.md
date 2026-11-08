@@ -253,3 +253,92 @@ Each of these edits makes the loader refuse the manifest:
   `mutator` tag;
 - keeping `resources` but removing the `imported:` entry from `tools`;
 - adding `ui://browser/screenshot` a second time to `resources`.
+
+## 7. A consumer that requires Bureau's tools
+
+A job-hunting app whose agents drive the user's browser through Bureau. It
+does not bundle browser tools of its own: it requires `@agentik/bureau` and
+names the four Bureau tools its agents need. See
+[Requirements](../../../aip-53.mdx#requirements-requires).
+
+The provider exposes, among others (excerpt of its APP.md):
+
+```yaml
+id: '@agentik/bureau'
+version: 0.3.2
+exposes:
+  prefix: bureau
+  tools:
+    - id: bureau.navigate                   # bundled TOOL.md
+      access: write
+      description: Open a URL in a browser instance the user owns.
+    - id: bureau.click
+      access: write
+      description: Click an element of the current page.
+    - id: bureau.fill
+      access: write
+      description: Type a value into a form field of the current page.
+    - id: imported:browser/browser_screenshot
+      access: read
+      mcpName: screenshot
+      description: Capture the current page of a browser instance.
+```
+
+Their MCP names are `bureau_navigate`, `bureau_click`, `bureau_fill` and
+`bureau_screenshot`. The consumer:
+
+```md
+---
+schema: app/v1
+id: '@acme/job-kit'
+name: Job kit
+version: 1.0.0
+agents:
+  - id: '@acme/job-scout'
+    path: .agentproto/agents/job-scout/AGENT.md
+requires:
+  browser: true
+  apps:
+    - id: '@agentik/bureau'
+      version: '^0.3'
+      tools: [bureau_navigate, bureau_click, bureau_fill, bureau_screenshot]
+---
+
+Finds job offers on the sites the user is signed in to and applies with
+the user's approval.
+```
+
+`job-scout`'s AGENT.md does not list any Bureau tool. What a conforming
+host does:
+
+- **Bureau installed at 0.3.2.** The install succeeds. Every session the
+  host starts from `job-scout` sees and can call `bureau_navigate`,
+  `bureau_click` and `bureau_fill` (`write`, granted as if the AGENT.md had
+  opted in to them by name) and `bureau_screenshot` (`read`, visible
+  anyway). An agent of another app, the job kit's own UI, and an external
+  MCP client still do not see the three `write` tools unless they opt in
+  themselves. If the operator set exposure to `off`, nothing is granted.
+- **Bureau not installed.** The install succeeds. The install result and
+  the app listing carry
+  `unmetRequires: [{ id: '@agentik/bureau', reason: 'not-installed' }]`,
+  and `job-scout` sessions get none of the four tools. Installing Bureau
+  afterwards grants them to sessions started from then on.
+- **Bureau installed at 0.4.0.** `^0.3` is not satisfied. The install
+  succeeds, nothing is granted, and the entry is reported as
+  `{ id: '@agentik/bureau', reason: 'version-mismatch', installed: '0.4.0' }`.
+- **Bureau uninstalled later.** The four tools disappear from `job-scout`
+  sessions and the entry is reported as `not-installed` again. The job kit
+  keeps loading.
+
+Each of these edits makes the install fail while Bureau is installed:
+
+- adding `bureau_type` to `tools`: Bureau exposes no tool with that MCP
+  name (`requires.apps[0].tools[4]: "bureau_type" is not exposed by
+  "@agentik/bureau"`);
+- writing a tool id instead of its MCP name, such as `bureau.navigate` or
+  `imported:browser/browser_screenshot`: the loader refuses it as not an
+  MCP name, whether or not Bureau is installed.
+
+Writing `requires: ['@agentik/bureau']` instead declares the dependency
+only: the install reports a missing Bureau the same way, and grants
+nothing even when Bureau is installed.
