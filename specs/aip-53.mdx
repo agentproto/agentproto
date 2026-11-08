@@ -5,7 +5,7 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-11-03
+updated: 2026-11-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42, 73]
 resources: ./resources/aip-53/draft
@@ -200,6 +200,7 @@ interface AppDefinition {
   category?:     string                               // coarse grouping surfaced in catalogs/trees
   setup?:        AppSetupStep[]                       // post-install configuration pipeline — see "Setup steps"
   services?:     AppService[]                          // long-running processes the host starts with the app, see "Services"
+  exposes?:      AppExposes                            // agents, workflows, MCP tools and ui:// views offered outside the app, see "Exposed tools and resources"
 }
 
 interface AgentEntry {
@@ -238,6 +239,27 @@ interface AppService {
   }
 }
 
+/**
+ * What the app offers to callers outside it (see
+ * [Exposed tools and resources](#exposed-tools-and-resources)).
+ */
+interface AppExposes {
+  agents?:    string[]              // ids of the app's own agents
+  workflows?: string[]              // ids of the app's own workflows
+  prefix?:    string                // ^[a-z][a-z0-9]{1,15}$, required when `tools` is non-empty
+  tools?:     AppExposedTool[]
+  resources?: string[]              // distinct ui:// URIs, needs an `imported:` tool
+}
+
+interface AppExposedTool {
+  id:           string              // a bundled TOOL.md id, or imported:<alias>/<tool>
+  access:       "read" | "write" | "approve"
+  description:  string              // non-blank, at most 300 characters
+  inputSchema?: Record<string, unknown>
+  mcpName?:     string              // required for an imported id
+  approvalArg?: string              // only with access: "approve"
+}
+
 interface AppUiDefinition {
   html:          string                    // the full document — required
   title?:        string
@@ -267,7 +289,7 @@ frontmatter is `.strict()` and carries no `systemPrompt` field, so the
 free-text prompt only ever lives in an `AGENT.md` body.
 
 `workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`,
-`data`, `category`, `setup`, `services`, and `workspace` are all optional. An app with agents
+`data`, `category`, `setup`, `services`, `exposes`, and `workspace` are all optional. An app with agents
 and nothing else is still a conforming app, as is a UI-only app with an
 empty `agents` array.
 
@@ -362,6 +384,27 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     Like rules 9 and 10, validating `services` performs no I/O: nothing
     in `services` is executed or contacted until a host's install path
     starts it (see [Services](#services-services)).
+
+12. **`exposes` is closed and checked at load.** When `exposes` is
+    present it MUST be an object with no key besides `agents`,
+    `workflows`, `prefix`, `tools` and `resources`. Every `agents` and
+    `workflows` entry MUST name an agent, respectively a workflow, the
+    app declares. A non-empty `tools` MUST come with a `prefix` matching
+    `^[a-z][a-z0-9]{1,15}$`. Each entry of `tools` MUST have a unique
+    `id`, an `access` of `read`, `write` or `approve`, a non-blank
+    `description` of at most 300 characters, and no key besides `id`,
+    `access`, `description`, `inputSchema`, `mcpName` and `approvalArg`;
+    `approvalArg` MUST NOT be set unless `access` is `approve`; no `id` or
+    `mcpName` may start with `approval`; an `imported:` id MUST have an
+    `mcpName` and `access: read`; a bundled id MUST resolve to a TOOL.md
+    the app bundles, which MUST NOT declare `mutates` or carry a
+    `mutator` or `write` tag when the entry is `read`; two entries MUST
+    NOT compute the same MCP name, and a computed name MUST NOT exceed 64
+    characters. A non-empty `resources` MUST hold distinct `ui://` URIs
+    and MUST come with at least one `imported:` entry in `tools`.
+    `defineApp` and the loader MUST refuse a definition that violates any
+    of these. Nothing is registered or dispatched until a host's gateway
+    does it (see [Exposed tools and resources](#exposed-tools-and-resources)).
 
 ### Emitted layout
 
@@ -1072,6 +1115,259 @@ absolute path or one with `..` segments, which places a service outside
 its app directory. The schema rejects both. A host SHOULD refuse such a
 `cwd` too.
 
+### Exposed tools and resources
+
+`exposes` declares what an app offers to callers outside it. It is a
+closed object with five optional keys: `agents`, `workflows`, `prefix`,
+`tools` and `resources`. The first two name parts of the bundle; the other
+three publish tools and `ui://` views to MCP clients through the host's MCP
+gateway.
+
+```yaml
+exposes:
+  agents: [job-scout]
+  workflows: [job-hunt]
+  prefix: jobkit
+  tools:
+    - id: jobkit.list                       # a TOOL.md the app bundles
+      access: read
+      description: List the job leads in the pipeline, newest first.
+    - id: imported:browser/browser_screenshot
+      access: read
+      mcpName: screenshot                   # required for an imported id
+      description: Capture the current page of a browser instance.
+      inputSchema:
+        type: object
+        properties: { instance: { type: string } }
+  resources:
+    - ui://browser/screenshot
+```
+
+#### `agents` and `workflows`
+
+Each is an array of non-empty strings. Every entry MUST be the `id` of an
+agent, respectively a workflow, the same app declares; the loader MUST
+refuse an entry that names anything else. `workflows` is the callable
+surface other apps' `requires` entries may name when they invoke a
+provider's workflow. Neither key declares an exposed tool.
+
+#### Prefix and MCP names
+
+`prefix` MUST match `^[a-z][a-z0-9]{1,15}$`: lowercase letters and digits
+only, 2 to 16 characters. It contains no `_`, so the first `_` of an
+exposed name is always the separator. `prefix` MUST be present when
+`tools` is non-empty.
+
+The MCP name of an entry is `<prefix>_<n>`, computed in this order:
+
+1. Take `mcpName` when set, otherwise `id`.
+2. Remove one leading `<prefix>.` or `<prefix>_`.
+3. Replace every character outside `[a-zA-Z0-9_-]` with `_`, merge runs of
+   `_`, and trim one leading and one trailing `_`.
+4. Prepend `<prefix>_`.
+
+`jobkit.leads.upsert` under prefix `jobkit` becomes
+`jobkit_leads_upsert`; `bureau_status` under `bureau` becomes
+`bureau_status`. A host MUST compute the name with exactly this rule, so
+two hosts publish the same name for the same manifest. The loader MUST
+refuse an entry whose step 3 leaves nothing, whose computed name is longer
+than 64 characters, or whose computed name equals that of another entry of
+the same app (the author sets `mcpName` on one of them). `mcpName` MUST
+match `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`, so it carries no `:`, `/` or `.`.
+Entry `id` values MUST be unique within `tools`.
+
+A host namespace is shared by every app and by the host's own tools, so a
+host MUST also:
+
+- refuse a `prefix` that is the first `_` segment of one of its own tool
+  names (a prefix `app` would claim the `app_*` family), and refuse an `id`
+  that is the name of one of its own tools. Those stay reserved to the UI
+  allowlist (`ui.tools`);
+- refuse to install an app whose non-empty `tools` use a `prefix` another
+  installed app already holds. Reinstalling the same app is not a
+  conflict;
+- never register an exposed tool under a name one of its own tools has,
+  nor under a name an earlier app already holds, and report the entry as
+  skipped instead of letting it shadow the other tool.
+
+#### Tool entries
+
+An entry carries `id`, `access` and `description`, and MAY carry
+`inputSchema`, `mcpName` and `approvalArg`. It is a closed object: any
+other key is refused.
+
+- `id` is non-empty. It is the id of a TOOL.md the app bundles, or
+  `imported:<alias>/<tool>` for a tool of an MCP server the app imports.
+  For a bundled id the loader MUST find the TOOL.md and refuse the manifest
+  when it is missing.
+- `access` is one of `read`, `write`, `approve` (see below).
+- `description` is required, is not blank, is at most 300 characters, and
+  is written for a model: it is what an MCP client shows when choosing a
+  tool.
+- `approvalArg` is a non-empty string and MUST NOT be set unless `access`
+  is `approve`.
+
+An exposed id does not have to appear in `ui.tools`. `exposes.tools` is
+its own allowlist: a call for an id that is not declared there MUST be
+refused, and an exposed call never falls through to the host's own
+tools.
+
+#### Access classes and default visibility
+
+| `access` | Meaning | Default visibility |
+|---|---|---|
+| `read` | Observes, changes nothing | Every caller |
+| `write` | Changes data or has side effects | Only a caller that opted in |
+| `approve` | Takes part in a human decision, for example a tool that carries an approval reference | Only a caller that opted in |
+
+A host MUST NOT list or run a `write` or `approve` entry for a caller that
+has not opted in to that exact MCP name, unless the operator has explicitly
+widened exposure for every caller. The opt-in is declared by the calling
+agent, not by the app: in the reference host an agent lists the names it
+wants in its AGENT.md as `tools: [{ kind: mcp, server: agentproto, allow:
+[jobkit_leads_upsert] }]`, matched exactly with no wildcard. A deny grant,
+a deny list or an allow subset that applies to the caller always wins over
+every access class and over an opt-in.
+
+A host SHOULD give the operator one setting with three values: expose
+`read` tools only (the default), expose nothing, or expose every declared
+tool to every caller. The reference host reads it per request as
+`defaults.apps.exposedTools` (`read`, `off`, `all`), so a change applies to
+the next call. The setting is checked on the call path as well as on the
+tool list: a tool the list hides is not callable by name.
+
+`access: read` is a claim the loader checks against the bundle: it MUST
+refuse a `read` entry whose bundled TOOL.md declares a non-empty `mutates`
+or carries a `mutator` or `write` tag (compared case-insensitively). The
+check is one-way. A tool with no such declaration can still write, so the
+author remains responsible for the class, and a host SHOULD NOT treat
+`read` as a safety guarantee on its own.
+
+A host SHOULD publish `readOnlyHint` on a `read` tool and `destructiveHint`
+on `write` and `approve` tools, using the annotations MCP defines.
+
+#### Why approval tools are refused
+
+An `id` or an `mcpName` that starts with `approval` MUST be refused at
+load. A host MUST also refuse to register any tool whose computed name
+starts with `approval` and MUST NOT add a tool that decides an approval of
+its own. Whoever asks for an approval does not decide it: the decision
+belongs to a human surface (in the reference host, an approval card), and
+the party that requested it is refused when it tries to decide.
+`exposes.tools` publishes tools to agents. If it could name an approval
+decision, an agent would have a second path to its own approval and the
+rule above would be only as strong as the app author's care. The name
+check closes that path wherever the manifest comes from.
+
+`access: approve` therefore marks a tool that takes part in a decision,
+for example by carrying a reference to an approval, and not a tool that
+makes one. `approvalArg` names the input argument that carries that
+reference. It is a shape hint for clients and authors, not an enforcement
+point: whether a given approval is valid is decided by the host's approval
+engine when the tool consumes it.
+
+#### Imported tools
+
+An `imported:<alias>/<tool>` id exposes a tool of an MCP server the app
+imports. Its spelling has no MCP-safe form, so:
+
+- `mcpName` is REQUIRED. The loader MUST refuse an `imported:` entry
+  without it;
+- `access` MUST be `read`. The loader MUST refuse any other class for an
+  imported id: nothing in the manifest lets a host check a foreign server's
+  tool against a TOOL.md, so it never offers one as writing or approving;
+- the host MUST dispatch the call to the named server and to nothing else,
+  and never resolves the id among its own tools.
+
+An exposed imported tool behaves like the original:
+
+- **The result passes through unchanged.** The host MUST return the
+  server's `CallToolResult` as it received it: every content block
+  (images included), `structuredContent`, `isError` and `_meta`. It MUST
+  NOT wrap, re-encode or rewrite them. A value that is not a
+  `CallToolResult` (it has no `content` array) MAY be wrapped as a single
+  text block. A bundled tool answers with its output as one JSON text
+  block.
+- **`_meta.ui` is preserved.** When the imported tool's own listing carries
+  `_meta.ui` (the MCP Apps widget link), the host MUST copy that object
+  onto the exposed tool's entry in `tools/list`, with its `resourceUri`
+  unchanged. A host that cannot read the import's tool list in time MAY
+  list the tool without it. The host copies `ui` only; other `_meta` keys
+  of the listing are not forwarded.
+- **Undeclared inputs are dropped.** See `inputSchema` below.
+
+#### `inputSchema`
+
+`inputSchema`, when present, is a JSON Schema object (`type: object`). It
+is the schema the host publishes for the tool. Without it the host uses the
+`inputs` of the bundled TOOL.md, and when neither exists it publishes a
+single optional `args` object.
+
+On an `imported:` entry whose `inputSchema` declares `properties`, the
+schema is also a filter. Before it calls the imported tool, the host MUST
+remove every top-level input key that `properties` does not declare, and
+MUST forward only the rest. The one exception is an `inputSchema` that
+sets `additionalProperties: true`, which forwards the input as received.
+An `inputSchema` without `properties` filters nothing. This lets an app
+narrow a foreign tool: an exposed screenshot tool that declares
+`instance` and `fullPage` never passes the import's own `path` argument,
+so a client cannot make the import write a file. For any other entry, a
+host SHOULD validate the input against the schema before it runs the tool.
+
+#### `resources`
+
+`resources` is the app's allowlist of views. It is an array of distinct
+URIs, each matching `^ui://[^\s]+$`. It MAY be non-empty only when
+`tools` holds at least one `imported:` entry: a view is relayed from an
+import, and an app with nothing imported has nothing to relay from. An
+empty array is accepted and means no allowlist.
+
+A host MUST:
+
+- register exactly the allowlisted URIs of an app whose tools it exposes,
+  and answer `resources/read` for each by relaying it to the app's imported
+  servers (the aliases of its `imported:` entries, in the order they are
+  declared, the first one that answers wins);
+- refuse a `resources/read` for any other URI as an unknown resource, even
+  when an imported server would serve it;
+- NOT relay a full `resources/list`. The list a client sees is the
+  allowlisted URIs and nothing else;
+- register no resource when exposure is turned off.
+
+The allowlist exists because a server's `resources/list` is the server's
+choice, not the app's. Relaying it whole would hand every client whatever
+the import chooses to serve, including resources the app author never
+reviewed.
+
+#### Errors and loading
+
+The loader validates `exposes` when the manifest is loaded, and a host
+validates it again when it installs the app and when it registers the
+tools, because an installed record can be edited by hand. A malformed
+declaration is refused with a message that names the entry by index
+(`exposes.tools[2].mcpName`). A host that finds an installed declaration no
+longer valid MUST NOT register any of that app's tools, and MUST NOT fall
+back to registering the entries that still look valid.
+
+#### Schema note
+
+[`APP.schema.json`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-53/draft)
+declares `exposes` as a closed object and each tool entry as a closed
+object. It expresses the `prefix` pattern, the required keys of an entry,
+the `access` enumeration, the 300-character bound, `approvalArg` only with
+`approve`, an `imported:` id requiring `mcpName` and `access: read`, the
+`approval` refusal on `id` and `mcpName`, the `ui://` URI pattern and its
+uniqueness, `prefix` being required once `tools` is non-empty, and
+`resources` needing an `imported:` entry (with `if`/`then` and `contains`).
+JSON Schema 2020-12 cannot compute, so a validator that stops at the
+schema accepts: an `exposes.agents` or `workflows` entry that names no
+agent or workflow of the app, a bundled `id` with no TOOL.md or a `read`
+entry whose TOOL.md is tagged `mutator`, two entries with the same
+computed name, a computed name over 64 characters, a duplicate `id`, a
+prefix or an `id` that collides with a host's own tool names, and a
+description whose length differs between UTF-16 code units and code
+points. The loader is the authority on all of them (conformance rule 12).
+
 ## The `.agentapp` package format (`agentapp/v1`)
 
 An emitted app directory is the *installed* form. `.agentapp` is the
@@ -1584,6 +1880,16 @@ to protect.
 
 ## Backward compatibility
 
+**`exposes` amendment (2026-11-08).** Purely additive: `exposes` is a new
+OPTIONAL frontmatter field, and an `APP.md` without it is unaffected. An
+app that declares none of `prefix`, `tools` and `resources` registers
+nothing on a host's MCP gateway, and no tool of an app becomes visible to an
+MCP client by default: a manifest has to name each one with its access
+class. A host built against the earlier closed schema rejects an `APP.md`
+that carries `exposes` rather than ignoring it, which is the intended
+fail-safe: an app that publishes tools must not be installed by a host that
+would drop the access classes. The `schema: app/v1` string is unchanged.
+
 **`services[].activation` amendment (2026-11-03).** Purely additive:
 `activation` is a new OPTIONAL key of a service entry, and a service
 without it is kept running exactly as before. A host built against the
@@ -1629,6 +1935,19 @@ supersede.
   the service. `auth: guard` keeps the host's guard in front of it.
   `auth: service` removes it: a host SHOULD show that choice to the user
   at install, and the service is then the only boundary.
+
+- **`exposes.tools` is a second, separate boundary: the app's reach
+  toward MCP clients.** The class on each entry decides who sees the tool,
+  so a host MUST apply the visibility rule on every call path, not only
+  when it lists tools, and a manifest MUST NOT be able to widen it. An
+  `imported:` entry forwards to a server the app does not control: only
+  `read` is allowed, the result is returned unchanged, and the input is
+  cut down to the keys `inputSchema` declares, which is how an app keeps a
+  foreign tool's file-writing or otherwise dangerous argument out of
+  reach. `exposes.resources` is an allowlist and not a filter: a host
+  MUST NOT relay a URI that is not in it, and MUST NOT relay a server's
+  full `resources/list`. No exposed tool can decide an approval (see
+  [Why approval tools are refused](#why-approval-tools-are-refused)).
 
 - **The UI tools allowlist is the primary security boundary.** A UI
   surface runs arbitrary, often third-party-authored, JavaScript inside
