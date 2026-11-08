@@ -1,7 +1,7 @@
-# AIP-45 HARNESS.md — adapter implementer's guide
+# AIP-45 HARNESS.md — implementer's guide
 
-This guide is for implementers writing a new harness adapter — either
-a manifest (`HARNESS.md`) or a `protocol: proprietary` adapter
+This guide is for implementers writing a new harness — either
+a manifest (`HARNESS.md`) or a `protocol: proprietary` harness
 package.
 
 ## Choosing a protocol arm
@@ -18,13 +18,13 @@ Does the binary speak ACP?
          │         Reference impl: src/protocol/mcp.ts.
          │
          └── No → protocol: "proprietary"
-                  Write an adapter package implementing AgentCliClient.
-                  Publish as @your-scope/adapter-<name> on npm.
+                  Write a harness package implementing AgentCliClient.
+                  Publish as @your-scope/harness-<name> on npm.
 ```
 
 When in doubt, push the upstream agent toward ACP — it's where the
-ecosystem is converging. Adapters for ACP-speaking agents are
-manifest-only; adapters for non-ACP agents are code.
+ecosystem is converging. Harnesses for ACP-speaking agents are
+manifest-only; harnesses for non-ACP agents are code.
 
 ## Authoring a `HARNESS.md`
 
@@ -47,7 +47,7 @@ protocol: acp | mcp | proprietary
 # Plus exactly one of:
 acp:     <ref to AIP-44 ACP.md>      # when protocol=acp
 mcp:     { ... }                     # when protocol=mcp
-adapter: "@scope/pkg"                # when protocol=proprietary
+harness: "@scope/pkg"                # when protocol=proprietary
 ---
 ```
 
@@ -56,23 +56,23 @@ Recommended additions:
 - `auth:` — AIP-29 auth block referencing an AIP-19 SECRETS.md
 - `session:` — declare session policy explicitly even at defaults
 - `models:` — let hosts route between models the agent supports; annotate an
-  `allowed` entry as `{ id, provider?, mode? }` when the adapter knows who
+  `allowed` entry as `{ id, provider?, mode? }` when the harness knows who
   serves it and which mode reaches it
 - `env:` — static always-on env, merged before any mode/option env
-- `presets:` — gateway presets the adapter can drive, merged into the
+- `presets:` — gateway presets the harness can drive, merged into the
   provider-preset catalog (built-in wins on `id` collision)
 - `capabilities:` — pre-flight visibility for routing decisions
 - `examples:` — a handful of canonical prompts the agent handles well
 
-## Implementing a proprietary adapter
+## Implementing a proprietary harness
 
-A `protocol: "proprietary"` adapter package exports a default `defineAgentCli`
+A `protocol: "proprietary"` harness package exports a default `defineAgentCli`
 result whose runtime reaches the `AgentCliClient` interface:
 
 ```ts
 import type { AgentCliClient, StreamEvent } from "@agentproto/harness"
 
-export const myAdapter: AgentCliClient = {
+export const myHarness: AgentCliClient = {
   async connect(opts) { /* spawn + handshake */ },
   async send(turnId, message) { /* write to subprocess */ },
   events(): AsyncIterable<StreamEvent> { /* yield normalised events */ },
@@ -81,7 +81,7 @@ export const myAdapter: AgentCliClient = {
 }
 ```
 
-The adapter MUST translate any vendor-specific events into the
+The harness MUST translate any vendor-specific events into the
 canonical taxonomy:
 
 | Canonical event | Description |
@@ -112,7 +112,7 @@ canonical taxonomy only.
 ## Sandbox + secrets contract
 
 The runner resolves the sandbox + secrets *before* spawning the
-binary. The adapter receives a flat env map and a working directory;
+binary. The harness receives a flat env map and a working directory;
 it MUST NOT shell out for secrets, MUST NOT reach for env vars
 outside `process.env` map passed in, and MUST NOT log secret values.
 
@@ -139,7 +139,7 @@ type ConnectOpts = {
 
 ## Testing
 
-Adapters SHOULD ship a smoke test that spawns the real binary against
+Harnesses SHOULD ship a smoke test that spawns the real binary against
 a deterministic prompt. The convention is:
 
 ```ts
@@ -229,9 +229,9 @@ corpus seam that accepts a `ModelLike`.
 
 ## Publishing
 
-- Adapter packages: `@your-scope/adapter-<name>`, MIT/Apache-2.0
+- Harness packages: `@your-scope/harness-<name>`, MIT/Apache-2.0
   license, peer-dep on `@agentproto/harness`.
-- Manifests: live alongside the adapter package or in
+- Manifests: live alongside the harness package or in
   `agentproto/ts/adapters/<name>/HARNESS.md`.
-- The upstream agent's licence governs runtime use; the adapter
+- The upstream agent's licence governs runtime use; the harness
   package licence governs the wrapper code.

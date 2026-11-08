@@ -191,6 +191,9 @@ owner. `user` and `host` are owned by this AIP until an AIP defines them.
 |---|---|
 | agent CLI | harness |
 | adapter slug | harness slug |
+| adapterSlug | harness |
+| agent_start.adapter | agent_start.harness |
+| --adapter | --harness |
 | human operator | user |
 | gateway preset | gateway |
 | completion policy | gate |
@@ -208,9 +211,21 @@ owner. `user` and `host` are owned by this AIP until an AIP defines them.
 | spawn role | agent (a built-in AIP-42 agent named by `agent`) |
 
 An alias stays readable during the transition. New text MUST use the
-replacement. Implementations MAY keep a deprecated field or tool name as an
-alias that behaves exactly like its replacement, and SHOULD say when it will
-be removed.
+replacement. A deprecated field, tool or flag name is **removed in the next
+breaking release of the reference implementation**; it is not kept past that
+release. Until then an implementation MAY accept the old name as an alias that
+behaves exactly like its replacement, and SHOULD warn, naming the
+replacement and the release that removes it, each time the old name is used.
+A spec does not carry the old name: the AIP that owned it drops it in the
+same change that adds the row here.
+
+The rows `adapterSlug`, `agent_start.adapter` and `--adapter` are the
+agent-CLI sense of `adapter` ([AIP-46](/docs/aip-46)'s `Session` field and
+`agent_start` input, and the CLI flag). The same `adapter` key in a WORKFLOW
+agent step ([AIP-15](/docs/aip-15) §Open questions 6) is renamed once that
+question is settled; `adapter` in the other senses (AIP-52's
+`FrameworkAdapter` and `ServiceAdapter`, the `ADAPTER.md` guides) is not
+deprecated.
 
 ### 5. Changing a name or a term
 
@@ -240,8 +255,9 @@ corpus, and it frees `adapter` and `driver`, which each had a second sense.
 This AIP changes no wire format. The renames it calls for land as separate
 PRs (titles and schema ids in the specs, then packages, constants, fields
 and tools in implementations), each removing its ids from `pending`. A
-renamed schema id or tool keeps its old spelling as an accepted alias until
-the major version that removes it.
+renamed schema id or tool keeps its old spelling as an accepted alias in the
+reference implementation until its next breaking release, which removes it
+(§4).
 
 ## Security Considerations
 

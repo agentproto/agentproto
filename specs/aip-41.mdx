@@ -259,7 +259,7 @@ target:
 # Target an AGENT (spawn an interactive/autonomous session)
 target:
   agent:
-    adapter: "claude-code"        # agent harness slug
+    harness: "claude-code"        # AIP-45 harness slug
     prompt: "Summarize overnight support tickets and flag anything urgent."
     model: "claude-sonnet-5"      # OPTIONAL
     cwd: "./support-triage"       # OPTIONAL working directory
@@ -270,7 +270,7 @@ secrets (`${{ vault.NAME }}`) and runtime context (`${{ now }}`,
 `${{ routine.run_id }}`).
 
 The `agent` target lowers to `agent_start`: it spawns an agent session
-with `adapter` and `prompt` (required), plus optional `model` and
+with `harness` and `prompt` (required), plus optional `model` and
 `cwd`. The spawned session is attributed `origin: "routine:<id>"` so
 downstream tooling can trace it back to the firing routine.
 
@@ -541,6 +541,14 @@ Migration path:
 2. Replace `triggers: [{ kind: schedule, ... }]` with
    `routines: [{ ref: ... }]`.
 3. Centralise identity attribution and retry policy on the routine.
+
+### The 2026-11-08 harness-rename amendment (draft)
+
+The `target.agent.adapter` key is now `target.agent.harness`, with the same
+meaning (an AIP-45 harness slug). `adapter` is removed, not kept as an alias:
+a ROUTINE that still carries it fails validation, and the fix is a rename of
+the key. The reference implementation keeps reading `adapter` until its next
+breaking release (AIP-70 §4).
 
 ## Security considerations
 

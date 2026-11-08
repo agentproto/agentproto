@@ -5,7 +5,7 @@ aip: 58
 status: Review
 type: Schema
 created: 2026-09-25
-updated: 2026-10-08
+updated: 2026-11-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 15, 16, 37, 46]
 resources: ./resources/aip-58/draft
@@ -185,7 +185,7 @@ interface StepRecord {
   status:     RunStatus | "skipped"  // pending|running|succeeded|failed|suspended|cancelled, or "skipped"
   driver?: {
     kind:       string               // e.g. "tool", "agent", "gate"
-    adapter?:   string                // AIP-45 harness slug, when agent-backed
+    harness?:   string                // AIP-45 harness slug, when agent-backed
     model?:     string
     sessionId?: string                // AIP-46 session id, when agent-backed
   }
@@ -638,7 +638,7 @@ the same posture [AIP-37](/docs/aip-37) takes for event names.
 | `orphaned` | A `running` run's owner lease expired with no live owner detected. |
 | `host-interrupted` | The owning host restarted while the run was `running` and the run was not durably suspended. |
 | `budget-exceeded` | The run's summed spend reached its declared budget; the next step was refused. |
-| `driver-error` | The underlying driver (tool implementation, agent adapter) itself failed. MUST carry the driver's own message as `RunError.message`. |
+| `driver-error` | The underlying driver (tool implementation, agent harness) itself failed. MUST carry the driver's own message as `RunError.message`. |
 | `cancelled` | The run was cancelled via `run.cancel` (or a parent run's cancellation cascaded). |
 | `timeout` | A step or the run exceeded its declared wall-clock limit. |
 
@@ -782,7 +782,8 @@ base this AIP's Motivation draws on:
   path (`fillStepStates` runs on both success and failure so a failed
   step still reports which session it was).
   ([`AgentStep`](https://github.com/agentproto/ts/tree/main/packages/workflow-runtime)
-  carries the same `adapter` / `model` / `sessionRef` shape
+  carries the same harness slug (its `adapter` key, see
+  [AIP-15](/docs/aip-15) §Open questions) / `model` / `sessionRef` shape
   `StepRecord.driver` names.)
 - **A run-scoped cache/journal** — `StepCache` (`get`/`set` keyed by a
   namespaced `stepCacheKey`) is exactly the lookup §Journal's "cache
@@ -820,6 +821,13 @@ existing AIPs additively; see [Amendments to existing
 AIPs](#amendments-to-existing-aips) in each amended document's own
 Compatibility section for what changed and why nothing existing breaks.
 
+One field was renamed on 2026-11-08: `StepRecord.driver.adapter` is now
+`StepRecord.driver.harness`, with the same meaning (an AIP-45 harness slug).
+`adapter` is removed from this AIP, not kept as an alias; the reference
+implementation keeps writing the old key until its next breaking release
+(AIP-70 §4), so a consumer that reads both generations reads `harness` first
+and falls back to `adapter`.
+
 ## Security Considerations
 
 - **The journal and event log are host-written, never step-written.**
@@ -851,7 +859,7 @@ Compatibility section for what changed and why nothing existing breaks.
 - **Spend figures are declarative unless a host sources them from the
   driver.** A `step.spend` event self-reported by an untrusted step
   body could under-report to evade `budget-exceeded`. Hosts SHOULD
-  derive `Spend` from the driver/adapter's own accounting (as the
+  derive `Spend` from the driver's own accounting (as the
   reference implementation's `maxTotalCostUsd` does from session cost)
   rather than from a value the step body supplies, wherever the driver
   can report it independently.

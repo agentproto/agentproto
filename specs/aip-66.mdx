@@ -21,7 +21,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/cloud-agent
 | Type | Core |
 | Requires | [AIP-1](/docs/aip-1) (process), [AIP-36](/docs/aip-36) (SANDBOX: the target this one is distinguished from), [AIP-44](/docs/aip-44) (ACP: the wire a cloud session is projected onto), [AIP-45](/docs/aip-45) (HARNESS: the harness manifest a vendor binds to) |
 | Created | 2026-10-14 |
-| Package | `@agentproto/cloud-agent` (spawn resolution, vendor registry, re-attach); `@agentproto/adapter-claude-code-cloud` (first vendor) |
+| Package | `@agentproto/cloud-agent` (spawn resolution, vendor registry, re-attach); `@agentproto/harness-claude-code-cloud` (first vendor; still published as `@agentproto/adapter-claude-code-cloud`) |
 
 ## Abstract
 
@@ -49,7 +49,7 @@ AIP-36 assumes the host boots a box and installs its own daemon and the
 caller's chosen harness inside it. A managed cloud agent breaks both
 assumptions: nothing can be installed in it, and the harness is fixed by
 the vendor. Modelling it as a sandbox provider would make `boot()` lie and
-would let callers pass fields (`installAdapters`, `mounts`, `network`) that
+would let callers pass fields (`installHarnesses`, `mounts`, `network`) that
 can never take effect.
 
 The value is real anyway: the vendor's compute and credits, a session the
@@ -63,7 +63,7 @@ gets its own target with an honest, smaller contract.
 A spawn names the target with a vendor slug:
 
 ```ts
-agent_start({ adapter: "claude-code", cloud: "anthropic", prompt: "..." })
+agent_start({ harness: "claude-code", cloud: "anthropic", prompt: "..." })
 ```
 
 - `cloud` is a vendor slug from the host's **vendor registry**.
@@ -75,22 +75,22 @@ agent_start({ adapter: "claude-code", cloud: "anthropic", prompt: "..." })
 ### 2. Vendor to harness binding
 
 Each registry entry declares the harness or harnesses the vendor runs and
-the adapter that relays to it:
+the harness that relays to it:
 
 ```ts
 interface CloudVendor {
   slug: string            // "anthropic"
   harnesses: string[]     // ["claude-code"]
-  adapter: string         // "claude-code-cloud"
+  relayHarness: string    // "claude-code-cloud"
 }
 ```
 
-- When `adapter` (or its alias `harness`) is set and is not in
-  `harnesses`, and is not the vendor's relay `adapter` itself, the host
+- When `harness` is set and is not in `harnesses`, and is not the
+  vendor's `relayHarness` itself, the host
   MUST refuse the spawn **before any side effect**, with an error that
   names the vendor and the allowed harnesses.
-- When `adapter` is unset, the host resolves it to the vendor's relay
-  adapter.
+- When `harness` is unset, the host resolves it to the vendor's
+  `relayHarness`.
 - An unknown vendor slug MUST be refused, never mapped to a default.
 
 ### 3. Repo source
@@ -116,7 +116,7 @@ A field set to its neutral value counts as unset and is not refused:
 `commandSandbox: "off"`, `browser: false`, `daemonMount: false`, and an
 empty `mcpServers` or `bundles` list.
 
-The refusal names the offending field. The relay adapter SHOULD repeat
+The refusal names the offending field. The relay harness SHOULD repeat
 the `mcpServers` check when the session is created, so that a host that
 forwards the field anyway still fails closed.
 
@@ -227,9 +227,11 @@ hardlinked objects, which section 3 makes moot.
 
 ### Reference implementation (agentproto/ts)
 
-- **Relay.** `@agentproto/adapter-claude-code-cloud` is an ACP stdio relay
+- **Relay.** `@agentproto/adapter-claude-code-cloud` (canonical name
+  `@agentproto/harness-claude-code-cloud`) is an ACP stdio relay
   ([agentproto/ts#1947](https://github.com/agentproto/ts/pull/1947)). It
-  reuses the stream-json to ACP mapping of `@agentproto/adapter-claude-sdk`.
+  reuses the stream-json to ACP mapping of `@agentproto/adapter-claude-sdk`
+  (canonical name `@agentproto/harness-claude-sdk`).
 - **Spawn wiring.** `@agentproto/cloud-agent` adds a vendor registry and
   `resolveCloudSpawn`. It refuses §2 and §4 violations before any side
   effect, with the code `cloud_spawn_refused`
@@ -246,6 +248,12 @@ hardlinked objects, which section 3 makes moot.
 ## Backwards Compatibility
 
 This AIP was titled Managed cloud agents until 2026-10-23 ([AIP-70](/docs/aip-70)).
+
+On 2026-11-08 the `agent_start` field `adapter` became `harness`, the
+AIP-36 field `installAdapters` named in the Motivation became
+`installHarnesses`, and the `CloudVendor` field `adapter` became
+`relayHarness`. `adapter` is removed from
+this AIP, not kept as an alias (AIP-70 §4).
 
 ## Security considerations
 
@@ -267,7 +275,7 @@ This AIP was titled Managed cloud agents until 2026-10-23 ([AIP-70](/docs/aip-70
 2. **Streaming.** Whether `/events/stream` should replace polling as the
    default observe path.
 3. **Second vendor.** Codex cloud tasks are expected to fit sections 1 to
-   8 unchanged; to be confirmed when its adapter lands.
+   8 unchanged; to be confirmed when its harness lands.
 
 ## See also
 

@@ -5,7 +5,7 @@ aip: 45
 status: Review
 type: Schema
 created: 2026-05-08
-updated: 2026-11-03
+updated: 2026-11-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 29, 36, 44]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/harness
@@ -90,8 +90,8 @@ A manifest is **AIP-45-conformant** iff:
    bound `ACP.md`.
 4. When `protocol: "mcp"`, the binary speaks MCP-over-stdio per
    `modelcontextprotocol.io`.
-5. When `protocol: "proprietary"`, the manifest's adapter package
-   (`adapter` field) implements the `AgentCliClient` interface from
+5. When `protocol: "proprietary"`, the manifest's harness package
+   (`harness` field) implements the `AgentCliClient` interface from
    `@agentproto/harness`.
 6. When `modes` is present, every entry has a unique `id` matching
    `^[a-z0-9][a-z0-9\-]*$`; mode patches reference no symbols beyond
@@ -131,10 +131,10 @@ Top-level fields (informative summary):
 | `protocol` | Yes | `acp` \| `mcp` \| `proprietary` \| `print` |
 | `acp` | When `protocol=acp` | Ref to AIP-44 ACP.md describing the wire profile |
 | `mcp` | When `protocol=mcp` | Inline MCP server config |
-| `adapter` | When `protocol=proprietary` | NPM package implementing `AgentCliClient` |
+| `harness` | When `protocol=proprietary` | NPM package implementing `AgentCliClient`. Named `adapter` in earlier drafts; `adapter` is removed (AIP-70 §4). |
 | `print` | When `protocol=print` | Inline print surface config (optional — Claude Code defaults when omitted) |
 | `session` | No | Session settings: mode, idle_timeout_ms, max_turns |
-| `models` | No | Model routing: default, allowed, env-mapped. Each `allowed` entry is a bare id string (provider unstated — the projector MUST NOT guess one) or `{ id, provider?, mode? }`: `id` is unchanged on the wire, `provider` is the ProviderPreset id (or direct provider) that serves and bills the model, `mode` is this adapter's mode id that routes to `provider`. |
+| `models` | No | Model routing: default, allowed, env-mapped. Each `allowed` entry is a bare id string (provider unstated — the projector MUST NOT guess one) or `{ id, provider?, mode? }`: `id` is unchanged on the wire, `provider` is the ProviderPreset id (or direct provider) that serves and bills the model, `mode` is this harness's mode id that routes to `provider`. |
 | `gateways` | No | Gateway endpoints (Anthropic/OpenAI-compatible backends) this harness can be pointed at. Formerly `presets`, which remains a legacy alias. See § Gateways. |
 | `capabilities` | No | Declarative capability flags (mirror of ACP capability map for non-ACP runtimes) |
 | `modes` | No | Mutually-exclusive operation modes (e.g. claude-code's `plan` / `accept-edits` / `bypass-permissions`). One active per turn. |
@@ -158,9 +158,9 @@ mcp:
   args: [serve]
   transport: stdio
 
-# protocol: "proprietary" → MUST declare `adapter` (NPM package)
+# protocol: "proprietary" → MUST declare `harness` (NPM package)
 protocol: proprietary
-adapter: "@agentproto/adapter-gemini"
+harness: "@agentproto/harness-gemini"
 
 # protocol: "print" → one fresh subprocess per turn (headless one-shot).
 # The `print` block is OPTIONAL — omitted, Claude Code defaults apply.
@@ -750,7 +750,7 @@ global config files under `$HOME`, which an OS-level sandbox profile
 denies by default. A `~/...` entry anchors at the operator's home; a
 leading `$VAR`/`${VAR}` is resolved from the per-spawn env and dropped
 when unset. The grant is READ-only: it never widens write access, and
-mutable adapter state belongs in the adapter's state home, not here.
+mutable harness state belongs in the harness's state home, not here.
 
 ### Auth surface
 
@@ -857,7 +857,7 @@ package.
 (Claude Code's `--print`, mastracode) are best driven headless: one
 subprocess per turn, events on stdout. Giving them a dedicated arm
 keeps them out of the `proprietary` arm — which exists for
-in-process adapter packages, a different integration shape — and
+in-process harness packages, a different integration shape — and
 out of long-lived ACP connections, whose stale-proxy failure modes
 the per-turn subprocess simply doesn't have.
 
@@ -980,6 +980,17 @@ stays accepted as a legacy alias, so existing manifests load unchanged; a
 manifest MUST NOT carry both fields. Consumers that read `presets` SHOULD
 read `gateways` first and fall back to `presets`.
 
+### The 2026-11-08 harness-rename amendment (draft)
+
+The `adapter` manifest field is now `harness`, with the same meaning (the
+NPM package that implements `AgentCliClient`) and the same requirement (when
+`protocol=proprietary`). `adapter` is removed, not kept as an alias: a
+manifest that still carries it fails validation, and the fix is a rename of
+the key. The reference implementation keeps reading `adapter` until its next
+breaking release (AIP-70 §4). The canonical package prefix is
+`@agentproto/harness-<slug>` ([AIP-52](/docs/aip-52) §Terminology
+reconciliation); `@agentproto/adapter-<slug>` names are legacy.
+
 ## Security considerations
 
 Inherits AIP-29's threat surface (install/version/auth/sandbox) and
@@ -1013,7 +1024,7 @@ adds the bidirectional-protocol surface.
   shared, a malicious actor with read access can inject prior turns
   into the agent's context. Hosts MUST scope persistent session
   storage to the authenticated identity.
-- **`adapter` packages from npm.** When `protocol: proprietary`, the
+- **`harness` packages from npm.** When `protocol: proprietary`, the
   manifest names an NPM package the runner imports. Hosts MUST treat
   these the same as any other dependency — pin versions, audit
   publishers, prefer first-party packages.
