@@ -246,8 +246,7 @@ What a conforming host does:
 Each of these edits makes the loader refuse the manifest:
 
 - dropping `prefix` while `tools` is non-empty;
-- dropping `mcpName` from the imported entry, or setting its `access` to
-  `write` (an imported id is `read` only);
+- dropping `mcpName` from the imported entry;
 - renaming a tool `id` to `approval.decide`;
 - declaring `bureau.overview` as `read` when its `TOOL.md` carries a
   `mutator` tag;

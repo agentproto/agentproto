@@ -464,7 +464,7 @@
         },
         {
           "if": { "properties": { "id": { "pattern": "^imported:" } } },
-          "then": { "required": ["mcpName"], "properties": { "access": { "const": "read" } } }
+          "then": { "required": ["mcpName"] }
         }
       ]
     },

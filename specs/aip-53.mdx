@@ -396,7 +396,7 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     `access`, `description`, `inputSchema`, `mcpName` and `approvalArg`;
     `approvalArg` MUST NOT be set unless `access` is `approve`; no `id` or
     `mcpName` may start with `approval`; an `imported:` id MUST have an
-    `mcpName` and `access: read`; a bundled id MUST resolve to a TOOL.md
+    `mcpName`; a bundled id MUST resolve to a TOOL.md
     the app bundles, which MUST NOT declare `mutates` or carry a
     `mutator` or `write` tag when the entry is `read`; two entries MUST
     NOT compute the same MCP name, and a computed name MUST NOT exceed 64
@@ -1290,9 +1290,16 @@ imports. Its spelling has no MCP-safe form, so:
 
 - `mcpName` is REQUIRED. The loader MUST refuse an `imported:` entry
   without it;
-- `access` MUST be `read`. The loader MUST refuse any other class for an
-  imported id: nothing in the manifest lets a host check a foreign server's
-  tool against a TOOL.md, so it never offers one as writing or approving;
+- `access` MAY be `read`, `write` or `approve`. Nothing in the manifest
+  lets a host check a foreign server's tool against a TOOL.md, so the class
+  is the author's declaration: an author MUST NOT declare `read` for a tool
+  that changes anything (navigates, clicks, writes a file, posts). A `write`
+  or `approve` imported tool follows the same visibility as a bundled one:
+  hidden in the host's default `read` mode, offered only in a wider mode, to
+  an agent that opts in by name, or through a `requires.apps[].tools`
+  grant. A host that serves exposed tools over any other surface (an HTTP
+  tool-call route, for example) MUST apply the same rule there and MUST
+  NOT run a `write` or `approve` tool without an identified caller session;
 - the host MUST dispatch the call to the named server and to nothing else,
   and never resolves the id among its own tools.
 
@@ -1372,7 +1379,7 @@ back to registering the entries that still look valid.
 declares `exposes` as a closed object and each tool entry as a closed
 object. It expresses the `prefix` pattern, the required keys of an entry,
 the `access` enumeration, the 300-character bound, `approvalArg` only with
-`approve`, an `imported:` id requiring `mcpName` and `access: read`, the
+`approve`, an `imported:` id requiring `mcpName`, the
 `approval` refusal on `id` and `mcpName`, the `ui://` URI pattern and its
 uniqueness, `prefix` being required once `tools` is non-empty, and
 `resources` needing an `imported:` entry (with `if`/`then` and `contains`).
