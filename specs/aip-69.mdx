@@ -337,8 +337,9 @@ command to run (the `command` of section 10) instead.
   `problems` (tested and failed; non-empty means `failed`) and `sideEffects`.
   A host MUST NOT report `verified` for a check it did not run. The report
   MUST NOT carry a token or a session fingerprint.
-- The report states that one re-login fixes every sub-account profile under
-  the parent, and lists those profiles.
+- The report lists the profiles that share the parent. For a source whose
+  parent owns sub-accounts, it also states that one re-login fixes every
+  sub-account profile under the parent.
 
 Reference sources and their login: `opencode-console` runs the console login
 (full verification, including sub-account ownership); `claude-code-oauth`,
