@@ -1,6 +1,6 @@
 ---
 title: "AIP-69: AUTH-PROFILE (auth-profile/v1): a named reference to the credential that pays for a session"
-description: "A runtime primitive for the account a session bills or authenticates through: a named, harness-independent reference to a credential on one billing endpoint, never the secret. Fixes the AuthProfile document (endpoint, method, credential reference, sub-account, subscription), the eligibility predicate that decides which profiles can serve a given harness and route, the profile as an AIP-38 resource (which models it may serve, who may use it, how much it may spend), and the read surface. Referenced by AIP-46 sessions, AIP-67 quota and AIP-38 policy."
+description: "A runtime primitive for the account a session bills or authenticates through: a named, harness-independent reference to a credential on one billing endpoint, never the secret. Fixes the AuthProfile document (endpoint, method, credential reference, sub-account, subscription), the eligibility predicate that decides which profiles can serve a given harness and route, the profile as an AIP-38 resource (which models it may serve, who may use it, how much it may spend), the read surface, and the contract for re-authenticating the account behind a profile (parent and sub-account modeling, expiry, a typed "log in again" error). Referenced by AIP-46 sessions, AIP-67 quota and AIP-38 policy."
 aip: 69
 status: Draft
 type: Standards Track
@@ -37,7 +37,11 @@ This AIP defines:
 2. **eligibility**: which profiles can serve a given harness, route and model;
 3. the profile as an [AIP-38](/docs/aip-38) **resource**: which models it may
    serve, who may use it, how much it may spend;
-4. the **read and write surface**, which never returns credential material.
+4. the **read and write surface**, which never returns credential material;
+5. the **parent account** behind a profile and the **sub-accounts** it owns,
+   the **expiry** a read reports for it, and **re-authentication**: the verb
+   that logs the parent in again, how it is verified, and the typed error a
+   spawn returns when it is needed.
 
 Three AIPs already depend on this concept without owning it:
 [AIP-46](/docs/aip-46) binds a session to a profile (`access.profileRef`) and
@@ -236,6 +240,135 @@ Binding, refusing and unbinding a profile are host lifecycle events
 session id and, on refusal, the eligibility rule or the AIP-38 decision
 record. They never carry credential material.
 
+
+### 7. Parent account and sub-account
+
+A **parent account** is the login a credential source is bound to (a console
+login, a harness's own OAuth login). It may own zero or more
+**sub-accounts**: organizations, workspaces, projects. A profile's
+`subaccount` pin (section 1) names one of them.
+
+- **The login belongs to the parent, never to a sub-account.** A host MUST
+  resolve a sub-account profile's credential from the parent account that
+  owns the pinned sub-account, and MUST NOT resolve it from whichever account
+  the provider's own client currently has active. When no stored login owns
+  the pin, or the owning login is expired or rejected, the host MUST refuse
+  (section 10) and MUST NOT fall back to another login.
+- **Re-login is per parent.** One re-authentication (section 9) of the parent
+  makes every sub-account profile under it usable again. Switching from one
+  sub-account to another is a change of profile, and MUST NOT require a
+  re-login while the parent's session is valid.
+- A source with no sub-account concept has a parent and no sub-accounts; its
+  profiles are the degenerate case.
+- Which account a provider's client considers active is provider state, not
+  part of this document. A host MUST NOT depend on it for resolution.
+
+### 8. Expiry on reads
+
+`auth_profile_list` (section 5), and any other read that lists a profile
+whose credential comes from a `source`, SHOULD add, read from the **parent
+account's** session (or the OAuth credential of a harness login):
+
+```ts
+interface AuthStatusFields {
+  expiresAt: string | null          // ISO-8601, the parent session's expiry; null when none is known
+  state:     "ok" | "expiring" | "expired" | "unknown"
+  parent?:   { source: string; id?: string; label?: string; loggedIn: boolean }
+  note?:     string                 // a caveat worth showing (why no expiry, ...)
+}
+```
+
+- `state` is derived from `expiresAt` and the clock: `expired` when less than
+  60 seconds remain (a session that close to its end is already unusable at
+  spawn), `expiring` within 24 hours, `ok` beyond that, `unknown` when no
+  expiry is recorded or readable (an API key, a source that does not expose
+  one).
+- No stored login for the parent is `expired` with `parent.loggedIn: false`:
+  there is nothing to spawn with.
+- A source whose own client renews the access token itself (and holds a
+  refresh token) SHOULD report `unknown`, keep `expiresAt` as the access
+  token's expiry and say so in `note`: an expired access token there is not by
+  itself a reason to log in again.
+- A **sub-account profile reports its parent's** `expiresAt` and `parent`,
+  never an expiry or token of its own.
+- These fields are derived, never stored in the profile document. They MUST
+  NOT carry a token, a refresh token or a session fingerprint.
+
+### 9. Re-authentication
+
+A conforming host SHOULD offer a verb that logs a profile's parent account in
+again. Through a projection with a terminal it is `auth reauth <profile|parent>`
+(the reference CLI also takes `--check`, read-only, and `--json`). A projection
+with no terminal (MCP, HTTP) MUST NOT run an interactive login: it returns the
+command to run (the `command` of section 10) instead.
+
+- The target is a profile id, or a bare parent (a credential source name or
+  an alias of it). A profile resolves to its parent through its `source`; a
+  profile that holds a stored key (`credentialRef`) has no login to redo, and
+  the verb MUST say so and exit non-zero.
+- **Per-source adapter.** Each credential source supplies one small adapter:
+  read-only `inspect` of the parent (id, label, whether a login is stored,
+  expiry), a login `plan` (a command to run, or manual instructions), and a
+  `verify` run after the login. Adding a source is adding an adapter; no
+  other part of the host changes.
+- **The login stays interactive; the rest is automated.** The host MUST run
+  the provider's own login with the terminal attached, and MUST do the
+  before and after reads, the verification and the report itself. Where the
+  provider's client has no login command that can be driven (the plan is
+  manual), the host MUST print what to run and, with no terminal, exit with a
+  distinct non-zero status rather than claim success.
+- **Verify the expected account.** After the login the host MUST verify that
+  the account now stored is the one that was expected: for a sub-account
+  profile, that the stored login owns the pinned sub-account and that the
+  provider accepts its session; where a login existed before, that it is the
+  same parent account. When there was no earlier login to compare with, the
+  host MUST state that only ownership could be checked.
+- **Leave other accounts alone.** The login MUST NOT leave other stored
+  accounts broken. The host MUST check that the other stored logins are
+  unchanged, and report any that the login replaced or removed.
+- **Do not flip the active account silently.** If the login moved the
+  provider's own active account, the host MUST report it as a side effect,
+  and MUST NOT undo it or change it on its own. Because resolution does not
+  depend on it (section 7), the report states that no profile was affected.
+- **Honest report.** The result is a verification with a `status`
+  (`verified`, `failed`, `unverified`) and four lists: `checked` (tested and
+  passed), `notChecked` (what could not be tested, and why; for instance that
+  the provider accepts the new login when the host has no way to exercise it),
+  `problems` (tested and failed; non-empty means `failed`) and `sideEffects`.
+  A host MUST NOT report `verified` for a check it did not run. The report
+  MUST NOT carry a token or a session fingerprint.
+- The report lists the profiles that share the parent. For a source whose
+  parent owns sub-accounts, it also states that one re-login fixes every
+  sub-account profile under the parent.
+
+Reference sources and their login: `opencode-console` runs the console login
+(full verification, including sub-account ownership); `claude-code-oauth`,
+`codex` delegate to the harness's own `login` command; `gemini` has no login
+command and is manual.
+
+### 10. The "log in again" error
+
+When a spawn fails because the owning parent's session is `expired`,
+missing, or rejected by the provider, the refusal MUST name the command that
+fixes it, in its message, and MUST carry it as data:
+
+```ts
+interface ReauthHint {
+  command:  string                                   // e.g. "agentproto auth reauth <profile>"
+  source:   string                                   // the credential source of the parent
+  reason:   "expired" | "missing" | "rejected"
+  profile?: string                                   // the profile that needed the login
+  parent?:  { id?: string; label?: string; expiredAt?: number }   // epoch ms
+}
+```
+
+carried as `details.reauth` of the host's existing credential-unresolved
+refusal (the reference implementation keeps its `auth_source_unresolved`
+code and adds `details.reauth`; no new code is introduced). A bare provider
+status (a 401 or 403) MUST NOT be the whole error. A failure that is not a
+login problem (a provider outage, a network error) MUST NOT carry a hint. The
+hint MUST NOT carry a token.
+
 ## Rationale
 
 **Why a primitive and not a field of AIP-46.** Sessions are not the only
@@ -252,6 +385,20 @@ reference implementation came from conflating the two.
 rule on a resource. Expressing it as a profile field gave the
 implementation a second, weaker access engine (no deny, no audit record,
 no delegation ceiling). AIP-38 already has all three.
+
+**Why re-login is per parent.** A token authenticates a person to a
+provider; the sub-accounts (organizations, workspaces) are things that
+person belongs to. Modeling the login on the sub-account makes the same
+login expire many times over and makes "switch workspace" look like "sign in
+again". With the login on the parent, expiry has one owner, one verb fixes
+all of its profiles, and resolution can pick the right login by ownership
+instead of trusting whatever the provider's client had active last.
+
+**Why verification reports what it did not check.** A re-login that cannot
+tell whether the provider accepts the new session, or which account was
+meant, is still useful, but only if it says so. A fixed vocabulary
+(`checked`, `notChecked`, `problems`, `sideEffects`) keeps a green result from
+meaning more than it proved.
 
 **Why no secret in the document.** Profiles are listed, diffed, shown in
 pickers and sent to other processes. The only safe design is one where the
@@ -270,6 +417,10 @@ document never had the secret to leak.
   policy alone decides.
 - The reference implementation's `models` and `costBudget` fields keep
   working as host short forms, evaluated as AIP-38 grants and limits.
+- Sections 7 to 10 add no field to the stored document (`expiresAt`, `state`
+  and `parent` are derived on read) and no new refusal code. A host that does
+  not implement them keeps its current behavior; a client that ignores
+  `details.reauth` sees the same error code as before.
 
 ## Security Considerations
 
@@ -286,6 +437,19 @@ document never had the secret to leak.
   login, environment variables) MUST ask before creating a profile from
   them, and MUST NOT copy the secret out of its original store without that
   consent.
+- **No credential in expiry, reauth or the hint.** The fields of section 8,
+  the report of section 9 and the hint of section 10 are all derived from the
+  parent's state. They MUST NOT carry a token, a refresh token or a session
+  fingerprint; a host fingerprints a session only to detect that a login
+  replaced it, and never emits the digest.
+- **Resolve by ownership.** Resolving a sub-account profile through the
+  provider's active account (section 7) can present one account's session
+  for another account's organization. Resolution by the owning parent, with
+  refusal instead of fallback, is what keeps a spawn from billing or acting
+  as an account the user did not name.
+- **The interactive login is the provider's.** A host runs the provider's own
+  login with the terminal attached and never reads or relays the credential
+  the user types; it reads the stored result afterwards, read-only, to verify.
 - **Sub-account identifiers** can be sensitive (organization ids). Hosts
   SHOULD treat them like profile metadata, visible to the user only.
 
@@ -294,7 +458,14 @@ document never had the secret to leak.
 `@agentproto/auth` (agentproto/ts): `profile-types.ts` (`AuthProfile`,
 `ModelCuration`, `CostBudget`, `SubaccountPin`), `profile-store.ts`
 (`~/.agentproto/auth-profiles.json`), `eligibility.ts`
-(`eligibleProfiles`, `methodsPresentable`), `subaccounts.ts`. The `models`
+(`eligibleProfiles`, `methodsPresentable`), `subaccounts.ts`, and `reauth.ts`
+(`ReauthAdapter` and its registry, `deriveAuthState`, `profileAuthStatus`,
+`AuthReauthRequiredError`, `ReauthHint`). Per-source adapters live next to the
+source: `@agentproto/adapter-opencode` (`reauth.ts`, full verification) and
+`@agentproto/cli` (`reauth/`: Claude Code, Codex, Gemini). The CLI verb is
+`agentproto auth reauth`; expiry shows in `auth profile list` and `auth status`.
+Not yet in the reference implementation: an MCP or HTTP projection of the
+verb, and the expiry fields on the MCP `auth_profile_list` read. The `models`
 and `costBudget` short forms are evaluated outside AIP-38 today; moving them
 onto the AIP-38 evaluator is follow-up work tracked with the AIP-38
 amendment.
@@ -311,7 +482,15 @@ amendment.
 2. **AIP-19 access grants.** AIP-19 has its own `access` grant list
    (role, user, tool, workflow, workspace). It predates AIP-38 and overlaps
    it. Out of scope here; worth aligning separately.
-3. **Default profile order.** Section 2 lets a host pick a profile when none
+3. **A remote projection of `reauth`.** Section 9 says a terminal-less
+   projection returns the command instead of running it. Whether a host
+   should also offer an out-of-band way to complete a browser sign-in for a
+   remote operator (a link, a device code) is left open.
+4. **Expiry for sources with no readable expiry.** Section 8 reports
+   `unknown`. Whether a host should probe the provider to turn `unknown` into
+   `ok` or `expired` (at the cost of a network call on every list) is left
+   open.
+5. **Default profile order.** Section 2 lets a host pick a profile when none
    is named. Should the order be a field here (`priority`), or stay in the
    session config (AIP-46 amendment) as an ordered fallback? The current
    draft leaves it to the session config.
