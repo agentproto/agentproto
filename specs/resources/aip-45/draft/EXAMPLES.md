@@ -5,7 +5,7 @@ against [`./HARNESS.schema.json`](./HARNESS.schema.json).
 
 ## ACP arm — Hermes Agent
 
-The reference adapter for `protocol: "acp"`. Hermes ships an ACP server
+The reference harness for `protocol: "acp"`. Hermes ships an ACP server
 out of the box; the manifest just wires install + version + spawn.
 
 ```yaml
@@ -146,14 +146,14 @@ tags: [goose, block, mcp, agent-runtime]
 ## Proprietary arm — Gemini CLI
 
 `protocol: "proprietary"` for agents whose CLI is a REPL or
-custom protocol. The manifest names an NPM adapter implementing
+custom protocol. The manifest names an NPM harness package implementing
 `AgentCliClient`.
 
 ```yaml
 ---
 name: gemini-cli
 id: gemini-cli
-description: Google's Gemini CLI — REPL-style harness. Driven via a node-pty wrapper that parses prompts and streams completions; bridged to AIP-45 stream events through a proprietary adapter package.
+description: Google's Gemini CLI — REPL-style harness. Driven via a node-pty wrapper that parses prompts and streams completions; bridged to AIP-45 stream events through a proprietary harness package.
 version: 0.1.0
 bin: gemini
 install:
@@ -170,7 +170,7 @@ auth:
     env: [GEMINI_API_KEY]
 sandbox: ./SANDBOX.md
 protocol: proprietary
-adapter: "@agentproto/adapter-gemini-cli"
+harness: "@agentproto/harness-gemini-cli"
 session:
   mode: ephemeral
 capabilities:
@@ -318,7 +318,7 @@ Every example MUST satisfy:
 
 1. The schema at `./HARNESS.schema.json`
 2. Cross-field rules: `protocol=acp ⇒ acp ref present`,
-   `protocol=mcp ⇒ mcp block present`, `protocol=proprietary ⇒ adapter
+   `protocol=mcp ⇒ mcp block present`, `protocol=proprietary ⇒ harness
    present`, `session.mode=resumable ⇒ capabilities.resumable: true`
 3. AIP-29 install/version/auth schemas (validated via `$ref`)
 4. AIP-36 sandbox schema

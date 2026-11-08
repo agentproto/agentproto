@@ -96,7 +96,7 @@ required `brief` artifact:
   "steps": [
     { "stepId": "fetch", "status": "succeeded", "driver": { "kind": "tool" }, "startedAt": "…T10:00:00Z", "endedAt": "…T10:00:01Z" },
     { "stepId": "parse", "status": "succeeded", "driver": { "kind": "tool" }, "startedAt": "…T10:00:01Z", "endedAt": "…T10:00:02Z" },
-    { "stepId": "draft", "status": "succeeded", "driver": { "kind": "agent", "adapter": "claude-code", "model": "claude-sonnet-5", "sessionId": "sess_9c1e" }, "startedAt": "…T10:00:02Z", "endedAt": "…T10:00:14Z" },
+    { "stepId": "draft", "status": "succeeded", "driver": { "kind": "agent", "harness": "claude-code", "model": "claude-sonnet-5", "sessionId": "sess_9c1e" }, "startedAt": "…T10:00:02Z", "endedAt": "…T10:00:14Z" },
     { "stepId": "save", "status": "succeeded", "driver": { "kind": "tool" }, "startedAt": "…T10:00:14Z", "endedAt": "…T10:00:14Z" }
   ],
   "createdAt": "…T09:59:59Z",
@@ -136,7 +136,7 @@ the result](#publishing-the-result) for what moves it further.
   { "seq": 6,  "ts": "…T10:00:01Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "parse", "type": "step.started",   "data": { "driver": { "kind": "tool" } } },
   { "seq": 7,  "ts": "…T10:00:02Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "parse", "type": "step.output",    "data": { "output": { "tiers": ["Free", "Pro", "Enterprise"] } } },
   { "seq": 8,  "ts": "…T10:00:02Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "parse", "type": "step.succeeded", "data": {} },
-  { "seq": 9,  "ts": "…T10:00:02Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.started",   "data": { "driver": { "kind": "agent", "adapter": "claude-code", "sessionId": "sess_9c1e" } } },
+  { "seq": 9,  "ts": "…T10:00:02Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.started",   "data": { "driver": { "kind": "agent", "harness": "claude-code", "sessionId": "sess_9c1e" } } },
   { "seq": 10, "ts": "…T10:00:14Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.output",    "data": { "output": { "text": "# Pricing Brief\n…" } } },
   { "seq": 11, "ts": "…T10:00:14Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.spend",     "data": { "amount": 0.014, "currency": "USD", "unit": "tokens" } },
   { "seq": 12, "ts": "…T10:00:14Z", "runId": "run_01J8Z3F9K2Q7", "stepId": "draft", "type": "step.succeeded", "data": {} },

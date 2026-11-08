@@ -11,7 +11,7 @@ aip: 15
 status: Review
 type: Schema
 created: 2026-04-28
-updated: 2026-11-03
+updated: 2026-11-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 7, 14, 16, 30, 58]
 resources: ./resources/aip-15/draft
@@ -510,9 +510,9 @@ and its runtime projection in `@agentproto/workflow-runtime`
 
 | Field | Type | Description |
 |---|---|---|
-| `agent.ref` | string | App-scoped agent id (e.g. `"@my-app/reviewer"`) the host resolves to a concrete adapter + spawn options at compile time. An unresolvable ref fails compilation, never the run. Omit to spawn a plain `adapter`, or to reuse via `sessionRef`. |
+| `agent.ref` | string | App-scoped agent id (e.g. `"@my-app/reviewer"`) the host resolves to a concrete harness + spawn options at compile time. An unresolvable ref fails compilation, never the run. Omit to spawn a plain harness through `adapter`, or to reuse via `sessionRef`. |
 | `prompt` | string | Required. The prompt sent to the session. |
-| `adapter` | string | Harness slug for spawning a NEW session. Ignored (and unnecessary) when `agent.ref` resolves one. Omit both `adapter` and `agent` to reuse via `sessionRef`. |
+| `adapter` | string | AIP-45 harness slug for spawning a NEW session. The key keeps the name `adapter` for now; see [Open questions](#open-questions) 6. Ignored (and unnecessary) when `agent.ref` resolves one. Omit both `adapter` and `agent` to reuse via `sessionRef`. |
 | `sessionRef` | string | Reuse an earlier agent step's spawned session, by that step's `id`. |
 | `sandbox` | string \| object | Run the step's session inside a sandbox — a provider slug or an inline spec (`{ provider: ... }`). Only meaningful with `adapter`; a `sessionRef` reuse inherits the referenced session's placement. Hosts without sandbox support MUST fail the spawn loudly rather than silently running on the host. |
 | `cacheable` | boolean | Cache this step's output under the run's cacheKey. Default `false`. |
@@ -520,8 +520,8 @@ and its runtime projection in `@agentproto/workflow-runtime`
 | `retry` | object | The common `retry` block (`{ max_attempts, backoff, initial_ms }`), applied to **transport failures only** — see "Transport retry" below. Unset ⇒ one retry for a session lost mid-turn. `max_attempts: 1` disables it. |
 | `outputSchema` | JSON Schema | Validates the session's final message; re-prompts on mismatch. |
 | `policy` | object | `awaiting`: `"auto-allow"` (with `prompt`) \| `"escalate"` (with optional `webhookUrl`, `timeoutMs`) \| `"fail"` — what to do when the session asks for something outside its permission. |
-| `options` | object | Adapter option id → value, forwarded to a NEW spawn's `startSession({ options })`. Only meaningful with `adapter`; ignored on a `sessionRef` reuse. |
-| `harness` | object | Harness pinning for this step's spawn — optional `model`, `effort`, `role`, `tools` (per-spawn allowlist), `skills`, `cwd`, `promptFile` (+ loader-computed `promptSha`), and `knowledge[]` (AIP-10 corpus materialized into the step's cwd under `.knowledge/` before the session runs). Precedence when a field is also set elsewhere: step `harness` > the resolved AGENT.md's frontmatter > caller args > adapter default. |
+| `options` | object | Harness option id → value, forwarded to a NEW spawn's `startSession({ options })`. Only meaningful with `adapter`; ignored on a `sessionRef` reuse. |
+| `harness` | object | Harness pinning for this step's spawn — optional `model`, `effort`, `role`, `tools` (per-spawn allowlist), `skills`, `cwd`, `promptFile` (+ loader-computed `promptSha`), and `knowledge[]` (AIP-10 corpus materialized into the step's cwd under `.knowledge/` before the session runs). Precedence when a field is also set elsewhere: step `harness` > the resolved AGENT.md's frontmatter > caller args > harness default. |
 
 ```yaml
 - id: review-draft
@@ -573,7 +573,7 @@ budget; a retry that would exceed it fails `budget-exceeded` instead.
 gate. When the step declares no `retry`, a host SHOULD still retry a
 session lost mid-turn once (the reference runtime waits 1 s); a spawn
 failure is retried only under a declared `retry`, since it is usually
-deterministic (a bad cwd, a missing adapter) and a fan-out's spawn
+deterministic (a bad cwd, a missing harness) and a fan-out's spawn
 circuit breaker needs to see it at once. A step body SHOULD be safe to
 re-run: the lost session may have left partial edits in the workspace.
 Each retry is reported as AIP-58's `step.retrying` event.
@@ -1088,5 +1088,21 @@ in-process privilege, egress enforcement), see
    handle this differently; spec is silent for now.
 5. **Sub-second timing primitives**: `kind: "wait"` for explicit
    delays — useful enough to standardise, or punt?
+6. **The `adapter` key of a `kind: "agent"` step (open, 2026-11-08).** The
+   agent-CLI concept is named `harness` everywhere else
+   ([AIP-70](/docs/aip-70), AIP-45, AIP-46), so the step's `adapter` string
+   (the harness slug) is the last agent-CLI `adapter` in the corpus. It
+   cannot simply be renamed `harness`: the step already has a `harness`
+   block (model and capability pinning). Two options, neither chosen yet:
+   - **Absorb the slug into the block**: `harness: { slug, model, effort,
+     ... }`. One key names the harness and how it is pinned. The shape of
+     the existing block changes.
+   - **Rename the block to `pin`**: `harness: "claude-code"` is then the
+     slug and `pin: { model, effort, ... }` is the pinning. Two keys, each
+     with one meaning, and the block's name changes.
+   Until this is settled the step keeps `adapter` (string) and `harness`
+   (block) as written above, and the rename is not part of the AIP-45,
+   46, 41 and 58 amendments of 2026-11-08 that renamed the other
+   agent-CLI fields.
 
 These remain open until enough adapters ship to settle empirically.

@@ -1,6 +1,6 @@
 ---
 title: "AIP-46: SESSION (session/v1): long-running multi-turn agent orchestration"
-description: A generic session-management protocol for orchestrating long-running, multi-turn harnesses (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-adapter spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-54 (REF) as the session's ground.
+description: A generic session-management protocol for orchestrating long-running, multi-turn harnesses (Hermes, Claude Code, OpenCode, …) on a host. Standardises the lifecycle (spawn → multi-turn → kill), the data model (sessions[] with status / ground / workspace bindings, nested via parentSessionId), the over-the-wire surface (HTTP + SSE + MCP tools), the workspace-resolution pattern that lets a single host serve many bound directories, the per-workspace state partitioning that keeps one workspace's history from evicting another's, and the spawn gate that decides whether a session may delegate to further sessions. Layers over AIP-45 (AGENT-CLI) for the per-harness spawn semantics and AIP-44 (ACP) for the wire format inside one turn; binds AIP-42 (AGENT) as the session's definition, AIP-38 (POLICY) as the delegation authority, and AIP-54 (REF) as the session's ground.
 aip: 46
 status: Review
 type: Schema
@@ -46,7 +46,7 @@ needs:
 A daemon implementing this AIP becomes a **control plane for local
 agents**. Any host (cloud orchestrator, IDE extension, mobile remote)
 can drive it through the standard surface — HTTP routes, an SSE
-stream, and MCP tools — without knowing which adapter is wrapped.
+stream, and MCP tools — without knowing which harness is wrapped.
 
 A session is the *running instance*; what it runs is an
 [AIP-42](/docs/aip-42) AGENT. AIP-46 owns the process boundary and
@@ -59,7 +59,7 @@ human can read and sign, not inside the daemon.
 AIP-46 is opinionated about the lifecycle and the data shape; it is
 *not* opinionated about the wire format inside a turn (that's
 AIP-44/ACP via AIP-45's `protocol` discriminator). Hosts that already
-support AIP-45 adapters get AIP-46 by adopting the registry +
+support AIP-45 harnesses get AIP-46 by adopting the registry +
 endpoint table below.
 
 ## Motivation
@@ -162,7 +162,7 @@ interface Session {
   /** Stable id for the lifetime of the session. Caller-opaque. */
   id: string
   /** Harness slug from the AIP-45 manifest the session wraps. */
-  adapterSlug: string
+  harness: string
   /** Workspace handle (§Workspaces) this session binds to. A host
    *  evaluating a workspace-scoped grant derives the binding itself and
    *  does not read it from this field (§Who may message whom rule 5).
@@ -198,7 +198,7 @@ interface Session {
   operatorLabel?: string
 
   /** The AIP-42 AGENT this session runs, when one was bound at spawn.
-   *  Absent for a bare adapter spawn (adapter default behaviour).
+   *  Absent for a bare harness spawn (harness default behaviour).
    *  Persisted: a consumer MUST be able to ask what a live session is
    *  running without replaying its prompt. */
   agentSlug?: string
@@ -333,7 +333,7 @@ workspaces, the directory holds what each one accumulated.
 | the sessions registry snapshot | MUST be per-bucket |
 | durably-kept transcripts / per-session output | SHOULD be per-bucket |
 | any other store whose records carry a workspace binding | SHOULD be per-bucket |
-| stores with no workspace binding (host config, pairings, adapter installs) | MUST stay global — bucketing them would assert a binding that does not exist |
+| stores with no workspace binding (host config, pairings, harness installs) | MUST stay global — bucketing them would assert a binding that does not exist |
 
 Hosts MAY choose a different root; the *partition*, not the path, is
 what this section requires.
@@ -431,7 +431,7 @@ A host that resolves an AGENT MUST record it as `agentSlug` on the
 session. A host MAY bind a host-configured default AGENT to a spawn
 that names none, and MUST then record it as `agentSlug`; §Who may
 spawn whom rule 3 bounds it like any other binding. A session to which
-no AGENT is bound, by request or by default, runs the adapter's
+no AGENT is bound, by request or by default, runs the harness's
 default behaviour and MUST be treated as declaring no `delegates_to`,
 that is deny (below).
 
@@ -484,9 +484,9 @@ This is the normative core.
   the sessions that can reach loopback, and MUST NOT describe its gate
   as binding them (the opening paragraph of that section).
 - **Removing the actions from the surface the host injects is defence
-  in depth, and MUST NOT be the only mechanism.** An adapter that
+  in depth, and MUST NOT be the only mechanism.** A harness that
   carries its own configuration for the host's endpoint will connect
-  to the ungated one; an adapter with a native delegation facility
+  to the ungated one; a harness with a native delegation facility
   will not use the host's surface at all. A host that gates only the
   URL it hands out will report a child as denied while that child
   delegates freely — the worst available outcome, because it is
@@ -622,8 +622,8 @@ The rules:
    that equals the id of a session it spawned.
 8. **Enforcement never outruns delivery.** A host MUST NOT enforce
    rules 3 and 4 against callers on a surface, or spawned through an
-   adapter, to which it does not yet deliver the credential under
-   rule 2. It MAY enforce per surface and per adapter and MUST report
+   harness, to which it does not yet deliver the credential under
+   rule 2. It MAY enforce per surface and per harness and MUST report
    which it enforces; until it enforces everywhere it delivers
    everywhere, it does not conform to rules 3 and 4.
 9. **A host may require proof.** A host MAY require `proven` for any
@@ -886,16 +886,16 @@ failed to start.
 
 An honest boundary, because implementations have shipped believing
 otherwise. **Everything in §Delegation governs surfaces the host
-grants.** Every adapter also ships its own equivalent of those
+grants.** Every harness also ships its own equivalent of those
 surfaces, and the host's rules do not reach them:
 
-| The host governs | The adapter's ungoverned twin |
+| The host governs | The harness's ungoverned twin |
 |---|---|
 | the delegation actions on the host's own gateway | a native task / sub-agent facility, spawning off-protocol |
 | host fs / exec tools anchored to the session's ground | the CLI's own built-in shell and file tools |
-| what the host injects into the child's config | what the adapter already has in *its* config |
+| what the host injects into the child's config | what the harness already has in *its* config |
 
-The pattern is one fact wearing three hats: **an adapter can do
+The pattern is one fact wearing three hats: **a harness can do
 natively whatever the host can do for it, and the host's version is
 the only one with rules on it.** A native sub-agent spawn has no
 session id and no parent edge — there is nothing to gate. A native
@@ -911,17 +911,17 @@ shell — the common case — ground is an **orientation default**: it
 says where work starts, not where it can go, and no amount of
 symlink-checking at spawn changes that. Hosts SHOULD know which of the
 two they are running and MUST NOT describe the second as the first.
-Turning ground into a real boundary for an adapter with its own shell
+Turning ground into a real boundary for a harness with its own shell
 is [AIP-36](/docs/aip-36)'s job, not this AIP's.
 
 Consequences a conforming host MUST accept:
 
 - It MUST NOT report as gated anything it did not actually gate.
   A child spawned off-protocol is invisible, not denied; a path read
-  through the adapter's own shell is unbounded, not confined.
-- It SHOULD disable the native facility through the adapter's AIP-45
-  options wherever the adapter exposes a flag, and SHOULD treat the
-  absence of such a flag as a material property of that adapter.
+  through the harness's own shell is unbounded, not confined.
+- It SHOULD disable the native facility through the harness's AIP-45
+  options wherever the harness exposes a flag, and SHOULD treat the
+  absence of such a flag as a material property of that harness.
 - It SHOULD treat [AIP-36](/docs/aip-36) as the only real backstop.
   A boundary the child's own tooling can step over is a convention.
   Where a host needs containment rather than convention, the
@@ -953,8 +953,8 @@ The host MUST expose these routes under a fixed prefix (default
 session **alive and idle**, ready for the next prompt with its context
 intact. It is the wire form of the Ctrl-C a human would press at the
 agent's own TUI, and hosts SHOULD implement it as exactly that (ACP
-`session/cancel`, or an adapter-specific SIGINT for process/PTY-backed
-adapters).
+`session/cancel`, or a harness-specific SIGINT for process/PTY-backed
+harnesses).
 
 It is deliberately **not** a status transition: an interrupted session
 stays `running` (see §Status transitions), which is the whole distinction
@@ -970,7 +970,7 @@ turn-end should not have to distinguish "stopped it" from "it had already
 finished", and both leave the session in the state the consumer asked
 for.
 
-Hosts MUST return 409 when the resolved adapter cannot cancel a turn at
+Hosts MUST return 409 when the resolved harness cannot cancel a turn at
 all: that is a capability refusal the consumer can act on (fall back to
 `kill`, or surface it), not a server fault.
 
@@ -988,9 +988,9 @@ user never asked for.
 {
   /** AIP-45 harness slug: which harness runs. Required unless `config` or
    *  `preset` supplies it. */
-  adapter: string
+  harness: string
   /** AIP-42 AGENT ref — WHAT it runs (prompt, skills, delegates_to,
-   *  policy). Optional; absent ⇒ adapter default + no delegation.
+   *  policy). Optional; absent ⇒ harness default + no delegation.
    *  See §Delegation. */
   agent?: string
   /** The AIP-9 operator the session runs for, an AIP-54 `operator:` ref
@@ -1012,7 +1012,7 @@ user never asked for.
   prompt?: string
   /** Free-text label for the descriptor. */
   label?: string
-  /** How the harness runs (2026-10-23, §Session config). `adapter` above
+  /** How the harness runs (2026-10-23, §Session config). `harness` above
    *  MAY be omitted when `config.harness` or the preset supplies it; when
    *  both are set they MUST be equal. */
   config?: SessionConfig
@@ -1056,13 +1056,13 @@ subtree `simone/docs`, written with slashes as in AIP-54's
 - A nested spawn's ground still narrows (§Delegation), so a child's node
   scope is its parent's or one nested inside it.
 
-#### The agent and the adapter
+#### The agent and the harness
 
-`adapter` and `agent` are orthogonal and both may be present: the
-adapter is the runtime (which binary), the agent is the definition
+`harness` and `agent` are orthogonal and both may be present: the
+harness is the runtime (which binary), the agent is the definition
 (which prompt, skills, and delegation grant). The same
-`reviewer` AGENT MAY be run on any conforming adapter; the same
-adapter MAY run any agent. Hosts MUST NOT infer one from the other.
+`reviewer` AGENT MAY be run on any conforming harness; the same
+harness MAY run any agent. Hosts MUST NOT infer one from the other.
 
 #### SSE event format
 
@@ -1097,7 +1097,7 @@ table below so MCP clients can drive sessions through the same connection:
 
 | Tool | Inputs | Notes |
 |---|---|---|
-| `agent_start` | `{adapter, agent?, operator?, ground?, prompt?, label?, config?, preset?, policy?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
+| `agent_start` | `{harness, agent?, operator?, ground?, prompt?, label?, config?, preset?, policy?}` | Returns the `Session` JSON. Subject to §Delegation when the caller is a session. |
 | `agent_prompt` | `{sessionId, prompt}` | Fire-and-forget — call `agent_output` to read the reply. A delegation action (§Delegation). |
 | `agent_sessions_list` | `{onlyAlive?: boolean}` | Returns `{sessions: Session[]}` |
 | `agent_output` | `{sessionId, lastN?: number}` | Returns the last N ring-buffer lines |
@@ -1268,7 +1268,7 @@ forged; it does not make the body trustworthy.
 |---|---|---|
 | `fyi` | inbox only, no wake | inbox only |
 | `next-turn` | start a turn | queue; deliver after the current turn ends naturally |
-| `steer` | start a turn | inject into the running turn if the adapter supports steering ([AIP-44](/docs/aip-44) `_session/steering`), else as `next-turn` |
+| `steer` | start a turn | inject into the running turn if the harness supports steering ([AIP-44](/docs/aip-44) `_session/steering`), else as `next-turn` |
 | `interrupt` | start a turn | cancel the turn and deliver ([§Interrupt](#interrupt-added-2026-07-17)) |
 
 A host MAY surface the unread `fyi` messages of a session to the model
@@ -1281,7 +1281,7 @@ MUST NOT also be delivered as a turn.
 
 A host MUST only steer into a turn **it** started and has in flight — never
 into a turn the agent began on its own (an autonomous background-task cycle,
-whose result the host may never see) — and SHOULD request the adapter's
+whose result the host may never see) — and SHOULD request the harness's
 "prompt required" idle behaviour so a steer that arrives after the turn
 settled is handed back rather than starting a detached turn. Hosts SHOULD
 rate-limit steers per recipient; the excess is delivered as `next-turn`.
@@ -1328,7 +1328,7 @@ urgency of an item before it enters the inbox, never raise it.
 
 ### Output projection
 
-When the underlying adapter speaks AIP-44/ACP (the common case),
+When the underlying harness speaks AIP-44/ACP (the common case),
 the host SHOULD project structured events into the ring buffer with
 human-readable prefixes:
 
@@ -1434,7 +1434,7 @@ turn and aggregated over the session's lifetime:
   /** Marginal cost of the session, in USD (float): what the session
    *  would have cost at the public API price. In "api" mode this is
    *  the actual bill; in "subscription" mode it is the informative
-   *  API-equivalent price (may be 0 if the adapter does not report
+   *  API-equivalent price (may be 0 if the harness does not report
    *  it); in "free" mode, 0.
    *  MUST NOT be the basis of a quality-per-USD decision when
    *  billingMode ≠ "api". */
@@ -1545,7 +1545,7 @@ cost.
 > (field names, literals, tool names) are English and final.*
 
 **Problem.** `SpawnAgentRequest` names three axes: which harness
-(`adapter`), what it runs (`agent`), where (`ground`). Every host also has
+(`harness`), what it runs (`agent`), where (`ground`). Every host also has
 to choose *how* the harness runs: which model, which account pays, which
 permission posture, which reasoning effort, which gateway route. Those
 choices are scattered: [AIP-42](/docs/aip-42) carries an authoring-time
@@ -1576,7 +1576,7 @@ allow and block rules and spend ceilings live, not in the config.
 
 ```ts
 interface SessionConfig {
-  /** AIP-45 harness slug. Same value as SpawnAgentRequest.adapter. */
+  /** AIP-45 harness slug. Same value as SpawnAgentRequest.harness. */
   harness?: string
   /** A model id (possibly an AIP-57 virtual key), or `selector:<id>`: an
    *  ordered, saved selector over the AIP-43 model registry. */
@@ -1624,9 +1624,12 @@ The JSON Schema is
 A host-specific key outside the axes above MUST be prefixed `x-`, so a
 conformance check can tell a host extension from an unspecified field.
 
-The `harness` axis was named `adapter` in earlier drafts. `adapter` is
-accepted as a legacy alias of `harness`, and `SpawnAgentRequest` keeps
-accepting `adapter`.
+The `harness` axis was named `adapter` in earlier drafts, and `Session` and
+`SpawnAgentRequest` carried `adapterSlug` and `adapter`. Those names are
+removed: they are not fields of this AIP, and a conforming host does not treat
+them as synonyms of `harness`. A host that still accepts one during a
+transition does so as a deprecation announced under
+[AIP-70 §4](/docs/aip-70), not as part of this AIP.
 
 `SpawnAgentRequest` gains `config?`, `preset?` and `policy?` (see the
 updated interface in §SpawnAgentRequest). The `Session` record gains
@@ -2079,7 +2082,7 @@ registering the registry + routes, and existing `agentproto run`
 invocations continue to work unchanged (they bypass the registry, which
 is fine for one-shot scripting).
 
-Hosts MAY refuse to register the routes when no AIP-45 adapter is
+Hosts MAY refuse to register the routes when no AIP-45 harness is
 installed; they then SHOULD return HTTP 501 from
 `POST /sessions/agent` with a clear message pointing at the install
 command.
@@ -2321,6 +2324,18 @@ extensions. An existing host gains no new MUST beyond rules 1 and 2 of
 the floor that holds without a setting; the other rules bind a host
 that claims the section (rule 6).
 
+### The 2026-11-08 harness-rename amendment (draft)
+
+`Session.adapterSlug` is now `Session.harness`, `SpawnAgentRequest.adapter`
+is now `SpawnAgentRequest.harness`, and the `agent_start` input follows. The
+`adapter` alias of `SessionConfig.harness` is removed too. This is a wire
+break for a third-party host or client: the old names have no alias in
+this AIP, and the replacement is a straight rename of the key with the same
+value. The reference implementation keeps accepting the old names, with a
+deprecation warning, until its next breaking release (AIP-70 §4). A client
+that must talk to both generations reads `harness` and falls back to
+`adapterSlug`, and sends `harness`.
+
 ## Security Considerations
 
 - All sessions execute as the daemon's UID. Hosts SHOULD gate the
@@ -2366,7 +2381,7 @@ that claims the section (rule 6).
   omits its credential reach the surface with the operator's rights: a
   residual the operator accepts by configuration, not an authentication.
 - **The realistic defeat of this gate is not an attacker.** It is an
-  adapter shipping its own config entry for the host's own endpoint,
+  harness shipping its own config entry for the host's own endpoint,
   or a well-meaning caller handing a child a broader MCP server. Both
   are ordinary configuration, neither looks like an attack, and both
   produce a child the host reports as denied while it delegates. This
@@ -2424,11 +2439,11 @@ that claims the section (rule 6).
 - Cancellation mid-turn — the protocol arms support
   `session.cancel()`, but the AIP doesn't expose it as an HTTP/MCP
   verb yet. Should be added once we have a real consumer demand
-  (the ACP `cancel_turn` semantics differ across adapters).
+  (the ACP `cancel_turn` semantics differ across harnesses).
 - Resume across daemon restarts — the per-workspace snapshot
   (§State partitioning) persists descriptors but not the live agent
   process. A future v2 could specify rehydration (re-spawn + replay
-  context) for adapters whose AIP-45 manifest declares
+  context) for harnesses whose AIP-45 manifest declares
   `session.mode = "resumable"`.
 - **Workspace-scoped reads.** §State partitioning gives a host the
   boundary but no rule for honouring it: nothing here says a consumer
@@ -2490,7 +2505,7 @@ that claims the section (rule 6).
   workspace, as AIP-38 §Security considerations requires before a child
   policy relaxes a parent.
 - **A portable steering capability.** Steering is advertised today
-  through an AIP-44 extension (`_meta.steering`), and adapters disagree
+  through an AIP-44 extension (`_meta.steering`), and harnesses disagree
   on idle semantics — one honours "prompt required", another starts a
   detached turn. A first-class AIP-44 capability with a mandated idle
   behaviour would let hosts drop the defensive host-turn gate.

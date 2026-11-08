@@ -432,7 +432,7 @@ A **projection** is how a session sees memory. It has two halves.
   its native memory are read back and written to the store as
   proposals. A capture never commits.
 
-Each [AIP-45](/docs/aip-45) harness adapter declares what it supports in
+Each [AIP-45](/docs/aip-45) harness declares what it supports in
 `capabilities.memory`:
 
 ```ts
@@ -443,12 +443,12 @@ interface MemoryProjectionCapability {
 ```
 
 - `inject: native-dir` means the harness reads a native memory
-  directory or file at start, and the adapter can write items into it.
+  directory or file at start, and the harness can write items into it.
 - `inject: system-prompt` means the harness has no native memory but
   accepts appended system-prompt text at spawn.
 - `inject: none` means neither.
 - `capture: native-dir-diff` means the harness writes its native memory
-  location during the session, and the adapter can diff it against what
+  location during the session, and the harness can diff it against what
   was projected.
 
 An absent declaration reads as `{ inject: "none", capture: "none" }`.
@@ -461,7 +461,7 @@ Native first, system prompt as the fallback, one owner per session, as
 in AIP-71 section 4:
 
 1. When the harness declares `inject: native-dir` and the host
-   implements the native projection for that adapter, the digest is
+   implements the native projection for that harness, the digest is
    written into the native location.
 2. Otherwise, when the harness declares `native-dir` or
    `system-prompt` and the host can append to that session's system
@@ -502,7 +502,7 @@ and the way to reach them (a search tool, when the host offers one).
 
 On the system-prompt path the digest is one delimited block that
 presents the items as recorded data, not as instructions. On the
-native-dir path the adapter writes the digest or one file per item in
+native-dir path the harness writes the digest or one file per item in
 the harness's native format; the `id` MUST survive in a recoverable form
 (for example the file name stem), so a capture can map a changed file
 back to its item.
@@ -777,7 +777,7 @@ session outside that node's projection reads.
 The reference implementation lives in
 [agentproto/ts](https://github.com/agentproto/ts). It covers the
 document, the store, a daemon tool surface, a spawn-time digest, and the
-native-dir projection and capture for one adapter.
+native-dir projection and capture for one harness.
 
 **Document (sections 1 to 7).**
 [`@agentproto/memory`](https://github.com/agentproto/ts/tree/main/packages/memory)
@@ -846,7 +846,7 @@ never a spawn failure.
 
 **Native projection and capture (section 9).** `@agentproto/harness`
 implements the native-dir path (`native-memory.ts`) and the claude-code
-adapter declares `capabilities.memory { inject: "native-dir", capture:
+harness declares `capabilities.memory { inject: "native-dir", capture:
 "native-dir-diff" }`:
 
 - Projection writes one topic file per in-force item, carrying `id`,
@@ -871,7 +871,7 @@ adapter declares `capabilities.memory { inject: "native-dir", capture:
 operation and the node projection (section 10) are specified here and
 not implemented yet: the reference store, the daemon tools and the
 digest select by `global` and the session's own anchors only, and the
-tools call the store without a scope. An adapter that declares `inject: none`, or declares
+tools call the store without a scope. A harness that declares `inject: none`, or declares
 nothing, still receives the system prompt digest when the manifest opts
 in, which is wider than the resolution order of section 9 (step 3). A
 bare store id in `memory.store` has no resolver yet and uses the default

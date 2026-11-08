@@ -297,6 +297,21 @@
       "pattern": "\\badapter slugs?\\b"
     },
     {
+      "alias": "adapterSlug",
+      "use": "harness",
+      "pattern": "\\badapterSlug\\b"
+    },
+    {
+      "alias": "agent_start.adapter",
+      "use": "agent_start.harness",
+      "pattern": "\\bagent_start\\.adapter\\b"
+    },
+    {
+      "alias": "--adapter",
+      "use": "--harness",
+      "pattern": "(?<![\\w-])--adapter\\b"
+    },
+    {
       "alias": "human operator",
       "use": "user",
       "pattern": "\\bhuman operators?\\b"

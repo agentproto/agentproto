@@ -85,7 +85,7 @@ name or a contract. Four problems compound while it stays anonymous:
    can't express a schema constraint, whether the bridge may touch
    credentials — from scratch, and answers them differently.
 
-2. **"Adapter" is overloaded three ways** (see
+2. **"Adapter" was overloaded three ways** (see
    [Terminology reconciliation](#terminology-reconciliation)) and readers
    conflate them. Without a spec, a credentialed provider registry
    (`@agentproto/provider-kit`) and a Mastra tool bridge look like the same
@@ -301,16 +301,17 @@ This AIP deliberately does **not** define:
 
 ## Terminology reconciliation
 
-### The three senses of "adapter"
+### The senses of "adapter"
 
-The word "adapter" carries three unrelated meanings across the AIP
-family. They are distinct today and MUST NOT be conflated when reading a
+The word "adapter" carried three unrelated meanings across the AIP
+family. They are distinct and MUST NOT be conflated when reading a
 spec; which sense an AIP means is determined by what it binds, not by
-the word:
+the word. One of the three has since been renamed ([AIP-70](/docs/aip-70)
+frees `adapter` and `driver`, which each had a second sense):
 
 | Type | Sense / what it binds | Example AIP | Example package |
 |---|---|---|---|
-| `HarnessAdapter` | adapter over a **harness** — wraps a harness (`claude-code`, `hermes`, `aider`, `opencode`) so it presents as an agentproto agent | [AIP-45](/docs/aip-45) | `@agentproto/adapter-claude-code` |
+| `Harness` (formerly `HarnessAdapter`) | a **harness**: the agent CLI a host drives (`claude-code`, `hermes`, `aider`, `opencode`), wrapped so it presents as an agentproto agent. It is named `harness`, no longer `adapter`. | [AIP-45](/docs/aip-45) | `@agentproto/harness-claude-code` |
 | `FrameworkAdapter` | bridge into a **foreign framework**: projects an agentproto handle outward so a host runtime runs it as a native citizen | AIP-52 (this AIP) | `@agentproto/bridge` |
 | `ServiceAdapter` | adapter to a **backend service** — routes a declared kind to a concrete backend: settlement rails, tunnel, sandbox, eval-reporter providers | [AIP-49](/docs/aip-49) | `@agentproto/provider-kit` |
 
@@ -318,13 +319,19 @@ AIP-52 means the second sense: `FrameworkAdapter`, the outward framework
 bridge. These type names are the settled vocabulary for the three
 contracts; specs SHOULD refer to the sense by its type name.
 
-The npm prefix stays **flat**. All 22 adapter packages are published
-under `adapters/*` uniformly as `@agentproto/adapter-<x>`
-(`@agentproto/adapter-claude-code` is at 2.1.10) and are **not** renamed:
-the flat prefix already provides discoverability, and what was missing
-was never the package name but a statement of WHICH contract each one
-implements. Renaming would be a breaking change buying something the
-prefix already gives.
+The npm prefix of a harness package is **`harness-<slug>`**.
+`@agentproto/harness-<slug>` (for example `@agentproto/harness-claude-code`)
+is canonical, as [AIP-70](/docs/aip-70) names the concept and as the
+reference implementation discovers it (agentproto/ts#2313). Discovery of
+`@agentproto/adapter-<slug>` packages is a **deprecated legacy path**: a host
+SHOULD still find an installed `adapter-<slug>` package during the
+transition, MUST prefer `harness-<slug>` when both exist for a slug, and the
+path is removed in the next breaking release of the reference
+implementation. Until the harness packages are published under the new
+prefix, the packages that exist are still named `@agentproto/adapter-<slug>`
+(`@agentproto/adapter-claude-code` is at 2.1.10). The `adapters/*`
+packages of the other two senses (framework bridges, backend services) are
+not harnesses, and this AIP does not rename them.
 
 The distinction is carried at the **type level**, not by a naming
 convention, because an unenforced convention drifts — as when this

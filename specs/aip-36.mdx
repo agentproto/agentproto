@@ -5,7 +5,7 @@ aip: 36
 status: Review
 type: Schema
 created: 2026-05-02
-updated: 2026-11-03
+updated: 2026-11-08
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 35]
 discussions-to: https://github.com/agentproto/agentproto/discussions/36
@@ -262,11 +262,14 @@ Mastra doesn't yet cover.
 
 ### Provider config shapes
 
-Every provider's `config` also accepts `installAdapters` (string[]): semantic
+Every provider's `config` also accepts `installHarnesses` (string[]): semantic
 harness slugs to pre-install in the box at boot (e.g. `["hermes", "claude-code"]`).
-Each expands to `@agentproto/adapter-<slug>@latest` plus that adapter's
+Each expands to `@agentproto/harness-<slug>@latest` plus that harness's
 declared boot extras; a `config.installPackages` pin for the same package
-always wins. Additive — absent means no extra install.
+always wins. Additive — absent means no extra install. The field was named
+`installAdapters` and the package prefix was `adapter-` in earlier drafts;
+both are removed from this AIP (AIP-70 §4), and the reference implementation
+keeps reading `installAdapters` until its next breaking release.
 
 ```yaml
 # local
@@ -873,7 +876,7 @@ merged. The host MUST resolve the ladder this way before walking it, so
 each resolved rung is self-contained
 (`runtime/src/placement-ladder.ts:122-136`,
 `runtime/src/session-spawn.ts:2497-2503`). Every other spawn field
-(adapter, cwd, `modelPolicy`, ...) is shared by all rungs
+(harness, cwd, `modelPolicy`, ...) is shared by all rungs
 (`runtime/src/session-spawn.ts:2511`).
 
 **The walk.** The host tries rung 1 as an ordinary single-sandbox spawn
@@ -1000,8 +1003,8 @@ stopping at the first `ko` (`runtime/src/sandbox-preflight.ts:240-257`).
 - It sends the one-line prompt `reply ok` to the session's model
   through the session's own harness, from inside the box, so the
   answer travels from the box's egress address.
-- It knows a one-line command for the `opencode` adapter only. Any other
-  adapter yields `unknown` (`runtime/src/sandbox-preflight.ts:120-128`,
+- It knows a one-line command for the `opencode` harness only. Any other
+  harness yields `unknown` (`runtime/src/sandbox-preflight.ts:120-128`,
   `:141-144`).
 - A model id outside `^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$` is not probed
   (`unknown`): the id reaches a shell command line
