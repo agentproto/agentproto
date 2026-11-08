@@ -299,9 +299,112 @@
       "type": "string",
       "minLength": 1,
       "description": "Coarse grouping surfaced in host catalogs/trees (e.g. `book`). Freeform — not validated against a fixed enum."
+    },
+    "exposes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What the app offers to callers outside it: A2A-visible agents and workflows, and the tools and `ui://` views it publishes to MCP clients (see the AIP-53 section `Exposed tools and resources`). Closed object. Rules JSON Schema cannot express (ids naming the app's own agents/workflows, a TOOL.md behind every non-imported tool id, no two entries computing the same MCP name, a computed name of at most 64 characters) are enforced by the loader.",
+      "properties": {
+        "agents": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "description": "Agent ids this app exposes. Every id must name one of the app's own agents."
+        },
+        "workflows": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "description": "Workflow ids this app exposes: the callable surface other apps' `requires.apps[].workflows` entries may name (consumed via `app_call`). Every id must name one of the app's own workflows."
+        },
+        "prefix": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]{1,15}$",
+          "description": "MCP name prefix of every exposed tool: the computed name is `<prefix>_<name>`. Lowercase letters and digits only, no `_`, 2 to 16 characters. Required when `tools` is non-empty. A host additionally refuses a prefix that is the first `_` segment of one of its own tool names."
+        },
+        "tools": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/exposedTool" },
+          "description": "Tools offered to MCP clients, each with an explicit access class. `id` values are unique within the array (loader rule)."
+        },
+        "resources": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^ui://[^\\s]+$" },
+          "uniqueItems": true,
+          "description": "Per-app allowlist of `ui://` view URIs a host may relay to the app's imported MCP servers on `resources/read`. Needs at least one `imported:` entry in `tools` to relay from. An empty array is accepted and means no allowlist."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["tools"], "properties": { "tools": { "minItems": 1 } } },
+          "then": { "required": ["prefix"] }
+        },
+        {
+          "if": { "required": ["resources"], "properties": { "resources": { "minItems": 1 } } },
+          "then": {
+            "required": ["tools"],
+            "properties": {
+              "tools": {
+                "contains": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": { "id": { "type": "string", "pattern": "^imported:" } }
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "$defs": {
+    "exposedTool": {
+      "type": "object",
+      "required": ["id", "access", "description"],
+      "additionalProperties": false,
+      "description": "One entry of `exposes.tools`. The MCP name is computed from `exposes.prefix` and `mcpName` (else `id`); see the AIP-53 section `Exposed tools and resources`.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "not": { "pattern": "^approval" },
+          "description": "A TOOL.md id the app bundles, or `imported:<alias>/<tool>` for a tool of one of the app's imported MCP servers. An id starting with `approval` is refused: deciding an approval never goes through this registry. A host's own tool names are refused too (loader rule)."
+        },
+        "access": {
+          "enum": ["read", "write", "approve"],
+          "description": "Access class. `read` is visible to every caller by default; `write` and `approve` are visible only to a caller that opted in by exact MCP name."
+        },
+        "description": {
+          "type": "string",
+          "pattern": "\\S",
+          "maxLength": 300,
+          "description": "Written for a model; non-blank, at most 300 characters."
+        },
+        "inputSchema": {
+          "type": "object",
+          "description": "JSON Schema object for the tool's input. Defaults to the bundled TOOL.md `inputs`. On an `imported:` entry whose schema declares `properties`, a host drops every undeclared input key before the call, unless `additionalProperties` is `true`."
+        },
+        "mcpName": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+          "not": { "pattern": "^approval" },
+          "description": "Replaces the id as the source of the MCP name (no `:`, `/` or `.`). Required for an `imported:` id. A name starting with `approval` is refused."
+        },
+        "approvalArg": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the input argument that carries an approval reference. Only for `access: approve`; a shape hint, not a guarantee."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["approvalArg"] },
+          "then": { "properties": { "access": { "const": "approve" } } }
+        },
+        {
+          "if": { "properties": { "id": { "pattern": "^imported:" } } },
+          "then": { "required": ["mcpName"], "properties": { "access": { "const": "read" } } }
+        }
+      ]
+    },
     "stepId": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",

@@ -175,3 +175,81 @@ What a conforming host does:
   changes the choice later; steps depending on it are re-evaluated.
 - Releasing 0.5.0 with one new step re-asks only that step (its
   fingerprint is new); every step the user already completed stays done.
+
+## 6. Exposing tools and a widget to MCP clients
+
+A browser-control app that publishes two read tools it bundles, one tool of
+an imported MCP server that comes with a widget, and the one `ui://` view a
+host may relay. See [Exposed tools and
+resources](../../../aip-53.mdx#exposed-tools-and-resources).
+
+```md
+---
+schema: app/v1
+id: '@acme/bureau'
+name: Bureau
+version: 0.3.0
+agents: []
+ui:
+  path: .agentproto/ui/index.html
+  tools: [bureau.status]
+exposes:
+  prefix: bureau
+  tools:
+    - id: bureau.status
+      access: read
+      description: Health of Bureau and the browser instances it is driving.
+    - id: bureau.overview
+      access: read
+      description: Every browser instance with its open tabs and the account each one is signed in to.
+    - id: imported:browser/browser_screenshot
+      access: read
+      mcpName: screenshot
+      description: Capture the current page of a browser instance and show it in a widget.
+      inputSchema:
+        type: object
+        properties:
+          instance: { type: string }
+          fullPage: { type: boolean }
+  resources:
+    - ui://browser/screenshot
+---
+
+Bureau's published surface.
+```
+
+The app bundles `.agentproto/tools/bureau.status/TOOL.md` and
+`.agentproto/tools/bureau.overview/TOOL.md`, and has an MCP server imported
+under the alias `browser`.
+
+What a conforming host does:
+
+- Registers three tools on its MCP gateway: `bureau_status`,
+  `bureau_overview` and `bureau_screenshot`. The leading `bureau.` of the
+  two bundled ids is the prefix, so it is dropped before `bureau_` is added;
+  the imported id has no safe spelling and takes its name from `mcpName`.
+- Shows all three to every caller, because all three are `access: read`
+  (unless the operator turned exposure `off`). An entry with `access: write`
+  would stay hidden until a caller opted in by its exact name.
+- Answers a `bureau_screenshot` call with the imported server's result as it
+  came, image block and `_meta` included. A call that passes `path` has that
+  key dropped first: `inputSchema` declares `instance` and `fullPage` only,
+  so the import never receives a file path to write to.
+- Lists `bureau_screenshot` with the `_meta.ui` link the imported tool
+  carries (`resourceUri` untouched), so a client that renders MCP Apps
+  widgets can show the capture.
+- Serves `resources/read` for `ui://browser/screenshot` by relaying it to the
+  `browser` import. A read of any other `ui://` URI is refused as unknown,
+  even when the import would answer it, and `resources/list` returns only
+  `ui://browser/screenshot`.
+
+Each of these edits makes the loader refuse the manifest:
+
+- dropping `prefix` while `tools` is non-empty;
+- dropping `mcpName` from the imported entry, or setting its `access` to
+  `write` (an imported id is `read` only);
+- renaming a tool `id` to `approval.decide`;
+- declaring `bureau.overview` as `read` when its `TOOL.md` carries a
+  `mutator` tag;
+- keeping `resources` but removing the `imported:` entry from `tools`;
+- adding `ui://browser/screenshot` a second time to `resources`.
