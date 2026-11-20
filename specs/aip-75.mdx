@@ -679,10 +679,11 @@ Rules:
 
 - The record is **cumulative and monotonic**: each call to `getUsage()`
   returns totals since the session opened. After `close()` it is final.
-- In a cascade there is one entry per stage and provider that ran: a
-  session that fell back from streaming to file transcription has two STT
-  entries. Characters count what was sent to TTS, interrupted text
-  included.
+- Entries are grouped by (stage, provider, model). A cascade has one entry
+  per group that ran: a session that falls back from streaming to file
+  transcription on the same provider and model has one STT entry, and has
+  two only when a second provider (or model) serves as the fallback.
+  Characters count what was sent to TTS, interrupted text included.
 - A host MAY also receive the record through an `onUsage` callback in
   start options; the content is the same. A rejected `onUsage` MUST NOT
   interrupt audio.
