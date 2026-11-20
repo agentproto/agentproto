@@ -173,7 +173,7 @@
                 "week",
                 "day"
               ],
-              "description": "Billing recurrence for metered prices. Absent = per-unit without period."
+              "description": "Billing recurrence: for metered prices, and for a subscription it projects `price.interval` and MUST agree with it. Absent = per-unit without period."
             }
           }
         },
