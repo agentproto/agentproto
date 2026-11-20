@@ -23,7 +23,7 @@ resources: ./resources/aip-49/draft
 | Domain | wallet.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
 | Resources | [`./resources/aip-49`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-49/draft) — [`ASSET.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-49/draft/ASSET.schema.json) |
-| Amended by | [AIP-74](/docs/aip-74) (BILLING): `expire`, `cause` and `origin`, the declared tie-break, entry from fiat, bonus lots, edges contributed by a registry layer, `excludes`, `settleIn`, enforcement of `ConvertEdge.cap` |
+| Amended by | AIP-74 (BILLING, a draft, in review in a companion pull request): `expire`, `cause` and `origin`, the declared tie-break, entry from fiat, bonus lots, edges contributed by a registry layer, `excludes`, `settleIn`, enforcement of `ConvertEdge.cap` |
 | Prior art | ERC-20 (fungible token), ERC-1400 / ERC-1410 (partially-fungible / partitioned token) |
 
 ## Abstract
@@ -322,8 +322,10 @@ only `convert`.
 scale across `decimals`. A conformant implementation MUST provide a
 `verifyNoArbitrage` check (negative-cycle detection over `-log(rate)`) and gate
 it in CI: no cycle of convert edges may have a rate product > 1. The check runs
-over **every declared edge, enabled or not**: a disabled edge can be enabled by
-configuration and must not be able to open a cycle then.
+over **every declared edge**, including an edge the host keeps switched off by
+its own configuration (AIP-74 `conversions[].enabled: false`): it can be enabled
+later and must not be able to open a cycle then. `ConvertEdge` itself has no
+`enabled` field.
 
 **Entry from fiat.** Value enters the journal from an external settlement as a
 fiat `mint` (recorded after the confirmed external fact, see *Ports*) followed by
@@ -342,24 +344,26 @@ of its own assets, even when the `from` asset (fiat) is shared: fiat is common,
 credits are per product. The no-arbitrage check runs over the union.
 
 **`excludes`.** A convert edge MAY list `excludes?: string[]`, restriction tags
-whose lots it never draws. A bonus lot is excluded this way.
+whose lots it never draws. A bonus lot is excluded this way: a manifest parser
+such as AIP-74's sets `excludes` on its edges from the restriction tags of the
+bonus partition.
 
-**`ConvertEdge.cap`.** A convert edge MAY declare `cap?: { amount, windowSec }`
-(anti-inflation throughput limiting, load-bearing for host-mint). A conformant
-implementation MUST enforce it **from the journal**: the sum of the source
-amounts already converted by the principal through this edge inside the
-trailing `windowSec`, plus the requested amount, MUST NOT exceed `amount`; a
-conversion over the cap is refused, not clipped. `amount` is in minor units of
-the **source** asset. (The `cap` the authorize engine bounds is a different
-field, `envelope.operating.cap`.)
+**`ConvertEdge.cap` is reserved and NOT yet enforced.** A convert edge MAY
+declare `cap?: { amount, windowSec }` (declared in `packages/wallet/src/asset.ts`;
+anti-inflation throughput limiting, load-bearing for host-mint). The reference
+convert path (`packages/wallet/src/convert.ts`) reads only `to`, `rate`, and
+`addsRestriction`. (The `cap` the authorize engine bounds is a different field,
+`envelope.operating.cap`.) Tracked code gap:
+https://github.com/agentproto/ts/issues/1203. Until that gap closes, hosts MUST
+NOT rely on `cap` being enforced and MUST apply their own throughput limiting on
+convert volume.
 
-> **Implementation status.** The reference convert path
-> (`packages/wallet/src/convert.ts`) reads only `to`, `rate`, `addsRestriction`
-> and does **not** enforce `cap` yet. Tracked code gap:
-> https://github.com/agentproto/ts/issues/1203. Until that gap closes, hosts MUST
-> NOT rely on the reference implementation enforcing `cap` and MUST apply their
-> own throughput limiting on convert volume. The requirement above is what the
-> fix has to satisfy.
+> **Intended semantics, for when the gap closes (not a requirement yet).** The
+> sum of the source amounts already converted by the principal through the edge
+> inside the trailing `windowSec`, plus the requested amount, will not exceed
+> `amount`, read from the journal; a conversion over the cap is refused, not
+> clipped. `amount` is in minor units of the **source** asset, and `0` forbids
+> the edge. This is what the fix to ts#1203 has to satisfy.
 
 **Offered conversions are declared edges.** The conversions a principal may run
 are the edges declared on its assets (and contributed by registry layers, above);
@@ -381,14 +385,16 @@ intersect.
 outbound, per asset), `RatePort` (universal rate oracle), `ClockPort`. All I/O is
 confined to these.
 
-A payment provider is a `SettlementProvider` ([AIP-74](/docs/aip-74)): an
+A payment provider is a `SettlementProvider` (defined by AIP-74, a draft): an
 implementation of `SettlementPort` that also verifies webhooks, refunds and
 projects a catalog. AIP-49 only requires the two methods of the port; the rest is
 defined where the payment path is defined.
 
 `AssetRuleSet.settleIn?: SettlementNetwork[]` is the inbound counterpart of
 `settleOut`: the networks through which value may **enter** the asset (a credit
-asset is bought through `stripe`, an asset may refuse on-chain deposits). Absent
+asset is bought through `stripe`, an asset may refuse on-chain deposits). The
+vocabulary is the one of `settleOut`: `autumn` is a rail, not a network, and
+settles through `stripe`. Absent
 means the same as `settleOut` when `settleOut` names a network, and "no external
 entry" when it is `false` or `internal-ledger`.
 
