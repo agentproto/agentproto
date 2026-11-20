@@ -613,7 +613,6 @@
       "aip": 75,
       "name": "VOICE",
       "specId": "voice/v1",
-      "package": "@agentproto/voice",
       "layer": "host"
     }
   ],

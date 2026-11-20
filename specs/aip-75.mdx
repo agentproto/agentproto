@@ -9,7 +9,6 @@ author: Jeremy André <jeremy@agentik.net>
 requires: [1, 25]
 discussions-to: https://github.com/agentproto/agentproto/discussions
 layer: host
-package: "@agentproto/voice"
 ---
 
 | Field | Value |
@@ -42,10 +41,11 @@ Two products run voice today. One (call and voice-room product) switches
 between a cascade and realtime engines and between vendors; the other (a
 multi-participant room product) switches vendor per participant voice.
 The choice is spread over URL parameters, environment variables and `if`
-branches in a 2,400-line server file, and the cascade that serves phone
-calls does not use the engine contract at all: its STT, TTS and brain are
-wired to one vendor. A third vendor (a second STT, a second TTS) means
-editing that file.
+branches in one large server file. The cascade that serves phone calls
+already takes its STT, TTS and brain as injected functions (so it runs
+with mocks in tests), but it does not sit behind the engine contract and
+its production wiring names one vendor per stage. A second STT or TTS
+vendor means editing code, not configuration.
 
 One contract per capability lets a product change a vendor by
 configuration, lets a vendor package be added without touching the host,
@@ -131,7 +131,11 @@ interface SttStream {
   close(): Promise<void>
 }
 
-interface SttFileInput { bytes: Uint8Array; mimeType: string }   // container audio, or raw PCM16 with a sampleRate
+interface SttFileInput {
+  bytes: Uint8Array
+  mimeType: string      // a container type, or audio/pcm for raw PCM16
+  sampleRate?: number   // REQUIRED when mimeType is audio/pcm, ignored otherwise
+}
 interface SttResult { text: string; language?: string; durationSeconds?: number }
 ```
 
@@ -211,7 +215,8 @@ Rules:
 **Consumed by:** Simone: `projects/simone/apps/voice/src/calls/stream-turn.ts`
 (streaming TTS per sentence or continuous, `cancel` on barge-in) over
 `packages/agent-framework/src/voice/tts-providers.ts` (`openElevenLabsTtsStream`,
-line 161; abort and cancel at lines 35 and 425). Guilde: the same
+line 161; `abort()` at lines 143 and 384, the abort signal at lines 41, 250 and
+418-431). Guilde: the same
 `tts-providers.ts` through the shared sequential path in
 `start-voice-server.ts` (voice rooms speak each participant in their own
 provider voice, `projects/guilde/apps/voice/src/index.ts:333-346`).
@@ -272,6 +277,7 @@ defineVoiceProvider({
   slug: "elevenlabs",
   name: "ElevenLabs",
   env: { apiKey: "ELEVENLABS_API_KEY", aliases: [] },
+  valueAliases: { stt: ["scribe"] },   // optional historical names for VOICE_STT_PROVIDER / VOICE_TTS_PROVIDER
   stt: sttProvider,            // optional, an SttProvider
   tts: ttsProvider,            // optional, a TtsProvider
   realtime: realtimeProvider,  // optional, a RealtimeProvider
@@ -316,7 +322,13 @@ same keys declared in `projects/guilde/apps/voice/src/env.ts`
 
 `VoiceSession` is the one conversation object a product holds, whatever
 engine runs it. It is the `VoiceEngineSession` contract the shared server
-already uses, with the same operations.
+already uses (`strategies/types.ts`), with the same operations and these
+differences: `getUsage()` returns a `VoiceUsage` (below) in place of
+`VoiceUsageSnapshot`, and its `providerCostSource` field is dropped (a
+cost is present only when the vendor reported it, see Usage record);
+`AudioFrame` is mono only and has no `channels` field; the session
+carries `engine` and `capabilities`, which replace the strategy's `mode`
+and `s2sBillingModelId`.
 
 ```ts
 interface VoiceStartOptions {
@@ -400,13 +412,13 @@ Rules:
 (`start-voice-server.ts:1181-1232`) from each product's loaders
 (Guilde `index.ts:586,629,670`).
 
-**`say`: consumed by Simone only today** (the wind-down when a wallet is
-depleted, `start-voice-server.ts:1677-1717`, enabled only when the product
-passes a billing gate, `projects/simone/apps/voice/src/index.ts:634-636`;
-Guilde passes none). It stays in the contract, as an optional operation,
-because the wind-down is a requirement of any product that bills voice by
-the minute; if no second product has adopted it when this AIP leaves
-Draft, it moves to `x-say`.
+**`say`: consumed by both.** The wind-down when a wallet is depleted or
+low is a billing-gate path of the shared server, which calls
+`engineSession.say(directive)` when the gate's balance directive carries a
+farewell directive (`start-voice-server.ts:1677,1717`). Simone wires the
+gate at `projects/simone/apps/voice/src/index.ts:634-636`; Guilde wires
+its own at `projects/guilde/apps/voice/src/index.ts:806-861`
+(`checkBalance` returns the directive). `say` stays optional per engine.
 
 ### Engines
 
@@ -424,11 +436,23 @@ interface CascadeOptions {
   stt: SttProvider
   tts: TtsProvider
   brain(input: { text: string; signal: AbortSignal; utteranceId: number }): AsyncIterable<string>
-  vad?: CascadeVadOptions
+  vad?: CascadeVadOptions | false     // false: manual mode, no local VAD (push-to-talk)
   bargeIn?: CascadeBargeInOptions
   playback?: { queuedMs(): number; waitBelow(ms: number, opts?: { signal?: AbortSignal }): Promise<"ready" | "aborted" | "timeout" | "closed"> }
 }
+
+function startCascade(opts: VoiceStartOptions & CascadeOptions): Promise<VoiceSession>
+function startRealtime(provider: RealtimeProvider, opts: VoiceStartOptions): Promise<VoiceSession>
 ```
+
+`startCascade` is the entry of the `cascade` engine; `startRealtime` is
+`provider.start(opts)` and exists for symmetry. `emit`, `hooks`,
+`language`, `voiceId` and `provider` come from `VoiceStartOptions`
+(previous section); `CascadeOptions` adds only what a cascade composes. In
+a cascade, `hooks.onTranscript` is called for each final turn; the other
+hooks (system prompt, tools, history, tool calls) belong to the brain,
+which the host supplies, and the engine does not call them. `voiceId` and
+`language` go to the TTS stream (and `language` to the STT stream).
 
 `brain` yields reply **text** in chunks. The engine owns synthesis: it
 feeds the chunks to a `TtsStream`, cutting at sentence or clause
@@ -439,6 +463,12 @@ configuration.)
 
 **The cascade engine** (the part that is not a vendor):
 
+- **Manual mode.** With `vad: false` the engine runs no local VAD: the host
+  pushes audio and calls `commit()` to end the utterance (push-to-talk).
+  `commit()` on a cascade session ends the current utterance and requests
+  the STT final; with the local VAD on, it is a no-op, as `VoiceSession`
+  rule 2 says. In manual mode the host also owns barge-in (it calls
+  `interrupt()`).
 - **Local VAD.** Detects the end of an utterance from audio energy and a
   silence duration, caps the length of one utterance, keeps a short
   pre-roll before the first loud frame, and ignores a burst shorter than
@@ -515,7 +545,13 @@ The kit reads these standard names. A product MAY set any subset.
 | `<SLUG>_API_KEY` | The provider's key (`ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`). |
 
 **`VOICE_PROVIDER` values.** The three values the studio products accept
-today keep their meaning:
+today are `elevenlabs-realtime`, `openai-realtime` and `whisper-elevenlabs`.
+Only the first runs through `VOICE_PROVIDER` today, as the ElevenLabs
+cascade; it keeps that meaning. `openai-realtime` is a realtime engine
+that the products select by an engine URL parameter, and
+`whisper-elevenlabs` is a historical name that was never implemented (the
+shared factory calls it a placeholder that never landed). This AIP gives
+those two the meaning of their names:
 
 | Value | Engine | Providers it implies |
 | --- | --- | --- |
@@ -528,10 +564,16 @@ A realtime provider adds a value by declaring `capabilities.id` in
 `elevenlabs`) and `gemini-live` (provider `gemini`), the engine ids the
 products already use. A new value MUST NOT collide with a value above.
 
-**`VOICE_STT_PROVIDER` values.** A provider slug. The two values that exist
-today keep their meaning and remain valid: `whisper` (OpenAI file
-transcription, one upload per utterance) and `scribe` (ElevenLabs streaming
-recognition).
+**`VOICE_STT_PROVIDER` and `VOICE_TTS_PROVIDER` values.** A provider slug
+that has the stage (`openai`, `elevenlabs`, `assemblyai` for STT;
+`elevenlabs`, `openai`, `assemblyai` for TTS), or a **value alias** the
+provider declares. `defineVoiceProvider` takes
+`valueAliases: { stt?: string[]; tts?: string[] }`, historical names that
+select that provider and stage. The two values that exist today are
+aliases and keep their meaning: `whisper` (declared by `openai` for STT:
+file transcription, one upload per utterance) and `scribe` (declared by
+`elevenlabs` for STT: streaming recognition). An alias that two providers
+declare for one stage is a registry error.
 
 **Priority rule.** Evaluated in this order; no existing value changes
 meaning:
@@ -542,7 +584,9 @@ meaning:
    `cascade` engine, and they win over the provider that `VOICE_PROVIDER`
    implies for that stage. With a `realtime` engine they are ignored and
    the kit logs one warning.
-3. `VOICE_ID` and `VOICE_LANGUAGE` are independent of the engine. When
+3. `VOICE_ID` is the voice id of the TTS provider in a cascade, and of the
+   realtime provider in a realtime session. `VOICE_ID` and
+   `VOICE_LANGUAGE` are independent of the engine. When
    `VOICE_ID` is unset the kit reads the selected provider's own voice
    variable (`<SLUG>_VOICE_ID`: `ELEVENLABS_VOICE_ID`, `OPENAI_VOICE_ID`
    are the names in use). A value set in either place keeps the meaning it
@@ -576,11 +620,15 @@ name; the per-provider names it falls back to are consumed by both
 
 ### Kit defaults
 
-When a variable is unset, the reference packages resolve each stage to
-**ElevenLabs**: TTS ElevenLabs, STT ElevenLabs Scribe (streaming), realtime
-ElevenLabs (a hosted speech-to-speech agent). OpenAI, AssemblyAI and Gemini
-are providers like any other and are selected by slug; no default path of
-the kit requires an OpenAI account.
+Two defaults are separate. The **default engine**, when `VOICE_PROVIDER`
+is unset, is `cascade`, with ElevenLabs for both stages (the same as
+`VOICE_PROVIDER=elevenlabs-realtime`). The **default provider of a
+stage**, used when that stage is selected and no slug is given, is
+ElevenLabs for each: TTS ElevenLabs, STT ElevenLabs Scribe (streaming),
+realtime ElevenLabs (a hosted speech-to-speech agent, reached with the
+`elevenlabs-s2s` value). OpenAI, AssemblyAI and Gemini are providers like
+any other and are selected by slug; no default path of the kit requires an
+OpenAI account.
 
 This is a default of the **reference packages**, stated in their single
 defaults file, and not a requirement of the spec: a conformant
@@ -602,7 +650,9 @@ change. The default in `projects/simone/apps/voice/src/env.ts:159`
 ## Usage record
 
 A session reports what it consumed, in the units the vendors bill:
-seconds, characters, tokens. It reports no price.
+seconds, characters, tokens. It computes no price. When a vendor itself
+reports a cost, the record carries it as stated (`reportedCostUsd`), never
+derived or adjusted here.
 
 ```ts
 interface VoiceUsage {
@@ -638,7 +688,8 @@ Rules:
   interrupt audio.
 - The record carries numbers only, never conversation content.
 - **This record is the only bridge between voice and billing.** Voice does
-  not import billing; billing does not import voice. Pricing, margins,
+  not import billing; billing does not import voice. Pricing (a cost the
+  vendor reported is a fact to pass on, not a price computed here), margins,
   credits and gates are the product's, applied to the record. Prices
   belong in a model catalog, not in this contract.
 
@@ -742,8 +793,8 @@ vendor exchanges; it lives with the reference package.
    vendor runs the model, or the host's brain does)? Add one only if a
    second vendor offers an equivalent; the protocol is not read here.
 2. Group calls are one product's: an extension for now.
-3. `VOICE_TTS_PROVIDER` and `say` each have fewer than two consumers (see
-   their lines). Revisit before Review.
+3. `VOICE_TTS_PROVIDER` has no consumer today (see its line). Revisit before
+   Review.
 
 ## Reference Implementation
 
@@ -754,5 +805,7 @@ yet published.
 
 ## See also
 
-AIP-25 PERSONA, AIP-36 SANDBOX (provider-family model), AIP-14 TOOL,
-AIP-31 HTTP.
+AIP-25 PERSONA, AIP-36 SANDBOX (provider-family model), AIP-49 WALLET
+(where a billing layer settles what the usage record measures), AIP-14
+TOOL, AIP-31 HTTP. A billing AIP (AIP-74) is in progress and is not
+linked yet.
