@@ -27,8 +27,8 @@ resources: ./resources/aip-55/draft
 ## Abstract
 
 This AIP defines the **pricing capability**: a `product/v1` manifest
-that attaches a price — `one-time`, `prepaid-pool`, `subscription` or
-`pay-per-call` (or a vendor model, `x-<vendor>:<name>`), with **minor-unit amounts as the normative representation** — plus a
+that attaches a price (`one-time`, `prepaid-pool`, `subscription` or
+`pay-per-call`, or a vendor model `x-<vendor>:<name>`), with **minor-unit amounts as the normative representation**, plus a
 billing-rail projection config (`stripe` / `autumn` / `tbd` /
 vendor-open) to ANY AIP artifact through an [AIP-54](/docs/aip-54)
 `ref/v1`. The target AIP needs zero pricing awareness: "a sandbox has
@@ -112,7 +112,7 @@ billingRail:
   state is host-side on every rail** — the rail only initiates the
   top-up payment. If a wallet asset (AIP-49) backs the pool, units
   MUST be minor units of that asset's `decimals`.
-- **`prepaid-pool`, price of a pack** — `{amountMinor, currency}`. Same model,
+- **`prepaid-pool`, price of a pack**: `{amountMinor, currency}`. Same model,
   priced by what the buyer pays rather than by a unit price: the pool size is
   **not stored**, it is the output of the host's conversion from the paid amount
   (for a wallet-backed pool, an AIP-49 conversion declared by the host, see
@@ -120,17 +120,17 @@ billingRail:
   200 cents converted to 20 000 hundredths of a credit. The form
   `{unitPriceMinor, currency, grantUnits}` above stays valid and means
   something else: a fixed grant for a fixed price per unit.
-- **`prepaid-pool`, buyer-chosen amount** — `{amountMinor: "buyer", minMinor?,
+- **`prepaid-pool`, buyer-chosen amount**: `{amountMinor: "buyer", minMinor?,
   maxMinor?, currency}`. The amount is chosen at purchase, within the optional
   bounds (absent: unbounded), and the host's conversion gives the pool.
-- **`subscription`** — `{amountMinor, currency, interval, intervalCount?}` with
+- **`subscription`**: `{amountMinor, currency, interval, intervalCount?}` with
   `interval` one of `week`, `month`, `year` and `intervalCount` a positive
   integer (default 1). A recurring payment; what each paid period gives (access,
   included credits) is outside this AIP and is declared by the host (AIP-74
   `includes`). On the `stripe` rail, `billingRail.recurrence` is the projection
   of `interval` and MUST agree with it when both are present, and
   `intervalCount` projects to Stripe's `recurring.interval_count`.
-- **`x-<vendor>:<name>`** — a vendor price model, matching
+- **`x-<vendor>:<name>`**: a vendor price model, matching
   `^x-[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$`, with vendor-defined fields. A host that
   does not know the model MUST refuse to sell the product (it MUST NOT ignore the
   model and sell at another price), and MUST tolerate the manifest when it only
