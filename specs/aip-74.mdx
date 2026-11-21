@@ -1,0 +1,469 @@
+---
+title: "AIP-74: BILLING (billing/v1): declarative billing manifest for a product"
+description: A single-doc manifest, BILLING.md, in which a product declares how it bills. Fiat is an asset like credits and points; every crossing between assets (buying credits, redeeming points) is one AIP-49 conversion with a rate and a cap. A received payment is a journal fact, checked against the price of the offer it names, whose effect follows from the offer type (credit lots, a subscription period, a one-time purchase), and every entry it causes carries the identity of the money movement, so "what became of this payment" is one query. Offers extend AIP-55 with a subscription type and included features. Adapters project offers onto payment providers (Stripe, Autumn) on the AIP-52 bridge / AIP-30 driver split, with normative environment variable names. Deliberately small; ships with a conformance suite.
+aip: 74
+status: Draft
+type: Schema
+created: 2026-11-20
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 2, 49, 52, 54, 55]
+resources: ./resources/aip-74/draft
+discussions-to: https://github.com/agentproto/agentproto/discussions
+layer: primitives
+---
+
+| Field | Value |
+|---|---|
+| AIP | 74 |
+| Title | BILLING (billing/v1): declarative billing manifest for a product |
+| Status | Draft |
+| Type | Schema |
+| Doctype | `billing/v1` (single-doc, written as `BILLING.md`) |
+| Requires | [AIP-49](/docs/aip-49) (WALLET), [AIP-52](/docs/aip-52) (BRIDGE: projection rules), [AIP-54](/docs/aip-54) (REF), [AIP-55](/docs/aip-55) (PRODUCT) |
+| Composes with | [AIP-30](/docs/aip-30) (DRIVER: rails), [AIP-19](/docs/aip-19) (SECRETS), [AIP-41](/docs/aip-41) (ROUTINE: schedule block), [AIP-56](/docs/aip-56) (DOCTYPE) |
+| Amends | AIP-49 (annex A), AIP-55 (annex B) |
+| Resources | [`./resources/aip-74`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-74/draft): `BILLING.schema.json` (**draft**, not frozen) and four example files |
+| Prior art | Stripe Product / Price; Autumn (useautumn.com) plans and features |
+
+## Abstract
+
+`billing/v1` defines **`BILLING.md`**: one file in which a product declares the
+assets it holds (fiat included), the offers it sells, who pays, what a payment
+turns into, which free credits it grants, and how payment providers see it.
+
+1. **One mechanism.** Euro, dollar, credits and points are AIP-49 assets.
+   Buying credits and redeeming points are conversions with a rate and a cap.
+2. **One path for a payment.** A payment is a journal fact, checked against the
+   price of the offer it names; the offer type decides what it opens; every
+   entry it causes carries the identity of the money movement.
+3. **Define once, project anywhere.** Adapters project an offer onto Stripe,
+   Autumn or any provider, like tools are projected onto Mastra or the AI SDK.
+
+**Names.** The file is `BILLING.md`; the TypeScript constructor is
+`defineBillingManifest` (not `defineBilling`, a name other code already uses for a
+different, policy-in-code shape). A payment provider implements the
+`SettlementProvider` contract below, which extends the AIP-49 `SettlementPort`.
+`BillingRail` keeps its AIP-55 meaning: the projection config on a product.
+
+**Status of the schema.** `BILLING.schema.json` is a **draft**. It is frozen only
+after a product has read its own `BILLING.md` at startup through a parser built
+from it; until then a field may change.
+
+**Weight rule.** A field is in this AIP only if at least two real products need
+it; everything else is `metadata.<vendor>` or an `x-<vendor>:<name>` strategy.
+The normative rules fit in 28 MUST (§Rules and §Rates and anchor currency).
+
+## Motivation
+
+- There is no file: AIP-49 and AIP-55 are TypeScript calls, a product's billing
+  is spread over several modules, and two products cannot be checked the same way.
+- Fiat sits outside the model ("settle, then mint credits"), so the pack price
+  and the credit peg are two copies of one rate, and a two-decimal credit pack
+  cannot be written in AIP-55 with an integer unit price.
+- Nothing links a payment to what it opened.
+- AIP-55 stops at the price: no subscription, nothing about what a plan includes.
+
+## Specification
+
+### File location
+
+`BILLING.md` (normative name) at `<product>/billing/BILLING.md` (conventional).
+One per product.
+
+### Frontmatter
+
+```yaml
+---
+schema: billing/v1
+name: <kebab-case-id>                 # required
+title: <text>                         # required
+version: <semver>                     # required; bump on any change of amount, expiry or right
+
+assets:                               # required; AIP-49 declarations, inline or { ref }
+  - { ref: aip://49/EUR }             #   fiat: its `default` partition is implicit
+  - <AssetDeclaration>                #   the credit, the points
+primaryAsset: <ASSET_REF>             # required; spends draw from it; its peg is DERIVED from anchor
+anchor: { currency: USD, creditsPerUnit: 100 }   # required; the one adjustable value of a credit (rule 26)
+fx: { EUR: 1.18 }                     # fixed config; other fiat rates follow by cross-multiplication
+spendOrder: [<partition-id>, ...]     # optional tie-break after the AIP-49 order
+taxBasis: net | gross                 # required if any conversion starts from fiat (rule 13)
+
+features:                             # optional; what offers include
+  - { id: <id>, type: boolean }       #   an access
+  - { id: <id>, type: credits }       #   credits of primaryAsset
+
+accounts:
+  kinds: [<kind>, ...]                # required, host vocabulary
+  hierarchy: { maxDepth: 0..3, funding: [pool | allocated_budget, ...] }   # required
+payer:
+  strategy: self | hierarchy/v1 | x-<vendor>:<name>   # required
+  owner: [<context-key>, ...]         # required; server-side keys only
+  affordability: balance | spendable  # default balance
+transfers:                            # optional; parent -> child allocation (AIP-49 transfer)
+  allow: [allocate, reclaim]
+  from: [<partition-id>, ...]         #   what a parent may allocate
+  expiry: inherit                     #   the child lot keeps the origin lot's expiry
+
+conversions:                          # every crossing between assets
+  - id: <id>
+    from: <ASSET_REF>
+    to: <ASSET_REF>
+    rate: { kind: fixed, ratio: <number> } | { kind: oracle, source: <id> }   # rule 9; for a fiat `from`, computed (rule 26), not written
+    rail: <rail-id>                   #   required when `from` is fiat
+    mint: { partition: <partition-id>, expires: <Expiry> }
+    bonus: { strategy: tiered-lots/v1, partition: <partition-id>, tiers: [[<fromMinor>, <percent>], ...] }   # fiat entries only
+    capMinor: { amount: <int>, windowSec: <int> }   # minor units of `from`, per principal
+    enabled: true | false             #   a disabled conversion still enters the no-arbitrage check
+
+offers:                               # AIP-55 product/v1, extended by annex B
+  - id: <id>
+    price: <AIP-55 price>             # model: one-time | prepaid-pool | subscription | x-<vendor>:<name>; a buyer-chosen amount has minMinor / maxMinor, each optional (absent: unbounded)
+    convert: <conversion-id>          # prepaid-pool only: the conversion the payment runs
+    includes:                         # one-time (given once) and subscription (given per period)
+      - { feature: <id> }                                      # boolean
+      - { feature: <id>, amountMinor: <int>, partition: <partition-id>, rollover: none | unbounded }   # credits into that partition; rollover default none
+    subscription:                     # subscription only
+      anchor: payment | calendar
+      grace: <ISO 8601 duration>      #   past_due window after a failed renewal; absent = no grace
+      onUpgrade: none | prorate
+    rail: { <rail-id>: { lookupKey: <string> } }   # optional, existing provider ids to keep
+
+grants:                               # free credits (no payment)
+  - id: <id>                          #   the key is always prefixed grant:<id>: (rule 15)
+    trigger: <AIP-41 schedule block>  #   cron | calendar | event | manual; UTC unless the block names a timezone
+    eligible: { plans: [<offer-id> | none, ...] }
+    amount: { fixedMinor: <int> } | { fromContext: true } | { strategy: x-<vendor>:<name> }
+    partition: <partition-id>
+    mode: add | top-up                #   default add
+    expires: <Expiry>
+    key: <suffix template>            #   must contain {account}; {period} for cron / calendar
+
+rails:
+  - id: <rail-id>                     # unique in the file; stripe | autumn | lemonsqueezy | <vendor>
+    provider: <provider-kind>         # optional: the SettlementProvider kind, default = id (two accounts of one provider = two entries, two ids)
+    productTag: <string>
+    env: { secretKey: <ENV_NAME>, webhookSecret: <ENV_NAME>, mode: <ENV_NAME> }   # names only; defaults in §Adapters
+
+metadata: {}                          # vendor extensions; never overrides a field above
+---
+```
+
+`mode` of a grant: `add` mints `amount` as a new lot each time the trigger fires;
+`top-up` replaces the unspent remainder of the previous drop in that partition:
+the remainder is expired and `amount` is minted, so the partition holds `amount`
+after the grant. A `credits` include names the `partition` its lot is minted
+into; `rollover` defaults to `none`.
+
+`Expiry` is `{ after: <ISO 8601 duration> }` or `{ atPeriodEnd: true }` or
+absent. A lot's expiry is fixed **at mint, from one source**: the explicit
+`expires` of the conversion, grant or include, else the partition's
+`defaultTtlMs`, else none.
+
+Implicit constants (not fields): spend order starts with the AIP-49 normative
+order; conversions round down; a conversion is always an action of its
+principal; grant schedules are evaluated in UTC unless an AIP-41
+schedule block names a `timezone`.
+
+### Conversions are AIP-49 edges
+
+A `conversions[]` entry is the manifest form of an AIP-49 `ConvertEdge` declared
+on the asset `from`, and the parser derives the edge; the `convertEdges` of an
+asset declared in the file MUST be empty (rule 21).
+
+| `conversions[]` | AIP-49 `ConvertEdge` |
+|---|---|
+| `to` | `to` |
+| `rate` (non-fiat `from`) | `rate` as written |
+| fiat `from` F | `rate: { kind: fixed, ratio: anchor.creditsPerUnit x fx[F] }`, with `fx` of the anchor currency being 1 (rule 26) |
+| `capMinor` | `cap`, in minor units of the source asset (AIP-49 reserves `cap`: until the reference wallet enforces it, ts#1203, the host applies the limit itself) |
+| `bonus` | a second lot minted in `bonus.partition` by the same commit; the restriction tags of that partition become `excludes` on every edge of the file, so no conversion draws a bonus lot |
+| `mint.partition`, `mint.expires` | the partition and the expiry stamped on the minted lot |
+| `enabled: false` | the edge stays declared and enters `verifyNoArbitrage` (rule 14); the host does not offer it |
+
+### The payment path
+
+```
+rail event (e.g. Stripe invoice paid)
+  │  verifyWebhook -> PaymentFact { movement, offerId, owner, amountMinor, taxMinor, currency }
+  ▼
+1. CHECK     offer exists and is enabled; currency matches; amount matches the price
+             (fixed price: equal; buyer-chosen amount: within min..max)
+  ▼
+2. FACT      mint <amount> of the fiat asset, cause = movement
+  ▼
+3. EFFECT    by price.model of the offer:
+             prepaid-pool  -> the offer's conversion: fiat -> credits (+ bonus lot)
+             one-time      -> burn fiat; `includes` given once
+             subscription  -> burn fiat; open or extend the paid period; `includes` given for it
+  ▼
+4. TRACE     every entry and lot of steps 2-3, and every later include of the
+             same period, carries cause = movement
+```
+
+### Rules (normative)
+
+Payment
+
+1. Nothing is written before the rail's verified fact.
+2. `movement` is the identity of the **money movement**, normalised per rail
+   (`stripe:pi_...` for a payment, `stripe:re_...` for a refund,
+   `stripe:du_...` for a dispute), never the id of an event. Two events about
+   one movement write once.
+3. Steps 1 to 3 commit atomically, keyed `payment:<movement>`; a replay writes
+   nothing.
+4. A failed check or effect leaves the fiat lot open: the money is owed back
+   and MUST be listed by the host, never dropped.
+5. "What became of this payment" is answerable from the journal alone: all
+   entries and lots with `cause = <movement>`.
+
+Refunds and disputes
+
+6. A refund of money (rail) and the reclaim of credits (journal) are separate.
+   The rail refund is the merchant's decision, at most the amount paid. The
+   reclaim takes back, from the lots this payment minted (never bonus), at most
+   `min(their unreserved remaining, floor(refunded share × minted))`; the
+   account never goes below zero for it.
+7. A refund or dispute of a subscription payment **closes the period**: no
+   include of that period is given after it, even if scheduled (yearly plans).
+8. A dispute (`stripe:du_...`) freezes spending on the payer account until it is
+   resolved; on win, the freeze lifts; on loss, rule 6 applies with refunded
+   share = 1.
+
+Conversions
+
+9. `ratio` is destination major units per source major unit. In minor units:
+   `out = floor(in × ratio × 10^(decimals(to) − decimals(from)))`.
+10. One rate per asset pair per product. The peg of `primaryAsset` is derived
+    from `anchor` (rule 26); no other peg is declared. Fiat to fiat conversion
+    is out of scope.
+11. No conversion from credits or points to fiat. Money leaves only by rule 6.
+12. A bonus is minted as its own lot, tagged so that no conversion draws it,
+    and is never reclaimed into money.
+13. With `taxBasis: net`, the conversion input is `amountMinor − taxMinor`;
+    with `gross`, `amountMinor`. The fiat fact records both.
+14. `verifyNoArbitrage` (AIP-49) passes over every declared conversion,
+    enabled or not.
+
+Grants, includes, subscriptions
+
+15. Every write has a deterministic key; grant keys are `grant:<id>:<suffix>`,
+    so two grants never collide.
+16. `includes` of a subscription are given once per paid period; `rollover:
+    none` expires the unspent remainder at the period end, `unbounded` keeps it.
+17. A failed renewal opens `past_due` for `grace`; includes continue during it;
+    without a payment by its end the period closes. With no `grace` the period
+    closes at the failed renewal.
+18. `onUpgrade: none` gives nothing more until the next period; `prorate` gives
+    the difference pro rata, rounded down. A downgrade takes effect at the next
+    period end (no mid-period clawback).
+
+Accounts and payer
+
+19. `hierarchy/v1`: walk up while the parent is funded `pool`; a parent funded
+    `allocated_budget` stops the walk and its direct child pays; a chain longer
+    than `maxDepth` or a cycle errors; no cascade to another payer.
+20. `owner` keys come from server-side state, never from the client.
+
+Manifest
+
+21. A parser rejects: an unknown reference (asset, partition, feature,
+    conversion, rail); a `bonus` on a non-fiat conversion; `convert` outside
+    `prepaid-pool`; `includes` on `prepaid-pool`; `subscription` outside the
+    subscription model; an unknown strategy or vendor model; a grant key
+    without `{account}` (or without `{period}` for a schedule); an `anchor`
+    currency that is not a declared fiat asset; an offer or fiat conversion whose
+    currency is neither the anchor currency nor a key of `fx`; an asset declared in
+    the file with non-empty `convertEdges`; a duplicate `rails[].id`; a `credits`
+    include whose `partition` is undeclared.
+22. Asset refs compare after normalisation (bare ref or `aip://49/`), currency
+    codes compared case-insensitively and normalised to upper-case ISO 4217
+    (AIP-55 allows either case).
+23. A value that changes an amount, an expiry or a right lives in a field, not
+    in `metadata` or an environment variable; changing it bumps `version`.
+24. A host whose manifest names a rail refuses to start when one of the rail's
+    environment variables is missing.
+25. A host MUST refuse to sell an offer whose model it does not know.
+
+### Offer types
+
+| `price.model` | What a payment does | Real cases |
+|---|---|---|
+| `prepaid-pool` | runs `convert`: fiat to credits, plus bonus | fixed credit packs, buyer-chosen top-ups |
+| `subscription` | opens a paid period; gives `includes` each period | recurring monthly/annual plans |
+| `one-time` | gives `includes` once | one-off bundle with feature access and credits |
+| `x-<vendor>:<name>` | declared by the vendor | anything else; refused by hosts that do not know it |
+
+`pay-per-call` (AIP-55) and postpaid statements stay in AIP-55 and
+`metadata.<vendor>`: one real case only today.
+
+Taken from Stripe: product vs price, one-off vs recurring with an interval.
+Taken from Autumn: what a plan includes (access, credits), reset per period,
+carry-over. Not taken: invoices, tax and proration objects, metered quotas,
+tiers, purchase limits (no second real case yet). Neither provider treats
+money, credits and points as convertible tokens, nor traces a payment to its
+effect: those two are ours.
+
+### Adapters
+
+Same split as tools: a pure **projection** (AIP-52 bridge) and a credentialed
+**`SettlementProvider`** (AIP-30 driver). A *rail* is the payment network or
+service (Stripe, Autumn); the manifest registers a `SettlementProvider` for it
+under the rail id. This is not AIP-55's `BillingRail`, which stays the
+projection config carried on a product.
+
+- **Projection** `to<Rail><Object>(offer) → { artifact, degradations }`, e.g.
+  `toStripeCatalog`, `toAutumnPlan`. AIP-52 rules: the manifest wins; what the
+  provider cannot express is a named degradation (Stripe: `includes`,
+  `rollover`); no credentials; the offer id is written into the provider object
+  (Stripe `lookup_key` unless `rail.stripe.lookupKey` keeps an existing one,
+  plus `metadata.agentproto_offer`; Autumn plan id); the offer is not mutated.
+- **`SettlementProvider`**: implements the AIP-49 `SettlementPort` (`charge`,
+  `pay`) and adds what a payment path needs. It declares its environment
+  variables like a driver (`auth.state.env`).
+
+  ```ts
+  interface SettlementProvider extends SettlementPort {
+    readonly id: string                                   // the rail id
+    verifyWebhook(raw: { body: string; headers: Record<string, string> }): Promise<PaymentFact>
+    refund?(movement: string, amountMinor: number): Promise<SettlementResult>
+    syncCatalog?(projection: unknown): Promise<void>
+  }
+  ```
+
+  `refund` and `syncCatalog` are optional. A provider that cannot do one of them
+  (no refund API, no catalog) omits it; a host MUST check for the method before
+  calling it and MUST NOT sell an offer whose refund path it cannot run.
+- **Environment variable names**: default `<RAIL>_SECRET_KEY`,
+  `<RAIL>_WEBHOOK_SECRET`, `<RAIL>_MODE` (`test` | `live`, default `test`; a
+  `live` rail refuses a test key and the reverse), with the provider's own SDK
+  names where they exist (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+  `AUTUMN_SECRET_KEY`, `AUTUMN_WEBHOOK_SECRET`). `rails[].env` overrides a name
+  when one process hosts two accounts of one rail.
+- An adapter for a provider nobody uses yet is legitimate: projection only,
+  tested, unwired.
+
+### Rates and anchor currency (normative)
+
+The credit's value is anchored to a single currency (`anchor`), and all other
+fiat entry rates follow by cross-multiplication using fixed configuration (`fx`).
+
+```yaml
+anchor: { currency: USD, creditsPerUnit: 100 }   # required: the ONE adjustable value of a credit
+fx: { EUR: 1.18 }                               # fixed in configuration: anchor units per local unit
+```
+
+26. The credit's value is defined by `anchor` only. For any other fiat `F`, the
+    entry rate is computed, never written: `ratio(F) = anchor.creditsPerUnit ×
+    fx[F]` (1 EUR = 100 × 1.18 = 118 credits). A conversion from fiat that
+    declares its own `ratio` is rejected. `fx` values are fixed configuration,
+    not a live exchange rate.
+27. The spend side uses the same anchor: one credit costs
+    `1 / anchor.creditsPerUnit` anchor units (0.01 USD). No other exchange rate
+    may appear in usage pricing.
+28. Prices stay round in local currency; what follows the rate is the number of
+    credits a payment gives (packs) or a plan includes when its includes are
+    priced from the plan price (`includes[].amountMinor` is an explicit integer
+    in the manifest, not auto-computed by the parser). Changing `anchor` or `fx`
+    bumps `version` (rule 23), applies to payments after the change, and never
+    rewrites the journal.
+
+A product may choose any anchor currency and scale (for example `USD` at 100 or
+1 000 credits per unit).
+
+## Conformance
+
+`@agentproto/billing/testing` (conformance suites), one suite per group, run
+against the host's real stores through `{ stores, clock, rails, manifest }`:
+
+| Suite | Rules | Key cases |
+|---|---|---|
+| BILL-PARSE | 21-23 | each rejection; the four reference examples parse |
+| BILL-PAY | 1-5 | two Stripe events for one movement write once; a falsified amount or currency is refused and owed back; trace query |
+| BILL-REFUND | 6-8 | partial refund after spending; bonus never reclaimed; refund of a yearly plan at month 2, clock + 12 months, zero include given; dispute freezes |
+| BILL-CONV | 9-14 | a `capMinor` becomes the edge `cap` (and is applied by the host until AIP-49 enforces it); a bonus tag appears in `excludes`; 200 USD cents at 100 credits per USD = 20 000 credit hundredths; 200 EUR cents at fx 1.18 = 23 600; a fiat conversion declaring its own ratio is rejected; points (decimals 0) to credits (decimals 2); net vs gross; disabled edge in the arbitrage check |
+| BILL-INCL | 15-18 | two weekly grants both land; rollover none / unbounded; past_due then close; upgrade |
+| BILL-PAYER | 19-20 | 4-level tree, no cascade, corrupted chain |
+| BILL-RAIL | 24 + adapters | projection lists its degradations; offer id round-trips; replayed or reordered webhook; missing env stops startup |
+
+## Rationale
+
+- **Small on purpose.** Each field is backed by two products (§Offer types,
+  and the case list of the plan). Metered quotas, tiers, purchase limits,
+  postpaid statements and capped rollover are real ideas with one case each;
+  they wait as vendor fields until a second product needs them.
+- **Fiat as an asset** removes the second copy of each price and makes the
+  payment a journal fact.
+- **The effect follows the offer type**, not the rail: the rail knows an
+  invoice was paid, only the product knows what was bought.
+- **`movement`, not event id**, because providers send several events per
+  money movement.
+- **Refund money and reclaim credits are separate** because a merchant may
+  refund money the user already spent, and a prepaid account must not go
+  negative.
+
+## Reference implementation
+
+Planned `@agentproto/billing`, laid out like `@agentproto/role`: `schema.ts`,
+`defineBillingManifest` (`createDoctype`), `manifest/parseBillingManifest`,
+`spec.ts` (`createVerbs`), pure `planPayment`, `planReclaim`, `resolvePayer`,
+`nextGrantOccurrences`, `tieredLots` on top of `@agentproto/wallet`, the
+projections `toStripeCatalog` and `toAutumnPlan`, and `./testing`.
+
+## Security considerations
+
+Owner keys and offer ids come from server-side state and verified rail data;
+the amount is checked against the price (step 1 of the path); no credits to
+money path (rule 11); rails carry variable names, never secrets; vendor
+strategies resolve from a registry fixed at build time.
+
+---
+
+## Annex A: amendments to AIP-49 WALLET
+
+Carried by a separate pull request against AIP-49 (this annex is the summary).
+
+- **A1** `expire` as an optional, idempotent journal verb; `fold` gives the same
+  balance with or without it.
+- **A2** Conversions offered to a principal are declared edges; `ConvertEdge.cap`
+  stays reserved until the reference wallet enforces it from the journal (targets
+  ts#1203).
+- **A2b** A registry layer may contribute edges whose `to` is one of its own
+  assets (fiat is shared, credits are per product).
+- **A3** Optional `origin` on `mint` / `convert_in`, opaque to the primitive.
+- **A4** A bonus is a separate lot; the conversion runs at its declared rate.
+- **A5** Declared partition tie-break after the normative coalescing order.
+- **A6** Entry from fiat is a fiat `mint` followed by the conversion in the
+  same commit, replacing "convert-on-entry".
+- **A7** `ruleSet.settleIn?: SettlementNetwork[]`, the inbound counterpart of `settleOut`; absent means the same as `settleOut` when it names a network, no external entry otherwise.
+- **A8** An edge may list `excludes` (restriction tags it never draws).
+- **A9** Optional `cause` on entries and lots, opaque to fold and spend.
+- **A10** A payment provider is a `SettlementProvider` (this AIP) implementing `SettlementPort`; AIP-49 requires only the two methods of the port.
+
+## Annex B: amendments to AIP-55 PRODUCT
+
+Carried by a separate pull request against AIP-55 (this annex is the summary).
+
+- **B1** `subscription` model: `{ amountMinor, currency, interval: week | month | year, intervalCount? }`;
+  `billingRail.recurrence` must agree.
+- **B2** A wallet-backed `prepaid-pool` is, besides the existing
+  `{ unitPriceMinor, currency, grantUnits }`, `{ amountMinor, currency }` (price
+  of the pack) or `{ amountMinor: buyer, minMinor?, maxMinor?, currency }`; the pool
+  size is not stored, it is the output of the host's conversion. "2 USD for 200
+  credits" = 200 cents × 100 = 20 000 credit hundredths; 2 EUR at fx 1.18 give
+  236 credits. Integers end to end either way.
+- **B3** `price.model` accepts `x-<vendor>:<name>`; unknown models are not sold.
+
+## Resources
+
+- [`BILLING.schema.json`](./resources/aip-74/draft/BILLING.schema.json): the
+  frontmatter schema, **draft**. It checks shape; the cross-reference rules of
+  rule 21 belong to the parser.
+- Four reference examples covering distinct billing archetypes:
+  [Consumer app](./resources/aip-74/draft/examples/consumer-app/BILLING.md)
+  (packs + loyalty points + weekly top-up grant),
+  [Team workspace](./resources/aip-74/draft/examples/team-workspace/BILLING.md)
+  (multi-currency packs + org-to-workspace allocation + unbounded rollover),
+  [Agency platform](./resources/aip-74/draft/examples/agency-platform/BILLING.md)
+  (buyer-chosen top-up + net tax + hierarchy allocate/reclaim),
+  [Usage SaaS](./resources/aip-74/draft/examples/usage-saas/BILLING.md)
+  (custom 1 000-credit anchor + `spendOrder` + one-time bundle + Autumn rail).

@@ -23,7 +23,6 @@ resources: ./resources/aip-49/draft
 | Domain | wallet.sh |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2) |
 | Resources | [`./resources/aip-49`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-49/draft) — [`ASSET.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-49/draft/ASSET.schema.json) |
-| Amended by | AIP-74 (BILLING, a draft, in review in a companion pull request): `expire`, `cause` and `origin`, the declared tie-break, entry from fiat, bonus lots, edges contributed by a registry layer, `excludes`, `settleIn`, enforcement of `ConvertEdge.cap` |
 | Prior art | ERC-20 (fungible token), ERC-1400 / ERC-1410 (partially-fungible / partitioned token) |
 
 ## Abstract
@@ -225,28 +224,15 @@ realised on-chain by stamping the deadline into the `bytes32` partition id.
 ### Journal + lots
 
 Verbs (`event_kind`): `mint · burn · reserve · capture · release · convert_in ·
-convert_out · transfer`, and optionally `expire`. A `convert` emits a correlated `convert_out` +
+convert_out · transfer`. A `convert` emits a correlated `convert_out` +
 `convert_in` pair atomically; a hold is `reserve` then `capture` (settle) or
 `release` (return). `fold(events, now)` projects lots
 `{ original, remaining, reserved, expiresAt?, status }`; the **net position** for
 an asset = Σ(remaining − reserved) over unexpired lots (the `spendableBalance`
-accessor). `expire` is an optional, idempotent verb that writes down a lot whose
-`expiresAt` has passed: `fold(events, now)` gives the **same** balance with or
-without it, so a host that never writes it stays conformant, and a host that
-writes it (to answer "what expired on which date" from the journal) MUST write it
-at most once per lot. Exhausted lots are NOT skipped: a normal one contributes 0, but a
+accessor). Exhausted lots are NOT skipped: a normal one contributes 0, but a
 drawn-down short lot carries a negative residual that is a real liability. Once
 floors exist this is no longer the same number as what a spend may draw — see
 *Net position vs spend capacity*.
-
-**Cause and origin (optional, opaque).** An event and the lot it creates MAY
-carry `cause?: string`, the identity of what made them happen (a money movement
-such as `stripe:pi_...`, a grant key), so that "what became of this payment" is
-one query over `cause`. `mint` and `convert_in` MAY carry `origin?: string`, the
-provenance of the value (the purchase, the gift, the subscription period).
-Neither field is read by `fold`, coalescing or authorize: they are carried and
-returned unchanged, and replaying a journal with or without them gives the same
-balances. (`correlationId` stays what it is: it links the two legs of one verb.)
 
 ### Lot floors (short positions)
 
@@ -307,11 +293,7 @@ Default order: **owned-first — short (`floor < 0`) lots last** — then
 **restricted-first** (spend constrained value before fungible), then
 **expiring-first**, then oldest. The ordering consequence is normative:
 borrowing from a short lot happens only once every real holding is drained,
-so general credit is spent before the account goes negative. A host MAY declare
-a tie-break, a list of partition ids, that orders lots **only after** this
-normative order has left them equal (AIP-74 `spendOrder` is one such
-declaration); it never overrides owned-first, restricted-first or expiring-first.
-An asset with
+so general credit is spent before the account goes negative. An asset with
 `spendableOn: []` (e.g. loyalty points) has NO eligible spend lot — it can
 only `convert`.
 
@@ -321,53 +303,18 @@ only `convert`.
 `out.restriction → in.restriction = meet(source, edge.addsRestriction)`. Amounts
 scale across `decimals`. A conformant implementation MUST provide a
 `verifyNoArbitrage` check (negative-cycle detection over `-log(rate)`) and gate
-it in CI: no cycle of convert edges may have a rate product > 1. The check runs
-over **every declared edge**, including an edge the host keeps switched off by
-its own configuration (AIP-74 `conversions[].enabled: false`): it can be enabled
-later and must not be able to open a cycle then. `ConvertEdge` itself has no
-`enabled` field.
+it in CI: no cycle of convert edges may have a rate product > 1.
 
-**Entry from fiat.** Value enters the journal from an external settlement as a
-fiat `mint` (recorded after the confirmed external fact, see *Ports*) followed by
-the conversion to the destination asset, **in the same atomic commit**. This
-replaces the earlier "convert-on-entry" wording: there is no implicit conversion,
-the fiat lot exists and carries the same `cause` as the entries it produces.
-
-**Bonus.** A bonus on a conversion is a separate lot, minted by the same commit
-at the destination asset. A host marks it with a restriction that no
-conversion edge draws (see `excludes` below), and it is never part of what a
-refund takes back in money.
-
-**Edges contributed by a registry layer.** An asset registry layer (an app
-extending the shared common set) MAY contribute convert edges whose `to` is one
-of its own assets, even when the `from` asset (fiat) is shared: fiat is common,
-credits are per product. The no-arbitrage check runs over the union.
-
-**`excludes`.** A convert edge MAY list `excludes?: string[]`, restriction tags
-whose lots it never draws. A bonus lot is excluded this way: a manifest parser
-such as AIP-74's sets `excludes` on its edges from the restriction tags of the
-bonus partition.
-
-**`ConvertEdge.cap` is reserved and NOT yet enforced.** A convert edge MAY
-declare `cap?: { amount, windowSec }` (declared in `packages/wallet/src/asset.ts`;
-anti-inflation throughput limiting, load-bearing for host-mint). The reference
-convert path (`packages/wallet/src/convert.ts`) reads only `to`, `rate`, and
-`addsRestriction`. (The `cap` the authorize engine bounds is a different field,
-`envelope.operating.cap`.) Tracked code gap:
-https://github.com/agentproto/ts/issues/1203. Until that gap closes, hosts MUST
-NOT rely on `cap` being enforced and MUST apply their own throughput limiting on
-convert volume.
-
-> **Intended semantics, for when the gap closes (not a requirement yet).** The
-> sum of the source amounts already converted by the principal through the edge
-> inside the trailing `windowSec`, plus the requested amount, will not exceed
-> `amount`, read from the journal; a conversion over the cap is refused, not
-> clipped. `amount` is in minor units of the **source** asset, and `0` forbids
-> the edge. This is what the fix to ts#1203 has to satisfy.
-
-**Offered conversions are declared edges.** The conversions a principal may run
-are the edges declared on its assets (and contributed by registry layers, above);
-nothing else converts.
+**`ConvertEdge.cap` — reserved, not yet enforced.** A convert edge MAY declare
+`cap?: { amount, windowSec }` (declared in
+`packages/wallet/src/asset.ts` — anti-inflation throughput limiting,
+load-bearing for host-mint). This field is **reserved and NOT yet
+enforced**: the reference convert path (`packages/wallet/src/convert.ts`)
+reads only `to`, `rate`, and `addsRestriction`. (The `cap` the authorize
+engine bounds is a different field — `envelope.operating.cap`.) Tracked
+code gap: https://github.com/agentproto/ts/issues/1203. Until that gap
+closes, hosts MUST NOT rely on `cap` being enforced and MUST apply their
+own throughput limiting on convert volume.
 
 ### Authorize + delegation
 
@@ -385,21 +332,6 @@ intersect.
 outbound, per asset), `RatePort` (universal rate oracle), `ClockPort`. All I/O is
 confined to these.
 
-A payment provider is a `SettlementProvider` (defined by AIP-74, a draft): an
-implementation of `SettlementPort` that also verifies webhooks, refunds and
-projects a catalog. AIP-49 only requires the two methods of the port; the rest is
-defined where the payment path is defined.
-
-`AssetRuleSet.settleIn?: SettlementNetwork[]` is the inbound counterpart of
-`settleOut`: the networks through which value may **enter** the asset (a credit
-asset is bought through `stripe`, an asset may refuse on-chain deposits). The
-vocabulary is the one of `settleOut`: higher-level billing rails (such as
-`autumn`) are rails, not networks, and settle through their underlying network
-(e.g. `stripe`); Merchant-of-Record rails that settle independently require a
-dedicated network identifier in a future schema revision. Absent
-means the same as `settleOut` when `settleOut` names a network, and "no external
-entry" when it is `false` or `internal-ledger`.
-
 ## Reference implementation
 
 [`@agentproto/wallet`](https://github.com/agentproto/ts/tree/main/packages/wallet)
@@ -415,9 +347,8 @@ the [AIP-56](/docs/aip-56) `createDoctype` scaffold.
 ## Known limitations
 
 - **Held multi-currency (B) and on-chain-authority custody** are declared in the
-  model but not part of the reference cloud pipeline; entry from fiat (a fiat
-  `mint` then the conversion, in one commit) and custodial-mirror are the day-1
-  defaults.
+  model but not part of the reference cloud pipeline; convert-on-entry and
+  custodial-mirror are the day-1 defaults.
 - **Runtime/DB-backed asset declarations** (host-minted tokens, arbitrary
   deposited ERC-20s) extend the config-first registry with a DB loader; the
   `ref` is the shared key so call sites are stable.

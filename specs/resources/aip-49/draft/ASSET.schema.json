@@ -88,12 +88,6 @@
             "amount": { "type": "number", "minimum": 0 },
             "windowSec": { "type": "number", "exclusiveMinimum": 0 }
           }
-        },
-        "excludes": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 },
-          "description": "Restriction tags whose lots this edge never draws (a bonus lot is excluded this way)."
         }
       }
     },
@@ -241,12 +235,6 @@
           "type": "string",
           "enum": ["custodial-mirror", "on-chain-authority"],
           "description": "Custody model for on-chain assets. Defaults to custodial-mirror."
-        },
-        "settleIn": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "enum": ["internal-ledger", "stripe", "pawapay", "x402", "solana"] },
-          "description": "Networks through which value may enter the asset. Absent: same as settleOut when it names a network, no external entry otherwise."
         }
       }
     }
