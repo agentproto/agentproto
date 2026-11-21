@@ -122,7 +122,9 @@ billingRail:
   something else: a fixed grant for a fixed price per unit.
 - **`prepaid-pool`, buyer-chosen amount**: `{amountMinor: "buyer", minMinor?,
   maxMinor?, currency}`. The amount is chosen at purchase, within the optional
-  bounds (absent: unbounded), and the host's conversion gives the pool.
+  bounds (absent: unbounded), and the host's conversion gives the pool. When
+  both `minMinor` and `maxMinor` are present, `minMinor <= maxMinor` MUST hold
+  (enforced by the parser).
 - **`subscription`**: `{amountMinor, currency, interval, intervalCount?}` with
   `interval` one of `week`, `month`, `year` and `intervalCount` a positive
   integer (default 1). A recurring payment; what each paid period gives (access,
