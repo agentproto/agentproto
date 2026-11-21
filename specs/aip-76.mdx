@@ -1,0 +1,514 @@
+---
+title: "AIP-76: EVENTS (events/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding"
+description: "Fixes how an agentproto host lets an external client watch it: event definitions (name, description, delivery, inputSchema, payloadSchema), subscription identity (RFC 8785 JCS-deterministic sub_<hex32>, idempotent subscribe/refresh/unsubscribe, ttlMs 60s..30d default 7d), the signed callback challenge (type:verification, single-use 64-hex) that must pass before any mutation, the {eventId, name, timestamp, data, cursor} wire envelope, webhook delivery as Standard Webhooks (whsec_ secrets 24-64 bytes, v1 signatures, 10-minute dual-sign rotation window), the delivery guarantees (one event per POST, 256 KiB clamp to {summary, subject}, 2xx = ack, exponential backoff bounded to 5 attempts, never retry 410/413), and the durable outbox that makes delivery at-least-once across restarts. EVENTS is transport-neutral; this AIP also fixes its first binding, mcp-events/v1: three native JSON-RPC methods (events/list, events/subscribe, events/unsubscribe) on the authenticated MCP endpoint, the events:{} capability at initialize, and a public MCP 2026-07-28 events origin (POST /mcp/events/<secret>). It fills AIP-60's frozen webhook target kind with its delivery contract and does not touch the inbound inbox path. There is no EVENTS.md file."
+aip: 76
+status: Draft
+type: Schema
+created: 2026-11-21
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 60]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/mcp-server
+layer: host
+---
+
+| Field | Value |
+|---|---|
+| AIP | 76 |
+| Title | EVENTS (events/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-60](/docs/aip-60) (SENTINEL: the store, providers, subjects, and the frozen `webhook` target kind this AIP gives a delivery contract) |
+| Composes with | [AIP-32](/docs/aip-32) (MCP driver: the client side of the same protocol family), [AIP-46](/docs/aip-46) (SESSION: subscriptions created from a session reach the host surface through the same session primitives) |
+| Bindings | `mcp-events/v1` (this AIP, §Binding: mcp-events/v1). Other transports are future bindings of the same contract. |
+| Created | 2026-11-21 |
+| Packages (ref-impl) | `@agentproto/mcp-server` (native method dispatch), `@agentproto/runtime` (`mcp-events` adapter, `webhook-egress`, events origin), `@agentproto/sentinel` (store, outbox) |
+| Prior art | OpenAI, "MCP Events – plugins" (developers.openai.com/plugins/build/mcp-events); Standard Webhooks 1.0; MCP HTTP-Streamable 2025-11-25 / MCP 2026-07-28 `server/discover` |
+
+## Abstract
+
+A host that can be watched by an external client needs three things: to say
+which events exist (list), to let that client subscribe with a callback and a
+secret (subscribe), and to stop on request (unsubscribe). EVENTS fixes the
+transport-neutral contract behind those three operations: event definitions,
+deterministic subscription identity, the signed challenge that must pass
+before a subscription mutates anything, the wire envelope of a delivered
+event, the Standard Webhooks signature and retry rules of delivery, and the
+durable outbox that makes the whole chain at-least-once across host restarts.
+It then fixes the first binding, `mcp-events/v1`, which exposes the three
+operations as native MCP JSON-RPC methods (`events/list`, `events/subscribe`,
+`events/unsubscribe`) on the authenticated MCP endpoint, plus a public,
+path-secret MCP 2026-07-28 origin that serves `server/discover`. EVENTS is
+the outbound twin of [AIP-60](/docs/aip-60): AIP-60 delivers watched events
+*into* a session's inbox; this AIP defines the `webhook` target kind AIP-60
+left as a frozen shape.
+
+## Motivation
+
+- The official OpenAI plugin contract ("MCP Events") requires the three
+  native methods on the same endpoint as tools, an `events:{}` capability
+  at `initialize`, signed challenge verification, and Standard Webhooks
+  delivery with bounded retry. An agentproto host that wants its plugins to
+  push events to a ChatGPT conversation has to satisfy all of it exactly.
+- AIP-60 froze the `webhook` target "without delivery"; shipping code now
+  exists and an audit (2026-11-21) confirms it conforms to the upstream page
+  on every mechanism. The spec is the missing half: no AIP today tells a
+  second implementer what to build.
+- The details that make or break interop (JCS-deterministic subscription
+  ids, `whsec_` secret format, 256 KiB clamp, 410/413 terminal statuses,
+  ack-after-terminal persistence) are exactly the kind of contract that
+  drifts when unspecified.
+- Most of that contract does not depend on MCP. Splitting the generic
+  EVENTS contract from its MCP binding lets a second transport (plain HTTP,
+  A2A, a session tool surface) reuse identity, challenge, envelope, delivery
+  and outbox without re-specifying them.
+
+## Design principles
+
+1. **Same wire as upstream.** The envelope, headers, and method shapes are
+   the upstream doc's verbatim, not a local dialect. Deviations are listed
+   as deviations (§Known deviations), not smuggled into the contract.
+2. **Contract once, bindings many.** Everything a receiver can observe
+   (identity, challenge, envelope, signatures, retry, outbox) is defined by
+   EVENTS. A binding only maps the three operations, their errors, and the
+   capability advertisement onto one transport.
+3. **Identity over lookup.** A subscription id is derived from the
+   subscription's identity (RFC 8785 canonical JSON), never minted. This
+   makes subscribe idempotent, refresh the same operation, and unsubscribe
+   recomputable by anyone who knows the identity.
+4. **Verify before mutate.** No store mutation happens before the callback
+   challenge passes; a failed remote renewal leaves the previous grant
+   intact.
+5. **Serialize once, sign per attempt.** The envelope bytes are computed
+   once per event; each delivery attempt signs those exact bytes with a
+   fresh timestamp. A redelivered event is byte-identical and the
+   `requestId` makes it a consumer no-op.
+6. **Persist the delivery, not the intent.** A durable outbox row holds the
+   exact bytes and is acked only when terminal; a crash re-dispatches the
+   same row.
+
+## Terminology
+
+- **EVENTS contract** (`events/v1`): the transport-neutral rules of this AIP
+  (§Specification up to §Errors).
+- **Binding**: the mapping of the three operations (list, subscribe,
+  unsubscribe), their errors and the capability advertisement onto one
+  transport. `mcp-events/v1` is the binding this AIP defines.
+- **Host events surface**: the operations of a binding plus its capability
+  advertisement; in `mcp-events/v1` it is the `events/*` methods plus
+  `events:{}` on the authenticated `/mcp` endpoint, sharing the transport
+  with tools.
+- **Public events origin**: in `mcp-events/v1`, a separate,
+  unauthenticated-by-token origin `POST /mcp/events/<secret>` (MCP
+  2026-07-28 era only) where the path secret *is* the auth; the only server
+  ever mounted there is the events surface.
+- **Inbound vs outbound**: AIP-60's sentinel pipeline (providers, poll, inbox
+  delivery) is *inbound*. This AIP's outbound path is a `webhook`-target
+  sentinel whose events are projected to the EVENTS envelope and POSTed out.
+- **Delivery guarantee** here means: signed webhook + bounded retry + durable
+  outbox restart-safety, not the internal session delivery ledger
+  (`delivery-ledger.jsonl`, which traces inbox deliveries and is out of
+  scope).
+
+## Specification
+
+### Event definitions and list
+
+An event definition is exactly `{name, description, delivery, inputSchema,
+payloadSchema}`. The list operation returns pages of definitions plus
+`nextCursor: string | null`; it never returns payloads. Definitions are
+registered per subject scheme (GitHub in v1) and carry an authorization gate
+per principal (see §Known deviations for the v1 single-tenant gate).
+
+```
+list result: { events: EventDefinition[], nextCursor: string | null }
+```
+
+### Subscribe (and renewal by the same operation)
+
+```
+subscribe params: {
+  name: string,
+  arguments: object,                  // validated against inputSchema
+  delivery: { mode: "webhook", url: string, secret: string },
+  ttlMs?: number | null              // omitted → default 7d; null → no expiry
+}
+subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
+                    cursor: null, truncated: false }
+```
+
+1. **Secret** MUST be `whsec_` + standard base64 decoding to 24..64 bytes
+   (else the binding's invalid-params error with `reason: invalid_secret`).
+   The secret is the receiver's Standard Webhooks signing secret; the host
+   never generates it.
+2. **TTL**: `ttlMs` omitted → default 7 days; number → granted
+   `min(max(requested, 60s), 30d)`; null → `until` never (no expiry).
+   `refreshBefore` in the result is the **granted expiration itself**
+   (ISO-8601 of `until.at`), not a pre-expiry hint; `null` when there is no
+   expiry. Expiration stops delivery: the expiry sweep flips the sentinel
+   to `expired` and cancels the provider side.
+3. **Identity and idempotence**: the subscription id is `sub_<hex32>` =
+   sha256 (first 128 bits) of the RFC 8785 (JCS) canonical JSON of
+   `{principal, callbackUrl, eventName, args}`. A second subscribe with the
+   same identity is a **renewal/refresh** (see rule 4); identity is shared
+   by unsubscribe minus the secret.
+4. **Refresh semantics**: on a same-identity subscribe, the host renews the
+   backing remote FIRST (`provider.renew`); only then rotates the stored
+   secret if the submitted one differs and moves the local TTL. A renewal
+   failure raises `BackingSubscriptionError` and leaves the previous grant
+   fully intact (state, TTL, secret): local never outlives remote. A
+   submitted `cursor` is ignored: v1 events are non-replayable.
+5. **Verify before mutate**: the callback challenge (next section) MUST pass
+   before any store mutation. The verification cache is keyed on
+   sha256(secret), so a new secret always forces a fresh challenge.
+
+### Callback verification (the challenge)
+
+1. The host POSTs to the callback URL a body
+   `{"type": "verification", "challenge": "<fresh 64-hex>"}` with
+   `webhook-id: msg_verification_<24-hex>`, a fresh `webhook-timestamp`,
+   `webhook-signature` (Standard Webhooks, the submitted secret), and
+   `X-MCP-Subscription-Id: <id>`.
+2. The receiver MUST answer 2xx with JSON echoing the challenge; the echo
+   comparison is constant-time. A failed fetch, status or shape is a
+   `CallbackEndpointError` with a mapped `reason` (`non_https`,
+   `challenge_failed`, `ssrf_blocked`, `timeout`, `non_2xx`: the exact v1
+   enum).
+3. A successful verification is cached (10 minutes, bounded cache, keyed on
+   the secret hash, per callback URL) so subsequent subscribes to the same
+   (principal, url, secret) skip the POST. A rotating secret invalidates it.
+4. The callback URL MUST be `https://` and pass the egress SSRF gate, the
+   same gate as delivery (§Delivery).
+
+### The delivered envelope
+
+```
+{ "eventId": string, "name": string, "timestamp": string,
+  "data": object, "cursor": null }
+```
+
+1. Wire shape is upstream-verbatim: `eventId` (the `webhook-id` header
+   carries it, so a receiver's dedup key is free), `name`, `timestamp`,
+   `data`, `cursor`. v1 events are non-replayable: `cursor` is `null`
+   everywhere and the `gap`/`terminated` control notifications of the
+   upstream sketch are never sent.
+2. **256 KiB clamp**: if the serialized envelope exceeds 262 144 bytes,
+   `data` is replaced by `{summary, subject}` and the envelope gains the
+   extension field `truncated: true` (§Known deviations for why this is an
+   extension). The clamp happens before any signature: the clamped bytes are
+   what every attempt signs.
+
+### Delivery (one event = one signed POST)
+
+1. **Serialization invariance**: the envelope is serialized exactly once;
+   each attempt re-signs the same bytes with a fresh timestamp. Between the
+   attempts the body bytes are bitwise identical.
+2. **Signature** (Standard Webhooks): `webhook-id` = `eventId`,
+   `webhook-timestamp` = fresh Unix seconds per attempt, `webhook-signature`
+   = space-separated `v1,<base64 HMAC-SHA256 over "id.timestamp." + body>`,
+   one segment per signing secret. During a **secret rotation** (subscribe
+   submitted a different secret), the previous secret is kept for a
+   **10-minute dual-sign window** and the row carries both signatures, so a
+   receiver rotating at its own pace stays verifiable.
+3. **Headers**: `Content-Type: application/json`, `webhook-id`,
+   `webhook-timestamp`, `webhook-signature`, `X-MCP-Subscription-Id`.
+4. **Outcome per attempt**: `2xx` = delivered (acked). `410` (Gone) and
+   `413` (Payload Too Large) are terminal, never retried. Everything else
+   (other 4xx, 5xx, 3xx, network error) retries with exponential backoff
+   **250ms base doubling, capped at 4000ms, at most 5 attempts** (delivery
+   timeout 15s per attempt). After 5 failed attempts the event is dead and
+   surfaced as such.
+5. **SSRF gate**: the POST targets a URL that MUST be `https://` on a
+   publicly routable address: DNS resolution then validation then a pinned
+   connection IP (closing TOCTOU/DNS-rebinding), original hostname preserved
+   for TLS/SNI, no HTTP redirects followed. The same gate serves challenge
+   and delivery.
+
+### Persistence and restart (at-least-once)
+
+1. **Subscriptions persist** in `sentinels.json` (mode 0600, atomic writes);
+   webhook secrets live in a separate store and never appear in sentinel
+   records, views, or tool results.
+2. **Outbox**: the webhook fire path appends a durable row BEFORE
+   dispatch:
+   `{sentinelId, requestId, eventId, bodyBytes (utf-8 base64 of the exact
+   wire bytes), cursor: null, deliveryState, status: pending|delivered|dead}`.
+   `requestId` is deterministic over `(sentinelId, eventId)`, so a
+   restart-redelivery is a receiver-side no-op on that key, while the
+   wire `webhook-id` header stays the event's own id.
+3. **Ack after terminal**: the backing sentinel event is acked to its
+   provider ONLY when the outbox row reaches terminal status (`delivered`,
+   or `dead` per retry cap, subscription expiry, or removal). A dispatch
+   that crashed stays `pending` and the event un-acked; a restart
+   re-dispatches by the stored exact bytes.
+4. **Ordering across events of one subscription is never assumed** (single
+   pending row at a time is not a guarantee); receivers dedup on
+   `eventId`/`requestId`. Delivered rows are reaped after 24h; pending rows
+   age out dead after 7 days.
+5. **Expiry stops delivery**: the startup/per-tick sweep flips an expired
+   subscription to `expired` (cancels the provider side); a gone
+   subscription's pending rows go `dead` with a reason.
+
+### Unsubscribe
+
+1. Unsubscribe recomputes the same identity (minus the secret) and is
+   **idempotent**: a second call, or a first call with no live record,
+   returns an empty success (`{}`).
+2. Removal first persists a **tombstone** (drop local deliveries, then
+   cancel remote; the sweep retries the cancel until it 404/204s), so a
+   dead-but-retried remote watch cannot resurrect deliveries.
+
+### Errors
+
+| Error | `reason` (examples) |
+|---|---|
+| Invalid params | `unknown_event`, `invalid_arguments`, `invalid_secret`, `invalid_ttl`, `unauthorized`, `identity_conflict` |
+| CallbackEndpointError | `non_https`, `challenge_failed`, `ssrf_blocked`, `timeout`, `non_2xx` |
+| BackingSubscriptionError | `backing_renew_failed`, `backing_subscription_expired` |
+
+A binding MUST map each error to a distinct transport error and carry the
+`reason` verbatim; it never turns a typed error into a generic one.
+
+## Binding: mcp-events/v1
+
+`mcp-events/v1` maps the EVENTS contract onto MCP. It is the binding the
+OpenAI "MCP Events" plugin contract consumes.
+
+### Surfaces and origins
+
+1. **Authenticated `/mcp` endpoint** (Streamable HTTP / MCP 2025-11-25): the
+   host mounts `events/list`, `events/subscribe`, `events/unsubscribe` as
+   native JSON-RPC request handlers (not `tools/call`) and announces
+   `events: {}` in capabilities at `initialize` (a compliant client may read
+   capabilities from either `initialize` or `server/discover`).
+2. **Public events origin** `POST /mcp/events/<secret>`: mounted only when a
+   secret of ≥ 32 characters is configured; it serves the MCP 2026-07-28 era
+   (`server/discover` with `supportedVersions` and `events:{}`, stateless
+   result `resultType: "complete"`), mounts **only** the events surface (no
+   tools, resources, or prompts without a security review), and gates
+   subscribe against an optional repo allowlist.
+3. The two origins are alternates for the same contract; a client uses
+   either.
+
+### Method mapping
+
+| EVENTS operation | JSON-RPC method | Params / result |
+|---|---|---|
+| list | `events/list` | §Event definitions and list |
+| subscribe | `events/subscribe` | §Subscribe |
+| unsubscribe | `events/unsubscribe` | §Unsubscribe; result `{}` |
+
+### Error mapping
+
+| EVENTS error | JSON-RPC code | Carried as |
+|---|---|---|
+| Invalid params | `-32602` | `data.reason` |
+| CallbackEndpointError | `-32015` | `data.reason` |
+| BackingSubscriptionError | `-32016` | `data.reason` |
+
+The transport surfaces adapter errors verbatim (code + data).
+
+## Known deviations (v1, deliberate, listed here so they are not lost)
+
+1. **Single tenant, no stop-on-revoke.** Upstream asks a host to re-check
+   the subscribing user's access during the subscription's lifetime and
+   stop delivery on revocation. v1 grants every principal (exactly two:
+   bearer-daemon and trusted-session) the same scope, and `authorize` is a
+   constant. On the public origin this means any path-secret holder gets
+   the same scope, mitigated by an optional repo allowlist. This is the
+   largest known gap to a multi-tenant host; tracked as future work
+   (per-auth-profile principals + periodic recheck + stop-on-revoke).
+2. **No read tool after the clamp.** The spec-recommended "large records →
+   summary + read tool" is implemented as the summary only; the payloads
+   behind a `{summary, subject}` clamp are not re-readable through any
+   tool. Adding an `events_payload_read` tool is the matching follow-up.
+3. **Top-level `truncated: true` on a clamped envelope** is a wire
+   extension: upstream documents `truncated` inside subscribe/replay
+   results, not on the event envelope. Low risk (tolerant receivers), but
+   strictly spec-shaped receivers may reject it; keep it in mind on strict
+   conformance testing.
+4. **No `server/discover` on the root `/mcp`** (`mcp-events/v1`).
+   Deliberate: advertising the modern era there made era-2025-11-25-only
+   transports coerce (a client regression where tools came back invalid).
+   The modern origin (public events origin) serves `server/discover`; a
+   client pointed at `/mcp` is expected to go through `initialize` (the
+   other branch upstream accepts). The code documents the re-enable
+   condition.
+5. **Polling/streaming transport for subscriptions**: not provided; v1 is
+   webhook-delivery only (upstream does not rely on polling either).
+
+## Rationale
+
+- **Why EVENTS, with MCP as a binding**: identity, challenge, envelope,
+  signatures, retry and outbox are what a receiver depends on, and none of
+  them is MCP-specific. Naming the IP after the capability (`events/v1`)
+  and the MCP mapping after its transport (`mcp-events/v1`) lets a second
+  binding reuse the contract instead of forking it, and keeps the MCP
+  binding diffable line by line against the upstream OpenAI page.
+- **Why native methods, not tools** (`mcp-events/v1`): the upstream contract
+  (and any compliant client) dispatches `events/*` as JSON-RPC methods on
+  the auth endpoint; a `tools/call` translation cannot produce the needed
+  capability advertisement, and the host has no reason to fake one.
+- **Why JCS-deterministic ids**: subscribe-by-identity makes the whole trio
+  idempotent without a lookup, lets a principal re-derive the id without a
+  subscription registry at hand, and lets unsubscribe stay correct after a
+  restart moved things; JCS (RFC 8785) is the one canonical JSON form that
+  survives numeric and key-order differences.
+- **Why challenge-before-mutation with a per-secret cache key**: a
+  subscription that never verified would be a spam relay; a cache keyed on
+  the secret (and not just URL/principal) means a leaked or rotated secret
+  can never inherit a previous verification.
+- **Why serialize-once + sign-per-attempt**: both Standard Webhooks
+  verification and receiver-side dedup are simplest when the body never
+  changes across retries; a fresh `webhook-timestamp` per attempt keeps the
+  receiver's staleness check meaningful.
+- **Why 410/413 are terminal**: the receiver told us the subscription is
+  gone (Gone) or this receiver will never take this size (Payload Too
+  Large); retrying would only be harassment, and terminal statuses carry a
+  positive signal the sender can audit.
+- **Why an outbox row with exact bytes + ack-after-terminal**: the
+  alternative (in-process delivery with mark-seen-first) loses an event
+  to a crash in the gap; requestId determinism caps the receiver-side
+  cost of the worst case (restart-redelivery) at one no-op.
+- **Why the public origin is a separate, minimal, path-secret origin**:
+  the host must be reachable without exposing the daemon's bearer token to
+  the wider world. The path secret is the only thing validated, the
+  surface is the events surface alone, and a tunnel must forward only
+  `/mcp/events/`, nothing else.
+- **Adjacency (extend, don't fork)**: the MCP binding is the upstream MCP
+  Events wire, profiled, not a competing dialect; delivery is Standard
+  Webhooks 1.0 unchanged. This AIP only adds what those documents leave to
+  the host: identity, persistence, restart safety, and the link to AIP-60.
+
+## Reference Implementation
+
+Single implementation: `agentproto/ts` @ `765660d` (2026-11-21 audit:
+conforms to the upstream OpenAI page on every audited mechanism; a
+conformance suite of 36 checks passes with 0 failures; two transports
+covered; deviations listed above).
+
+| Concern | Source (in `agentproto/ts`) |
+|---|---|
+| Native method dispatch, `events:{}` at `initialize`, era notes | `packages/mcp-server/src/events-methods.ts:26` (protocol version const), `:69-72` (capability), `:75-81` (no `server/discover` on `/mcp`, the deviation), `:86-92` (request handlers) |
+| Adapter (list/subscribe/refresh/unsubscribe, TTL, errors) | `packages/runtime/src/mcp-events/adapter.ts:10-19` (v1 invariants), `:48-51` (60s/7d/30d TTL bounds), `:58-59` (`refreshBefore` = granted expiry), `:68-73` (`untilForTtl`), `:104-105` (`-32015`), `:117-122` (`-32016`), `:245-254` (`events/list`), `:259-358` (subscribe; `:276-281` secret gate, `:282-300` verify-before-mutation), `:303-340` (refresh path), `:364-415` (idempotent unsubscribe + tombstones), `:421-431` (envelope) |
+| JCS identity (`sub_<hex32>`) | `packages/runtime/src/mcp-events/subscription-id.ts:49` (RFC 8785 canonicalize), `:76-84` (id derivation) |
+| Event definitions per scheme; principals | `packages/runtime/src/mcp-events/events-registry.ts:36-44` (principals), `:46-60` (EventDefinition), `:174+` (inputSchema validation), `:245-247` (single-tenant `authorize`, the deviation), `:366-368` (`tenantScope`) |
+| Challenge | `packages/runtime/src/webhook-egress/challenge.ts:115-183` (`verifyCallback`; `:139` fresh 64-hex, `:141` `msg_verification_*`, `:131-137` cache keyed on sha256(secret), `:65` 10-min TTL, `:149` `X-MCP-Subscription-Id`) |
+| Standard Webhooks signing | `packages/runtime/src/webhook-egress/signing.ts:28-33` (header shape), `:51-64` (`whsec_` 24..64 byte decode), `:72-91` (HMAC-SHA256 `v1,`, multi-secret space-join) |
+| Delivery loop | `packages/runtime/src/webhook-egress/delivery.ts:22-31` (envelope verbatim + `truncated` extension), `:108-115` (clamp 256 KiB, 5 attempts, 250→4000ms backoff), `:119` (410/413 terminal), `:126-140` (clamp → `{summary, subject}`), `:142-205` (the loop; serialize once `:152`, fresh timestamp per attempt, headers `:181`, 15s timeout `:182`) |
+| SSRF gate | `packages/runtime/src/webhook-egress/ssrf-fetch.ts:66` (`isPubliclyRoutable`), `:240` (`ssrfFetch`), `:277-286` (resolve → validate → pin IP, `servername` SNI) |
+| Events-only public surface + allowlist | `packages/runtime/src/mcp-events-surface.ts:24-42` (`:27-41`: events surface, `events_ping`, repoAllowlist gate) |
+| Public origin route + MCP 2026-07-28 | `packages/runtime/src/http-server.ts:1245-1247` (route + tunnel rule), `:1923`, `:2900` (`handleModernRequest`), `:3439-3442` (path-secret match); `packages/runtime/src/mcp-modern/index.ts:121-133` (`server/discover`); gate `packages/runtime/src/index.ts:5226-5234` (`AGENTPROTO_MCP_EVENTS_SECRET` ≥ 32 chars, `AGENTPROTO_MCP_EVENTS_REPOS` allowlist) |
+| Durable outbox + ack-after-terminal + expiry sweep | `packages/sentinel/src/sentinel-webhook-outbox.ts:1-34` (design: row shape, ack-after-terminal, ordering, 24h/7d reaping), `:52-58` (row), `:173` (`webhookRequestId` deterministic over `(sentinelId, eventId)`), `:364` (use); `packages/sentinel/src/sentinel-runtime.ts:377-399` (expiry sweep), `:415-473` (fire path + `ackAfterTerminalRow`) |
+| Subscription + secret persistence, rotation | `packages/sentinel/src/sentinel-store.ts:123-132` (`SentinelWebhookSecret`, 10-min `prevSecret` window), `:209` (`sentinels.json`) |
+| End-to-end tests | `packages/runtime/src/__tests__/mcp-events-e2e.test.ts`, `mcp-events-principal.test.ts`, `mcp-events-route.test.ts`, `mcp-events-surface.test.ts`, `sentinel-delivery-apply.test.ts`, `external-sentinel-delivery.test.ts`; `packages/mcp-server/src/__tests__/events-methods.test.ts` |
+| Conformance suite | `scripts/mcp-events-conformance/` (36 PASS / 0 FAIL at `765660d`) |
+
+## Backwards Compatibility
+
+Additive everywhere. A host that does not mount an events surface exposes
+no `events/*` methods and no public origin; existing clients see no change.
+AIP-60's frozen `webhook` target kind gains a delivery contract, so a
+conformant host that previously rejected `target.kind: "webhook"` keeps
+rejecting it unless it implements this AIP; the reserved-kinds rule of
+AIP-60 (reject with `not_implemented` until a delivery is defined) is what
+this AIP activates for `webhook`. No existing schema field changes. No AIP
+is replaced.
+
+## Security Considerations
+
+- **Secret handling**: `whsec_` secrets are validated (standard base64 after
+  a fixed prefix, 24..64 raw bytes) before use, stored in a separate 0600
+  store from the sentinel record, never logged (only the prefix shape
+  appears in errors), never echoed in views or tool results. During
+  rotation the previous secret lives for exactly one 10-minute window.
+- **Challenge**: single-use (fresh 32 random bytes hex), constant-time
+  comparison, bounded cache keyed on the secret hash (a new secret always
+  re-verifies), and the signed challenge POST gives the receiver the same
+  HMAC guarantee as a real delivery.
+- **Egress SSRF**: both challenge and delivery go through the shared gate
+  (HTTPS-only, public-routable only, resolve-then-pin, SNI preserved,
+  no redirects), so a hostile `delivery.url` cannot probe the host's
+  private network or loop back into the host's own inbound routes.
+- **Public origin** (`mcp-events/v1`): mounted only on an explicit ≥ 32-char
+  secret; the events surface is the only server there (no tools), subscribe
+  is allowlist-gated, and a tunnel is documented to forward only
+  `/mcp/events/`: the origin has deliberately minimal surface.
+- **Clamp**: two effects, both security-adjacent: the summary replaces a
+  payload the receiver may never see (leak minimization), and the size cap
+  protects the receiver from a giant POST its client billed per token.
+- **Unsubscribe**: identity is recomputable without a secret, but the
+  challenge gate is on subscribe; the remote cancel is retried via
+  tombstone so a stuck provider watch cannot continue delivering as a
+  ghost.
+
+## Conformance
+
+A host is conformant to `events/v1` when:
+
+1. Challenge verification runs before any subscription mutation and never
+   caches a verification across a secret change.
+2. Every delivered envelope is upstream-shaped
+   (`{eventId, name, timestamp, data, cursor}`), `cursor` is `null`, and
+   the signature body matches the sent bytes per attempt.
+3. 2xx acks, 410/413 are terminal, retry is bounded exponential ≤ 5
+   attempts, and a serialized body over 256 KiB is only ever sent as
+   `{summary, subject}` (+ the documented deviation if any).
+4. The outbox persists exact bytes before dispatch and acks the backing
+   event only after terminal status; a mid-delivery restart re-dispatches
+   identical bytes and delivers at-least-once, never more than one
+   distinct envelope per event.
+5. Subscription identity is JCS-deterministic over
+   (principal, callbackUrl, eventName, args), subscribe is idempotent up
+   to renewal, and unsubscribe returns an empty success for any state.
+
+A host is additionally conformant to `mcp-events/v1` when `events:{}` is
+advertised at `initialize`, and `events/list`, `events/subscribe`,
+`events/unsubscribe` are native JSON-RPC methods on the same authenticated
+endpoint as tools, with the error codes of §Error mapping.
+
+A named deviation (`truncated` top-level, single-tenant authorize, no read
+tool, no `server/discover` on the root) is conformant **only if** listed in
+the implementation's deviation list.
+
+## Open questions
+
+1. **Read tool post-clamp**: the matching follow-up tool to the
+   `{summary, subject}` clamp; spec-recommended upstream, dropped in v1 by
+   the implementation plan (§Known deviations 2). What ground it covers
+   (a full payload read? a paginated re-read?) is open.
+2. **Multi-tenant principals + stop-on-revoke**: the answer to §Known
+   deviations 1; needs an operator-approved auth-profile shape before it
+   can be a MUST here.
+3. **`truncated` field placement**: keep the top-level extension with a
+   registered note (receiver tolerance means it ships today), or move it
+   into `data` (strict-spec shape) pending a conformance test on the real
+   upstream consumer.
+4. **Frozen wire schemas**: publish `resources/aip-76/draft/`
+   (`envelope.schema.json`, `EventDefinition.schema.json`) in a follow-up
+   PR, or stay prose-only like AIP-75. This PR ships prose only.
+5. **Second binding**: which transport earns the next binding of the
+   EVENTS contract (plain HTTP for non-MCP clients, A2A, a session tool
+   surface over AIP-46), and whether polling/streaming delivery is worth
+   designing for a client that cannot receive webhooks.
+6. **Second implementer**: the 2-implementer rule for Final. The
+   conformance suite in the reference implementation is the starting
+   point; extracting a portable one is a blocker on the path from Draft to
+   Final, not to Draft.
+
+## See also
+
+- [AIP-1](/docs/aip-1): process, RFC 2119, adjacency clause (why this
+  extends MCP rather than forks it: the wire is upstream-verbatim)
+- [AIP-32](/docs/aip-32): the MCP driver, the client side of the same
+  protocol family; a host may be both a client (AIP-32) and a watched
+  server (this AIP)
+- [AIP-60](/docs/aip-60): SENTINEL, subjects, providers, and the inbound
+  inbox delivery; the `webhook` target kind this AIP gives a delivery
+  contract to, and the store/runtime this AIP composes with
+- [AIP-46](/docs/aip-46): SESSION, the inbox AIP-60 delivers into (the
+  inbound direction; nothing here changes it)
+- Upstream: OpenAI "MCP Events – plugins" page (the wire contract the
+  `mcp-events/v1` binding profiles); Standard Webhooks 1.0 (signature
+  format); RFC 8785 (JCS, subscription identity)
