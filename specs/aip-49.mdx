@@ -393,8 +393,10 @@ defined where the payment path is defined.
 `AssetRuleSet.settleIn?: SettlementNetwork[]` is the inbound counterpart of
 `settleOut`: the networks through which value may **enter** the asset (a credit
 asset is bought through `stripe`, an asset may refuse on-chain deposits). The
-vocabulary is the one of `settleOut`: `autumn` is a rail, not a network, and
-settles through `stripe`. Absent
+vocabulary is the one of `settleOut`: higher-level billing rails (such as
+`autumn`) are rails, not networks, and settle through their underlying network
+(e.g. `stripe`); Merchant-of-Record rails that settle independently require a
+dedicated network identifier in a future schema revision. Absent
 means the same as `settleOut` when `settleOut` names a network, and "no external
 entry" when it is `false` or `internal-ledger`.
 
