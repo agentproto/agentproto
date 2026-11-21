@@ -1,0 +1,770 @@
+---
+title: "AIP-75: VOICE (voice/v1): speech provider contracts and the voice session"
+description: "Fixes how a product talks to voice providers: three provider contracts (SttProvider, TtsProvider, RealtimeProvider) declared with defineVoiceProvider, one VoiceSession with two engines (realtime and cascade) and why interruption differs between them, the environment variables that choose them and the rule that orders those variables, and the usage record that is the only thing a voice session hands to billing. There is no VOICE.md."
+aip: 75
+status: Draft
+type: Schema
+created: 2026-11-20
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 25]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+layer: host
+---
+
+| Field | Value |
+|---|---|
+| AIP | 75 |
+| Title | VOICE (voice/v1): speech provider contracts and the voice session |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-25](/docs/aip-25) (PERSONA: carries the voice register; this AIP carries the execution) |
+| Composes with | [AIP-36](/docs/aip-36) (SANDBOX: the provider-family model this AIP follows) |
+| Created | 2026-11-20 |
+| Package | `@agentproto/voice` (contracts, registry, `VoiceSession` and its two engines); one package per provider, `@agentproto/voice-<slug>` |
+
+## Abstract
+
+A product that talks needs three things from a vendor: to turn speech into
+text (STT), to turn text into speech (TTS), or to do the whole
+conversation at once (realtime). This AIP fixes one contract for each
+(`SttProvider`, `TtsProvider`, `RealtimeProvider`), the declaration a
+provider package makes about itself (`defineVoiceProvider`), the one
+conversation object a product holds (`VoiceSession`) with its two engines
+(`realtime` and `cascade`), the environment variables that pick them, and
+the usage record a session reports. Concrete vendors live in their own
+packages; the spec stays small. There is no `VOICE.md` file.
+
+## Motivation
+
+Two products run voice today. One (call and voice-room product) switches
+between a cascade and realtime engines and between vendors; the other (a
+multi-participant room product) switches vendor per participant voice.
+The choice is spread over URL parameters, environment variables and `if`
+branches in one large server file. The cascade that serves phone calls
+already takes its STT, TTS and brain as injected functions (so it runs
+with mocks in tests), but it does not sit behind the engine contract and
+its production wiring names one vendor per stage. A second STT or TTS
+vendor means editing code, not configuration.
+
+One contract per capability lets a product change a vendor by
+configuration, lets a vendor package be added without touching the host,
+and keeps the cascade a first-class engine instead of code inside an app.
+
+## Design principles
+
+1. **Two-product rule.** A notion enters this AIP only if two real
+   products consume it, and each notion carries a "Consumed by" line that
+   says who and where. A notion with one consumer is `x-` (extension) or
+   stays in the product. Where a notion has a single consumer today and is
+   kept for a stated reason, its line says so.
+2. **Three contracts, not one.** STT, TTS and realtime differ in shape
+   (audio to text, text to audio, audio to audio with the vendor running
+   turn detection and interruption). One interface over all three hides the
+   differences that matter.
+3. **One conversation, two engines.** `VoiceSession` is what a product
+   holds. Which engine runs behind it changes who owns turn detection,
+   interruption and the brain, so the engine is explicit and not hidden.
+4. **Providers are packages, not file formats.** What a product declares
+   belongs in a product manifest; what a vendor can do belongs in code.
+   Nothing here is a document a product authors (see Rationale: no
+   `VOICE.md`).
+5. **Audio on the boundary is PCM16 little-endian mono.** A provider
+   transcodes internally when its wire format differs.
+6. **No agent framework in the contract.** The contracts and their
+   reference packages speak to vendors directly (WebSocket, HTTP) and do
+   not depend on any agent framework. An agent framework is wired through
+   `VoiceHooks`.
+
+## Terminology
+
+| Term | Meaning |
+| --- | --- |
+| **Provider** | A vendor package that declares itself with `defineVoiceProvider`, identified by a stable `slug` (`elevenlabs`, `openai`, `assemblyai`, `gemini`). |
+| **Stage** | One of `stt`, `tts`, `realtime`. A provider implements one or more stages. |
+| **Engine** | How a `VoiceSession` runs: `realtime` (a `RealtimeProvider` does everything) or `cascade` (the engine composes STT, a brain and TTS). |
+| **Brain** | In a cascade, the host callback that turns a user utterance into reply text. In a realtime session the brain runs at the vendor, with tools returned through hooks. |
+| **Turn** | One user utterance and the assistant reply to it. |
+| **Barge-in** | The user speaks while the assistant is speaking. |
+| **Usage record** | The cumulative measure of what a session consumed: seconds, characters, tokens. It carries no price. |
+
+## Provider contracts
+
+All three contracts share the audio frame and the lifecycle rules below.
+
+```ts
+interface AudioFrame {
+  pcm16: ArrayBuffer      // little-endian, mono
+  sampleRate: number
+  sequenceNumber: number  // monotonic, preserved end to end
+}
+```
+
+### SttProvider: audio to text
+
+```ts
+interface SttProvider {
+  readonly slug: string
+  readonly capabilities: SttCapabilities
+  openStream(opts: SttStreamOptions): Promise<SttStream>
+  transcribe(input: SttFileInput, opts?: { language?: string; signal?: AbortSignal }): Promise<SttResult>
+}
+
+interface SttCapabilities {
+  streaming: boolean          // openStream is implemented
+  file: boolean               // transcribe is implemented
+  partials: boolean           // the stream emits partial transcripts
+  serverEndpointing: boolean  // the vendor decides where an utterance ends
+  manualCommit: boolean       // commit() requests a final on demand
+  languages: readonly string[] // BCP-47; empty means vendor default
+  sampleRates: readonly number[]
+}
+
+interface SttStreamOptions { language?: string; sampleRate: number; signal?: AbortSignal }
+
+interface SttStream {
+  pushAudio(frame: AudioFrame): void
+  commit(): void                      // ask for a final for the audio pushed so far
+  on(event: "partial" | "final", cb: (t: { text: string; startMs?: number; endMs?: number }) => void): void
+  on(event: "error", cb: (err: Error) => void): void
+  on(event: "closed", cb: () => void): void
+  close(): Promise<void>
+}
+
+interface SttFileInput {
+  bytes: Uint8Array
+  mimeType: string      // a container type, or audio/pcm for raw PCM16
+  sampleRate?: number   // REQUIRED when mimeType is audio/pcm, ignored otherwise
+}
+interface SttResult { text: string; language?: string; durationSeconds?: number }
+```
+
+Rules:
+
+- A provider that sets `streaming: false` MUST still implement
+  `transcribe`; a provider that sets `file: false` MUST still implement
+  `openStream`. At least one MUST be true.
+- After `commit()`, a streaming provider MUST emit a `final` for the
+  audio pushed so far, or an `error`. It never goes silent. A host that
+  needs a bounded wait applies its own timeout; the cascade engine does
+  (see Engines) and falls back to `transcribe` with the audio it kept.
+- `partial` events replace one another; a `final` closes the utterance.
+  Consecutive `final` events for the same audio MUST NOT repeat text.
+- A provider MUST NOT invent text for silence. A host MAY filter vendor
+  artifacts (subtitle credits and similar) on `final`; that filter is a
+  host concern, not part of the contract.
+- If `pushAudio(frame)` receives a `frame.sampleRate` that differs from the
+  stream's negotiated `sampleRate`, the provider MUST either resample
+  internally or emit an `error`; it MUST NOT send mis-pitched audio to the
+  vendor.
+- `error` is terminal for that stream unless documented otherwise by the
+  provider: after emitting `error`, the stream transitions to `closed`.
+
+**Consumed by:** both reference host classes — a call / voice-room host
+(streaming STT, `commit`, bounded final wait, and per-utterance file fallback)
+and a multi-participant room host (streaming STT with manual or VAD commit
+strategies).
+
+### TtsProvider: text to audio
+
+```ts
+interface TtsProvider {
+  readonly slug: string
+  readonly capabilities: TtsCapabilities
+  openStream(opts: TtsStreamOptions): Promise<TtsStream>
+  synthesize(input: { text: string; voiceId?: string; language?: string; signal?: AbortSignal }): Promise<TtsResult>
+}
+
+interface TtsCapabilities {
+  streaming: boolean
+  file: boolean
+  chunkedInput: boolean       // text may arrive in pieces on one stream
+  cancel: boolean             // cancel() stops generation at the vendor
+  languages: readonly string[]
+  outputSampleRates: readonly number[]
+}
+
+interface TtsStreamOptions { voiceId?: string; language?: string; sampleRate?: number; signal?: AbortSignal }
+
+interface TtsStream {
+  sendText(chunk: string): void   // chunks of one reply, in order
+  flush(): void                   // generate what is buffered now, keep the stream open
+  end(): void                     // no more text for this reply; remaining audio is still delivered
+  cancel(): void                  // interruption: stop now
+  on(event: "audio", cb: (frame: AudioFrame) => void): void
+  on(event: "done", cb: () => void): void
+  on(event: "error", cb: (err: Error) => void): void
+  close(): Promise<void>
+}
+
+interface TtsResult { bytes: Uint8Array; mimeType: string; durationSeconds?: number }
+```
+
+Rules:
+
+- **`cancel()` is the interruption primitive.** After `cancel()` returns,
+  the stream MUST NOT deliver another `audio` event, and it MUST NOT emit
+  `done` for the cancelled text. `cancel()` is idempotent. A provider whose
+  vendor cannot stop generation sets `cancel: false`; the stream still
+  honors the no-delivery rule locally by dropping frames.
+- `flush()` forces generation of buffered text without ending the reply.
+  Hosts use it at sentence or clause boundaries.
+- `end()` flushes and then lets the vendor finish; `done` fires after the
+  last `audio` event.
+- Frames carry `sampleRate`; a host that needs one rate resamples. A
+  provider SHOULD offer 24 kHz PCM16 natively when the vendor does.
+- A provider reports characters it was sent in the usage record, cancelled
+  text included: the vendor bills what was sent.
+- `error` is terminal for that stream unless documented otherwise by the
+  provider: after emitting `error`, the stream emits no further `audio` or
+  `done` events.
+
+**Consumed by:** both reference host classes — a call / voice-room host
+(streaming TTS per sentence or continuous, with `cancel` on barge-in) and a
+multi-participant room host (each participant speaking through its own
+configured provider voice).
+
+### RealtimeProvider: an external service that does everything
+
+```ts
+interface RealtimeProvider {
+  readonly slug: string
+  readonly capabilities: RealtimeCapabilities
+  start(opts: VoiceStartOptions): Promise<VoiceSession>
+}
+
+interface RealtimeCapabilities {
+  id: string                  // the VOICE_PROVIDER value that selects it (see Variables)
+  serverVad: boolean          // the vendor detects turns
+  interruption: boolean       // the vendor cuts its own reply on barge-in
+  functionCalling: boolean
+  say: boolean                // the vendor can speak a directive on demand
+  refreshTools: boolean       // the tool catalog can change mid-session
+  languages: readonly string[]
+  inputSampleRates: readonly number[]
+  outputSampleRate: number
+}
+```
+
+A realtime provider runs speech recognition, the model and speech
+synthesis at the vendor. Turn detection (VAD) and interruption happen at
+the vendor too. The session it returns is a `VoiceSession` (next section);
+the `realtime` engine is a thin delegation to it.
+
+Rules:
+
+- The brain is the vendor's model. A host reaches it through `VoiceHooks`
+  (system prompt, tools, history); tool calls come back through
+  `onToolCall` and the result is returned to the model.
+- A vendor-side object that the vendor requires and the account owns (a
+  hosted agent, a project) is passed in `VoiceStartOptions.provider`, an
+  opaque record owned by the product and documented in the provider
+  package. This AIP defines no such field and carries no account
+  identifier.
+
+**Consumed by:** both reference host classes — a call / voice-room host
+(realtime engine selected per call bridge) and a multi-participant room host
+(realtime engine chosen per participant voice).
+
+## defineVoiceProvider
+
+A provider package declares itself with one call. The declaration states
+what the vendor can do and which variables it reads; nothing else about it
+is a document.
+
+```ts
+defineVoiceProvider({
+  slug: "elevenlabs",
+  name: "ElevenLabs",
+  env: { apiKey: "ELEVENLABS_API_KEY", aliases: [] },
+  valueAliases: { stt: ["scribe"] },   // optional historical names for VOICE_STT_PROVIDER / VOICE_TTS_PROVIDER
+  stt: sttProvider,            // optional, an SttProvider
+  tts: ttsProvider,            // optional, a TtsProvider
+  realtime: realtimeProvider,  // optional, a RealtimeProvider
+}): VoiceProvider
+```
+
+`VoiceProvider` exposes `slug`, `name`, `env`, the three optional
+implementations and a derived `capabilities` object `{ stt?, tts?, realtime? }`
+copied from the implementations.
+
+Rules:
+
+1. `slug` is lowercase kebab-case and unique in a registry. The package
+   name is `@agentproto/voice-<slug>`.
+2. At least one of `stt`, `tts`, `realtime` MUST be present. `capabilities`
+   lists exactly the stages present: a stage is declared if and only if it
+   is implemented.
+3. `env.apiKey` MUST be `<SLUG>_API_KEY`, the slug upper-cased with `-`
+   replaced by `_`. `env.aliases` lists other names the package also
+   accepts (for example a vendor-documented name); the canonical name wins
+   when both are set. A provider never reads a variable it did not declare.
+4. A provider reads its key from the environment variable, or from an
+   injected key store, and never from a file the product commits. It never
+   logs a key.
+5. A registry resolves a stage by slug: `registry.stt("elevenlabs")`,
+   `registry.tts(...)`, `registry.realtime(...)`. Resolving a slug whose
+   provider lacks the stage is an error that names the slug and the stage.
+6. Vendor-specific tuning that a product may set (model, stability,
+   output format and the like) is read by the provider from
+   `<SLUG>_<NAME>` variables it declares in its package documentation.
+   Those names are extensions: this AIP does not list them.
+
+**Consumed by:** both reference host classes, which load provider API keys
+(including vendor aliases such as `GOOGLE_GENERATIVE_AI_API_KEY`) and
+provider-specific tuning from environment configuration.
+
+## VoiceSession
+
+`VoiceSession` is the one conversation object a product holds, whatever
+engine runs it. It is the `VoiceEngineSession` contract the shared server
+already uses (`strategies/types.ts`), with the same operations and these
+differences: `getUsage()` returns a `VoiceUsage` (below) in place of
+`VoiceUsageSnapshot`, and its `providerCostSource` field is dropped (a
+cost is present only when the vendor reported it, see Usage record);
+`AudioFrame` is mono only and has no `channels` field; the session
+carries `engine` and `capabilities`, which replace the strategy's `mode`
+and `s2sBillingModelId`.
+
+```ts
+interface VoiceStartOptions {
+  emit: VoiceEmit
+  hooks: VoiceHooks
+  onUsage?(usage: VoiceUsage): void | Promise<void>
+  language?: string
+  voiceId?: string
+  provider?: Record<string, unknown>   // opaque, product-owned, documented by the provider
+}
+
+interface VoiceEmit {
+  audio(frame: AudioFrame): void
+  userTranscript(text: string, final: boolean): void
+  assistantTranscript(text: string, final: boolean): void
+  toolCallStart(name: string, args: unknown): void
+  toolCallEnd(name: string, result: unknown): void
+  interrupt(): void              // the assistant turn was cut by a barge-in
+  responseComplete(): void       // the assistant turn finished
+  error(err: Error): void
+}
+
+interface VoiceHooks {            // host side, all optional
+  getSystemPrompt?(): Promise<string>
+  getTools?(): Promise<VoiceToolSchema[]>
+  loadHistory?(): Promise<VoiceHistoryMessage[]>
+  onToolCall?(name: string, args: unknown): Promise<unknown>
+  onTranscript?(turn: { role: "user" | "assistant"; text: string; finalizedAt: number }): Promise<void>
+}
+
+interface VoiceToolSchema { name: string; description?: string; parameters: Record<string, unknown> }
+interface VoiceHistoryMessage { role: "system" | "user" | "assistant"; content: string }
+
+interface VoiceSession {
+  readonly engine: "realtime" | "cascade"
+  readonly capabilities: VoiceSessionCapabilities
+  pushAudio(frame: AudioFrame): Promise<void> | void
+  commit(): Promise<void>        // request a reply now; no-op when the engine detects turns itself
+  interrupt(): Promise<void>     // cancel the current assistant turn
+  pushText?(text: string): Promise<void>
+  refreshTools?(): Promise<void>
+  say?(directive: string): Promise<void>
+  getUsage?(): VoiceUsage | undefined
+  close(): Promise<void>
+}
+
+interface VoiceSessionCapabilities {
+  serverVad: boolean
+  interruption: boolean
+  functionCalling: boolean
+  say: boolean
+  languages: readonly string[]
+}
+```
+
+Rules:
+
+1. A session MUST emit `responseComplete` exactly once per assistant turn
+   that was not interrupted, and `interrupt` once per interrupted turn
+   (when `capabilities.interruption`). It never emits both for one turn.
+2. `commit()` MUST be a no-op when the engine detects turns itself.
+3. After `interrupt` is emitted for a turn, no `audio` event of that turn
+   MAY follow.
+4. A failed hook MUST NOT end the session. A failed `onToolCall` is
+   returned to the model as the tool result (an error value), not thrown
+   into the session.
+5. `say(directive)` makes the assistant speak now, improvising from
+   `directive` (a stage direction, not the literal words) so the reply is
+   in the persona's own voice. It is optional; an engine that cannot
+   self-initiate speech omits it and the host shows text instead.
+6. `pushText` and `refreshTools` are optional; a host checks for them and
+   never branches on an engine id.
+7. `close()` releases the vendor connection and makes `getUsage()` final.
+8. `emit.error(err)` reports a session-level fault; if the fault is fatal,
+   the session closes and emits no further `audio` events.
+
+**Consumed by:** both reference host classes through a shared voice-session
+host layer, wiring `loadHistory`, `getTools`, and `onToolCall` from each
+product's loaders.
+
+**`say`: consumed by both.** Both reference hosts invoke `say(directive)` for
+billing wind-down farewell directives when a wallet balance is low or depleted.
+`say` stays optional per engine.
+
+### Engines
+
+| | `realtime` | `cascade` |
+| --- | --- | --- |
+| Who runs it | a `RealtimeProvider` (external service) | the kit: STT, a brain callback, TTS |
+| Speech recognition, model, synthesis | at the vendor | STT provider, host brain, TTS provider |
+| Turn detection (VAD) | at the vendor | local VAD in the engine |
+| Who decides a barge-in | the vendor | the engine |
+| Brain | the vendor's model, tools via hooks | `brain` callback, any backend |
+| Interruption primitive | the vendor cuts its reply, the session reports it | `TtsStream.cancel()` and the brain `signal` |
+
+```ts
+interface CascadeOptions {
+  stt: SttProvider
+  tts: TtsProvider
+  brain(input: { text: string; signal: AbortSignal; utteranceId: number }): AsyncIterable<string>
+  vad?: CascadeVadOptions | false     // false: manual mode, no local VAD (push-to-talk)
+  bargeIn?: CascadeBargeInOptions
+  playback?: { queuedMs(): number; waitBelow(ms: number, opts?: { signal?: AbortSignal }): Promise<"ready" | "aborted" | "timeout" | "closed"> }
+}
+
+function startCascade(opts: VoiceStartOptions & CascadeOptions): Promise<VoiceSession>
+function startRealtime(provider: RealtimeProvider, opts: VoiceStartOptions): Promise<VoiceSession>
+```
+
+`startCascade` is the entry of the `cascade` engine; `startRealtime` is
+`provider.start(opts)` and exists for symmetry. `emit`, `hooks`,
+`language`, `voiceId` and `provider` come from `VoiceStartOptions`
+(previous section); `CascadeOptions` adds only what a cascade composes. In
+a cascade, `hooks.onTranscript` is called for each final turn; the other
+hooks (system prompt, tools, history, tool calls) belong to the brain,
+which the host supplies, and the engine does not call them. `voiceId` and
+`language` go to the TTS stream (and `language` to the STT stream).
+
+`brain` yields reply **text** in chunks. The engine owns synthesis: it
+feeds the chunks to a `TtsStream`, cutting at sentence or clause
+boundaries and calling `flush()`. The brain never returns audio. (Today's
+call cascade lets the brain callback emit PCM; separating the TTS from the
+brain callback is what makes the TTS provider replaceable by
+configuration.)
+
+**The cascade engine** (the part that is not a vendor):
+
+- **Manual mode.** With `vad: false` the engine runs no local VAD: the host
+  pushes audio and calls `commit()` to end the utterance (push-to-talk).
+  `commit()` on a cascade session ends the current utterance and requests
+  the STT final; with the local VAD on, it is a no-op, as `VoiceSession`
+  rule 2 says. In manual mode the host also owns barge-in (it calls
+  `interrupt()`).
+- **Local VAD.** Detects the end of an utterance from audio energy and a
+  silence duration, caps the length of one utterance, keeps a short
+  pre-roll before the first loud frame, and ignores a burst shorter than
+  a minimum. Parameters are `CascadeVadOptions`; their default values live
+  in one defaults file of `@agentproto/voice`, each with its origin, not
+  in this AIP.
+- **STT with fallback.** When the STT stream is not ready, drops, or
+  misses a bounded wait for its final after `commit()`, the engine
+  transcribes the audio it kept with `SttProvider.transcribe` when the
+  provider has it (or with a second STT provider if the product
+  configured one). The utterance is not lost.
+- **Brain guards.** A bound on the time to the first brain chunk, on the
+  gap between two chunks, and an explicit cancellation of an abandoned
+  turn through the `signal`.
+- **Outbound audio queue.** Audio accepted from TTS and not yet played is
+  bounded (back-pressure) so that a barge-in abandons a bounded amount.
+- **Turn lifecycle.** `responseComplete` is emitted when the brain is done,
+  TTS reported `done` and the queue drained.
+
+**Why interruption is not the same in the two engines.** In `realtime`,
+the vendor hears the user, decides that the user is cutting in and stops
+its own reply; the session only *reports* it (`emit.interrupt`) and the
+host MUST then clear whatever audio it queued, because the vendor's
+output after the cut is already discarded at the vendor. `interrupt()` on
+the session asks the vendor to cancel. The host does not know how much of
+the reply was heard.
+
+In `cascade`, nothing is stopped for free: the engine hears the user
+(local VAD), must decide that it is speech and not echo of the assistant,
+and then has three things in flight that each keep producing: the brain
+turn, the TTS stream and the queued audio. Barge-in MUST therefore run in
+this order:
+
+1. abort the brain turn (the `signal`) and `TtsStream.cancel()`, **before**
+   any purge, so that no late chunk is queued behind the purge;
+2. purge the outbound audio queue;
+3. emit `interrupt`.
+
+Barge-in in the cascade has its own parameters: how much continuous speech
+counts, a guard period after the assistant starts speaking during which
+speech is ignored (the assistant's own echo arrives shortly after its first
+audio), the energy a frame needs to count as speech, and a tolerated gap
+inside a run of speech. These are `CascadeBargeInOptions`; defaults live in
+the package defaults file. Because the engine knows exactly what it sent to
+TTS, a host MAY read it back (see `x-` extensions): what was played versus
+not played is not in this AIP.
+
+Two engines, not one interface with a flag: the realtime engine has no
+local VAD, no queue to purge, no brain to cancel; the cascade engine has
+all three. A flag on one interface would make the cascade's obligations
+look optional.
+
+**Consumed by:** both reference host classes — the call / voice-room host
+(local VAD, ordered abort-then-purge barge-in, brain guards, and realtime
+engine selection) and the multi-participant room host (sequential STT → brain →
+TTS path and per-participant realtime engines).
+
+## Variables
+
+The kit reads these standard names. A product MAY set any subset.
+
+| Variable | Meaning |
+| --- | --- |
+| `VOICE_PROVIDER` | Chooses the engine, and for some values the providers it implies. |
+| `VOICE_STT_PROVIDER` | Provider slug of the STT stage (cascade only). |
+| `VOICE_TTS_PROVIDER` | Provider slug of the TTS stage (cascade only). New in this AIP. |
+| `VOICE_ID` | Voice id for the selected TTS or realtime provider. |
+| `VOICE_LANGUAGE` | BCP-47 language of the session. |
+| `<SLUG>_API_KEY` | The provider's key (`ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `ASSEMBLYAI_API_KEY`, `GEMINI_API_KEY`). |
+
+**`VOICE_PROVIDER` values.** A realtime provider adds a value by declaring
+`capabilities.id` in `defineVoiceProvider` (reference ids: `openai-realtime`,
+`elevenlabs-s2s`, `gemini-live`). For compatibility with existing deployments,
+two legacy cascade aliases are also recognized alongside the canonical stage
+variables (`VOICE_STT_PROVIDER` / `VOICE_TTS_PROVIDER`):
+
+| Value | Engine | Providers it implies |
+| --- | --- | --- |
+| `elevenlabs-realtime` *(legacy alias)* | `cascade` | STT `elevenlabs`, TTS `elevenlabs` |
+| `whisper-elevenlabs` *(legacy alias)* | `cascade` | STT `openai` (per-utterance file transcription), TTS `elevenlabs` |
+| `openai-realtime` | `realtime` | `openai` |
+
+A new realtime `capabilities.id` MUST NOT collide with a value above.
+
+**`VOICE_STT_PROVIDER` and `VOICE_TTS_PROVIDER` values.** A provider slug
+that has the stage (`openai`, `elevenlabs`, `assemblyai` for STT;
+`elevenlabs`, `openai`, `assemblyai` for TTS), or a **value alias** the
+provider declares. `defineVoiceProvider` takes
+`valueAliases: { stt?: string[]; tts?: string[] }`, historical names that
+select that provider and stage. The two values that exist today are
+aliases and keep their meaning: `whisper` (declared by `openai` for STT:
+file transcription, one upload per utterance) and `scribe` (declared by
+`elevenlabs` for STT: streaming recognition). An alias that two providers
+declare for one stage is a registry error.
+
+**Priority rule.** Evaluated in this order; no existing value changes
+meaning:
+
+1. `VOICE_PROVIDER` chooses the engine and the providers it implies
+   (table above). Unset, the kit default applies (next section).
+2. `VOICE_STT_PROVIDER` and `VOICE_TTS_PROVIDER` count **only** in the
+   `cascade` engine, and they win over the provider that `VOICE_PROVIDER`
+   implies for that stage. With a `realtime` engine they are ignored and
+   the kit logs one warning.
+3. `VOICE_ID` is the voice id of the TTS provider in a cascade, and of the
+   realtime provider in a realtime session. `VOICE_ID` and
+   `VOICE_LANGUAGE` are independent of the engine. When
+   `VOICE_ID` is unset the kit reads the selected provider's own voice
+   variable (`<SLUG>_VOICE_ID`: `ELEVENLABS_VOICE_ID`, `OPENAI_VOICE_ID`
+   are the names in use). A value set in either place keeps the meaning it
+   has today.
+4. A slug that does not resolve, or a provider that lacks the requested
+   stage, fails at startup with the slug and the stage. It never silently
+   falls back to another provider.
+
+Worked example: `VOICE_PROVIDER=elevenlabs-realtime` with
+`VOICE_STT_PROVIDER=whisper` runs a cascade with OpenAI file transcription
+and ElevenLabs TTS: rule 1 implies ElevenLabs for both stages, rule 2
+replaces the STT. With `VOICE_PROVIDER=openai-realtime` the same
+`VOICE_STT_PROVIDER` is ignored.
+
+**Consumed by:** `VOICE_PROVIDER`, `VOICE_LANGUAGE`, `<SLUG>_API_KEY`, and
+per-provider voice IDs (`ELEVENLABS_VOICE_ID`, `OPENAI_VOICE_ID`, generalized
+by `VOICE_ID`) are consumed by both reference host classes. `VOICE_STT_PROVIDER`
+(`whisper`, `scribe`) is consumed by the call host today and gained by the room
+host. `VOICE_TTS_PROVIDER` is new (no existing consumer at draft time; accepted
+because a second TTS vendor cannot be selected without it).
+
+### Kit defaults
+
+Two defaults are separate. The **default engine**, when `VOICE_PROVIDER`
+is unset, is `cascade`, with ElevenLabs for both stages (the same as
+`VOICE_PROVIDER=elevenlabs-realtime`). The **default provider of a
+stage**, used when that stage is selected and no slug is given, is
+ElevenLabs for each: TTS ElevenLabs, STT ElevenLabs Scribe (streaming),
+realtime ElevenLabs (a hosted speech-to-speech agent, reached with the
+`elevenlabs-s2s` value). OpenAI, AssemblyAI and Gemini are providers like
+any other and are selected by slug; no default path of the kit requires an
+OpenAI account.
+
+This is a default of the **reference packages**, stated in their single
+defaults file, and not a requirement of the spec: a conformant
+implementation MAY default to another provider, and MUST document it.
+
+**What changes and what does not.** The kit default for the STT stage is
+ElevenLabs Scribe. A product that previously left `VOICE_STT_PROVIDER` unset
+and relied on a product-local `whisper` default would move to Scribe under the
+kit. That is a change of default, not of meaning: `whisper` still means OpenAI
+per-utterance transcription and `scribe` still means ElevenLabs streaming. A
+product that wants OpenAI transcription sets `VOICE_STT_PROVIDER=whisper` (or
+`openai`) explicitly.
+
+## Usage record
+
+A session reports what it consumed, in the units the vendors bill:
+seconds, characters, tokens. It computes no price. When a vendor itself
+reports a cost, the record carries it as stated (`reportedCostUsd`), never
+derived or adjusted here.
+
+```ts
+interface VoiceUsage {
+  engine: "realtime" | "cascade"
+  wallSeconds: number
+  entries: VoiceUsageEntry[]
+}
+
+interface VoiceUsageEntry {
+  stage: "stt" | "tts" | "realtime"
+  provider: string          // the slug
+  model?: string            // the vendor model the stage ran, when known
+  audioSeconds?: number     // seconds of audio the vendor processed
+  characters?: number       // characters sent to TTS
+  tokens?: {
+    audioIn: number; audioOut: number; textIn: number; textOut: number
+    cachedAudioIn: number; cachedTextIn: number
+  }
+  reportedCostUsd?: number  // only when the vendor itself reports a cost
+}
+```
+
+Rules:
+
+- The record is **cumulative and monotonic**: each call to `getUsage()`
+  returns totals since the session opened. After `close()` it is final.
+- Entries are grouped by (stage, provider, model). A cascade has one entry
+  per group that ran: a session that falls back from streaming to file
+  transcription on the same provider and model has one STT entry, and has
+  two only when a second provider (or model) serves as the fallback.
+  Characters count what was sent to TTS, interrupted text included.
+- A host MAY also receive the record through an `onUsage` callback in
+  start options; the content is the same. A rejected `onUsage` MUST NOT
+  interrupt audio.
+- The record carries numbers only, never conversation content.
+- **This record is the only bridge between voice and billing.** Voice does
+  not import billing; billing does not import voice. Pricing (a cost the
+  vendor reported is a fact to pass on, not a price computed here), margins,
+  credits and gates are the product's, applied to the record. Prices
+  belong in a model catalog, not in this contract.
+
+**Consumed by:** both reference host classes, which emit STT seconds, TTS
+characters, and realtime token counts via `onUsage` to their product billing
+APIs. `entries` generalizes session-level voice usage snapshots without coupling
+voice to pricing.
+
+## Out of scope (stays in the product)
+
+Local filler phrases, clips and wait cues; reading back which part of a
+reply was played; backchannel handling; WebRTC and SIP bridges; credit
+gates and caps; multi-party floor control and group calls; voice
+catalogs and pickers; per-product tuning of the cascade's silence and
+interruption values. Each has one consumer today or belongs to a transport
+or a product policy. They use `x-` fields or stay in code.
+
+## Rationale
+
+**Why three contracts.** The market splits the same way. LiveKit Agents
+plugins expose `stt`, `tts`, `llm` and `realtime`; Pipecat has
+`STTService`, `TTSService`, `LLMService` and speech-to-speech services; the
+Vercel AI SDK exposes `transcribe()` and `generateSpeech()` separately from
+realtime models. We take the three speech capabilities and leave the LLM to
+the host (the `brain` callback and `VoiceHooks`).
+
+**Why no `VOICE.md`.** AIP-36 gives sandbox a `SANDBOX.md`, but no product
+reads one today. For voice, both products configure by environment
+variable, and no code would read a `VOICE.md`. A file with no reader is a
+promise, not a format. If a reader appears, a `VOICE.md` can be added in
+a later version, validated by the same schema as `defineVoiceProvider`'s
+inputs, with no change to the contracts here.
+
+**Why two engines.** See "Why interruption is not the same". The two
+differ in who owns turn detection, the brain and the audio queue; a single
+interface with an `interruption` flag would not tell a host what it must
+clear after one.
+
+**Why PCM16 on the boundary.** Every vendor in use accepts or produces PCM
+and the products already normalize on it; transcoding is the provider's
+job.
+
+**Why no agent framework.** The shared server wraps vendor classes of one
+agent framework today, which forced workarounds when the vendor's protocol
+moved ahead of the wrapper. Contracts that speak to vendors directly do
+not inherit that coupling; a framework is attached through `VoiceHooks`.
+
+**Why the default is a package default.** A spec that names a vendor as
+the default makes every other vendor a deviation. The reference packages
+choose a default and say so; the contracts are neutral.
+
+## Security considerations
+
+- A provider reads its key from the environment or an injected store and
+  never logs it, nor includes it in an error.
+- Audio and transcripts are personal data. The usage record carries
+  numbers only. A provider SHOULD NOT write audio to disk.
+- A browser client never receives a long-lived provider key; it receives a
+  short-lived token the provider can mint, or no key at all.
+- Hooks run host code on model output: `onToolCall` receives arguments the
+  model chose and MUST validate them like any untrusted input.
+- A realtime session keeps a vendor connection open and may bill by the
+  second: a host SHOULD close it on silence or inactivity and MUST close it
+  on disconnect.
+- No account identifier (a hosted agent id, a project id) appears in this
+  AIP or in a package default; they are product configuration.
+
+## Conformance
+
+A provider implementation is conformant when:
+
+1. It is declared with `defineVoiceProvider` and satisfies its rules
+   (slug, stages, `<SLUG>_API_KEY`).
+2. Each stage it declares implements its contract and its capability
+   flags are true to behavior.
+3. `TtsStream.cancel()` stops audio delivery as specified.
+4. `SttStream.commit()` ends in a `final` or an `error`.
+5. It never logs a key and never reads a variable it did not declare.
+
+A session implementation is conformant when:
+
+1. It satisfies the `VoiceSession` rules 1 to 7.
+2. The `cascade` engine runs barge-in in the order given: abort and
+   cancel, purge, emit.
+3. It resolves providers by the priority rule and fails at startup on an
+   unresolvable slug or a missing stage.
+4. `getUsage()` is cumulative, monotonic and final after `close()`.
+5. It tolerates unknown `x-` fields.
+
+A conformance suite runs these against a fake transport and recorded
+vendor exchanges; it lives with the reference package.
+
+## Open questions
+
+1. Does the newer OpenAI live protocol need a "delegation" capability (the
+   vendor runs the model, or the host's brain does)? Add one only if a
+   second vendor offers an equivalent; the protocol is not read here.
+2. Group calls are one product's: an extension for now.
+3. `VOICE_TTS_PROVIDER` has no consumer today (see its line). Revisit before
+   Review.
+
+## Reference Implementation
+
+The reference packages are `@agentproto/voice` and one
+`@agentproto/voice-<slug>` per vendor, in
+`https://github.com/agentproto/ts`. They are tracked separately and are not
+yet published.
+
+## See also
+
+AIP-25 PERSONA, AIP-36 SANDBOX (provider-family model), AIP-49 WALLET
+(where a billing layer settles what the usage record measures), AIP-14
+TOOL, AIP-31 HTTP. A billing AIP (AIP-74) is in progress and is not
+linked yet.
