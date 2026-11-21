@@ -610,6 +610,13 @@
       "layer": "host"
     },
     {
+      "aip": 74,
+      "name": "BILLING",
+      "specId": "billing/v1",
+      "file": "BILLING.md",
+      "layer": "primitives"
+    },
+    {
       "aip": 75,
       "name": "VOICE",
       "specId": "voice/v1",

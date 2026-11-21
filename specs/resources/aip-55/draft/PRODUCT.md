@@ -61,7 +61,7 @@ billingRail:
 | `schema` | MUST | `product/v1` |
 | `id` | MUST | kebab-case |
 | `on` | MUST | AIP-54 `ref/v1`. The target AIP needs zero pricing awareness. Hosts MUST refuse unresolvable refs. |
-| `price` | MUST | Discriminated on `model`: `one-time` \| `prepaid-pool` \| `subscription` \| `pay-per-call` \| `x-<vendor>:<name>` (see AIP-55 § Price models). **Minor units are normative.** |
+| `price` | MUST | Discriminated on `model`: `one-time` \| `prepaid-pool` \| `pay-per-call`. **Minor units are normative.** |
 | `billingRail` | MAY | Projection config, never the price's source of truth. See § Billing rails. |
 | `kind` | MUST | `pricing` (fixed — this AIP defines the pricing capability; future capability kinds may share the pattern). |
 | `title`, `description`, `metadata` | MAY | |
