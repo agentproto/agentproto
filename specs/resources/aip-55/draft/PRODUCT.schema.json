@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentproto.sh/schemas/aip-55/PRODUCT.schema.json",
   "title": "product/v1 frontmatter (AIP-55)",
-  "description": "Validates the YAML frontmatter portion of an AIP-55 PRODUCT.md \u2014 a pricing CAPABILITY attached to any referenced AIP artifact. The target is addressed by an AIP-54 ref/v1 (aip:// URI in string contexts); the target AIP needs zero pricing awareness. Price models: 'one-time', 'prepaid-pool', 'pay-per-call'. Minor units are normative. billingRail is projection config, never the source of truth.",
+  "description": "Validates the YAML frontmatter portion of an AIP-55 PRODUCT.md \u2014 a pricing CAPABILITY attached to any referenced AIP artifact. The target is addressed by an AIP-54 ref/v1 (aip:// URI in string contexts); the target AIP needs zero pricing awareness. Price models: 'one-time', 'prepaid-pool', 'subscription', 'pay-per-call' and vendor models 'x-<vendor>:<name>'. Minor units are normative. billingRail is projection config, never the source of truth.",
   "$defs": {
     "price": {
       "oneOf": [
@@ -26,8 +26,8 @@
             },
             "currency": {
               "type": "string",
-              "pattern": "^[a-z]{3}$",
-              "description": "ISO-4217 lowercase, e.g. 'usd'."
+              "pattern": "^[A-Za-z]{3}$",
+              "description": "ISO-4217, compared case-insensitively, e.g. 'usd' or 'USD'."
             }
           }
         },
@@ -52,7 +52,7 @@
             },
             "currency": {
               "type": "string",
-              "pattern": "^[a-z]{3}$"
+              "pattern": "^[A-Za-z]{3}$"
             },
             "grantUnits": {
               "type": "integer",
@@ -82,13 +82,61 @@
             },
             "currency": {
               "type": "string",
-              "pattern": "^[a-z]{3}$"
+              "pattern": "^[A-Za-z]{3}$"
             },
             "meter": {
               "type": "string",
               "minLength": 1,
               "maxLength": 96,
               "description": "Host-declared meter id, e.g. 'agent-call', 'tokens-1k', 'sandbox-hour'. Open vocabulary; hosts SHOULD namespace host-specific meters."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["model", "amountMinor", "currency"],
+          "additionalProperties": false,
+          "properties": {
+            "model": {
+              "const": "prepaid-pool",
+              "description": "Priced by the pack: the pool size is the output of the host's conversion, not stored."
+            },
+            "amountMinor": { "type": "integer", "minimum": 1, "description": "Price of the pack in minor units." },
+            "currency": { "type": "string", "pattern": "^[A-Za-z]{3}$" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["model", "amountMinor", "currency"],
+          "additionalProperties": false,
+          "properties": {
+            "model": { "const": "prepaid-pool" },
+            "amountMinor": { "const": "buyer", "description": "The amount is chosen at purchase." },
+            "minMinor": { "type": "integer", "minimum": 1, "description": "Absent: no minimum." },
+            "maxMinor": { "type": "integer", "minimum": 1, "description": "Absent: no maximum." },
+            "currency": { "type": "string", "pattern": "^[A-Za-z]{3}$" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["model", "amountMinor", "currency", "interval"],
+          "additionalProperties": false,
+          "properties": {
+            "model": { "const": "subscription", "description": "A recurring payment. What each paid period gives is declared by the host." },
+            "amountMinor": { "type": "integer", "minimum": 1, "description": "Amount per interval, in minor units." },
+            "currency": { "type": "string", "pattern": "^[A-Za-z]{3}$" },
+            "interval": { "enum": ["week", "month", "year"] },
+            "intervalCount": { "type": "integer", "minimum": 1, "default": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["model"],
+          "properties": {
+            "model": {
+              "type": "string",
+              "pattern": "^x-[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$",
+              "description": "Vendor price model. A host that does not know it MUST refuse to sell the product."
             }
           }
         }
@@ -125,7 +173,7 @@
                 "week",
                 "day"
               ],
-              "description": "Billing recurrence for metered prices. Absent = per-unit without period."
+              "description": "Billing recurrence: for metered prices, and for a subscription it projects `price.interval` and MUST agree with it. Absent = per-unit without period."
             }
           }
         },
