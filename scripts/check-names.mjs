@@ -93,6 +93,10 @@ function pascal(name) {
 // AIP-70 section 1, applied to the registry entry itself.
 function shapeProblems(entry) {
   const out = []
+  // AIP-70 §1: names are singular unless the document is inherently a set.
+  const PLURAL_NAMES = new Set(["SECRETS", "ACTION-HOOKS"])
+  const SINGULAR_ENDING_IN_S = new Set(["PROCESS", "HARNESS"])
+  if (/[A-Z]S$/.test(entry.name ?? "") && !PLURAL_NAMES.has(entry.name) && !SINGULAR_ENDING_IN_S.has(entry.name)) out.push(`name "${entry.name}" should be singular per AIP-70 §1 (plural only for inherent sets: ${[...PLURAL_NAMES].join(", ")})`)
   if (!/^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$/.test(entry.name ?? "")) out.push(`name "${entry.name}" is not UPPER-CASE-WORDS`)
   const lower = (entry.name ?? "").toLowerCase()
   if (entry.specId && !new RegExp(`^${lower}/v\\d+$`).test(entry.specId)) {
