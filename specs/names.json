@@ -624,8 +624,8 @@
     },
     {
       "aip": 76,
-      "name": "EVENTS",
-      "specId": "events/v1",
+      "name": "EVENT",
+      "specId": "event/v1",
       "layer": "host"
     }
   ],

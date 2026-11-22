@@ -1,6 +1,6 @@
 ---
-title: "AIP-76: EVENTS (events/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding"
-description: "Fixes how an agentproto host lets an external client watch it: event definitions (name, description, delivery, inputSchema, payloadSchema), subscription identity (RFC 8785 JCS-deterministic sub_<hex32>, idempotent subscribe/refresh/unsubscribe, ttlMs 60s..30d default 7d), the signed callback challenge (type:verification, single-use 64-hex) that must pass before any mutation, the {eventId, name, timestamp, data, cursor} wire envelope, webhook delivery as Standard Webhooks (whsec_ secrets 24-64 bytes, v1 signatures, 10-minute dual-sign rotation window), the delivery guarantees (one event per POST, 256 KiB clamp to {summary, subject}, 2xx = ack, exponential backoff bounded to 5 attempts, never retry 410/413), and the durable outbox that makes delivery at-least-once across restarts. EVENTS is transport-neutral; this AIP also fixes its first binding, mcp-events/v1: three native JSON-RPC methods (events/list, events/subscribe, events/unsubscribe) on the authenticated MCP endpoint, the events:{} capability at initialize, and a public MCP 2026-07-28 events origin (POST /mcp/events/<secret>). It fills AIP-60's frozen webhook target kind with its delivery contract and does not touch the inbound inbox path. There is no EVENTS.md file."
+title: "AIP-76: EVENT (event/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding"
+description: "Fixes how an agentproto host lets an external client watch it: event definitions (name, description, delivery, inputSchema, payloadSchema), subscription identity (RFC 8785 JCS-deterministic sub_<hex32>, idempotent subscribe/refresh/unsubscribe, ttlMs 60s..30d default 7d), the signed callback challenge (type:verification, single-use 64-hex) that must pass before any mutation, the {eventId, name, timestamp, data, cursor} wire envelope, webhook delivery as Standard Webhooks (whsec_ secrets 24-64 bytes, v1 signatures, 10-minute dual-sign rotation window), the delivery guarantees (one event per POST, 256 KiB clamp to {summary, subject}, 2xx = ack, exponential backoff bounded to 5 attempts, never retry 410/413), and the durable outbox that makes delivery at-least-once across restarts. EVENT is transport-neutral; this AIP also fixes its first binding, mcp-events/v1: three native JSON-RPC methods (events/list, events/subscribe, events/unsubscribe) on the authenticated MCP endpoint, the events:{} capability at initialize, and a public MCP 2026-07-28 events origin (POST /mcp/events/<secret>). It fills AIP-60's frozen webhook target kind with its delivery contract and does not touch the inbound inbox path. There is no EVENT.md file."
 aip: 76
 status: Draft
 type: Schema
@@ -15,7 +15,7 @@ layer: host
 | Field | Value |
 |---|---|
 | AIP | 76 |
-| Title | EVENTS (events/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding |
+| Title | EVENT (event/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding |
 | Author | Jeremy André &lt;jeremy@agentik.net&gt; |
 | Status | Draft |
 | Type | Schema |
@@ -30,7 +30,7 @@ layer: host
 
 A host that can be watched by an external client needs three things: to say
 which events exist (list), to let that client subscribe with a callback and a
-secret (subscribe), and to stop on request (unsubscribe). EVENTS fixes the
+secret (subscribe), and to stop on request (unsubscribe). EVENT fixes the
 transport-neutral contract behind those three operations: event definitions,
 deterministic subscription identity, the signed challenge that must pass
 before a subscription mutates anything, the wire envelope of a delivered
@@ -39,7 +39,7 @@ durable outbox that makes the whole chain at-least-once across host restarts.
 It then fixes the first binding, `mcp-events/v1`, which exposes the three
 operations as native MCP JSON-RPC methods (`events/list`, `events/subscribe`,
 `events/unsubscribe`) on the authenticated MCP endpoint, plus a public,
-path-secret MCP 2026-07-28 origin that serves `server/discover`. EVENTS is
+path-secret MCP 2026-07-28 origin that serves `server/discover`. EVENT is
 the outbound twin of [AIP-60](/docs/aip-60): AIP-60 delivers watched events
 *into* a session's inbox; this AIP defines the `webhook` target kind AIP-60
 left as a frozen shape.
@@ -60,7 +60,7 @@ left as a frozen shape.
   ack-after-terminal persistence) are exactly the kind of contract that
   drifts when unspecified.
 - Most of that contract does not depend on MCP. Splitting the generic
-  EVENTS contract from its MCP binding lets a second transport (plain HTTP,
+  EVENT contract from its MCP binding lets a second transport (plain HTTP,
   A2A, a session tool surface) reuse identity, challenge, envelope, delivery
   and outbox without re-specifying them.
 
@@ -71,7 +71,7 @@ left as a frozen shape.
    as deviations (§Known deviations), not smuggled into the contract.
 2. **Contract once, bindings many.** Everything a receiver can observe
    (identity, challenge, envelope, signatures, retry, outbox) is defined by
-   EVENTS. A binding only maps the three operations, their errors, and the
+   EVENT. A binding only maps the three operations, their errors, and the
    capability advertisement onto one transport.
 3. **Identity over lookup.** A subscription id is derived from the
    subscription's identity (RFC 8785 canonical JSON), never minted. This
@@ -90,7 +90,7 @@ left as a frozen shape.
 
 ## Terminology
 
-- **EVENTS contract** (`events/v1`): the transport-neutral rules of this AIP
+- **EVENT contract** (`events/v1`): the transport-neutral rules of this AIP
   (§Specification up to §Errors).
 - **Binding**: the mapping of the three operations (list, subscribe,
   unsubscribe), their errors and the capability advertisement onto one
@@ -105,7 +105,7 @@ left as a frozen shape.
   ever mounted there is the events surface.
 - **Inbound vs outbound**: AIP-60's sentinel pipeline (providers, poll, inbox
   delivery) is *inbound*. This AIP's outbound path is a `webhook`-target
-  sentinel whose events are projected to the EVENTS envelope and POSTed out.
+  sentinel whose events are projected to the EVENT envelope and POSTed out.
 - **Delivery guarantee** here means: signed webhook + bounded retry + durable
   outbox restart-safety, not the internal session delivery ledger
   (`delivery-ledger.jsonl`, which traces inbox deliveries and is out of
@@ -272,7 +272,7 @@ A binding MUST map each error to a distinct transport error and carry the
 
 ## Binding: mcp-events/v1
 
-`mcp-events/v1` maps the EVENTS contract onto MCP. It is the binding the
+`mcp-events/v1` maps the EVENT contract onto MCP. It is the binding the
 OpenAI "MCP Events" plugin contract consumes.
 
 ### Surfaces and origins
@@ -293,7 +293,7 @@ OpenAI "MCP Events" plugin contract consumes.
 
 ### Method mapping
 
-| EVENTS operation | JSON-RPC method | Params / result |
+| EVENT operation | JSON-RPC method | Params / result |
 |---|---|---|
 | list | `events/list` | §Event definitions and list |
 | subscribe | `events/subscribe` | §Subscribe |
@@ -301,7 +301,7 @@ OpenAI "MCP Events" plugin contract consumes.
 
 ### Error mapping
 
-| EVENTS error | JSON-RPC code | Carried as |
+| EVENT error | JSON-RPC code | Carried as |
 |---|---|---|
 | Invalid params | `-32602` | `data.reason` |
 | CallbackEndpointError | `-32015` | `data.reason` |
@@ -340,7 +340,7 @@ The transport surfaces adapter errors verbatim (code + data).
 
 ## Rationale
 
-- **Why EVENTS, with MCP as a binding**: identity, challenge, envelope,
+- **Why EVENT, with MCP as a binding**: identity, challenge, envelope,
   signatures, retry and outbox are what a receiver depends on, and none of
   them is MCP-specific. Naming the IP after the capability (`events/v1`)
   and the MCP mapping after its transport (`mcp-events/v1`) lets a second
@@ -489,7 +489,7 @@ the implementation's deviation list.
    (`envelope.schema.json`, `EventDefinition.schema.json`) in a follow-up
    PR, or stay prose-only like AIP-75. This PR ships prose only.
 5. **Second binding**: which transport earns the next binding of the
-   EVENTS contract (plain HTTP for non-MCP clients, A2A, a session tool
+   EVENT contract (plain HTTP for non-MCP clients, A2A, a session tool
    surface over AIP-46), and whether polling/streaming delivery is worth
    designing for a client that cannot receive webhooks.
 6. **Second implementer**: the 2-implementer rule for Final. The
