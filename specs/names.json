@@ -621,6 +621,12 @@
       "name": "VOICE",
       "specId": "voice/v1",
       "layer": "host"
+    },
+    {
+      "aip": 76,
+      "name": "EVENT",
+      "specId": "event/v1",
+      "layer": "host"
     }
   ],
   "pending": [
