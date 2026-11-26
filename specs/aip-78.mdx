@@ -44,7 +44,7 @@ changes the session's own lifecycle.
   `agent_prompt`) today either blocks on a long call or polls session state it
   must interpret itself. The Tasks extension is the standard shape for that.
 - Mapping a whole session to one task breaks: the session is `running` and
-  `busy: false` after every turn, so the task would never leave `working`, and
+  idle after every turn, so the task would never leave `working`, and
   `tasks/cancel` (an interrupt) ends a turn but leaves the session alive, so it
   could never reach `cancelled`.
 - The [AIP-20](/docs/aip-20) work board and MCP tasks share a word and nothing
@@ -96,9 +96,11 @@ changes the session's own lifecycle.
   `finished` (the turn ended naturally, `turn-end`), `interrupted` (cancelled by
   the interrupt route, by a prompt carrying `interrupt: true`, or by
   `tasks/cancel`), `dropped` (removed from the queue before it started),
-  `session-error`, `session-killed`, `session-exited`, `host-restart`. The
-  last four are derived from the AIP-46 session `status` (`error`, `killed`,
-  `exited`) or from a host restart; they are not new session fields.
+  `session-error`, `session-killed`, `session-exited`, `session-forgotten`
+  (the session record was forgotten, deleted or collected while the ticket was
+  queued or in flight), `host-restart`. The last five are derived from the
+  AIP-46 session `status` (`error`, `killed`, `exited`), from the removal of the
+  session, or from a host restart; they are not new session fields.
 - **Pending input**: the host's own record that the turn is waiting on a human
   answer (a permission, a question, or a suspended run). AIP-46 defines no
   field for it; this AIP only requires that the host can tell, per ticket,
@@ -120,20 +122,28 @@ When a covered call starts or queues a turn and the client declared the
 extension, the host MUST answer with a `CreateTaskResult` (`resultType:
 "task"`). Otherwise it answers with the ordinary result. A client MUST NOT be
 able to force or suppress task creation by any parameter. If the host cannot
-answer a non-declaring client without a task, it MUST reject with `-32021`
-carrying `error.data.requiredCapabilities.extensions`.
+answer a non-declaring client without a task (for example, a host policy that
+makes every turn start asynchronous), it MUST reject with `-32021` carrying
+`error.data.requiredCapabilities.extensions`. A host that can always answer
+synchronously never returns `-32021` here.
 
 **Order of operations.** The host MUST:
 
 1. check the capability (and the per-principal task cap below) and reject with
    `-32021` or a tool error **before** it creates any ticket, ledger entry or
    turn, so a refused call has no side effect;
-2. durably write the ledger entry in state `working` (queued);
-3. only then hand the prompt to the session;
+2. **reserve** the identifiers: pre-allocate the `promptId` and, for
+   `agent_start`, the `sessionId` (the host chooses it before spawning), then
+   durably write the ledger entry in state `working` (queued) with those
+   reserved identifiers;
+3. only then spawn the session (for `agent_start`) and hand the prompt to it,
+   using the reserved identifiers;
 4. send the `CreateTaskResult`.
 
-If step 3 fails, the host marks the entry `failed`, and answers the call with
-the tool's own error rather than a task.
+If step 3 fails, the host marks the entry `failed` and answers the call with
+the tool's own error rather than a task. A reserved entry found at start-up
+whose session or ticket never came to exist is marked `failed` (with
+`data.reason: "host-restart"`) by the restart rule.
 
 `CreateTaskResult` MUST carry the session it belongs to in
 `_meta["io.agentproto/turn-task"] = { sessionId, promptId }`, so the client can
@@ -200,8 +210,15 @@ are removed once answered.
 
 ### Turn-to-task state mapping
 
-The status is derived by evaluating the rows in order; the first match wins. A
-ledger entry already in a terminal state is never re-derived.
+**Recording.** The host MUST write the terminal state and the result to the
+ledger **at the moment the turn ends** (and at every other terminal transition),
+not when a client reads. The rows below are evaluated in order, first match
+wins, only for an entry with no recorded terminal state; an entry already
+terminal is never re-derived. `host-restart` is therefore declared only for an
+entry that has no recorded terminal state: a turn that ended and was recorded
+before the restart stays `completed` (or its recorded state). A session resumed
+after a restart does not revive a `failed` task; a prompt sent to it creates a
+new ticket and a new task.
 
 | Condition on the ticket | Task status | Detail |
 |---|---|---|
@@ -209,7 +226,10 @@ ledger entry already in a terminal state is never re-derived.
 | outcome `session-killed` (turn queued or in flight) | `cancelled` | |
 | outcome `session-exited`, turn in flight | `failed` | `error: { code: -32603, message, data: { reason: "session-exited", sessionId, exitCode? } }` |
 | outcome `session-exited`, turn never started | `cancelled` | no work was done |
-| outcome `session-error` | `failed` | `data.reason: "session-error"` |
+| outcome `session-error`, turn in flight | `failed` | `data.reason: "session-error"` |
+| outcome `session-error`, turn never started | `cancelled` | no work was done |
+| outcome `session-forgotten`, turn in flight | `failed` | `data.reason: "session-forgotten"` |
+| outcome `session-forgotten`, turn never started | `cancelled` | no work was done |
 | outcome `host-restart`, task non-terminal | `failed` | `data.reason: "host-restart"` |
 | outcome `finished` | `completed` | bounded `result` written to the ledger |
 | in flight and pending input | `input_required` | `inputRequests` carries the pending requests |
@@ -246,9 +266,15 @@ terminal become `failed`; a task that was already `completed`, `cancelled` or
   - ticket is the turn in flight: interrupt it as [AIP-46](/docs/aip-46)
     §Interrupt describes; the turn ends, the task becomes `cancelled`, the
     session stays alive;
+  - the harness cannot cancel a turn ([AIP-46](/docs/aip-46) §Interrupt, HTTP
+    `409`): the call returns a tool error and the task stays `working`;
   - ticket already ended, or the task terminal: acknowledged, no effect. In
     particular `tasks/cancel` MUST NOT interrupt a later turn of the same
     session.
+  A cancel that races the move of its ticket from queued to in flight is
+  atomic with respect to that move: the host serializes both on the session, so
+  the ticket is either dropped (it never starts) or interrupted (it started),
+  never both and never neither.
   The transition to `cancelled` is not guaranteed: if the turn finishes first,
   `completed` is a valid outcome. `tasks/cancel` MUST NOT kill the session, and
   `notifications/cancelled` MUST NOT be used to cancel a task.
@@ -330,7 +356,8 @@ specified here ahead of the implementation and are tracked as changes to it.
 A host conforms to `turn-task/v1` when:
 
 1. A client that declared the Tasks extension receives a `CreateTaskResult` from
-   `agent_start` (with a prompt) and `agent_prompt`; a client that did not
+   each covered tool (`agent_start` with a prompt, `agent_prompt`, per the
+   configured mode); a client that did not
    receives the ordinary result or `-32021`.
 2. `CreateTaskResult` carries the `sessionId`; the task reaches `completed` at
    the end of the turn while the session stays `running`; a second
@@ -340,15 +367,19 @@ A host conforms to `turn-task/v1` when:
    race) and leaves the session alive; on a queued ticket it drops it; on an
    ended task or ticket it is an idempotent no-op that never interrupts a later
    turn.
-5. A host restart between creation and a later `tasks/get` turns a non-terminal
-   task into `failed` with `data.reason: "host-restart"`, leaves terminal tasks
+5. A task whose turn ended is recorded as terminal at that moment, so a restart
+   afterwards leaves it unchanged. A host restart between creation and a later
+   `tasks/get` turns a task with no recorded terminal state into `failed` with `data.reason: "host-restart"`, leaves terminal tasks
    unchanged, and every task still resolves.
 6. An inconsistent `Mcp-Name` is `-32020`; an unknown, expired or not visible
    `taskId` is `-32602`; `tasks/result` is `-32601`; a task is not visible to a
    different principal.
-7. A refused creation (`-32021`, per-principal cap) leaves no ticket, ledger
+7. A session forgotten, deleted or collected while a ticket is queued or in
+   flight ends its task (`cancelled` or `failed` per the table); no task stays
+   `working` forever or keeps counting against the per-principal cap.
+8. A refused creation (`-32021`, per-principal cap) leaves no ticket, ledger
    entry or turn behind.
-8. The [AIP-20](/docs/aip-20) work board behaves identically with the feature
+9. The [AIP-20](/docs/aip-20) work board behaves identically with the feature
    on or off.
 
 ## See also
