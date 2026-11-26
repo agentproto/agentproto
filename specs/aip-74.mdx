@@ -380,7 +380,7 @@ field is added to `BILLING.schema.json` together with the parser that reads it
 
 ```yaml
 usage:
-  defaults: { margin: 2.0, floorMinor: 1, mode: direct }
+  defaults: { margin: 1.5, floorMinor: 0 }   # example values: the AIP sets none
   categories:
     - id: llm
       match: { kind: llm }
@@ -398,26 +398,34 @@ usage:
     optional `margin` (a number, or `at-cost`), an optional `marginFloor`, an
     optional `floorMinor` and a `mode` (`hold`, `direct` or `shadow`). Of the
     categories that match an event, the one with the most `match` fields wins.
-30. The price of an event is `max(floorMinor, ceil(cost × ratio(currency) ×
+30. The price of an event is `max(floorMinor, round(cost × ratio(currency) ×
     margin × 10^decimals))` in minor units of `primaryAsset`, where
     `ratio(currency)` is the entry ratio of rule 26 for the currency of the
-    cost. A category declaring its own rate is rejected.
-31. `at-cost` is margin 1.0. Neither `usage.defaults` nor an event overrides it,
-    and a category cannot combine `at-cost` with a `marginFloor` above 1.
+    cost. A category declaring its own rate is rejected. The values of
+    `margin`, `floorMinor`, the rounding function and the `mode` are the
+    host's configuration; an absent `margin` is 1, an absent `floorMinor` is 0,
+    and the reference implementation rounds up unless the host injects another
+    function.
+31. `at-cost` is the keyword for margin 1.0. `usage.defaults` does not override
+    it and an event carries no margin; a category cannot combine `at-cost` with
+    a `marginFloor` above 1. Which categories use it is the host's choice.
 32. An event that no category prices, or whose cost is absent, unknown in
     currency or negative in units, is refused. It is never priced at zero.
 33. Every spend carries a caller key. A replay of the same key writes nothing
     twice. A `hold` is `reserve`, then `capture` of at most the reserve and
     `release` of the rest; a `direct` spend is `burn`; both are AIP-49 verbs
     and the journal is the only record of money.
-34. When an account cannot cover a direct spend, the caller chooses: `refuse`
-    writes nothing; `absorb` charges what the account has and reports the
-    rest as a shortfall. A prepaid account never goes below zero. A postpaid
-    account holds a lot whose `floor` is negative, and the spend stops at that
-    floor.
+34. When an account cannot cover a direct spend, the caller names what
+    happens; there is no default: `refuse` writes nothing, `absorb` charges
+    what the account has and reports the rest as a shortfall. A spend never
+    draws a lot below its `floor` (AIP-49), so whether an account may go
+    negative is the floor of the lots the host mints (0 or a negative number),
+    not a mode of the spend. The order in which lots are drawn is the host's,
+    with AIP-49's coalescing order as the reference default.
 35. A category that declares a `marginFloor` MUST NOT sell below it: the
     conformance suite fails when the real margin of a sample event
-    (price ÷ cost) is lower. In `shadow` mode an event is priced and recorded
+    (price ÷ cost) is lower. The value of the floor is the host's; the
+    specification sets none. In `shadow` mode an event is priced and recorded
     outside the journal and no balance moves; an unpriced event is recorded as
     such and raised, never written off as free.
 
@@ -434,7 +442,7 @@ against the host's real stores through `{ stores, clock, rails, manifest }`:
 | BILL-CONV | 9-14 | a `capMinor` becomes the edge `cap` (and is applied by the host until AIP-49 enforces it); a bonus tag appears in `excludes`; 200 USD cents at 100 credits per USD = 20 000 credit hundredths; 200 EUR cents at fx 1.18 = 23 600; a fiat conversion declaring its own ratio is rejected; points (decimals 0) to credits (decimals 2); net vs gross; disabled edge in the arbitrage check |
 | BILL-INCL | 15-18 | two weekly grants both land; rollover none / unbounded; past_due then close; upgrade |
 | BILL-PAYER | 19-20 | 4-level tree, no cascade, corrupted chain |
-| BILL-USE | 29-35 | 1 USD of cost at margin 2 at 100 credits per USD = 20 000 minor; 1 EUR at fx 1.18 = 11 800 at margin 1; `at-cost` ignores `defaults.margin`; an unpriced event is refused; a replayed key writes once; `refuse` writes nothing and `absorb` reports the shortfall; a postpaid lot stops at its floor; a flat price under its `marginFloor` fails |
+| BILL-USE | 29-35 | 1 USD of cost at margin 2 at 100 credits per USD = 20 000 minor; 1 EUR at fx 1.18 = 11 800 at margin 1; `at-cost` ignores `defaults.margin`; an unpriced event is refused; a replayed key writes once; `refuse` writes nothing and `absorb` reports the shortfall; a spend stops at the floor of a lot (0 or negative); a flat price under its declared `marginFloor` fails |
 | BILL-RAIL | 24 + adapters | projection lists its degradations; offer id round-trips; replayed or reordered webhook; missing env stops startup |
 
 ## Rationale
