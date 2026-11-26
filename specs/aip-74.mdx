@@ -433,7 +433,9 @@ decision. A rule never receives write access to the journal.
 Invariants (the core keeps them, no rule can lift them)
 
 36. **Idempotence.** A key charges once. A replay of the same key writes nothing
-    and returns the first charge; the amount of the replay is ignored.
+    and returns the first charge (not the shortfall nor the rule of the first
+    call); the amount of the replay is ignored. An amount is an integer in
+    minor units.
 37. **No raising.** A rule may refuse or lower the amount requested; it can
     never raise it. A decision that is not an integer between 1 and the amount
     requested refuses the spend.
@@ -446,8 +448,11 @@ Invariants (the core keeps them, no rule can lift them)
 Named rules
 
 40. A host's rules are an ordered list of `{ name, decide }`. Names are unique
-    in the list. They run in order, the first rule that decides wins, and the
-    result and its trace name the rule that decided and the ones that passed.
+    in the list. They run in order. A rule answers nothing (it passes), a
+    refusal (which stops the run) or a lower amount (which the next rule then
+    sees as the amount requested); any other answer refuses the spend (rule
+    39). The result and its trace name the rule that decided and the ones that
+    passed. The order is the host's to choose and matters.
 
 ### Writing an overlay (informative)
 
