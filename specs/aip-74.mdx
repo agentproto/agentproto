@@ -51,7 +51,7 @@ from it; until then a field may change.
 
 **Weight rule.** A field is in this AIP only if at least two real products need
 it; everything else is `metadata.<vendor>` or an `x-<vendor>:<name>` strategy.
-The normative rules fit in 28 MUST (§Rules and §Rates and anchor currency).
+The normative rules fit in 35 MUST (§Rules, §Rates and anchor currency and §Usage and spend).
 
 ## Motivation
 
@@ -370,6 +370,57 @@ fx: { EUR: 1.18 }                               # fixed in configuration: anchor
 A product may choose any anchor currency and scale (for example `USD` at 100 or
 1 000 credits per unit).
 
+### Usage and spend (normative)
+
+A product that meters usage declares **categories** as data, in an optional
+`usage` block. The categories say where the cost of an action comes from and
+what is charged for it; they never carry a rate (rules 26 and 27). The `usage`
+field is added to `BILLING.schema.json` together with the parser that reads it
+(the schema is a draft).
+
+```yaml
+usage:
+  defaults: { margin: 2.0, floorMinor: 1, mode: direct }
+  categories:
+    - id: llm
+      match: { kind: llm }
+      cost: { source: measured }            # measured | fixed | catalog | resolver | flatCredits
+      marginFloor: 1.1
+    - id: messaging-fee
+      match: { kind: messaging-fee }
+      cost: { source: resolver, resolver: fee-grid }
+      margin: at-cost                        # margin 1.0, nothing overrides it
+      floorMinor: 0
+```
+
+29. A category states the source of the provider cost (`measured`, `fixed`,
+    `catalog`, `resolver`, or a `flatCredits` price with a reference cost), an
+    optional `margin` (a number, or `at-cost`), an optional `marginFloor`, an
+    optional `floorMinor` and a `mode` (`hold`, `direct` or `shadow`). Of the
+    categories that match an event, the one with the most `match` fields wins.
+30. The price of an event is `max(floorMinor, ceil(cost × ratio(currency) ×
+    margin × 10^decimals))` in minor units of `primaryAsset`, where
+    `ratio(currency)` is the entry ratio of rule 26 for the currency of the
+    cost. A category declaring its own rate is rejected.
+31. `at-cost` is margin 1.0. Neither `usage.defaults` nor an event overrides it,
+    and a category cannot combine `at-cost` with a `marginFloor` above 1.
+32. An event that no category prices, or whose cost is absent, unknown in
+    currency or negative in units, is refused. It is never priced at zero.
+33. Every spend carries a caller key. A replay of the same key writes nothing
+    twice. A `hold` is `reserve`, then `capture` of at most the reserve and
+    `release` of the rest; a `direct` spend is `burn`; both are AIP-49 verbs
+    and the journal is the only record of money.
+34. When an account cannot cover a direct spend, the caller chooses: `refuse`
+    writes nothing; `absorb` charges what the account has and reports the
+    rest as a shortfall. A prepaid account never goes below zero. A postpaid
+    account holds a lot whose `floor` is negative, and the spend stops at that
+    floor.
+35. A category that declares a `marginFloor` MUST NOT sell below it: the
+    conformance suite fails when the real margin of a sample event
+    (price ÷ cost) is lower. In `shadow` mode an event is priced and recorded
+    outside the journal and no balance moves; an unpriced event is recorded as
+    such and raised, never written off as free.
+
 ## Conformance
 
 `@agentproto/billing/testing` (conformance suites), one suite per group, run
@@ -383,6 +434,7 @@ against the host's real stores through `{ stores, clock, rails, manifest }`:
 | BILL-CONV | 9-14 | a `capMinor` becomes the edge `cap` (and is applied by the host until AIP-49 enforces it); a bonus tag appears in `excludes`; 200 USD cents at 100 credits per USD = 20 000 credit hundredths; 200 EUR cents at fx 1.18 = 23 600; a fiat conversion declaring its own ratio is rejected; points (decimals 0) to credits (decimals 2); net vs gross; disabled edge in the arbitrage check |
 | BILL-INCL | 15-18 | two weekly grants both land; rollover none / unbounded; past_due then close; upgrade |
 | BILL-PAYER | 19-20 | 4-level tree, no cascade, corrupted chain |
+| BILL-USE | 29-35 | 1 USD of cost at margin 2 at 100 credits per USD = 20 000 minor; 1 EUR at fx 1.18 = 11 800 at margin 1; `at-cost` ignores `defaults.margin`; an unpriced event is refused; a replayed key writes once; `refuse` writes nothing and `absorb` reports the shortfall; a postpaid lot stops at its floor; a flat price under its `marginFloor` fails |
 | BILL-RAIL | 24 + adapters | projection lists its degradations; offer id round-trips; replayed or reordered webhook; missing env stops startup |
 
 ## Rationale
@@ -391,6 +443,10 @@ against the host's real stores through `{ stores, clock, rails, manifest }`:
   and the case list of the plan). Metered quotas, tiers, purchase limits,
   postpaid statements and capped rollover are real ideas with one case each;
   they wait as vendor fields until a second product needs them.
+- **Usage is data, the engine is one.** Categories are rows, not code paths: a
+  messaging fee at cost, a voice call held then settled, an image at a margin
+  are the same price function over a different cost source. One anchor sets
+  every price, so the rate has a single place to change.
 - **Fiat as an asset** removes the second copy of each price and makes the
   payment a journal fact.
 - **The effect follows the offer type**, not the rail: the rail knows an
