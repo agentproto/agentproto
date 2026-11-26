@@ -1107,7 +1107,9 @@ table below so MCP clients can drive sessions through the same connection:
 
 The MCP tools and the HTTP routes target the same underlying
 registry — calling either family results in the same observable
-state.
+state. The MCP gateway endpoint (`/mcp`), its supported protocol
+eras, `server/discover`, and extension negotiation are specified by
+[AIP-77](/docs/aip-77) (MCP-GATEWAY).
 
 `agent_start` and `agent_prompt` are the delegation actions of
 §Delegation; hosts gate them by action identity, not by tool name.

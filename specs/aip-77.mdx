@@ -1,0 +1,254 @@
+---
+title: "AIP-77: MCP-GATEWAY (mcp-gateway/v1): dual-era MCP host gateway, server/discover, and extension negotiation"
+description: "Specifies how an agentproto host serves its authenticated MCP gateway (/mcp) across both the legacy 2025-11-25 Streamable HTTP era and the stateless 2026-07-28 modern era: authentication-first dispatch, header and single-read body era routing, strict separation of accepted vs advertised protocol versions, server/discover and capabilities.extensions, error status mapping including -32021 (HTTP 400), shared tool-factory discovery modes (deferredTools/tool_search), unified session observability, and configuration rollback. Scope v1 covers /mcp only; /mcp/orchestrator and /mcp/imported/<id> stay on 2025-11-25. Host primitives remain specified by their existing AIPs."
+aip: 77
+status: Draft
+type: Schema
+created: 2026-11-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 46]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime/src/mcp-modern
+layer: host
+---
+
+| Field | Value |
+|---|---|
+| AIP | 77 |
+| Title | MCP-GATEWAY (mcp-gateway/v1): dual-era MCP host gateway, server/discover, and extension negotiation |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-46](/docs/aip-46) (SESSION: host session tools and caller-identity boundaries exposed through the gateway) |
+| Composes with | [AIP-3](/docs/aip-3) (SKILL), [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-20](/docs/aip-20) (WORK), [AIP-32](/docs/aip-32) (MCP driver), [AIP-45](/docs/aip-45) (HARNESS), [AIP-58](/docs/aip-58) (RUN), [AIP-76](/docs/aip-76) (EVENT) |
+| Created | 2026-11-26 |
+| Packages (ref-impl) | `@agentproto/runtime` (`mcp-modern`, `http-server`, `mcp-session-observer`) |
+| Prior art | Model Context Protocol 2025-11-25 (Streamable HTTP) and 2026-07-28 (`server/discover`, stateless HTTP, caching hints, error codes) |
+
+## Abstract
+
+An agentproto host exposes its tools, resources, prompts, and protocol extensions
+over an authenticated MCP endpoint (`/mcp`). Existing clients speak the
+`2025-11-25` Streamable HTTP era (`initialize` handshake + SSE), while newer
+clients speak the stateless `2026-07-28` era (`server/discover`, strict
+`MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` headers, `resultType`,
+caching hints, and `capabilities.extensions`).
+
+MCP-GATEWAY specifies how one authenticated `/mcp` endpoint serves both eras
+side by side without breaking existing clients, duplicating authorization, or
+drifting the tool surface. It fixes the dispatch order, the separation between
+accepted and advertised protocol versions, the `server/discover` payload, error
+status mapping, shared discovery filtering (`deferredTools` / `tool_search`),
+unified observability, and the configuration switch to disable modern-era
+routing.
+
+## Motivation
+
+- Existing MCP clients and embedded SDKs negotiate `2025-11-25` via
+  `initialize`. Advertising `2026-07-28` from `initialize` or replacing the
+  legacy transport breaks clients that expect a `2025-11-25` handshake.
+- Modern MCP capabilities (elicitation via multi-round tool requests, task
+  projections, skills catalogs, and event extensions) require `server/discover`
+  and `2026-07-28` framing on the authenticated `/mcp` endpoint, not only on a
+  dedicated unauthenticated origin.
+- Splitting the modern era onto a separate URL would duplicate authentication,
+  caller-identity enforcement, tool allow/deny filters, and deferred discovery,
+  creating drift between the two surfaces.
+
+## Scope
+
+Version 1 of this specification covers the root authenticated host endpoint
+`/mcp` only.
+
+- `/mcp/orchestrator` (scoped child-orchestrator sub-gateway) and
+  `/mcp/imported/<id>` (per-import upstream passthrough) remain on the
+  `2025-11-25` era. Bringing them to the modern era is separate work.
+- `/mcp/events/<secret>` (the public events origin defined in
+  [AIP-76](/docs/aip-76)) remains modern-only (`supportedVersions: ["2026-07-28"]`).
+- Host primitives (sessions, approvals, permissions, workboards, runs, skills,
+  events) remain defined by their existing AIPs; this gateway does not replace
+  or duplicate their semantics.
+
+## Design principles
+
+1. **Auth before era.** Authentication, origin checks, caller-identity
+   enforcement, surface restrictions, and query-parameter parsing execute once,
+   before deciding which protocol era handles the request.
+2. **One tool factory.** Both eras construct their server from the exact same
+   factory and query filters (`denyTools`, `allowTools`, `deferred`, `profile`,
+   `surface`). A modern `tools/list` and a legacy `tools/list` for the same
+   caller and query return the same tool names.
+3. **Accepted versions are not advertised versions.** The set of protocol
+   versions accepted by the modern handler (`protocolVersions`) is distinct from
+   the set advertised in `server/discover` and `-32022` errors
+   (`advertisedVersions`). A request carrying a legacy version on the modern
+   path MUST be rejected with `-32022`, never answered with `2026-07-28` shapes.
+4. **Read the request body once.** Routing inspects HTTP headers first. When
+   body inspection is needed, the stream is buffered once (capped at the body
+   limit) and the parsed object is handed directly to whichever era runs.
+5. **Additive and reversible.** Legacy `initialize` is unchanged and never
+   advertises `2026-07-28`. A host configuration flag (`mcp.modernEra: false`)
+   disables modern-era routing cleanly.
+
+## Specification
+
+### Protocol versions
+
+A conformant dual-era `/mcp` gateway maintains two explicit version lists:
+
+- **Accepted modern versions** (`protocolVersions`): `["2026-07-28"]`. Only
+  these versions are accepted by the modern validator.
+- **Advertised versions** (`advertisedVersions`): `["2026-07-28", "2025-11-25"]`.
+  Returned in `server/discover` (`result.supportedVersions`) and in `-32022`
+  (`error.data.supported`).
+
+By contrast, a modern-only origin such as `/mcp/events/<secret>`
+([AIP-76](/docs/aip-76)) advertises only `["2026-07-28"]`.
+
+Legacy `initialize` continues to negotiate `2025-11-25` and MUST NOT advertise
+`2026-07-28`.
+
+### Dispatch order on `/mcp`
+
+Every request arriving at `/mcp` MUST pass through the following sequence in
+order:
+
+1. **Authorization and identity.** Enforce host auth (loopback or bearer token),
+   `Origin` validation, caller-identity attestation and enforcement, external
+   session touch, query-parameter parsing (`denyTools`, `allowTools`,
+   `callerSessionId`, `origin`, `deferred`, `profile`, `surface`), and surface
+   restrictions (such as denying operator-only surfaces to daemon-spawned
+   sessions). If `mcp.modernEra` is `false`, skip steps 2–4 and serve the
+   request through the legacy transport.
+2. **Non-POST verbs (`GET`, `DELETE`, etc.).** Route to the modern handler if
+   and only if the `MCP-Protocol-Version` header names a version in
+   `protocolVersions` (the modern handler responds `405 Method Not Allowed` with
+   `Allow: POST`). Otherwise serve through the legacy transport (`GET` SSE
+   stream, `DELETE` legacy handling).
+3. **`POST` header check (zero body read).** If the `MCP-Protocol-Version`
+   header names a version in `protocolVersions`, buffer the body (enforcing the
+   1 MiB body limit with `413`) and route directly to the modern handler.
+4. **`POST` single-read body check.** Otherwise, buffer the request body once
+   (enforcing the gateway body limit with `413`).
+   - If the body is not valid JSON: if the request appears to be a modern call
+     or cannot be parsed for dispatch, return HTTP `400` with JSON-RPC `-32700`
+     (`Parse error`, `id: null`). Never attempt to replay a drained stream into
+     the legacy transport.
+   - Route to the modern handler (passing the buffered raw body) when either:
+     - `body.method` is a modern-only method (`server/discover`, or an
+       extension method added by subsequent gateway bindings that does not exist
+       in `2025-11-25`), or
+     - `body.params._meta["io.modelcontextprotocol/protocolVersion"]` names a
+       version in `protocolVersions`.
+5. **Legacy fallback.** Otherwise, hand the already-parsed JSON object to the
+   legacy Streamable HTTP transport (`handleRequest(req, res, parsedBody)`).
+   Legacy header coercion (rewriting newer unknown `MCP-Protocol-Version`
+   headers down to `2025-11-25` for older SDK compatibility) MUST run only
+   inside this legacy branch, never before step 2.
+
+A request whose `MCP-Protocol-Version` header is `2025-11-25` while its body
+`_meta["io.modelcontextprotocol/protocolVersion"]` is `2026-07-28` enters step 4
+and is rejected by the modern validator with HTTP `400` `-32020` (header
+mismatch), never silently downgraded.
+
+A request calling `server/discover` with both header and `_meta` set to
+`2025-11-25` enters step 4 and is rejected by the modern validator with HTTP
+`400` `-32022` (`Unsupported protocol version`,
+`error.data.supported = ["2026-07-28", "2025-11-25"]`), proving that
+`advertisedVersions` does not widen the accepted modern set.
+
+### `server/discover` and `capabilities.extensions`
+
+`server/discover` builds its response from a fresh server instance produced by
+the shared factory (so capabilities reflect the caller's actual surface):
+
+- `resultType`: `"complete"`.
+- `supportedVersions`: `advertisedVersions` (`["2026-07-28", "2025-11-25"]` on
+  `/mcp`).
+- `capabilities`: the server's capabilities with the removed `logging` key
+  stripped, plus `extensions` when at least one modern extension is enabled
+  (omitted or empty when none are enabled).
+- `_meta["io.modelcontextprotocol/serverInfo"]`: `{ name, version }`.
+- `ttlMs` and `cacheScope`: required on `server/discover` and the other five
+  cacheable operations (`tools/list`, `prompts/list`, `resources/list`,
+  `resources/templates/list`, `resources/read`), defaulting to
+  `{ ttlMs: 0, cacheScope: "private" }` when no host cache policy is supplied.
+
+### Error mapping
+
+The modern handler maps protocol errors to HTTP status codes as follows:
+
+| JSON-RPC code | Meaning | HTTP status |
+|---|---|---|
+| `-32700` | Parse error | `400` |
+| `-32600` | Invalid request (batch, response body, wrong verb/Accept/Content-Type) | `400` / `405` / `406` / `415` |
+| `-32601` | Method not found (including removed legacy methods such as `initialize`, `ping`, `logging/setLevel`) | `404` |
+| `-32602` | Invalid params (including missing required `_meta` fields) | `400` |
+| `-32020` | Header mismatch (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) | `400` |
+| `-32021` | Missing required client capability (`error.data.requiredCapabilities`) | `400` |
+| `-32022` | Unsupported protocol version (`error.data.supported`, `error.data.requested`) | `400` |
+| Handler errors | Tool or extension domain errors not listed above | `200` |
+| Uncaught internal failure | Internal error (`-32603`) without leaking internal details | `500` |
+
+### Discovery modes and filtering
+
+Query parameters that narrow or shape the tool catalog (`?denyTools=`,
+`?allowTools=`, `?deferred=1`, `?profile=`, `?surface=`) apply identically on
+both eras because both invoke the same server factory. Deferred tool discovery
+(`deferredTools` / `tool_search`) behaves identically on `2026-07-28` and
+`2025-11-25` so large tool surfaces do not bloat modern clients' context.
+
+### Observability
+
+When the host records per-session MCP observations (keyed by the trusted caller
+session id), the modern branch MUST feed the same observation store as the
+legacy branch:
+
+- Successful and failed `server/discover` and `tools/list` results are recorded
+  with the client's `MCP-Protocol-Version`.
+- HTTP-level rejections (`status >= 400`) on modern requests that never reach
+  method execution are recorded as HTTP errors against the caller session.
+
+### Rollback configuration
+
+Hosts expose a boolean configuration option `mcp.modernEra` (default `true`).
+When set to `false`, `/mcp` bypasses the modern dispatch path completely and
+serves all requests through the `2025-11-25` transport, including legacy version
+header coercion.
+
+## Security considerations
+
+- **No auth bypass.** Modern routing happens strictly after `authorizeMcp`,
+  `enforceCallerIdentity`, and surface restriction checks. A modern client
+  without a valid bearer token (when bearer auth is active) or with an untrusted
+  `Origin` receives the same `401` / `403` rejection as a legacy client.
+- **No silent downgrade on mismatch.** Conflicting header and `_meta` protocol
+  versions are rejected (`-32020`) rather than coerced.
+- **Bounded memory.** Request bodies buffered for dispatch or modern handling
+  enforce the gateway size ceiling and reject oversized payloads with `413`.
+
+## Conformance
+
+A host conforms to `mcp-gateway/v1` when:
+
+1. `/mcp` serves `server/discover`, `tools/list`, `tools/call`, `resources/*`,
+   `prompts/*`, and `events/*` under `2026-07-28` while continuing to serve
+   `initialize` and all existing methods under `2025-11-25`.
+2. `server/discover` on `/mcp` advertises `["2026-07-28", "2025-11-25"]`, while
+   a modern request carrying `2025-11-25` in both header and `_meta` is rejected
+   with HTTP `400` `-32022`.
+3. Every auth check, `Origin` check, caller-identity check, and query filter
+   (`denyTools`, `allowTools`, `deferred`, `surface`) produces identical
+   enforcement on both eras.
+4. `-32021` maps to HTTP `400`; `-32601` maps to HTTP `404`; `-32020` and
+   `-32022` map to HTTP `400`.
+5. Modern `server/discover`, `tools/list`, and HTTP errors update the host's
+   session observation store.
+6. Setting `mcp.modernEra` to `false` restores pure legacy routing on `/mcp`.
+
+## See also
+
+- [AIP-1](/docs/aip-1): process and RFC 2119 terminology
+- [AIP-46](/docs/aip-46): SESSION, whose MCP tools are exposed through this
+  gateway
+- [AIP-76](/docs/aip-76): EVENT and the `mcp-events/v1` public origin
