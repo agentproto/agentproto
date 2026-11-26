@@ -214,7 +214,11 @@ are removed once answered.
 ledger **at the moment the turn ends** (and at every other terminal transition),
 not when a client reads. The rows below are evaluated in order, first match
 wins, only for an entry with no recorded terminal state; an entry already
-terminal is never re-derived. `host-restart` is therefore declared only for an
+terminal is never re-derived. A crash between the end of a turn and the ledger
+write is an accepted window: such a turn has no recorded outcome and is
+reported `failed` (`host-restart`) even though the agent finished; the host
+SHOULD keep that window as small as it can (write before acknowledging the
+turn end to any observer). `host-restart` is therefore declared only for an
 entry that has no recorded terminal state: a turn that ended and was recorded
 before the restart stays `completed` (or its recorded state). A session resumed
 after a restart does not revive a `failed` task; a prompt sent to it creates a
@@ -224,7 +228,7 @@ new ticket and a new task.
 |---|---|---|
 | outcome `interrupted` or `dropped` | `cancelled` | the session is untouched: it stays `running` |
 | outcome `session-killed` (turn queued or in flight) | `cancelled` | |
-| outcome `session-exited`, turn in flight | `failed` | `error: { code: -32603, message, data: { reason: "session-exited", sessionId, exitCode? } }` |
+| outcome `session-exited`, turn in flight | `failed` | `error.code: -32603`, `data: { reason: "session-exited", sessionId, exitCode? }` |
 | outcome `session-exited`, turn never started | `cancelled` | no work was done |
 | outcome `session-error`, turn in flight | `failed` | `data.reason: "session-error"` |
 | outcome `session-error`, turn never started | `cancelled` | no work was done |
@@ -267,7 +271,9 @@ terminal become `failed`; a task that was already `completed`, `cancelled` or
     §Interrupt describes; the turn ends, the task becomes `cancelled`, the
     session stays alive;
   - the harness cannot cancel a turn ([AIP-46](/docs/aip-46) §Interrupt, HTTP
-    `409`): the call returns a tool error and the task stays `working`;
+    `409`): this applies only to a ticket that is the turn in flight; the call returns a
+    JSON-RPC error (`tasks/cancel` is a method, not a tool call) and the task
+    stays `working`;
   - ticket already ended, or the task terminal: acknowledged, no effect. In
     particular `tasks/cancel` MUST NOT interrupt a later turn of the same
     session.
@@ -302,8 +308,9 @@ Every task has an explicit `ttlMs`: a host default and a host maximum apply.
 it reports the retention that will apply. The host MUST NOT purge a task that
 is not terminal. A terminal entry is purged only after `ttlMs` has elapsed since
 its `endedAt`, and its result MUST already be in the ledger. The host sweeps at
-start-up and during reads. An expired entry, or one whose session was
-collected without a recorded result, answers `-32602`.
+start-up and during reads. An expired entry answers `-32602`. A session
+forgotten or collected while its ticket was non-terminal does not leave a task
+without result: it ends the task as `session-forgotten` (see the mapping).
 
 ## Rationale
 
@@ -369,7 +376,8 @@ A host conforms to `turn-task/v1` when:
    turn.
 5. A task whose turn ended is recorded as terminal at that moment, so a restart
    afterwards leaves it unchanged. A host restart between creation and a later
-   `tasks/get` turns a task with no recorded terminal state into `failed` with `data.reason: "host-restart"`, leaves terminal tasks
+   `tasks/get` turns a task with no recorded terminal state into `failed`
+   with `data.reason: "host-restart"`, leaves terminal tasks
    unchanged, and every task still resolves.
 6. An inconsistent `Mcp-Name` is `-32020`; an unknown, expired or not visible
    `taskId` is `-32602`; `tasks/result` is `-32601`; a task is not visible to a
