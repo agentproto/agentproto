@@ -619,6 +619,15 @@ workspace.
 | `run_request_input` | `{stepId, prompt, schema?}` | Registered for a step's own session to call — the harness surfaces it to an agent-backed step as an ordinary callable tool, the same way AIP-46's `agent_*` tools are reachable from inside a session. |
 | `run_publish` | `{runId, artifactKey, to?}` | |
 
+A run that is waiting for input MAY be projected to a client as an
+input-required state of a protocol that has one (for example the
+`input_required` status of an MCP task). That projection is made by the
+operator-side observer of the run (the consumer that watches it through
+`run_get`, `run_events` or the host's status tool), never by
+`run.requestInput`, which only the executing step calls. Answering goes back
+through the same resolver as any other resume (`run.resume`); the projection
+adds no way to change a run.
+
 Resolving a rejected `run.resume` or `run.replay` uses stable,
 machine-readable errors — `run_not_found`, `not_suspended`,
 `step_mismatch` — distinct from the run-level error codes below, the

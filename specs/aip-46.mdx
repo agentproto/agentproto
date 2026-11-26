@@ -1144,6 +1144,15 @@ racing a turn-end never has to choose in advance. This flag has shipped
 in the reference implementation since before this AIP was written; the
 document simply never described it.
 
+**MCP task handle for a turn.** On the `2026-07-28` MCP era, the
+response to `agent_start` (with a prompt) or `agent_prompt` MAY be an MCP
+task handle for that **turn**, when the host decides so and the client has
+declared the Tasks extension. The client never requests it, the task ends
+with the turn, and the session keeps its own lifecycle (it stays alive and
+idle after the turn). The projection is specified by
+[AIP-78](/docs/aip-78) (TURN-TASK) and the endpoint by
+[AIP-77](/docs/aip-77) (MCP-GATEWAY); neither changes the semantics above.
+
 `interrupt: true` and `POST /sessions/:id/interrupt` are not
 alternatives: the flag cancels a turn *in order to* start another one
 and cannot express "stop, send nothing"; the route ends a turn and stops
@@ -2337,6 +2346,12 @@ value. The reference implementation keeps accepting the old names, with a
 deprecation warning, until its next breaking release (AIP-70 §4). A client
 that must talk to both generations reads `harness` and falls back to
 `adapterSlug`, and sends `harness`.
+
+### The 2026-11-26 turn-task amendment (draft)
+
+Adds the §Multi-turn semantics paragraph "MCP task handle for a turn". It
+is additive: a client that does not declare the MCP Tasks extension sees no
+change, and no session field, status, or HTTP route is added or altered.
 
 ## Security Considerations
 

@@ -25,7 +25,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/work
 | Doctypes | `work.workspace/v2` (`WORK.md`, the work manifest of one workspace node) + the normative `work-item` base collection ([AIP-18](/docs/aip-18) `collection.schema/v1`) |
 | Requires | [AIP-7](/docs/aip-7) (approvals, audit), [AIP-18](/docs/aip-18) (collections, items), [AIP-34](/docs/aip-34) (workspace node that owns the work root) |
 | Replaces | [AIP-13](/docs/aip-13) (`agentwork/v1`) — Superseded, no compatibility layer |
-| Composes with | [AIP-46](/docs/aip-46) (sessions — claimants), [AIP-54](/docs/aip-54) (refs), [AIP-58](/docs/aip-58) (runs), [AIP-15](/docs/aip-15) (workflows), [AIP-9](/docs/aip-9) (operators) |
+| Composes with | [AIP-46](/docs/aip-46) (sessions — claimants; MCP task handles for session turns are [AIP-78](/docs/aip-78), not this board), [AIP-54](/docs/aip-54) (refs), [AIP-58](/docs/aip-58) (runs), [AIP-15](/docs/aip-15) (workflows), [AIP-9](/docs/aip-9) (operators) |
 | Resources | [`./resources/aip-20`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft) — [`WORK.schema.json`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/WORK.schema.json), [`collections/`](https://github.com/agentproto/agentproto/tree/main/specs/resources/aip-20/draft/collections) (`work-item`, `task`, `initiative`), [`ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/ADAPTER.md), [`EXAMPLES.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-20/draft/EXAMPLES.md) |
 
 ## Abstract
@@ -839,3 +839,4 @@ place in this spec; nothing is kept twice.
 - [AIP-46 — agent sessions](/docs/aip-46) — session claimants
 - [AIP-54 — refs](/docs/aip-54) — principal and item ref grammar
 - [AIP-58 — RUN](/docs/aip-58) — runs linked from items
+- [AIP-78 — TURN-TASK](/docs/aip-78) — MCP tasks are a projection of one session turn, a different thing from the work items of this AIP; neither reads nor writes the other

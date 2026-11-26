@@ -567,6 +567,13 @@ path that handles a human decision, never as a tool.
 Tool results for these operations MUST NOT contain card tickets, bearer
 credentials, or any other secret that would let a caller decide.
 
+A host MAY also carry a human question or a link to an approval over a
+protocol's input channel (for example an MCP elicitation or a task input
+request). That channel is a **transport** only. An answer received on it is a
+statement that something was shown or answered, never a decision: moving an
+approval request out of `pending` and consuming it, with its pinned payload,
+remains the only act of authorization.
+
 ### Threat model and residual risk
 
 The `ui_card` channel rests on one assumption: the ticket never appears
