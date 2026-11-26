@@ -1,0 +1,400 @@
+---
+title: "AIP-78: TURN-TASK (turn-task/v1): projecting one session turn as an MCP task"
+description: "Specifies how a host that serves the 2026-07-28 MCP era projects a single turn of an AIP-46 session as an MCP task: server-decided creation for agent_start and agent_prompt, an opaque unguessable taskId bound to a prompt ticket and to its creating principal through a durable ledger, the turn-to-task state mapping, tasks/get, tasks/update and tasks/cancel semantics, cooperative cancellation that ends the turn and not the session, retention, and error codes. It does not replace the AIP-20 work board and does not change the multi-turn lifecycle of AIP-46."
+aip: 78
+status: Draft
+type: Schema
+created: 2026-11-26
+author: Jeremy André <jeremy@agentik.net>
+requires: [1, 46, 77]
+discussions-to: https://github.com/agentproto/agentproto/discussions
+ref-impl: https://github.com/agentproto/ts/tree/main/packages/runtime/src/mcp-modern
+layer: coordination
+---
+
+| Field | Value |
+|---|---|
+| AIP | 78 |
+| Title | TURN-TASK (turn-task/v1): projecting one session turn as an MCP task |
+| Author | Jeremy André &lt;jeremy@agentik.net&gt; |
+| Status | Draft |
+| Type | Schema |
+| Requires | [AIP-1](/docs/aip-1) (process), [AIP-46](/docs/aip-46) (SESSION: sessions, turns, `agent_start`, `agent_prompt`, interrupt), [AIP-77](/docs/aip-77) (MCP-GATEWAY: the `2026-07-28` era, `server/discover`, extension negotiation, error mapping) |
+| Composes with | [AIP-7](/docs/aip-7) (GOVERNANCE), [AIP-19](/docs/aip-19) (SECRETS), [AIP-20](/docs/aip-20) (WORK), [AIP-58](/docs/aip-58) (RUN) |
+| Created | 2026-11-26 |
+| Packages (ref-impl) | `@agentproto/runtime` (`mcp-modern`) |
+| Prior art | Model Context Protocol 2026-07-28 Tasks extension (`io.modelcontextprotocol/tasks`: `CreateTaskResult`, `tasks/get`, `tasks/update`, `tasks/cancel`) |
+
+## Abstract
+
+The MCP 2026-07-28 Tasks extension gives a long-running request a handle
+(`taskId`) that a client polls, updates with input, or cancels. An
+[AIP-46](/docs/aip-46) session is not a request: it is a multi-turn process
+that stays `running` and idle between turns.
+
+TURN-TASK defines the only projection that is faithful to both: **one turn of
+a session is one MCP task**. The task is created by the server when
+`agent_start` or `agent_prompt` starts or queues a turn, resolves through a
+durable ledger to `(sessionId, promptId)`, ends when the turn ends, and never
+changes the session's own lifecycle.
+
+## Motivation
+
+- A client that delegates work through the session tools (`agent_start`,
+  `agent_prompt`) today either blocks on a long call or polls session state it
+  must interpret itself. The Tasks extension is the standard shape for that.
+- Mapping a whole session to one task breaks: the session is `running` and
+  idle after every turn, so the task would never leave `working`, and
+  `tasks/cancel` (an interrupt) ends a turn but leaves the session alive, so it
+  could never reach `cancelled`.
+- The [AIP-20](/docs/aip-20) work board and MCP tasks share a word and nothing
+  else. Without an explicit statement, implementers conflate a board item with
+  a protocol handle.
+
+## Scope
+
+- In: projection of a turn started or queued by `agent_start` (with a prompt)
+  or `agent_prompt` into an MCP task on the `2026-07-28` era of the authenticated
+  `/mcp` endpoint ([AIP-77](/docs/aip-77)).
+- Out: the `2025-11-25` era (its experimental tasks methods are not specified
+  here; `tasks/result` answers `-32601` on the modern era), tasks for other
+  tools, and the transport of questions and approvals while a turn waits for
+  input (reused as-is: this AIP only says how the task reflects that wait).
+- This AIP does **not** replace the [AIP-20](/docs/aip-20) work board and does
+  **not** change the multi-turn semantics of [AIP-46](/docs/aip-46). It adds a
+  handle for one turn; the session remains the unit of lifecycle, identity and
+  state.
+
+## Design principles
+
+1. **A task is a request handle; a turn is the request.** One turn, one task.
+   A second `agent_prompt` creates a new task. No task spans turns.
+2. **The server decides, the client never asks.** The client only declares the
+   extension; the server chooses when a call returns a task.
+3. **The session stays the source of truth.** Session state is read from the
+   session descriptor plus the recorded turn outcome. The projection is
+   one-directional (turn to task); a task state never drives a session except
+   through `tasks/update` and `tasks/cancel`.
+4. **Opaque handle.** `taskId` carries no session information and is not
+   derivable from one.
+5. **Durable before visible.** The task record exists before the creating
+   response is sent.
+
+## Specification
+
+### Terms
+
+- **Principal**: the caller identity the host resolves server-side for a
+  request ([AIP-46](/docs/aip-46) §Session principals). It is never taken from a
+  client-supplied field.
+- **Prompt ticket**: a host-assigned, stable identifier (`promptId`) for one
+  prompt accepted by a session, whether it starts a turn at once or waits in the
+  queue ([AIP-46](/docs/aip-46) §Multi-turn semantics). A task is bound to a
+  prompt ticket, not to a position in the queue, so reordering or dropping queue
+  entries cannot re-point a task.
+- **Turn outcome**: how the turn of a ticket ended. A closed enumeration:
+  `finished` (the turn ended naturally, `turn-end`), `interrupted` (cancelled by
+  the interrupt route, by a prompt carrying `interrupt: true`, or by
+  `tasks/cancel`), `dropped` (removed from the queue before it started),
+  `session-error`, `session-killed`, `session-exited`, `session-forgotten`
+  (the session record was forgotten, deleted or collected while the ticket was
+  queued or in flight), `host-restart`. The last five are derived from the
+  AIP-46 session `status` (`error`, `killed`, `exited`), from the removal of the
+  session, or from a host restart; they are not new session fields.
+- **Pending input**: the host's own record that the turn is waiting on a human
+  answer (a permission, a question, or a suspended run). AIP-46 defines no
+  field for it; this AIP only requires that the host can tell, per ticket,
+  whether such a request is pending.
+
+### Extension declaration and creation
+
+A client declares support in the request metadata:
+`_meta["io.modelcontextprotocol/clientCapabilities"].extensions["io.modelcontextprotocol/tasks"] = {}`.
+The host advertises `extensions["io.modelcontextprotocol/tasks"]` in
+`server/discover` ([AIP-77](/docs/aip-77)) when the feature is enabled.
+
+Which tools return a task is a host setting with three explicit modes, applied
+uniformly and documented by the host: `agent_start` only, `agent_prompt` only,
+or both (the reference default). `agent_start` without a prompt starts no turn
+and never returns a task.
+
+When a covered call starts or queues a turn and the client declared the
+extension, the host MUST answer with a `CreateTaskResult` (`resultType:
+"task"`). Otherwise it answers with the ordinary result. A client MUST NOT be
+able to force or suppress task creation by any parameter. If the host cannot
+answer a non-declaring client without a task (for example, a host policy that
+makes every turn start asynchronous), it MUST reject with `-32021` carrying
+`error.data.requiredCapabilities.extensions`. A host that can always answer
+synchronously never returns `-32021` here.
+
+**Order of operations.** The host MUST:
+
+1. check the capability (and the per-principal task cap below) and reject with
+   `-32021` or a tool error **before** it creates any ticket, ledger entry or
+   turn, so a refused call has no side effect;
+2. **reserve** the identifiers: pre-allocate the `promptId` and, for
+   `agent_start`, the `sessionId` (the host chooses it before spawning), then
+   durably write the ledger entry in state `working` (queued) with those
+   reserved identifiers;
+3. only then spawn the session (for `agent_start`) and hand the prompt to it,
+   using the reserved identifiers;
+4. send the `CreateTaskResult`.
+
+If step 3 fails, the host marks the entry `failed` and answers the call with
+the tool's own error rather than a task. A reserved entry found at start-up
+whose session or ticket never came to exist is marked `failed` (with
+`data.reason: "host-restart"`) by the restart rule.
+
+`CreateTaskResult` MUST carry the session it belongs to in
+`_meta["io.agentproto/turn-task"] = { sessionId, promptId }`, so the client can
+keep using the session tools (`agent_prompt`, `agent_output`,
+`agent_sessions_list`, `agent_kill`) with the real `sessionId`.
+
+### Task identity, ledger and ownership
+
+- `taskId` MUST be generated from at least 128 bits of randomness (reference
+  format: `task_` followed by 16 random bytes in hex). It MUST NOT be derived
+  from a `sessionId`.
+- The ledger keeps per task:
+  `{ taskId, sessionId, promptId, principal, createdAt, ttlMs, pollIntervalMs, lastStatus, lastUpdatedAt, endedAt?, outcome?, result? }`.
+  `principal` is the resolved principal that created the task.
+- Writes MUST be atomic (write to a temporary file in the same directory,
+  `fsync`, rename) and the files readable only by the host user (mode `0600`).
+  The ledger MUST survive a host restart.
+- A task is visible to, and can be updated or cancelled by, its creating
+  principal, and by a principal that the host's session rules
+  ([AIP-46](/docs/aip-46) §Delegation, §Session principals) allow to act on the
+  underlying session. For anyone else the answer is `-32602`, identical to an
+  unknown task.
+- The host MUST cap the number of non-terminal tasks per principal (the limit
+  is a host setting). Creation beyond the cap is refused as in step 1.
+
+### Task object
+
+```ts
+interface Task {
+  taskId: string
+  status: "working" | "input_required" | "completed" | "cancelled" | "failed"
+  statusMessage?: string
+  createdAt: string        // ISO 8601
+  lastUpdatedAt: string    // ISO 8601, monotonic per task
+  ttlMs: number            // retention after the terminal state
+  pollIntervalMs?: number
+}
+type CreateTaskResult = Result & Task & { resultType: "task" }
+
+type DetailedTask =
+  | (Task & { status: "working" })
+  | (Task & { status: "input_required"; inputRequests: Record<string, unknown> })
+  | (Task & { status: "completed"; result: TurnResult })
+  | (Task & { status: "failed"; error: { code: number; message: string; data?: unknown } })
+  | (Task & { status: "cancelled" })
+
+interface TurnResult {
+  sessionId: string
+  text: string          // final assistant text of the turn, bounded
+  truncated: boolean    // true when text was cut at the bound
+}
+```
+
+`TurnResult` is the same for `agent_start` and `agent_prompt`. It is not the
+`Session` JSON; the session is read through the session tools. `text` is
+bounded by a host setting, and the host MUST redact values it holds as secrets
+([AIP-19](/docs/aip-19)) before storing it. A transcript is never stored.
+
+`inputRequests` is a map whose keys are generated by the host and stay stable
+over the life of the task. Each value is the request object of the mechanism
+that raised it, in the shape that mechanism defines (an MCP elicitation request
+for a permission or question, or the same for a suspended run). Its entries
+are removed once answered.
+
+### Turn-to-task state mapping
+
+**Recording.** The host MUST write the terminal state and the result to the
+ledger **at the moment the turn ends** (and at every other terminal transition),
+not when a client reads. The rows below are evaluated in order, first match
+wins, only for an entry with no recorded terminal state; an entry already
+terminal is never re-derived. A crash between the end of a turn and the ledger
+write is an accepted window: such a turn has no recorded outcome and is
+reported `failed` (`host-restart`) even though the agent finished; the host
+SHOULD keep that window as small as it can (write before acknowledging the
+turn end to any observer). `host-restart` is therefore declared only for an
+entry that has no recorded terminal state: a turn that ended and was recorded
+before the restart stays `completed` (or its recorded state). A session resumed
+after a restart does not revive a `failed` task; a prompt sent to it creates a
+new ticket and a new task.
+
+| Condition on the ticket | Task status | Detail |
+|---|---|---|
+| outcome `interrupted` or `dropped` | `cancelled` | the session is untouched: it stays `running` |
+| outcome `session-killed` (turn queued or in flight) | `cancelled` | |
+| outcome `session-exited`, turn in flight | `failed` | `error.code: -32603`, `data: { reason: "session-exited", sessionId, exitCode? }` |
+| outcome `session-exited`, turn never started | `cancelled` | no work was done |
+| outcome `session-error`, turn in flight | `failed` | `data.reason: "session-error"` |
+| outcome `session-error`, turn never started | `cancelled` | no work was done |
+| outcome `session-forgotten`, turn in flight | `failed` | `data.reason: "session-forgotten"` |
+| outcome `session-forgotten`, turn never started | `cancelled` | no work was done |
+| outcome `host-restart`, task non-terminal | `failed` | `data.reason: "host-restart"` |
+| outcome `finished` | `completed` | bounded `result` written to the ledger |
+| in flight and pending input | `input_required` | `inputRequests` carries the pending requests |
+| in flight | `working` | `statusMessage` MAY name the phase |
+| queued, not started | `working` | `statusMessage: "queued"`, `pollIntervalMs` set |
+
+A turn in which a tool reported `isError: true` but that ended `finished` is
+`completed`: the tool outcome stays in the text of the result, not in `error`.
+`failed` is for abnormal ends only. On a host restart, only tasks that were not
+terminal become `failed`; a task that was already `completed`, `cancelled` or
+`failed` keeps its state and result.
+
+### Methods
+
+- **`tasks/get`** `{ taskId }` returns `resultType: "complete"` plus the
+  `DetailedTask`. It MUST have no observable effect on the task or the session:
+  it never carries `inputResponses`, and it is idempotent. (The host MAY
+  refresh its own derived state or sweep expired entries; neither is visible to
+  the caller.) Once a turn ends, the bounded result is stored, so a late
+  `tasks/get` is stable even if the session has started another turn.
+  `tasks/get` is not a cacheable operation: no `cacheScope`, and `ttlMs` is the
+  retention, never a cache hint.
+- **`tasks/update`** `{ taskId, inputResponses }` answers pending input and
+  returns an empty acknowledgement (`{ resultType: "complete" }`). Keys that
+  are unknown or already answered are ignored. On a task that is not
+  `input_required` (including a terminal one) it is an acknowledged no-op.
+  The answer is applied through the mechanism that raised the request, so that
+  mechanism's rules still hold, including [AIP-7](/docs/aip-7) (an answer on an
+  input channel is not a governance decision).
+- **`tasks/cancel`** `{ taskId }` returns an empty acknowledgement and is
+  idempotent and **cooperative**. It acts only on the task's own ticket:
+  - ticket queued: remove it from the queue; the task becomes `cancelled`
+    (outcome `dropped`);
+  - ticket is the turn in flight: interrupt it as [AIP-46](/docs/aip-46)
+    §Interrupt describes; the turn ends, the task becomes `cancelled`, the
+    session stays alive;
+  - the harness cannot cancel a turn ([AIP-46](/docs/aip-46) §Interrupt, HTTP
+    `409`): this applies only to a ticket that is the turn in flight; the call returns a
+    JSON-RPC error (`tasks/cancel` is a method, not a tool call) and the task
+    stays `working`;
+  - ticket already ended, or the task terminal: acknowledged, no effect. In
+    particular `tasks/cancel` MUST NOT interrupt a later turn of the same
+    session.
+  A cancel that races the move of its ticket from queued to in flight is
+  atomic with respect to that move: the host serializes both on the session, so
+  the ticket is either dropped (it never starts) or interrupted (it started),
+  never both and never neither.
+  The transition to `cancelled` is not guaranteed: if the turn finishes first,
+  `completed` is a valid outcome. `tasks/cancel` MUST NOT kill the session, and
+  `notifications/cancelled` MUST NOT be used to cancel a task.
+- **Interplay with the queue.** A queued prompt removed through the queue
+  controls ends its task as `cancelled`. A prompt sent with `interrupt: true`
+  ends the previous in-flight turn (its task becomes `cancelled`) and creates a
+  separate task for the new ticket.
+- `tasks/list` and `tasks/result` do not exist on this era; `tasks/result`
+  answers `-32601`. Discovery of sessions stays with `agent_sessions_list`.
+
+### Transport and errors
+
+`tasks/get`, `tasks/update` and `tasks/cancel` MUST carry
+`Mcp-Method: <method>` and `Mcp-Name: <taskId>`; an inconsistent header is
+`-32020` (HTTP `400`). Error mapping follows [AIP-77](/docs/aip-77): `-32021` is
+HTTP `400`; an unknown, expired, or not visible `taskId` is `-32602`, HTTP
+`400`. Because `Mcp-Name` carries the handle in a header, a host SHOULD NOT
+write the full `taskId` to shared logs or access logs (a prefix or a hash is
+enough).
+
+### Retention
+
+Every task has an explicit `ttlMs`: a host default and a host maximum apply.
+`ttlMs` counts from the moment the task reaches a terminal state; before that
+it reports the retention that will apply. The host MUST NOT purge a task that
+is not terminal. A terminal entry is purged only after `ttlMs` has elapsed since
+its `endedAt`, and its result MUST already be in the ledger. The host sweeps at
+start-up and during reads. An expired entry answers `-32602`. A session
+forgotten or collected while its ticket was non-terminal does not leave a task
+without result: it ends the task as `session-forgotten` (see the mapping).
+
+## Rationale
+
+- **Turn, not session.** A session is long-lived and multi-turn; the Tasks
+  extension models one request. Projecting the turn keeps both honest.
+- **Prompt ticket, not position.** Queue positions change when prompts are
+  reordered or dropped; a stable ticket keeps each task bound to its own
+  prompt.
+- **Server-decided creation.** The extension lets the server choose; making it
+  a client option would create two result shapes per call and a new place for
+  clients to disagree. Declaring support is enough.
+- **Cancel the turn, not the session.** The existing interrupt ends a turn and
+  keeps context. Reusing it, only for the task's own ticket, gives
+  `tasks/cancel` a precise, non-destructive meaning.
+- **Random handle, owner-bound, plus ledger.** Session ids are short and
+  guessable; the handle must not derive from them, must not work for another
+  principal, and must resolve after a restart.
+- **Distinct from AIP-20.** A work board item is a unit of planned work with
+  owners, dependencies and verification. An MCP task is a transient protocol
+  handle. They are unrelated and neither reads nor writes the other.
+
+## Reference Implementation
+
+`@agentproto/runtime` (`packages/runtime/src/mcp-modern`) implements the
+projection, the ledger, the state mapping and the three methods behind the host
+configuration flag `mcp.tasks`. Some points above (prompt tickets, the closed
+turn-outcome set, the per-principal cap, `_meta` on `CreateTaskResult`) are
+specified here ahead of the implementation and are tracked as changes to it.
+
+## Security considerations
+
+- **Unguessable handles.** 128-bit random ids; never derived from a session id.
+- **No privilege through a task.** A task is bound to the principal resolved
+  server-side when it was created. Reading, updating or cancelling it needs
+  that principal, or one allowed to act on the session. A known `taskId` grants
+  nothing.
+- **Bounded creation.** The capability check and the per-principal cap of
+  non-terminal tasks run before any turn or ledger entry exists.
+- **Secrets.** Stored results are redacted and bounded; the handle is kept out
+  of shared logs.
+- **No new decision path.** `tasks/update` reuses the existing answer paths and
+  cannot decide a governance approval ([AIP-7](/docs/aip-7)).
+- **Bounded storage.** Ledger results are bounded text, not transcripts;
+  terminal entries expire after `ttlMs`; files are `0600` and written
+  atomically.
+- **Cooperative cancel only.** `tasks/cancel` cannot terminate a session.
+
+## Conformance
+
+A host conforms to `turn-task/v1` when:
+
+1. A client that declared the Tasks extension receives a `CreateTaskResult` from
+   each covered tool (`agent_start` with a prompt, `agent_prompt`, per the
+   configured mode); a client that did not
+   receives the ordinary result or `-32021`.
+2. `CreateTaskResult` carries the `sessionId`; the task reaches `completed` at
+   the end of the turn while the session stays `running`; a second
+   `agent_prompt` creates a second task.
+3. `tasks/get` implements the state mapping above and has no observable effect.
+4. `tasks/cancel` on the in-flight turn yields `cancelled` (or `completed` on a
+   race) and leaves the session alive; on a queued ticket it drops it; on an
+   ended task or ticket it is an idempotent no-op that never interrupts a later
+   turn.
+5. A task whose turn ended is recorded as terminal at that moment, so a restart
+   afterwards leaves it unchanged. A host restart between creation and a later
+   `tasks/get` turns a task with no recorded terminal state into `failed`
+   with `data.reason: "host-restart"`, leaves terminal tasks
+   unchanged, and every task still resolves.
+6. An inconsistent `Mcp-Name` is `-32020`; an unknown, expired or not visible
+   `taskId` is `-32602`; `tasks/result` is `-32601`; a task is not visible to a
+   different principal.
+7. A session forgotten, deleted or collected while a ticket is queued or in
+   flight ends its task (`cancelled` or `failed` per the table); no task stays
+   `working` forever or keeps counting against the per-principal cap.
+8. A refused creation (`-32021`, per-principal cap) leaves no ticket, ledger
+   entry or turn behind.
+9. The [AIP-20](/docs/aip-20) work board behaves identically with the feature
+   on or off.
+
+## See also
+
+- [AIP-1](/docs/aip-1): process and RFC 2119 terminology
+- [AIP-7](/docs/aip-7): GOVERNANCE, approvals are never decided by an answer to a prompt
+- [AIP-20](/docs/aip-20): WORK, the work board this AIP does not replace
+- [AIP-46](/docs/aip-46): SESSION, the multi-turn lifecycle this AIP leaves unchanged
+- [AIP-58](/docs/aip-58): RUN, whose pending runs can also surface as input requests
+- [AIP-77](/docs/aip-77): MCP-GATEWAY, the endpoint, era and extension negotiation
