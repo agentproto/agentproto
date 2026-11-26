@@ -429,6 +429,29 @@ usage:
     outside the journal and no balance moves; an unpriced event is recorded as
     such and raised, never written off as free.
 
+### Writing an overlay (informative)
+
+A host's own billing rules (its packs and bonuses, expiries, caps, overdraft
+policy, fees at cost, per-product prices) are not part of this AIP and not part
+of a reference implementation. They live in one **overlay**: a package of the
+host that is shared by all its products and sits on the primitives of this AIP
+(`price`, `hold`, `settle`, `debit`, `shadow`, the journal). An overlay:
+
+- keeps every value of a rule in configuration (the `usage` block, the
+  rounding, the draw order, the shortfall behaviour), never in the primitives;
+- implements a rule by calling a primitive and adding its own step before or
+  after it (a cap reads the journal before a `debit`; a bonus mints its own
+  lot; a fee at cost is a category whose cost comes from a `resolver`);
+- keys every write deterministically, so a replay writes once (rule 33);
+- expresses prepaid or postpaid as the `floor` of the lots it mints (rule 34),
+  never as a mode of a spend;
+- is tested against the conformance suite's in-memory stores, which the
+  reference implementation ships with a worked example.
+
+An overlay that needs a value the primitives do not carry puts it in
+`metadata.<vendor>` or an `x-<vendor>:<name>` field (see §Weight rule), not in
+the primitive.
+
 ## Conformance
 
 `@agentproto/billing/testing` (conformance suites), one suite per group, run
