@@ -56,7 +56,8 @@ and keeps the cascade a first-class engine instead of code inside an app.
 1. **Two-product rule.** A notion enters this AIP only if two real
    products consume it, and each notion carries a "Consumed by" line that
    says who and where. A notion with one consumer is `x-` (extension) or
-   stays in the product. Where a notion has a single consumer today and is
+   stays in the product, or is *reserved* when this AIP declares it for a
+   second consumer it expects (see Processors). Where a notion has a single consumer today and is
    kept for a stated reason, its line says so.
 2. **Three contracts, not one.** STT, TTS and realtime differ in shape
    (audio to text, text to audio, audio to audio with the vendor running
@@ -361,7 +362,7 @@ interface VoiceHooks {            // host side, all optional
   onToolCall?(name: string, args: unknown): Promise<unknown>
   onTranscript?(turn: { role: "user" | "assistant"; text: string; finalizedAt: number }): Promise<void>
   onMicIdle?(info: { idleMs: number }): void | Promise<void>
-  onProcessorEvent?(event: ProcessorEvent): void
+  onProcessorEvent?(event: ProcessorEvent): void | Promise<void>
 }
 
 interface VoiceToolSchema { name: string; description?: string; parameters: Record<string, unknown> }
@@ -472,10 +473,14 @@ function startCascade(opts: VoiceStartOptions & CascadeOptions): Promise<VoiceSe
 function startRealtime(provider: RealtimeProvider, opts: VoiceStartOptions): Promise<VoiceSession>
 ```
 
-A `BrainEvent` carries no text. `activity` tells the engine the brain is
-still working (for example during a long tool call), so the brain guards do
-not abandon the turn; `tool-start` also names the tool. Events reach the
-`textOut` processors (see Processors) as a chunk with empty text.
+A `BrainEvent` carries no text. A cascade session, with or without
+processors, resets the brain guards when the brain yields one: `activity`
+tells the engine the brain is still working (for example during a long tool
+call), so the guards do not abandon the turn. `tool-start` also names the
+tool (`name` is meaningful on `tool-start` only); it is reserved, and a
+session that does not handle it treats it as `activity`. A `BrainEvent` that
+reaches the `textOut` processors (see Processors) is a chunk with empty
+`text` and `event` set; a transformer that drops it does not undo the reset.
 
 `playback` is the read side of the host's outbound audio queue, the part
 only the client knows. `queuedMs()` is the audio, in milliseconds, that the
@@ -575,8 +580,7 @@ TTS path and per-participant realtime engines).
 A session MAY be started with processors: named units the engine runs on
 the data that crosses it, at four hook points. A product adds its own
 without changing the package. This section fixes the two kinds of processor,
-their names and order, the hook points and their observable effects; the
-rest of the reference package's processor support is not normative.
+their names and order, the hook points and their observable effects.
 
 Processors apply to the `cascade` engine. A `realtime` session MAY ignore
 `processors`; it then never calls `hooks.onProcessorEvent`.
@@ -593,8 +597,11 @@ interface CallContext<H extends VoiceHook = VoiceHook> {
   readonly name: string            // the processor's own name
   readonly callId: string
   readonly utteranceId?: number
-  readonly signal: AbortSignal
+  readonly signal: AbortSignal     // belongs to one call of run or observe
   readonly language?: string
+  readonly state?: Map<string, unknown>                      // reserved
+  readonly annotations?: Readonly<Record<string, unknown>>   // reserved
+  inject?(item: HookItems[H]): void                          // reserved
 }
 
 interface Transformer<H extends VoiceHook = VoiceHook> {
@@ -617,7 +624,7 @@ interface Observer<H extends VoiceHook = VoiceHook> {
 }
 
 type VoiceProcessor<H extends VoiceHook = VoiceHook> = Transformer<H> | Observer<H>
-type VoiceProcessors = readonly VoiceProcessor[]    // array order is the run order
+type VoiceProcessors = readonly VoiceProcessor[]    // array order is the run order of the transformers of each hook
 
 interface ProcessorEvent {
   type: "error" | "budget-exceeded" | "abandoned" | "dropped" | "bypassed" | "published"
@@ -630,13 +637,32 @@ interface ProcessorEvent {
 }
 ```
 
+`error` events carry `error`; `budget-exceeded` carries `elapsedMs` and
+`budgetMs`; `abandoned` carries `elapsedMs`; `dropped` and `published` carry
+`data` (`{ count }` for `dropped`); `bypassed` carries `data: { reason }` and
+tells that the implementation stopped running a processor for the rest of
+the session (its hook is reserved and ignored, or it kept failing).
+
 **Two kinds.** A *transformer* is on the path of the sound or the text: it
 receives one item, streamed in chunks, and returns the item (modified),
-several items, or `null`. An *observer* is off the path: it receives the item
-as it leaves the transformers of its hook, MUST NOT modify it, never delays
-anything and only publishes metadata through `ctx.publish`, which reaches
-`hooks.onProcessorEvent` as a `published` event. Both kinds receive
-`ctx.signal`.
+several items, or `null`. An *observer* is off the path: it receives each item
+after every transformer of its hook, wherever it sits in the array, and only
+publishes metadata through `ctx.publish`, which reaches
+`hooks.onProcessorEvent` as a `published` event. An observer MUST NOT modify
+the item; the engine hands it a copy (or a frozen object), so a change it
+makes has no effect on the path. Both kinds receive `ctx.signal`.
+
+**Status of the hook points.** Each hook point has a status in the table
+below, fixed by this document and changed only by an amendment of it. An
+*active* hook point MUST be run by a session that accepts `processors`. A
+*reserved* hook point is declared for a use that has one consumer today; a
+session MAY ignore the processors of a reserved hook. The context fields
+`ctx.state` (state private to one processor slot and one session),
+`ctx.annotations` (metadata of earlier processors on the item) and
+`ctx.inject(item)` (one more item, just downstream of the processor, same
+hook) are reserved under these exact names: an implementation MAY omit them,
+and one that provides them gives them this name and this meaning; a
+processor that needs one checks that it is present.
 
 | Hook | Item | Runs | Status |
 | --- | --- | --- | --- |
@@ -645,34 +671,34 @@ anything and only publishes metadata through `ctx.publish`, which reaches
 | `audioIn` | `AudioFrame` | after the frame is accepted, before local VAD and STT | reserved |
 | `audioOut` | `AudioFrame` | after TTS, before the outbound queue and `emit.audio` | reserved |
 
-A hook point is *active* when at least two products use it, *reserved* when
-it is declared for a use that only one product has today. An implementation
-MAY ignore processors on a reserved hook; the reference package runs them. A
-reserved hook becomes active when a second product uses it. The same applies
-to the context fields of an implementation beyond those listed above (per
-call state, metadata handed from one processor to the next, injecting an item
-into the chain): they are reserved, an implementation MAY omit them, and a
-processor that needs one checks that it is present.
+`TextChunk.end` is true on the last chunk of the brain's reply for a turn;
+the engine sets it, and a transformer that holds text MUST release it with the
+chunk that carries `end`. The engine does not complete a turn from the `end` a
+transformer returns: completion follows rule 12.
 
 Rules:
 
-1. The processors of the array run in array order, per hook: the output of
-   one transformer is the input of the next. An array fans out: each element
-   goes through the rest of the chain, in order. `null` (or an empty array)
-   drops the item. Items of one hook leave it in the order in which they
-   entered, even when a transformer is asynchronous and its work for a later
-   item finishes first.
+1. The transformers of a hook run in array order: the output of one is the
+   input of the next. An array fans out: each element goes through the rest
+   of the chain, in order. `null` (or an empty array) drops the item. Items of
+   one hook leave it in the order in which they entered, even when a
+   transformer is asynchronous and its work for a later item finishes first.
+   An observer receives an item after every transformer of its hook; the array
+   order applies among transformers only.
 2. **Names.** Every processor has a non-empty `name`, unique in the array
-   whatever its hook or kind. The engine checks it when the session is
-   started and rejects the start with an error that names the offender; no
-   session opens.
+   whatever its hook or kind. The check covers every processor of the array,
+   including those of a hook the implementation ignores. A violation makes
+   `startCascade` reject with an `Error` whose `message` contains the name of
+   the offender (the names of both processors and the facet, for a conflict);
+   no session opens and no vendor connection is made.
 3. **Conflicts.** A transformer declares in `modifies` what it changes
-   (facets: free strings such as `"text"`). When two transformers of the same
-   hook declare the same facet, the later one MUST list the earlier one in
-   `after`, and the earlier one MUST come first in the array; otherwise the
-   engine rejects the start, naming both processors and the facet. An `after`
-   naming a processor that is absent, of another hook or later in the array is
-   rejected too.
+   (facets: exact, case-sensitive strings such as `"text"`); `modifies` MUST
+   contain at least one facet. When transformers of the same hook declare the
+   same facet, each later one MUST list in `after` every earlier one it shares
+   a facet with, and each earlier one MUST come first in the array. An `after`
+   naming an observer, an absent processor, a processor of another hook or a
+   later one is rejected, as is an empty `modifies`. A violation is rejected
+   as in rule 2.
 4. A transformer that fails (throws, rejects) or returns an item of the wrong
    shape MUST NOT end the session (rule 4 of VoiceSession): its input
    continues unchanged through the rest of the chain and
@@ -680,27 +706,35 @@ Rules:
    shape when it does not satisfy `HookItems[H]` (for audio: a `pcm16` of even
    byte length, a finite `sampleRate`, a numeric `sequenceNumber`); an array
    containing one item of the wrong shape is wholly invalid. A failure of
-   `onProcessorEvent` itself is a hook failure (rule 4 of VoiceSession).
-5. **Budget.** Each transformer has a time budget per item: `budgetMs`, or the
-   default of its hook in the implementation's defaults file; `0` disables
-   it. The time is the wall clock, read from a monotonic clock, between the
-   call of `run` and the settlement of what it returned (a synchronous return
-   counts the duration of the call). When the budget is exceeded the engine
-   stops waiting: the input continues unchanged, the late result is ignored
-   and `onProcessorEvent` receives a `budget-exceeded` event with the measured
-   `elapsedMs` and the `budgetMs`.
+   `onProcessorEvent`, thrown or rejected, is a hook failure (rule 4 of
+   VoiceSession); the engine does not wait for it.
+5. **Budget.** Each transformer has a time budget per item: its `budgetMs`, or,
+   when it has none, the default of its hook in the implementation, which MAY
+   be none; `0` disables it. A `budgetMs` that is negative or not finite is
+   rejected as in rule 2. `elapsedMs` is a duration measured so that a change
+   of the system clock cannot alter it, from the call of `run` to the
+   settlement of what it returned (a synchronous return counts the duration of
+   the call). When the budget is exceeded the engine aborts the signal of that
+   call, stops waiting, continues with the input unchanged, ignores the late
+   result and sends a `budget-exceeded` event with `elapsedMs` (at least
+   `budgetMs`) and `budgetMs`.
 6. **Observers never block.** The engine does not wait for an observer, and
-   an observer's slowness or failure changes nothing on the path. Items an
-   observer has not yet taken may be dropped when it falls behind (a `dropped`
-   event); an observer failure is an `error` event.
-7. **Cancellation.** `ctx.signal` of every processor, of either kind, is
-   aborted when the assistant turn of the item is interrupted (for
-   `transcript`, `textOut` and `audioOut`) and when the session closes (for
-   all hooks). A processor MUST stop its work within a bounded delay after the
-   abort (the reference default is 100 ms); a processor still running after it
+   an observer's slowness or failure changes nothing on the path. Each observer
+   has a bounded queue (the reference default is 64 items); when it is full the
+   oldest item is dropped, and the engine sends one `dropped` event per burst
+   with `data: { count }`, the number of items dropped since the last event. An
+   observer failure is an `error` event. A `publish` call after the observer
+   settled, or after `close()`, is ignored.
+7. **Cancellation.** `ctx.signal` is aborted when the assistant turn the item
+   belongs to is interrupted (for `textOut` and `audioOut`; an item belongs to
+   the turn named by `ctx.utteranceId`) and when the session closes (for all
+   hooks); the signal of `transcript` and `audioIn` processors is aborted on
+   close only. After the abort, a processor SHOULD stop its work within the
+   cancellation delay (an implementation setting; the reference default is
+   100 ms), counted from the abort. A processor still running when it elapses
    is abandoned: its result is ignored and an `abandoned` event is sent. The
-   engine does not wait longer than that delay for any processor, neither to
-   emit `interrupt` nor to close.
+   engine waits no longer than the delay for any processor, so `interrupt` is
+   emitted, and `close()` completes, at most one delay after the cause.
 8. After `interrupt` is emitted for a turn, no `audio` event of that turn
    follows (rule 3 of VoiceSession), whatever the processors return or hold;
    the purge of the barge-in order (abort and cancel, purge, emit) covers what
@@ -716,7 +750,7 @@ Rules:
     is spoken, not what is shown. The characters counted in the usage record
     are those sent to TTS, after the `textOut` chain. `heardText` and
     `unheardText` of `interrupt` come from the text sent to TTS: when a
-    `textOut` transformer changed the text they are not substrings of
+    `textOut` transformer changed the text they need not be substrings of
     `assistantTranscript`.
 11. An `audioIn` or `audioOut` transformer MUST return frames at the sample
     rate of its input and with a `pcm16` of even byte length; otherwise the
@@ -728,13 +762,11 @@ Rules:
     events: they are emitted once per turn, as if every processor were the
     identity function. A turn whose `textOut` chain drops all text still emits
     `responseComplete`.
-13. The brain guards are reset by a `BrainEvent` as the brain yields it,
-    before the `textOut` chain; a transformer that drops a chunk carrying an
-    event does not undo that reset. `name` is meaningful on `tool-start` only
-    (`tool-start` is reserved; `activity` is active).
 
-**Consumed by:** both reference host classes, which assemble their
-per-product rules as named processors in one shared package (see below).
+**Consumed by:** both reference host classes, for the `textOut` hook (the
+other hook points have one consumer today, see Status). Rule 1 of the design
+principles is met by the status above, not by a count of products that
+changes.
 
 **Writing an overlay (informative).** A product keeps its own rules (its
 persona phrases, its pronunciation list, its clips) in one package of
@@ -742,13 +774,14 @@ processors built on this form, and builds the array from the reference
 processors and its own. The same package serves every application of that
 product, so no rule is copied between them; the contract and the reference
 package never learn the product's names. A processor is a plain object and is
-tested by calling `run` with a fake context. The package SHOULD run the
-contract test suite of the reference package (names, order, conflicts,
-cancellation, budget, fail-open, non-blocking observers) in its own tests each
-time it moves to a new version of the reference package.
+tested by calling `run` with a fake context. A product package is expected to
+run the contract test suite of the reference package, once it exists, against
+its processors each time it moves to a new version of the reference package.
 
 ```ts
-// textOut: replace words the speech engine reads badly, from a list the product supplies
+// textOut: replace words the speech engine reads badly, from a list the product supplies.
+// A word split across two chunks is not replaced; a product that needs it buffers
+// inside the processor and releases the buffer on the chunk that carries `end`.
 function glossary(list: Record<string, string>): Transformer<"textOut"> {
   return {
     kind: "transformer",
@@ -767,12 +800,14 @@ function glossary(list: Record<string, string>): Transformer<"textOut"> {
 }
 ```
 
-**Reference processors (informative).** The reference package MAY ship
-processors for spoken-form normalization of numbers, dates and amounts
-(`textOut`) and sentence splitting (`textOut`). Wait phrases, backchannel
-acknowledgements and silence frames that keep a transport alive are
-processors a product writes in its overlay; they change what the client
-hears, none is required, and a conformant implementation MAY ship none.
+**Reference processors (informative).** The reference package is to ship a
+processor for spoken-form normalization of numbers, dates and amounts
+(`textOut`), and MAY ship one for sentence splitting. Wait phrases,
+backchannel acknowledgements and silence frames that keep a transport alive
+need hook points and context fields that are reserved (`audioOut`,
+`ctx.inject`); a product writes them in its overlay only once an
+implementation provides them. They change what the client hears, none is
+required, and a conformant implementation MAY ship none.
 
 ## Variables
 
@@ -939,9 +974,8 @@ multi-party floor control and group calls; voice catalogs and pickers;
 per-product tuning of the cascade's silence and interruption values. Each
 has one consumer today or belongs to a transport or a product policy; they
 use `x-` fields or stay in code. Local filler phrases, clips, wait cues and
-backchannel handling are not part of the contract either; a product, or the
-reference package, provides them as processors (see Processors). Each has one consumer today or belongs to a transport
-or a product policy. They use `x-` fields or stay in code.
+backchannel handling are not part of the contract either; a product provides
+them as processors (see Processors).
 
 ## Rationale
 
@@ -990,6 +1024,9 @@ choose a default and say so; the contracts are neutral.
 - A realtime session keeps a vendor connection open and may bill by the
   second: a host SHOULD close it on silence or inactivity and MUST close it
   on disconnect.
+- `ProcessorEvent.data` and `ProcessorEvent.error` can carry conversation
+  content. A host that records them treats them as personal data, and an
+  observer SHOULD publish numbers and metadata only.
 - No account identifier (a hosted agent id, a project id) appears in this
   AIP or in a package default; they are product configuration.
 
@@ -1008,7 +1045,8 @@ A provider implementation is conformant when:
 A session implementation is conformant when:
 
 1. It satisfies the `VoiceSession` rules 1 to 8 and 10, and rule 9 when it
-   is a `cascade` session.
+   is a `cascade` session, and a `cascade` session handles `BrainEvent` as
+   described under Engines.
 2. The `cascade` engine runs barge-in in the order given: abort and
    cancel, purge, emit.
 3. It resolves providers by the priority rule and fails at startup on an
@@ -1016,8 +1054,11 @@ A session implementation is conformant when:
 4. `getUsage()` is cumulative, monotonic and final after `close()`.
 5. It tolerates unknown `x-` fields.
 6. A `cascade` session started with `processors` satisfies the Processors
-   rules 1 to 13 for the `textOut` hook and for observers; it MAY ignore
-   transformers of a reserved hook.
+   rules 1 to 7, 10 and 12 for the processors of an active hook (`textOut`).
+   It MAY ignore the processors, transformers and observers alike, of a
+   reserved hook (`transcript`, `audioIn`, `audioOut`); if it runs them, it
+   satisfies rules 8, 9 and 11 for them. The checks of rules 2, 3 and 5 apply
+   to the whole array, including the processors it ignores.
 
 A conformance suite runs these against a fake transport and recorded
 vendor exchanges; it lives with the reference package.
