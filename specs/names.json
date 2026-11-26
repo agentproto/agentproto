@@ -627,6 +627,12 @@
       "name": "EVENT",
       "specId": "event/v1",
       "layer": "host"
+    },
+    {
+      "aip": 77,
+      "name": "MCP-GATEWAY",
+      "specId": "mcp-gateway/v1",
+      "layer": "host"
     }
   ],
   "pending": [
