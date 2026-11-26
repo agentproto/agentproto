@@ -231,14 +231,6 @@ The decisions behind the format, in the order the schema presents them:
   agentskills.io skill anywhere; runtimes that do not know AIP-3 preserve the
   object verbatim.
 
-### Transport (informative)
-
-This AIP defines the `SKILL.md` format only, and it is unchanged. Delivering a
-skill to an agent at spawn remains the default mode. A host MAY additionally
-expose skills to clients over its MCP gateway; that transport is specified by
-the gateway AIP ([AIP-77](/docs/aip-77)), not here, and does not alter the
-manifest.
-
 ## Reference Implementation
 
 `packages/skill`:
