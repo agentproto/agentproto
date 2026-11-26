@@ -51,7 +51,7 @@ from it; until then a field may change.
 
 **Weight rule.** A field is in this AIP only if at least two real products need
 it; everything else is `metadata.<vendor>` or an `x-<vendor>:<name>` strategy.
-The normative rules fit in 35 MUST (§Rules, §Rates and anchor currency and §Usage and spend).
+The normative rules fit in 40 MUST (§Rules, §Rates and anchor currency and §Usage and spend).
 
 ## Motivation
 
@@ -384,50 +384,70 @@ usage:
   categories:
     - id: llm
       match: { kind: llm }
-      cost: { source: measured }            # measured | fixed | catalog | resolver | flatCredits
+      cost: { source: measured }            # measured | fixed | catalog
       marginFloor: 1.1
     - id: messaging-fee
       match: { kind: messaging-fee }
-      cost: { source: resolver, resolver: fee-grid }
+      cost: { source: measured }
       margin: at-cost                        # margin 1.0, nothing overrides it
       floorMinor: 0
 ```
 
-29. A category states the source of the provider cost (`measured`, `fixed`,
-    `catalog`, `resolver`, or a `flatCredits` price with a reference cost), an
-    optional `margin` (a number, or `at-cost`), an optional `marginFloor`, an
-    optional `floorMinor` and a `mode` (`hold`, `direct` or `shadow`). Of the
-    categories that match an event, the one with the most `match` fields wins.
-30. The price of an event is `max(floorMinor, round(cost × ratio(currency) ×
+**Money is not pluggable like the rest.** The primitives (price, hold, settle,
+debit, shadow) keep invariants that no host rule can lift (rules 36 to 39). A
+host's policy is a set of **rules**: pure functions that look at a read-only
+snapshot and decide an amount or a refusal. The primitive executes the
+decision. A rule never receives write access to the journal.
+
+29. A category states the source of the provider cost (`measured`, `fixed` or
+    `catalog`), an optional `margin` (a number, or `at-cost`), an optional
+    `marginFloor` and an optional `floorMinor`. Of the categories that match an
+    event, the one with the most `match` fields wins.
+30. The price of an event is `max(floorMinor, ceil(cost × ratio(currency) ×
     margin × 10^decimals))` in minor units of `primaryAsset`, where
     `ratio(currency)` is the entry ratio of rule 26 for the currency of the
     cost. A category declaring its own rate is rejected. The values of
-    `margin`, `floorMinor`, the rounding function and the `mode` are the
-    host's configuration; an absent `margin` is 1, an absent `floorMinor` is 0,
-    and the reference implementation rounds up unless the host injects another
-    function.
+    `margin` and `floorMinor` are the host's configuration; an absent `margin`
+    is 1 and an absent `floorMinor` is 0.
 31. `at-cost` is the keyword for margin 1.0. `usage.defaults` does not override
     it and an event carries no margin; a category cannot combine `at-cost` with
     a `marginFloor` above 1. Which categories use it is the host's choice.
 32. An event that no category prices, or whose cost is absent, unknown in
-    currency or negative in units, is refused. It is never priced at zero.
-33. Every spend carries a caller key. A replay of the same key writes nothing
-    twice. A `hold` is `reserve`, then `capture` of at most the reserve and
-    `release` of the rest; a `direct` spend is `burn`; both are AIP-49 verbs
-    and the journal is the only record of money.
+    currency, negative or not finite, or whose units are negative, is refused.
+    It is never priced at zero.
+33. Every spend carries a caller key. `hold` is `reserve`, then `capture` of at
+    most the reserve and `release` of the rest; a direct spend is `burn`. Both
+    are AIP-49 verbs and the journal is the only record of money.
 34. When an account cannot cover a direct spend, the caller names what
     happens; there is no default: `refuse` writes nothing, `absorb` charges
-    what the account has and reports the rest as a shortfall. A spend never
-    draws a lot below its `floor` (AIP-49), so whether an account may go
-    negative is the floor of the lots the host mints (0 or a negative number),
-    not a mode of the spend. The order in which lots are drawn is the host's,
-    with AIP-49's coalescing order as the reference default.
+    what the account has and reports the rest as a shortfall. Whether an
+    account may go negative is the `floor` of the lots the host mints (0 or a
+    negative number), not a mode of the spend.
 35. A category that declares a `marginFloor` MUST NOT sell below it: the
     conformance suite fails when the real margin of a sample event
     (price ÷ cost) is lower. The value of the floor is the host's; the
-    specification sets none. In `shadow` mode an event is priced and recorded
-    outside the journal and no balance moves; an unpriced event is recorded as
-    such and raised, never written off as free.
+    specification sets none. In `shadow` an event is priced and recorded outside
+    the journal and no balance moves; an unpriced event is recorded as such and
+    raised, never written off as free.
+
+Invariants (the core keeps them, no rule can lift them)
+
+36. **Idempotence.** A key charges once. A replay of the same key writes nothing
+    and returns the first charge; the amount of the replay is ignored.
+37. **No raising.** A rule may refuse or lower the amount requested; it can
+    never raise it. A decision that is not an integer between 1 and the amount
+    requested refuses the spend.
+38. **Never below the floor.** A spend never draws a lot below its `floor`
+    (AIP-49), and a settlement never exceeds what was reserved; a prepaid lot
+    therefore never goes negative.
+39. **Fail closed.** A rule that throws, or answers outside its type, refuses
+    the spend and writes nothing.
+
+Named rules
+
+40. A host's rules are an ordered list of `{ name, decide }`. Names are unique
+    in the list. They run in order, the first rule that decides wins, and the
+    result and its trace name the rule that decided and the ones that passed.
 
 ### Writing an overlay (informative)
 
@@ -437,20 +457,21 @@ of a reference implementation. They live in one **overlay**: a package of the
 host that is shared by all its products and sits on the primitives of this AIP
 (`price`, `hold`, `settle`, `debit`, `shadow`, the journal). An overlay:
 
-- keeps every value of a rule in configuration (the `usage` block, the
-  rounding, the draw order, the shortfall behaviour), never in the primitives;
-- implements a rule by calling a primitive and adding its own step before or
-  after it (a cap reads the journal before a `debit`; a bonus mints its own
-  lot; a fee at cost is a category whose cost comes from a `resolver`);
-- keys every write deterministically, so a replay writes once (rule 33);
+- keeps every value of a rule in configuration, never in the primitives;
+- writes its policy as named, ordered, pure rules (rule 40) that decide an
+  amount or a refusal, and lets the primitive execute them (rules 36 to 39);
+- leaves what is data as data: a bonus on a pack and an expiry are declared in
+  the manifest (rule 12 and the conversions), not coded as hooks;
+- keys every write deterministically (rule 36);
 - expresses prepaid or postpaid as the `floor` of the lots it mints (rule 34),
   never as a mode of a spend;
-- is tested against the conformance suite's in-memory stores, which the
-  reference implementation ships with a worked example.
+- runs the implementation's contract tests (the invariants above) in its own
+  CI, and again at every bump of the implementation's version.
 
 An overlay that needs a value the primitives do not carry puts it in
 `metadata.<vendor>` or an `x-<vendor>:<name>` field (see §Weight rule), not in
-the primitive.
+the primitive. A hook point exists in an implementation only when at least two
+real products need it.
 
 ## Conformance
 
@@ -465,7 +486,7 @@ against the host's real stores through `{ stores, clock, rails, manifest }`:
 | BILL-CONV | 9-14 | a `capMinor` becomes the edge `cap` (and is applied by the host until AIP-49 enforces it); a bonus tag appears in `excludes`; 200 USD cents at 100 credits per USD = 20 000 credit hundredths; 200 EUR cents at fx 1.18 = 23 600; a fiat conversion declaring its own ratio is rejected; points (decimals 0) to credits (decimals 2); net vs gross; disabled edge in the arbitrage check |
 | BILL-INCL | 15-18 | two weekly grants both land; rollover none / unbounded; past_due then close; upgrade |
 | BILL-PAYER | 19-20 | 4-level tree, no cascade, corrupted chain |
-| BILL-USE | 29-35 | 1 USD of cost at margin 2 at 100 credits per USD = 20 000 minor; 1 EUR at fx 1.18 = 11 800 at margin 1; `at-cost` ignores `defaults.margin`; an unpriced event is refused; a replayed key writes once; `refuse` writes nothing and `absorb` reports the shortfall; a spend stops at the floor of a lot (0 or negative); a flat price under its declared `marginFloor` fails |
+| BILL-USE | 29-40 | 1 USD of cost at margin 2 at 100 credits per USD = 20 000 minor; 1 EUR at fx 1.18 = 11 800 at margin 1; `at-cost` ignores `defaults.margin`; an unpriced event is refused; a replayed key writes once; a rule cannot raise an amount; a rule that throws refuses; a spend stops at the floor of a lot; a rule gets a frozen snapshot; a category under its declared `marginFloor` fails. The invariants (rules 36-39) ship as an exported contract suite that a host runs in its own CI at every bump of the implementation |
 | BILL-RAIL | 24 + adapters | projection lists its degradations; offer id round-trips; replayed or reordered webhook; missing env stops startup |
 
 ## Rationale
