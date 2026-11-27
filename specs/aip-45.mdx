@@ -521,7 +521,8 @@ prompt is resolved as `{ cancelled: true }`. For a `plan-approval`,
 by the field `id`. `prompt` becomes the property `description`,
 `header` its `title`, and a `required` field is listed in `required`.
 `recommended` becomes the `default` of a `single` property. The message
-is the question `prompt`.
+is the question `prompt`, or the request `text` when the prompt is
+empty.
 
 | Field | Property |
 |---|---|
@@ -541,7 +542,8 @@ would refuse an answer the harness accepts; the answer rules below put
 a typed choice back in `selected`. A choice's `description` and
 `preview` are not carried.
 
-**Answer.** An `accept` is turned into `{ answers }`: a `single` string
+**Answer.** For a question with `fields`, an `accept` is turned into
+`{ answers }`: a `single` string
 equal to a choice `value` becomes `selected`, any other string becomes
 `text`; a `multi` array becomes `selected`; a `text` string becomes
 `text`; a `boolean` or `number` becomes `value`. An absent property or
@@ -571,11 +573,21 @@ the host's own tools.
 
 **Question without `fields`.** A host MUST NOT carry a `question` that
 has no `fields` as the tool-permission form above: `approve` would pick
-an option the human never saw. It either writes it as a form of one
-`single` field built from `choices`, `allowFreeText` and
-`freeTextOptionId` (rule 1 of
-[Multi-field questions](#multi-field-questions-2026-11-03), read
-backwards), or does not project it.
+an option the human never saw. It either does not project it, or
+writes it as a form with one property, `answer`: a string with a
+`oneOf` of `{ const: optionId, title: label }` per choice, or a plain
+string when `allowFreeText` is true. Such a prompt is answered as in
+rule 3 of [`agent-prompt` requests](#agent-prompt-requests-added-2026-10-28),
+never with `{ answers }`, which the harness MUST reject on a prompt
+without `fields`. An `answer` equal to a choice `optionId` resolves
+the prompt with `{ optionId }`; any other text, when `allowFreeText`
+is true, resolves it with `{ optionId: freeTextOptionId, feedback }`.
+An empty or absent `answer` is incomplete. `decline` and `cancel` are
+handled as for a question with `fields`.
+
+A host that relays `agent-prompt` over MCP conforms to this
+subsection when it meets every MUST above; this is in addition to
+[AIP-77](/docs/aip-77) conformance item 8, which covers the transport.
 
 ### Lifecycle
 
@@ -1028,10 +1040,13 @@ in `@agentproto/runtime`, `src/mcp-modern/human-gate.ts`
 `applyOnePermissionResponse`). Two points of that subsection are not
 met yet. A `question` without `fields` is still carried as the
 tool-permission form, and `approve` then selects the first `allow_*`
-option. A `plan-approval` selects its options by kind (the first
-`allow_once` or `reject_once`, `selectPermissionOptionId` in
-`src/sessions.ts`), which matches `approveOptionId` and
-`rejectOptionId` only when no other option has the same kind.
+option. A `plan-approval` selects its options by kind, not by id
+(`selectPermissionOptionId` in `src/sessions.ts`): `approve` takes the
+first `allow_once`, or the first `allow_always` when `scope` is
+`always`, and `deny` takes the first `reject_once`, else any
+`reject_*` or `deny_*` option. That matches `approveOptionId` and
+`rejectOptionId` only when the plan offers no `allow_always` and no
+other option of the kinds it selects.
 
 ## Backward compatibility
 
@@ -1134,8 +1149,8 @@ adds the bidirectional-protocol surface.
 
 - [AIP-29 — CLI.md](/docs/aip-29) — tool CLIs (one-shot `cmd → output`); shares install/version/auth blocks via `$ref`
 - [AIP-44 — ACP.md](/docs/aip-44) — wire protocol when `protocol: acp`
-- [AIP-77](/docs/aip-77): MCP gateway; its Human input over MRTR section carries an `agent-prompt` to an MCP client
-- [AIP-7](/docs/aip-7): approvals, the only human input sent as an MCP `url` elicitation
+- [AIP-77, MCP-GATEWAY](/docs/aip-77): its Human input over MRTR section carries an `agent-prompt` to an MCP client
+- [AIP-7, GOVERNANCE](/docs/aip-7): approvals, the only human input sent as an MCP `url` elicitation
 - [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime that consumes a harness via the optional `runtime: { kind: "agent-cli" }` binding
 - [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth surface
