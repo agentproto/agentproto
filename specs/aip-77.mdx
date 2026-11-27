@@ -239,8 +239,9 @@ era of `/mcp`.
   binding.
 - **`skills/list`** returns `{ skills, nextCursor? }`. Each entry is
   `{ uri, frontmatter, resources }`: `uri` is `skill://<name>/SKILL.md`,
-  `frontmatter` is the frontmatter of `SKILL.md` as written (every key kept, no
-  normalization), and `resources` lists every file of the skill as
+  `frontmatter` is the parsed frontmatter of `SKILL.md` encoded as JSON (every
+  key kept, no key renamed; YAML-only forms such as dates or anchors arrive as
+  their JSON values), and `resources` lists every file of the skill as
   `{ uri, digest, size }`. The cursor is opaque.
 - **`skills/get`** takes `{ uri: "skill://<name>/SKILL.md" }` and returns
   `{ skill }` with the same entry shape. Any other path is `-32602`.
@@ -251,8 +252,9 @@ era of `/mcp`.
   `cacheScope`, like the other cacheable operations. `skills/get` requires no
   `Mcp-Name` header; `resources/read` keeps its `uri` one.
 - **Naming.** The `<name>` segment is the skill's frontmatter `name` (its
-  registry id), never a display alias. A skill whose frontmatter `name` or
-  `description` does not match its registry entry is not served.
+  registry id), never a display alias. A skill whose frontmatter `name` differs
+  from its registry id, or whose `description` is missing or empty, is not
+  served.
 - **Manifest and digests.** `digest` is `sha256:<hex>` over the raw bytes of
   the file. It lets a client detect drift; it is not a trust anchor (it is
   unsigned and comes from the same server). A file whose bytes no longer match
@@ -313,7 +315,9 @@ Rules:
   answer produces a fresh `InputRequiredResult`, not an error.
 - **Durability.** Approval and run tokens stay verifiable across a host
   restart (the signing key and the consumed nonces are stored). Permission and
-  question tokens are bound to the host's boot and fail after a restart.
+  question tokens are bound to the host's boot: a token from a previous boot is
+  rejected with `-32602` (`data.reason: "input_unavailable"`), it is not
+  re-projected.
 - **Not projected.** A run waiting on an `escalate` policy (it carries neither a
   question nor a schema); a run whose input schema is not flat (no console page
   exists to send it to); `workflow_run_file` and `approval_request`
