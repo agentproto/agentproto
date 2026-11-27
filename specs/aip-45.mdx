@@ -515,7 +515,9 @@ approvals.
 with an `allow_*` option (`allow_always` when `scope` is `always`),
 `deny` with a `reject_*` option; when no reject option is offered the
 prompt is resolved as `{ cancelled: true }`. For a `plan-approval`,
-`approve` and `deny` MUST select `approveOptionId` and `rejectOptionId`.
+`approve` and `deny` MUST select `approveOptionId` and `rejectOptionId`,
+and the form SHOULD NOT carry `scope`, which could not change the
+option selected.
 
 **Question with `fields`.** The form has one property per field, keyed
 by the field `id`. `prompt` becomes the property `description`,
@@ -1037,16 +1039,13 @@ Draft phase; spec changes propagate through `scaffold-aip` regen.
 The MCP transport of a question is implemented by the agentproto daemon
 in `@agentproto/runtime`, `src/mcp-modern/human-gate.ts`
 (`buildPermissionElicitation`, `projectQuestionField`,
-`applyOnePermissionResponse`). Two points of that subsection are not
-met yet. A `question` without `fields` is still carried as the
-tool-permission form, and `approve` then selects the first `allow_*`
-option. A `plan-approval` selects its options by kind, not by id
-(`selectPermissionOptionId` in `src/sessions.ts`): `approve` takes the
-first `allow_once`, or the first `allow_always` when `scope` is
-`always`, and `deny` takes the first `reject_once`, else any
-`reject_*` or `deny_*` option. That matches `approveOptionId` and
-`rejectOptionId` only when the plan offers no `allow_always` and no
-other option of the kinds it selects.
+`buildQuestionAnswerElicitation`, `planApprovalIds`,
+`applyOnePermissionResponse`), since
+[agentproto/ts#2899](https://github.com/agentproto/ts/pull/2899) for a
+question without `fields` and a plan approval named by id. One point is
+not met yet: the secret check does not catch the spaced spelling of a
+two-word term (for example `API key` or `access token`, while `api_key`
+and `access-token` are caught).
 
 ## Backward compatibility
 
