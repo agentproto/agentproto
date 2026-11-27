@@ -1144,6 +1144,20 @@ racing a turn-end never has to choose in advance. This flag has shipped
 in the reference implementation since before this AIP was written; the
 document simply never described it.
 
+**MCP task handle for a turn.** On the `2026-07-28` MCP era, a client
+that has declared the MCP Tasks extension receives, from `agent_start`
+(with a prompt) or `agent_prompt` and when the host so decides, a task
+handle for that **turn** instead of the tool's ordinary return (`Session`
+JSON, or the fire-and-forget acknowledgement). For that client the shape of
+the return therefore changes; the `sessionId` is carried in the handle's
+`_meta`, and the session itself is read through the session tools as usual.
+A client that has not declared the extension sees no change. The client never
+requests the handle, the task ends with the turn, and the session keeps its
+own lifecycle (it stays alive and idle after the turn). The projection is
+specified by [AIP-78](/docs/aip-78) (TURN-TASK) and the endpoint by
+[AIP-77](/docs/aip-77) (MCP-GATEWAY); neither changes the session
+semantics above.
+
 `interrupt: true` and `POST /sessions/:id/interrupt` are not
 alternatives: the flag cancels a turn *in order to* start another one
 and cannot express "stop, send nothing"; the route ends a turn and stops
@@ -2337,6 +2351,14 @@ value. The reference implementation keeps accepting the old names, with a
 deprecation warning, until its next breaking release (AIP-70 §4). A client
 that must talk to both generations reads `harness` and falls back to
 `adapterSlug`, and sends `harness`.
+
+### The 2026-11-26 turn-task amendment (draft)
+
+Adds the §Multi-turn semantics paragraph "MCP task handle for a turn". No
+session field, status, or HTTP route is added or altered. The only wire
+difference is for a client that declares the MCP Tasks extension: the return of
+`agent_start` (with a prompt) and `agent_prompt` is then a task handle instead
+of the ordinary return. A client that does not declare it sees no change.
 
 ## Security Considerations
 

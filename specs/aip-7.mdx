@@ -567,6 +567,13 @@ path that handles a human decision, never as a tool.
 Tool results for these operations MUST NOT contain card tickets, bearer
 credentials, or any other secret that would let a caller decide.
 
+A host MAY also carry a human question or a link to an approval over a
+protocol's input channel (for example an MCP elicitation or a task input
+request). That channel is a **transport** only. An answer received on it is a
+statement that something was shown or answered, never a decision: moving an
+approval request out of `pending` and consuming it, with its pinned payload,
+remains the only act of authorization.
+
 ### Threat model and residual risk
 
 The `ui_card` channel rests on one assumption: the ticket never appears
@@ -682,6 +689,13 @@ the roadmap: the AIP-54 Ref migration described above. Within this
 draft, both the legacy `kind:slug` string form and the AIP-54 object
 form are normative inputs; producers SHOULD emit object form, consumers
 MUST accept either.
+
+### The 2026-11-26 turn-task amendment (draft)
+
+§Agents never decide gains a paragraph stating that a protocol input channel
+(an elicitation, a task input request) is a transport, and that an answer on
+it is never a decision. It restates the existing rule; no record, state or
+tool changes.
 
 A future AIP-7 v2 will deprecate the string form. The transition window
 is at least one minor release of every reference implementation listed

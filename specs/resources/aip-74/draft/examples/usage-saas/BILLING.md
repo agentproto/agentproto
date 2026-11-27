@@ -22,6 +22,13 @@ primaryAsset: SAAS_CREDITS
 
 anchor: { currency: USD, creditsPerUnit: 1000 }
 spendOrder: ["SAAS_CREDITS:monthly", "SAAS_CREDITS:topup"]
+# Metered usage as data (rules 29 to 32, 35). Example values: the AIP sets none.
+usage:
+  defaults: { margin: 1.5, floorMinor: 0 }
+  categories:
+    - { id: llm, match: { kind: llm }, cost: { source: measured }, marginFloor: 1.1 }
+    - { id: messaging-fee, match: { kind: messaging-fee }, cost: { source: measured }, margin: at-cost }
+    - { id: search, match: { kind: search }, cost: { source: fixed, amount: 0.0015, currency: USD } }
 taxBasis: gross
 
 features:

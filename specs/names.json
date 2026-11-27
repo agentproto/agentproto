@@ -633,6 +633,12 @@
       "name": "MCP-GATEWAY",
       "specId": "mcp-gateway/v1",
       "layer": "host"
+    },
+    {
+      "aip": 78,
+      "name": "TURN-TASK",
+      "specId": "turn-task/v1",
+      "layer": "coordination"
     }
   ],
   "pending": [
