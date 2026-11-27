@@ -56,7 +56,8 @@ and keeps the cascade a first-class engine instead of code inside an app.
 1. **Two-product rule.** A notion enters this AIP only if two real
    products consume it, and each notion carries a "Consumed by" line that
    says who and where. A notion with one consumer is `x-` (extension) or
-   stays in the product. Where a notion has a single consumer today and is
+   stays in the product, or is *reserved* when this AIP declares it for a
+   second consumer it expects (see Processors). Where a notion has a single consumer today and is
    kept for a stated reason, its line says so.
 2. **Three contracts, not one.** STT, TTS and realtime differ in shape
    (audio to text, text to audio, audio to audio with the vendor running
@@ -105,6 +106,8 @@ interface AudioFrame {
 ```ts
 interface SttProvider {
   readonly slug: string
+  /** The vendor models the provider transcribes with, when it knows them. */
+  readonly models?: { stream?: string; file?: string }
   readonly capabilities: SttCapabilities
   openStream(opts: SttStreamOptions): Promise<SttStream>
   transcribe(input: SttFileInput, opts?: { language?: string; signal?: AbortSignal }): Promise<SttResult>
@@ -150,6 +153,10 @@ Rules:
   (see Engines) and falls back to `transcribe` with the audio it kept.
 - `partial` events replace one another; a `final` closes the utterance.
   Consecutive `final` events for the same audio MUST NOT repeat text.
+- A provider SHOULD declare `models` when it knows the vendor model, one
+  per path (a vendor's streaming and file transcription often run different
+  models). `models` MAY be computed when read. The cascade copies the model
+  that produced an utterance onto the STT usage entry (see Usage record).
 - A provider MUST NOT invent text for silence. A host MAY filter vendor
   artifacts (subtitle credits and similar) on `final`; that filter is a
   host concern, not part of the contract.
@@ -330,6 +337,7 @@ and `s2sBillingModelId`.
 interface VoiceStartOptions {
   emit: VoiceEmit
   hooks: VoiceHooks
+  processors?: VoiceProcessors          // see Processors
   onUsage?(usage: VoiceUsage): void | Promise<void>
   language?: string
   voiceId?: string
@@ -342,7 +350,7 @@ interface VoiceEmit {
   assistantTranscript(text: string, final: boolean): void
   toolCallStart(name: string, args: unknown): void
   toolCallEnd(name: string, result: unknown): void
-  interrupt(): void              // the assistant turn was cut by a barge-in
+  interrupt(info?: { heardText?: string; unheardText?: string }): void  // the assistant turn was cut by a barge-in
   responseComplete(): void       // the assistant turn finished
   error(err: Error): void
 }
@@ -353,6 +361,8 @@ interface VoiceHooks {            // host side, all optional
   loadHistory?(): Promise<VoiceHistoryMessage[]>
   onToolCall?(name: string, args: unknown): Promise<unknown>
   onTranscript?(turn: { role: "user" | "assistant"; text: string; finalizedAt: number }): Promise<void>
+  onMicIdle?(info: { idleMs: number }): void | Promise<void>
+  onProcessorEvent?(event: ProcessorEvent): void | Promise<void>
 }
 
 interface VoiceToolSchema { name: string; description?: string; parameters: Record<string, unknown> }
@@ -385,6 +395,11 @@ Rules:
 1. A session MUST emit `responseComplete` exactly once per assistant turn
    that was not interrupted, and `interrupt` once per interrupted turn
    (when `capabilities.interruption`). It never emits both for one turn.
+   A cascade session SHOULD fill `info` when it knows how much of the reply
+   was played (`heardText`) and how much was not (`unheardText`). When both
+   fields are present, `heardText` followed by `unheardText` is the text of
+   that turn sent to TTS; when only one is known the other is omitted. An
+   engine that cannot know omits `info`.
 2. `commit()` MUST be a no-op when the engine detects turns itself.
 3. After `interrupt` is emitted for a turn, no `audio` event of that turn
    MAY follow.
@@ -400,6 +415,29 @@ Rules:
 7. `close()` releases the vendor connection and makes `getUsage()` final.
 8. `emit.error(err)` reports a session-level fault; if the fault is fatal,
    the session closes and emits no further `audio` events.
+9. **Mic idle.** A `cascade` session that has received no inbound audio
+   frame for the idle bound (`CascadeOptions.idleMicMs`, in milliseconds,
+   `0` disables it), counted from the start of the session and again from
+   every call to `pushAudio` while the session is open, MUST close itself. The
+   bound is reset by every such call, including calls with silent frames and
+   frames the session rejects. Before it starts closing, the session calls
+   `hooks.onMicIdle({ idleMs })`, where `idleMs` is the bound that elapsed
+   (the configured value, not a measured duration), and does not wait for
+   its result. A hook failure, thrown or rejected, MUST NOT prevent the
+   close (rule 4). A host that wants the conversation to continue starts a
+   new session when the caller speaks again. A `realtime` session MAY apply
+   no bound, in which case the host applies the Security considerations
+   bullet on vendor connections itself. The reference default is 60000 ms;
+   the contract does not fix it.
+10. **Usage callback.** When `onUsage` is set, the session calls it
+    exactly once with the final `VoiceUsage`, when the session closes for any
+    reason (`close()`, a fatal fault under rule 8, the idle close of rule 9),
+    after the record is final. `close()` MAY wait for it to settle before it
+    resolves (the reference package does); a host MUST NOT rely on either
+    order. The session
+    MAY call it earlier with cumulative snapshots; each snapshot supersedes
+    the previous one. A rejected or throwing `onUsage` MUST NOT interrupt
+    audio or prevent the close.
 
 **Consumed by:** both reference host classes through a shared voice-session
 host layer, wiring `loadHistory`, `getTools`, and `onToolCall` from each
@@ -424,15 +462,38 @@ billing wind-down farewell directives when a wallet balance is low or depleted.
 interface CascadeOptions {
   stt: SttProvider
   tts: TtsProvider
-  brain(input: { text: string; signal: AbortSignal; utteranceId: number }): AsyncIterable<string>
+  brain(input: { text: string; signal: AbortSignal; utteranceId: number }): AsyncIterable<string | BrainEvent>
   vad?: CascadeVadOptions | false     // false: manual mode, no local VAD (push-to-talk)
   bargeIn?: CascadeBargeInOptions
-  playback?: { queuedMs(): number; waitBelow(ms: number, opts?: { signal?: AbortSignal }): Promise<"ready" | "aborted" | "timeout" | "closed"> }
+  playback?: { queuedMs(): number; waitBelow(ms: number, opts?: { signal?: AbortSignal; timeoutMs?: number }): Promise<"ready" | "aborted" | "timeout" | "closed"> }
+  idleMicMs?: number                  // see VoiceSession rule 9
 }
+
+interface BrainEvent { type: "activity" | "tool-start"; name?: string }
 
 function startCascade(opts: VoiceStartOptions & CascadeOptions): Promise<VoiceSession>
 function startRealtime(provider: RealtimeProvider, opts: VoiceStartOptions): Promise<VoiceSession>
 ```
+
+A `BrainEvent` carries no text. A cascade session, with or without
+processors, resets the brain guards when the brain yields one: `activity`
+tells the engine the brain is still working (for example during a long tool
+call), so the guards do not abandon the turn. `tool-start` also names the
+tool (`name` is meaningful on `tool-start` only); it is reserved, and a
+session that does not handle it treats it as `activity`. A `BrainEvent` that
+reaches the `textOut` processors (see Processors) is a chunk with empty
+`text` and `event` set; a transformer that drops it does not undo the reset.
+
+`playback` is the read side of the host's outbound audio queue, the part
+only the client knows. `queuedMs()` is the audio, in milliseconds, that the
+engine has emitted through `emit.audio` and the listener has not yet played.
+`waitBelow(ms)` resolves `"ready"` when `queuedMs()` is at or below `ms`,
+`"timeout"` when `opts.timeoutMs` is set and elapses, `"aborted"` when its
+signal fires, and `"closed"` when the engine ends the session while it waits
+(the engine produces `"closed"`; a host implementation need not). A host
+that sends audio faster than real time SHOULD provide it; without it the
+engine falls back to a fixed bound on the outbound queue and cannot tell
+when a reply has been heard.
 
 `startCascade` is the entry of the `cascade` engine; `startRealtime` is
 `provider.start(opts)` and exists for symmetry. `emit`, `hooks`,
@@ -502,8 +563,9 @@ speech is ignored (the assistant's own echo arrives shortly after its first
 audio), the energy a frame needs to count as speech, and a tolerated gap
 inside a run of speech. These are `CascadeBargeInOptions`; defaults live in
 the package defaults file. Because the engine knows exactly what it sent to
-TTS, a host MAY read it back (see `x-` extensions): what was played versus
-not played is not in this AIP.
+TTS, it SHOULD report what was played versus not played on `interrupt`
+(rule 1 of VoiceSession), best effort: the split is as precise as the
+playback clock allows.
 
 Two engines, not one interface with a flag: the realtime engine has no
 local VAD, no queue to purge, no brain to cancel; the cascade engine has
@@ -514,6 +576,248 @@ look optional.
 (local VAD, ordered abort-then-purge barge-in, brain guards, and realtime
 engine selection) and the multi-participant room host (sequential STT → brain →
 TTS path and per-participant realtime engines).
+
+## Processors
+
+A session MAY be started with processors: named units the engine runs on
+the data that crosses it, at four hook points. A product adds its own
+without changing the package. This section fixes the two kinds of processor,
+their names and order, the hook points and their observable effects.
+
+Processors apply to the `cascade` engine. A `realtime` session MAY ignore
+`processors`; it then never calls `hooks.onProcessorEvent`.
+
+```ts
+type VoiceHook = "audioIn" | "transcript" | "textOut" | "audioOut"
+
+interface TranscriptItem { text: string; final: boolean; startMs?: number; endMs?: number }
+interface TextChunk { text: string; end?: boolean; event?: BrainEvent }
+interface HookItems { audioIn: AudioFrame; transcript: TranscriptItem; textOut: TextChunk; audioOut: AudioFrame }
+
+interface CallContext<H extends VoiceHook = VoiceHook> {
+  readonly hook: H
+  readonly name: string            // the processor's own name
+  readonly callId: string
+  readonly utteranceId?: number
+  readonly signal: AbortSignal     // belongs to one call of run or observe
+  readonly language?: string
+  readonly state?: Map<string, unknown>                      // reserved
+  readonly annotations?: Readonly<Record<string, unknown>>   // reserved
+  inject?(item: HookItems[H]): void                          // reserved
+}
+
+interface Transformer<H extends VoiceHook = VoiceHook> {
+  readonly kind: "transformer"
+  readonly name: string
+  readonly hook: H
+  readonly modifies: readonly string[]     // what it changes, at least one facet
+  readonly after?: readonly string[]       // earlier transformers it deliberately runs after on a shared facet
+  readonly budgetMs?: number
+  run(input: HookItems[H], ctx: CallContext<H>):
+    HookItems[H] | readonly HookItems[H][] | null |
+    Promise<HookItems[H] | readonly HookItems[H][] | null>
+}
+
+interface Observer<H extends VoiceHook = VoiceHook> {
+  readonly kind: "observer"
+  readonly name: string
+  readonly hook: H
+  readonly queueMax?: number    // size of its queue (Processors rule 6)
+  observe(input: Readonly<HookItems[H]>, ctx: CallContext<H> & { publish(data: Record<string, unknown>): void }): void | Promise<void>
+}
+
+type VoiceProcessor<H extends VoiceHook = VoiceHook> = Transformer<H> | Observer<H>
+type VoiceProcessors = readonly VoiceProcessor[]    // array order is the run order of the transformers of each hook
+
+interface ProcessorEvent {
+  type: "error" | "budget-exceeded" | "abandoned" | "dropped" | "bypassed" | "published"
+  name: string
+  hook: VoiceHook
+  elapsedMs?: number
+  budgetMs?: number
+  error?: Error
+  data?: Record<string, unknown>
+}
+```
+
+`error` events carry `error`; `budget-exceeded` carries `elapsedMs` and
+`budgetMs`; `abandoned` carries `elapsedMs`; `dropped` and `published` carry
+`data` (`{ count }` for `dropped`); `bypassed` carries `data: { reason }` and
+tells that the implementation stopped running a processor for the rest of
+the session (its hook is reserved and ignored, or it kept failing).
+
+**Two kinds.** A *transformer* is on the path of the sound or the text: it
+receives one item, streamed in chunks, and returns the item (modified),
+several items, or `null`. An *observer* is off the path: it receives each item
+after every transformer of its hook, wherever it sits in the array, and only
+publishes metadata through `ctx.publish`, which reaches
+`hooks.onProcessorEvent` as a `published` event. An observer MUST NOT modify
+the item; the engine hands it a copy (or a frozen object), so a change it
+makes has no effect on the path. Both kinds receive `ctx.signal`.
+
+**Status of the hook points.** Each hook point has a status in the table
+below, fixed by this document and changed only by an amendment of it. An
+*active* hook point MUST be run by a session that accepts `processors`. A
+*reserved* hook point is declared for a use that has one consumer today; a
+session MAY ignore the processors of a reserved hook. The context fields
+`ctx.state` (state private to one processor slot and one session),
+`ctx.annotations` (metadata of earlier processors on the item) and
+`ctx.inject(item)` (one more item, just downstream of the processor, same
+hook) are reserved under these exact names: an implementation MAY omit them,
+and one that provides them gives them this name and this meaning; a
+processor that needs one checks that it is present.
+
+| Hook | Item | Runs | Status |
+| --- | --- | --- | --- |
+| `textOut` | `TextChunk` | after the brain, before TTS | active |
+| `transcript` | `TranscriptItem` (partial and final) | after STT, before the engine acts on it | reserved |
+| `audioIn` | `AudioFrame` | after the frame is accepted, before local VAD and STT | reserved |
+| `audioOut` | `AudioFrame` | after TTS, before the outbound queue and `emit.audio` | reserved |
+
+`TextChunk.end` is true on the last chunk of the brain's reply for a turn;
+the engine sets it, and a transformer that holds text MUST release it with the
+chunk that carries `end`. The engine does not complete a turn from the `end` a
+transformer returns: when a turn completes follows rule 1 of VoiceSession, and
+rule 12 below fixes how many `responseComplete` and `interrupt` events it
+gets.
+
+Rules:
+
+1. The transformers of a hook run in array order: the output of one is the
+   input of the next. An array fans out: each element goes through the rest
+   of the chain, in order. `null` (or an empty array) drops the item. Items of
+   one hook leave it in the order in which they entered, even when a
+   transformer is asynchronous and its work for a later item finishes first.
+   An observer receives an item after every transformer of its hook; the array
+   order applies among transformers only.
+2. **Names.** Every processor has a non-empty `name`, unique in the array
+   whatever its hook or kind. The check covers every processor of the array,
+   including those of a hook the implementation ignores. A violation makes
+   `startCascade` reject with an `Error` whose `message` contains the name of
+   the offender (the names of both processors and the facet, for a conflict);
+   no session opens and no vendor connection is made.
+3. **Conflicts.** A transformer declares in `modifies` what it changes
+   (facets: exact, case-sensitive strings such as `"text"`); `modifies` MUST
+   contain at least one facet. When transformers of the same hook declare the
+   same facet, each later one MUST list in `after` every earlier one it shares
+   a facet with, and each earlier one MUST come first in the array. An `after`
+   naming an observer, an absent processor, a processor of another hook or a
+   later one is rejected, as is an empty `modifies`. A violation is rejected
+   as in rule 2.
+4. A transformer that fails (throws, rejects) or returns an item of the wrong
+   shape MUST NOT end the session (rule 4 of VoiceSession): its input
+   continues unchanged through the rest of the chain and
+   `hooks.onProcessorEvent` receives an `error` event. An item has the wrong
+   shape when it does not satisfy `HookItems[H]` (for audio: a `pcm16` of even
+   byte length, a finite `sampleRate`, a numeric `sequenceNumber`); an array
+   containing one item of the wrong shape is wholly invalid. A failure of
+   `onProcessorEvent`, thrown or rejected, is a hook failure (rule 4 of
+   VoiceSession); the engine does not wait for it. (Informative: the reference
+   package types `onProcessorEvent` as returning `void` and absorbs only a
+   synchronous throw; a rejected promise it returns is not caught yet. Until
+   the reference is aligned, a host SHOULD NOT return a promise that can
+   reject.)
+5. **Budget.** Each transformer has a time budget per item: its `budgetMs`, or,
+   when it has none, the default of its hook in the implementation, which MAY
+   be none; `0` disables it. A `budgetMs` that is negative or not finite is
+   rejected as in rule 2. `elapsedMs` is a duration measured so that a change
+   of the system clock cannot alter it, from the call of `run` to the
+   settlement of what it returned (a synchronous return counts the duration of
+   the call). When the budget is exceeded the engine aborts the signal of that
+   call, stops waiting, continues with the input unchanged, ignores the late
+   result and sends a `budget-exceeded` event with `elapsedMs` (at least
+   `budgetMs`) and `budgetMs`.
+6. **Observers never block.** The engine does not wait for an observer, and
+   an observer's slowness or failure changes nothing on the path. Each observer
+   has a bounded queue of `queueMax` items when it sets one, otherwise of the
+   implementation's default (the reference default is 64); when it is full the
+   oldest item is dropped, and the engine sends one `dropped` event per burst
+   with `data: { count }`, the number of items dropped since the last event. An
+   observer failure is an `error` event. A `publish` call after the observer
+   settled, or after `close()`, is ignored.
+7. **Cancellation.** `ctx.signal` is aborted when the assistant turn the item
+   belongs to is interrupted (for `textOut` and `audioOut`; an item belongs to
+   the turn named by `ctx.utteranceId`) and when the session closes (for all
+   hooks); the signal of `transcript` and `audioIn` processors is aborted on
+   close only. After the abort, a processor SHOULD stop its work within the
+   cancellation delay (an implementation setting; the reference default is
+   100 ms), counted from the abort. A processor still running when it elapses
+   is abandoned: its result is ignored and an `abandoned` event is sent. The
+   engine waits no longer than the delay for any processor, so `interrupt` is
+   emitted, and `close()` completes, at most one delay after the cause.
+8. After `interrupt` is emitted for a turn, no `audio` event of that turn
+   follows (rule 3 of VoiceSession), whatever the processors return or hold;
+   the purge of the barge-in order (abort and cancel, purge, emit) covers what
+   the `audioOut` chain holds. After `close()` no item reaches an `emit` event.
+   An item without `utteranceId` is not subject to the interruption rule, but
+   the barge-in purge still drops it if it is queued.
+9. A `transcript` item that a transformer drops produces no
+   `emit.userTranscript`, no `hooks.onTranscript` and, when it is a final, no
+   turn; the STT usage still counts the audio. `emit.userTranscript`,
+   `hooks.onTranscript` and the brain see the processed text.
+10. `emit.assistantTranscript` and `hooks.onTranscript` for the assistant
+    carry the text as the brain produced it; `textOut` transformers change what
+    is spoken, not what is shown. The characters counted in the usage record
+    are those sent to TTS, after the `textOut` chain. `heardText` and
+    `unheardText` of `interrupt` come from the text sent to TTS: when a
+    `textOut` transformer changed the text they need not be substrings of
+    `assistantTranscript`.
+11. An `audioIn` or `audioOut` transformer MUST return frames at the sample
+    rate of its input and with a `pcm16` of even byte length; otherwise the
+    item is of the wrong shape (Processors rule 4). The engine renumbers the
+    frames that leave `audioOut` so that `sequenceNumber` is strictly
+    increasing on `emit.audio`; the end-to-end preservation of
+    `sequenceNumber` (AudioFrame) holds for frames no transformer touched.
+12. Processors never change the number of `responseComplete` and `interrupt`
+    events: they are emitted once per turn, as if every processor were the
+    identity function. A turn whose `textOut` chain drops all text still emits
+    `responseComplete`.
+
+**Consumed by:** both reference host classes, for the `textOut` hook (the
+other hook points have one consumer today, see Status). Rule 1 of the design
+principles is met by the status above, not by a count of products that
+changes.
+
+**Writing an overlay (informative).** A product keeps its own rules (its
+persona phrases, its pronunciation list, its clips) in one package of
+processors built on this form, and builds the array from the reference
+processors and its own. The same package serves every application of that
+product, so no rule is copied between them; the contract and the reference
+package never learn the product's names. A processor is a plain object and is
+tested by calling `run` with a fake context. A product package is expected to
+run the contract test suite of the reference package, once it exists, against
+its processors each time it moves to a new version of the reference package.
+
+```ts
+// textOut: replace words the speech engine reads badly, from a list the product supplies.
+// A word split across two chunks is not replaced; a product that needs it buffers
+// inside the processor and releases the buffer on the chunk that carries `end`.
+function glossary(list: Record<string, string>): Transformer<"textOut"> {
+  return {
+    kind: "transformer",
+    name: "glossary",
+    hook: "textOut",
+    modifies: ["text"],
+    run(chunk) {
+      let text = chunk.text
+      for (const [wrong, right] of Object.entries(list)) {
+        if (!wrong) continue
+        text = text.split(wrong).join(right)
+      }
+      return { ...chunk, text }
+    },
+  }
+}
+```
+
+**Reference processors (informative).** The reference package is to ship a
+processor for spoken-form normalization of numbers, dates and amounts
+(`textOut`), and MAY ship one for sentence splitting. Wait phrases,
+backchannel acknowledgements and silence frames that keep a transport alive
+need hook points and context fields that are reserved (`audioOut`,
+`ctx.inject`); a product writes them in its overlay only once an
+implementation provides them. They change what the client hears, none is
+required, and a conformant implementation MAY ship none.
 
 ## Variables
 
@@ -645,17 +949,28 @@ Rules:
 - Entries are grouped by (stage, provider, model). A cascade has one entry
   per group that ran: a session that falls back from streaming to file
   transcription on the same provider and model has one STT entry, and has
-  two only when a second provider (or model) serves as the fallback.
+  two when a second provider, or a second model (`SttProvider.models` with
+  different `stream` and `file` values), serves as the fallback.
   Characters count what was sent to TTS, interrupted text included.
 - A host MAY also receive the record through an `onUsage` callback in
-  start options; the content is the same. A rejected `onUsage` MUST NOT
-  interrupt audio.
+  start options; the content is the same, and rule 10 of VoiceSession says
+  when it is called.
+- The `model` of an entry is copied from the provider that ran the stage
+  (`TtsProvider.model`, `SttProvider.models.stream` or `.file` for the path
+  that transcribed the utterance). An entry without `model` is priced by the
+  host, which MUST NOT present a guessed model as the one that ran.
 - The record carries numbers only, never conversation content.
 - **This record is the only bridge between voice and billing.** Voice does
   not import billing; billing does not import voice. Pricing (a cost the
   vendor reported is a fact to pass on, not a price computed here), margins,
   credits and gates are the product's, applied to the record. Prices
   belong in a model catalog, not in this contract.
+
+**Credit gates stay the product's.** A host reserves, checks and settles a
+balance around a session with its own policy. The contract gives it what it
+needs to do so: `getUsage()` (when present) to measure what was spent, `say`
+(when present) to announce a wind-down, and `close()` to cut. A helper that
+composes them is not part of this contract.
 
 **Consumed by:** both reference host classes, which emit STT seconds, TTS
 characters, and realtime token counts via `onUsage` to their product billing
@@ -664,12 +979,13 @@ voice to pricing.
 
 ## Out of scope (stays in the product)
 
-Local filler phrases, clips and wait cues; reading back which part of a
-reply was played; backchannel handling; WebRTC and SIP bridges; credit
-gates and caps; multi-party floor control and group calls; voice
-catalogs and pickers; per-product tuning of the cascade's silence and
-interruption values. Each has one consumer today or belongs to a transport
-or a product policy. They use `x-` fields or stay in code.
+Credit gates and caps (see Usage record); WebRTC and SIP bridges;
+multi-party floor control and group calls; voice catalogs and pickers;
+per-product tuning of the cascade's silence and interruption values. Each
+has one consumer today or belongs to a transport or a product policy; they
+use `x-` fields or stay in code. Local filler phrases, clips, wait cues and
+backchannel handling are not part of the contract either; a product provides
+them as processors (see Processors).
 
 ## Rationale
 
@@ -718,6 +1034,9 @@ choose a default and say so; the contracts are neutral.
 - A realtime session keeps a vendor connection open and may bill by the
   second: a host SHOULD close it on silence or inactivity and MUST close it
   on disconnect.
+- `ProcessorEvent.data` and `ProcessorEvent.error` can carry conversation
+  content. A host that records them treats them as personal data, and an
+  observer SHOULD publish numbers and metadata only.
 - No account identifier (a hosted agent id, a project id) appears in this
   AIP or in a package default; they are product configuration.
 
@@ -735,13 +1054,21 @@ A provider implementation is conformant when:
 
 A session implementation is conformant when:
 
-1. It satisfies the `VoiceSession` rules 1 to 7.
+1. It satisfies the `VoiceSession` rules 1 to 8 and 10, and rule 9 when it
+   is a `cascade` session, and a `cascade` session handles `BrainEvent` as
+   described under Engines.
 2. The `cascade` engine runs barge-in in the order given: abort and
    cancel, purge, emit.
 3. It resolves providers by the priority rule and fails at startup on an
    unresolvable slug or a missing stage.
 4. `getUsage()` is cumulative, monotonic and final after `close()`.
 5. It tolerates unknown `x-` fields.
+6. A `cascade` session started with `processors` satisfies the Processors
+   rules 1 to 7, 10 and 12 for the processors of an active hook (`textOut`).
+   It MAY ignore the processors, transformers and observers alike, of a
+   reserved hook (`transcript`, `audioIn`, `audioOut`); if it runs them, it
+   satisfies rules 8, 9 and 11 for them. The checks of rules 2, 3 and 5 apply
+   to the whole array, including the processors it ignores.
 
 A conformance suite runs these against a fake transport and recorded
 vendor exchanges; it lives with the reference package.
@@ -754,13 +1081,28 @@ vendor exchanges; it lives with the reference package.
 2. Group calls are one product's: an extension for now.
 3. `VOICE_TTS_PROVIDER` has no consumer today (see its line). Revisit before
    Review.
+4. Browser transport. Hosts that talk to a browser use the same ad hoc
+   framing (binary PCM16 up and down, JSON control messages for ready,
+   transcripts, interrupt, complete, error and end). Should it become a
+   normative section, or its own AIP, with the reference package shipping a
+   client? Revisit before Review.
+5. Diarization. Should `SttTranscript` and `TranscriptItem` carry timed
+   `words[]` and a `speaker` the engine fills for hosts that transcribe meetings? Revisit
+   before Review.
+6. Credential source. When a session runs with a key the customer owns
+   (bring-your-own-key, `byok`), billing must tell it apart from the
+   platform key. The reference package already lets the host attach an
+   opaque tag to each usage entry (`credentialSource`, a string it never
+   interprets), outside this contract. Should the contract name that field
+   and fix its values (`platform` or `byok`), or leave the tag to the host?
+   Revisit before Review.
 
 ## Reference Implementation
 
 The reference packages are `@agentproto/voice` and one
 `@agentproto/voice-<slug>` per vendor, in
-`https://github.com/agentproto/ts`. They are tracked separately and are not
-yet published.
+`https://github.com/agentproto/ts`, published to npm under the
+`@agentproto` scope.
 
 ## See also
 
