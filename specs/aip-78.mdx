@@ -155,9 +155,11 @@ keep using the session tools (`agent_prompt`, `agent_output`,
 - `taskId` MUST be generated from at least 128 bits of randomness (reference
   format: `task_` followed by 16 random bytes in hex). It MUST NOT be derived
   from a `sessionId`.
-- The ledger keeps per task:
+- The ledger keeps at least, per task:
   `{ taskId, sessionId, promptId, principal, createdAt, ttlMs, pollIntervalMs, lastStatus, lastUpdatedAt, endedAt?, outcome?, result? }`.
-  `principal` is the resolved principal that created the task.
+  `principal` is the resolved principal that created the task. A host MAY keep
+  further fields (for example the boot it was written under, whether the turn
+  started, the last `statusMessage`); this AIP does not require them.
 - Writes MUST be atomic (write to a temporary file in the same directory,
   `fsync`, rename) and the files readable only by the host user (mode `0600`).
   The ledger MUST survive a host restart.
