@@ -62,8 +62,8 @@ unsatisfying ways:
 1. **A flat enum on the operator** — `role: "ceo" | "cmo" | "cto" | …`.
    This conflates executive functions with disciplines (a "CMO" and a
    "Senior SEO Specialist" are not the same kind of thing) and
-   forecloses on user-defined roles. The reference implementation in
-   Guilde currently ships this shape and the limitation surfaces every
+   forecloses on user-defined roles. One production implementation
+   currently ships this shape and the limitation surfaces every
    time a customer asks for a role outside the enum.
 2. **Role fields scattered across the operator object** —
    `capabilities`, `strengths`, `background`, `responsibilities` live
@@ -392,9 +392,9 @@ slots:
 role:
   ref: ws://roles/pm
   bind:
-    board:         ws://collections/katchy-board
-    objective:     ws://collections/katchy-relaunch
-    product_tools: { kind: mcp, server: katchy }
+    board:         ws://collections/prism-board
+    objective:     ws://collections/prism-relaunch
+    product_tools: { kind: mcp, server: prism }
   with: { language: fr }
 ```
 
@@ -529,10 +529,10 @@ AIP. The role spec itself is the source of truth; vendor namespaces are
 advisory. Conventional vendor extensions used by reference
 implementations:
 
-- `metadata.guilde.visibility` — `public | private | org`
-- `metadata.guilde.organizationId` — opaque org handle, scopes
+- `metadata.atrium.visibility` — `public | private | org`
+- `metadata.atrium.organizationId` — opaque org handle, scopes
   `visibility: org`
-- `metadata.guilde.modelTier` — recommended LLM tier for operators in
+- `metadata.atrium.modelTier` — recommended LLM tier for operators in
   this role
 - `metadata.aip-47.bodyMerge` — `append-with-separator | replace`,
   controls body merge under `extends` (default `append-with-separator`)
@@ -800,13 +800,13 @@ in the agentproto TS monorepo. Scope:
   `@agentproto/role-catalog`.
 - File-system source loader (per-company `roles/` folder).
 - Database source loader — adapter pattern for runtimes that store
-  roles in a table; the Guilde `operator_template` table is the
+  roles in a table; one production host's `operator_template` table is the
   current reference shape and indicates the working schema.
 - HTTP source loader (optional, for community catalogues).
 - Integration adapter for [AIP-9](/docs/aip-9) OPERATOR consumers
-  (Guilde `operator-orchestrator`).
+  (for example a host's operator orchestrator).
 
-A reference adapter for the Guilde runtime is documented in
+A reference adapter for an operator-platform runtime is documented in
 [`./resources/aip-47/draft/ADAPTER.md`](https://github.com/agentproto/agentproto/blob/main/specs/resources/aip-47/draft/ADAPTER.md).
 Worked examples (builtin role, org-scoped override, executive role)
 are in
@@ -825,7 +825,7 @@ not formally specify role-on-operator beyond the conventional `roles/<slug>/ROLE
 this is a clarification, not a break.
 
 For [AIP-9](/docs/aip-9) implementations that resolve the operator
-role against an internal enum (Guilde's `ceo | cmo | cto | …`) or read it
+role against an internal enum (for example `ceo | cmo | cto | …`) or read it
 from `metadata.roleSlug`: those implementations SHOULD continue to honour
 the existing slugs as canonical role names and ship `ROLE.md` files at the
 matching slugs. The slug surface stays stable while the resolution target
@@ -880,7 +880,7 @@ surface lies in what runtimes do with role contents:
   governance gates on role authorship and modification; organisations
   MAY enforce an immutable baseline KPI list via vendor extension.
 - **Cross-org role leakage.** A role marked
-  `metadata.guilde.visibility: org` is served to operators in a
+  `metadata.atrium.visibility: org` is served to operators in a
   different org. *Mitigation:* runtime resolvers MUST enforce
   visibility scope on every lookup; visibility is a runtime concern,
   not a file-format concern.

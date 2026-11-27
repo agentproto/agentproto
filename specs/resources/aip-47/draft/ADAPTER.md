@@ -26,7 +26,7 @@ SHOULD support three. The chain is consulted in order; the first match
 wins. A typical chain:
 
 ```
-1. file://       roles in the local workspace (.guilde/roles/, roles/<slug>/ROLE.md)
+1. file://       roles in the local workspace (.atrium/roles/, roles/<slug>/ROLE.md)
 2. db://         roles in the runtime's database (per-org custom roles)
 3. builtin://    roles shipped by the runtime (e.g. @agentproto/role-catalog)
 4. http://       roles fetched from a remote registry (optional)
@@ -47,7 +47,7 @@ The order is opinionated:
 - **HTTP optional** for federated catalogues; runtimes that ship without
   it are still conformant.
 
-Visibility scope (`metadata.guilde.visibility: public | private | org`)
+Visibility scope (`metadata.atrium.visibility: public | private | org`)
 MUST be enforced by the resolver, not by the file format. A role with
 `visibility: org` served to an operator in a different org is a
 resolver bug, not a spec bug.
@@ -180,9 +180,9 @@ CREATE INDEX role_visibility_org ON role (visibility, organization_id);
 CREATE INDEX role_department ON role (department);
 ```
 
-The Guilde reference implementation reaches this shape by renaming
-`operator_template` to `role` and aligning columns. The migration is
-covered in the agentik-studio repo's role-catalog package.
+One production implementation reaches this shape by renaming
+`operator_template` to `role` and aligning columns, in its own
+role-catalog migration.
 
 ## Error envelope
 

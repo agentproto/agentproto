@@ -90,7 +90,7 @@ approval chain without traversing the workspace.
   account, agent id). Use the same identifier scheme the host uses elsewhere —
   slug, not numeric DB id.
 - `signer.role`: the role under which the signer acts (`legal`, `cfo`,
-  `operator`, `agent:simone`). The host's policy resolver reads this.
+  `operator`, `agent:nova`). The host's policy resolver reads this.
 - `signature.alg`: cryptographic algorithm. RECOMMENDED `Ed25519`. The spec is
   algorithm-agnostic; the host's verifier MUST support `Ed25519` at minimum.
 - `signature.value`: base64url-encoded signature bytes over the canonical JSON
@@ -158,7 +158,7 @@ chain is empty, start at 0.
   "doctype": "audit-event",
   "seq": 42,
   "ts": "2026-04-28T10:12:00.000Z",
-  "actor": { "id": "agent:simone", "role": "operator" },
+  "actor": { "id": "agent:nova", "role": "operator" },
   "action": "tool.call",
   "subject": { "kind": "tool", "ref": "send-email-brevo" },
   "input": { "to": "ops@example.com", "subject": "..." },

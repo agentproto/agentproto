@@ -261,10 +261,10 @@ spawns can reference a named handle instead of an absolute path:
 ```json
 {
   "version": 1,
-  "active": "agentik-studio",
+  "active": "example-monorepo",
   "workspaces": [
-    { "slug": "agentik-studio",
-      "path": "/Volumes/.../agentik-studio",
+    { "slug": "example-monorepo",
+      "path": "/Volumes/.../example-monorepo",
       "addedAt": "2026-05-10T15:31:56.664Z",
       "updatedAt": "2026-05-10T15:32:00.123Z",
       "label": "Main monorepo" }
@@ -277,7 +277,7 @@ Each entry is addressable as an [AIP-54](/docs/aip-54) ref —
 carries as its `ground`. The `path` is the host's private resolution
 of it. Per AIP-54 §Seams, an [AIP-34](/docs/aip-34) workspace id is
 `@<owner>/<slug>`, so a fully-qualified ground ref reads
-`ws://workspaces/@acme/agentik-studio`; a host whose registry predates
+`ws://workspaces/@acme/example-monorepo`; a host whose registry predates
 AIP-34 ids MAY key by bare slug until it adopts them.
 
 Ground resolution priority for any **root** spawn that omits an
@@ -314,7 +314,7 @@ MUST partition that state per workspace. The reference layout:
 ~/.agentproto/
 ├── workspaces.json              # the registry (§Workspaces)
 └── workspaces/                  # one bucket per workspace
-    ├── agentik-studio/
+    ├── example-monorepo/
     │   ├── sessions.json        # this workspace's registry snapshot
     │   └── sessions/            # this workspace's transcripts
     │       └── <sessionId>/…
@@ -1040,8 +1040,8 @@ what a parent needs to hand a child less ground than it holds.
 The `ground` also gives the session its node scope, defined by
 [AIP-34 §Node scope of a session](/docs/aip-34#node-scope-of-a-session):
 the nearest declared node whose folder contains the ground, a subtree
-body included (`ws://workspaces/@acme/agentik/simone/docs` is the
-subtree `simone/docs`, written with slashes as in AIP-54's
+body included (`ws://workspaces/@acme/agentik/nova/docs` is the
+subtree `nova/docs`, written with slashes as in AIP-54's
 `local-body`). This AIP adds the host's side of that rule:
 
 - The host derives the scope from `Session.ground` of the calling

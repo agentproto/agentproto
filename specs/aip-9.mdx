@@ -137,9 +137,9 @@ slug, also the body of its `operator:<slug>` compact ref), `entry` and
 role:
   ref: ws://roles/pm             # the AIP-47 ROLE
   bind:                          # one value per slot the role declares
-    board:         ws://collections/katchy-board
-    objective:     ws://collections/katchy-relaunch
-    product_tools: { kind: mcp, server: katchy }
+    board:         ws://collections/prism-board
+    objective:     ws://collections/prism-relaunch
+    product_tools: { kind: mcp, server: prism }
   with: { language: fr }         # rare scalars only
 ```
 
@@ -224,7 +224,7 @@ in the body, and override scalar fields.
 | 2 | IDENTITY ([AIP-23](/docs/aip-23)) | substance (the compression tier is a host token-budget choice, not a merge step) |
 | 3 | PERSONA ([AIP-25](/docs/aip-25)) | name, voice, persona boundaries |
 | 4 | ROLE ([AIP-47](/docs/aip-47), after its own `extends` chain) | mission and responsibilities rendered, the role body (append with a separator), the bodies of the role's `skills`, `knowledge.packs` mounted as the corpus floor, tools as intent |
-| 5 | slot bindings | a rendered bindings block ("your board: katchy", the project, the product tools) |
+| 5 | slot bindings | a rendered bindings block ("your board: prism", the project, the product tools) |
 | 6 | OPERATOR | its own body and its inline overrides, `delegates_to` |
 | 7 | host definition sections ([AIP-42](/docs/aip-42) rule 3) | the AGENTS.md prefix, house rules, the boundaries block |
 
@@ -486,7 +486,7 @@ An operator that declared an MCP server as a tool uses the form AIP-42 defines
 for `tools`; this AIP no longer restates it.
 
 `version` and `profile` were required by the earlier schema, and operator files
-in the field omit them (the `metadata.roleSlug` files of Guilde packs, for
+in the field omit them (the `metadata.roleSlug` files of one production host's packs, for
 instance). They are now optional, so those files validate.
 
 The earlier statement that an operator is "a dynamic agent" is withdrawn as a

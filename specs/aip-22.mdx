@@ -203,7 +203,7 @@ company root:
 divisions/research/OFFICE.md          # extends ../../<company-root>/OFFICE.md
 jurisdictions/us/OFFICE.md            # extends ../../<company-root>/OFFICE.md
 operators/eng-lead/OFFICE.md          # extends ../../<company-root>/OFFICE.md
-simone/OFFICE.md                      # extends ../OFFICE.md (a child node of a company tree)
+nova/OFFICE.md                      # extends ../OFFICE.md (a child node of a company tree)
 ```
 
 A view's `extends:` field points to a parent `OFFICE.md` (workspace
@@ -578,7 +578,7 @@ frontmatter field: the node views are ordinary view-mode manifests.
 - **A seat's containment `parent`.** It is either an item whose collection
   is allowed by `allowedParentKinds`, or an [AIP-54](/docs/aip-54)
   `workspace:` ref to a node of the same tree that carries a view (for
-  example `parent: workspace:@acme/simone`). The matrix names that second
+  example `parent: workspace:@acme/nova`). The matrix names that second
   case with the reserved parent kind `view`: `role: [team, department, view]`.
   `view` is not a collection and never appears in `allowedKinds`. A view
   parent counts as one level in `maxDepth`. A parent that is a node of
@@ -621,7 +621,7 @@ frontmatter field: the node views are ordinary view-mode manifests.
   not itself a seat and grants no node scope: the session it activates is
   scoped to N like any other.
 
-A company tree `@acme/acme` with one guild node `@acme/simone`:
+A company tree `@acme/acme` with one guild node `@acme/nova`:
 
 ```yaml
 # acme/OFFICE.md (workspace-root mode, the only one in the tree)
@@ -645,24 +645,24 @@ orgTree:
 ```
 
 ```yaml
-# acme/simone/OFFICE.md (view of the guild node)
+# acme/nova/OFFICE.md (view of the guild node)
 schema: office.workspace/v1
-name: acme-simone
-title: Acme, Simone guild
-description: The lens of the Simone guild on the Acme office.
+name: acme-nova
+title: Acme, Nova guild
+description: The lens of the Nova guild on the Acme office.
 version: 1.0.0
 extends: ../OFFICE.md
 ```
 
 ```yaml
-# acme/items/role/pm-simone.md (a seat attached to the guild view)
+# acme/items/role/pm-nova.md (a seat attached to the guild view)
 schema: collection.item/v1
 collection: role
-id: ROLE-pm-simone
-title: PM Simone
-parent: workspace:@acme/simone
+id: ROLE-pm-nova
+title: PM Nova
+parent: workspace:@acme/nova
 reportsTo: ROLE-coo
-holder: operator:pm-simone
+holder: operator:pm-nova
 ```
 
 ```yaml

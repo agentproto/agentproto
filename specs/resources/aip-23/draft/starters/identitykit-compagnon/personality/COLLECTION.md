@@ -8,8 +8,8 @@ description: |
   surface-observable layer of who the bearer is — how they show
   up in conversation, what they're known for. Ships in the
   identitykit-compagnon starter library; corresponds to the
-  `personality` layer in the Guilde reference implementation
-  (packages/guilde/src/domain/identity/layers.ts).
+  `personality` layer of a production operator-platform
+  implementation (private).
 version: 1.0.0
 fields:
   - name: traits
@@ -102,8 +102,8 @@ background. Personality is the layer the bearer's _peers_ would describe — sou
 is what _they_ would describe.
 
 This collection is part of the **identitykit-compagnon** starter library. It is
-a faithful translation of the Guilde reference implementation's `personality`
-layer (packages/guilde/src/domain/identity/layers.ts). Workspaces extending this
+a faithful translation of the `personality` layer of a production operator-platform
+implementation (private). Workspaces extending this
 collection MAY add Big-Five traits not in the canonical five (curiosity,
 assertiveness, agreeableness, extraversion, neuroticism), bandwidth indicators,
 or domain-specific style fields.
@@ -174,5 +174,5 @@ confidence: 1.0
 
 - [AIP-23 — agentidentity/v1 spec](/docs/aip-23)
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18)
-- The Guilde reference implementation's
-  [`personality` layer](https://github.com/agentik-net/agentik-studio/blob/main/packages/guilde/src/domain/identity/layers.ts)
+- The `personality` layer of a production operator-platform implementation
+  (private, not linked)

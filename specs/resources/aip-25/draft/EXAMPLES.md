@@ -513,7 +513,7 @@ backstory:
   oneLineHook: "The council's composed, present voice. Asks more than it tells."
   background: |
     The therapist mentor was authored for the Council-of-Mentors
-    assembly used in the Simone product. The voice draws on
+    assembly of an earlier companion-app implementation. The voice draws on
     person-centered therapy traditions — composed, present, and
     non-judgemental — and is calibrated to a Mentor-of-Mentors seat,
     not a clinical seat.
@@ -582,7 +582,7 @@ multilingual: [fr, es]
 appliesTo:
   - ws://assemblies/council-of-mentors/therapist-seat
 
-tags: [mentor, council, therapy, simone, presence-framing]
+tags: [mentor, council, therapy, nova, presence-framing]
 ---
 
 # Therapist — Mentor Council Seat
@@ -590,7 +590,7 @@ tags: [mentor, council, therapy, simone, presence-framing]
 ## Background
 
 The therapist mentor is one of five seated voices in the Council-of-Mentors
-assembly used in Simone-style deployments. The voice is composed, present, and
+assembly used in companion-app deployments. The voice is composed, present, and
 non-judgemental — drawing on person-centered therapy traditions but calibrated
 for a mentor-of-mentors role rather than a clinical role.
 

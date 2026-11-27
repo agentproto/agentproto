@@ -418,9 +418,9 @@ scope is defined here, once.
   a folder without one belongs to its nearest declared ancestor. The
   `ground` is an [AIP-54](/docs/aip-54) ref and MAY carry a subtree
   body, written with slashes as in `local-body`:
-  `ws://workspaces/@acme/agentik/simone/docs` is the subtree
-  `simone/docs` of workspace `@acme/agentik`. The node scope is the
-  nearest declared node containing that folder, which is `simone` if it
+  `ws://workspaces/@acme/agentik/nova/docs` is the subtree
+  `nova/docs` of workspace `@acme/agentik`. The node scope is the
+  nearest declared node containing that folder, which is `nova` if it
   declares a `WORKSPACE.md` and `@acme/agentik` otherwise. No other
   syntax names a subtree.
 - **The scope is read from the caller.** A host MUST derive it from the
@@ -462,15 +462,15 @@ boundary to a separate process or identity.
 A door exists only when BOTH sides declare it:
 
 ```yaml
-# consumer: agentik/chatcommerce/WORKSPACE.md
+# consumer: agentik/shopchat/WORKSPACE.md
 includes:
-  - { ref: "ws://workspaces/@jeremy/simone#docs/whatsapp-flows", mode: read }
+  - { ref: "ws://workspaces/@jeremy/nova#docs/whatsapp-flows", mode: read }
 ```
 
 ```yaml
-# provider: agentik/simone/WORKSPACE.md
+# provider: agentik/nova/WORKSPACE.md
 exports:
-  - { path: docs/whatsapp-flows, to: "@jeremy/chatcommerce", mode: read }
+  - { path: docs/whatsapp-flows, to: "@jeremy/shopchat", mode: read }
 ```
 
 Resolution rule: an `includes` entry is honoured iff some `exports`
@@ -515,11 +515,11 @@ matching `accepted_apps` entry.
 ```yaml
 # declaring node: agentik/seo-tooling/WORKSPACE.md
 apps:
-  - { id: "@agentik/seo-crew", version: "^0.1.0", attach: "@jeremy/chatcommerce" }
+  - { id: "@agentik/seo-crew", version: "^0.1.0", attach: "@jeremy/shopchat" }
 ```
 
 ```yaml
-# target: agentik/chatcommerce/WORKSPACE.md
+# target: agentik/shopchat/WORKSPACE.md
 accepted_apps:
   - { from: "@jeremy/seo-tooling", app: "@agentik/seo-crew" }
 ```
@@ -544,14 +544,14 @@ declaration exactly like includes/exports:
 secrets:
   - slug: stripe-api-key
     name: Stripe (Agentik account)
-    description: Payments. Never visible from Simone.
+    description: Payments. Never visible from Nova.
     access:
       bind:
-        - workspace: "@jeremy/chatcommerce"   # AIP-19 extension — see below
+        - workspace: "@jeremy/shopchat"   # AIP-19 extension — see below
 ```
 
 ```yaml
-# consumer: agentik/chatcommerce/WORKSPACE.md
+# consumer: agentik/shopchat/WORKSPACE.md
 uses_secrets:
   - { from: "@jeremy/agentik", slug: stripe-api-key, mode: bind }
 ```
@@ -623,8 +623,8 @@ types:
     parents: [company]
     default_wall: isolated
     starter:
-      agents: [{ template: "@pygmalion/staff/project-lead" }]
-      routines: [{ template: "@pygmalion/staff/heartbeat-26h" }]
+      agents: [{ template: "@muse/staff/project-lead" }]
+      routines: [{ template: "@muse/staff/heartbeat-26h" }]
   initiative:
     parents: [perso, company, project]
     default_wall: isolated
@@ -687,7 +687,7 @@ types:
     parents: [company]
     default_wall: isolated
     starter:
-      agents: [{ template: "@pygmalion/staff/project-lead" }]
+      agents: [{ template: "@muse/staff/project-lead" }]
   guild:
     extends: project          # inherits parents, default_wall, starter
 ---
@@ -901,10 +901,10 @@ apps:
     version: 0.1.0
     source: "file:/path/to/seo-crew"
     sha256: "…"
-    attach: "@jeremy/chatcommerce"
-    dataDir: agentik/chatcommerce/.apps/seo-crew
+    attach: "@jeremy/shopchat"
+    dataDir: agentik/shopchat/.apps/seo-crew
 packs:
-  - name: "@pygmalion/staff"
+  - name: "@muse/staff"
     version: 0.1.0
     digest: "review.pack-digest/v1:…"
     attach: "@jeremy/root"
@@ -971,17 +971,17 @@ tree root before reading, writing, or reporting its contents.
 ```md
 ---
 schema: workspace/v2
-id: "@jeremy/simone"
+id: "@jeremy/nova"
 version: 1.0.0
-name: Simone
+name: Nova
 type: project
 status: active
 owner: { type: org, id: agentik, slug: jeremy }
 storage:
-  inline: { provider: local-fs, config: { mount_path: /Users/jeremy/agentproto/agentik/simone } }
+  inline: { provider: local-fs, config: { mount_path: /Users/jeremy/agentproto/agentik/nova } }
 code:
   inline:
-    path: /path/to/monorepo/projects/simone
+    path: /path/to/monorepo/projects/nova
 work:
   file: WORK.md
 presence:
@@ -995,7 +995,7 @@ policy:
 
 ## Description
 
-Simone's project node. Code lives in the monorepo; this manifest is
+Nova's project node. Code lives in the monorepo; this manifest is
 the organigramme entry, not a second copy of the repo.
 ```
 

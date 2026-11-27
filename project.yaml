@@ -18,7 +18,6 @@ gcp:
   region: europe-west1
   runtime_sa: agentproto-site
   # deployer omitted → falls back to the global shared deployer
-  # (dev-infra-global@agentik-studio.iam.gserviceaccount.com)
 
 github:
   repo: agentproto/site

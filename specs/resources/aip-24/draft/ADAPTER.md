@@ -290,7 +290,7 @@ The lock-check is AIP-24's distinctive safety substrate. It runs at
 **persistence time** for every candidate artifact. The algorithm depends on
 `matchMode`:
 
-### `substring` (default, matches Simone v1)
+### `substring` (default, matches the first implementation)
 
 ```
 for trait in lockedTraits:

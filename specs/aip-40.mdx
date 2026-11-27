@@ -118,7 +118,7 @@ requires: [13, 54]
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `schema` | string | yes | Literal `agentproto/extension/v1`. |
-| `slug` | string | yes | `<namespace>:<name>` — e.g. `acme:deal`, `katchy:campaign`. Lowercase, digits, single colon, dashes. Pattern: `^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*[a-z0-9]$`. |
+| `slug` | string | yes | `<namespace>:<name>` — e.g. `acme:deal`, `prism:campaign`. Lowercase, digits, single colon, dashes. Pattern: `^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*[a-z0-9]$`. |
 | `title` | string | yes | Human-readable display name. 1–80 chars. |
 | `description` | string | yes | One paragraph describing the extension's purpose. 1–2000 chars. |
 | `version` | string | yes | Extension's own semver. Bump on breaking change. |

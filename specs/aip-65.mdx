@@ -61,7 +61,7 @@ codebase, with no shared contract:
 | A push-gate range router (downstream, `scripts/review/router.mjs`) | skip / standard / deep per git range from path globs and a signal score; a Jev shadow on metadata only behind `GATE_JEV=on` | router shipped; Jev shadow built, never run |
 | A `ProbabilisticOracle` (downstream, graph-orm memory) | `classify`, `rate`, `evaluate`; implementations `jev`, `llm`, `embed` (`head` declared, not implemented). Its LLM implementation asks the model to write its own probabilities, the practice §2 forbids. | shipped |
 | Daemon `packages/runtime/src/jev-client.ts`, a forge adapter | copies of the same Jev `choice` contract | shipped |
-| A messaging triage (downstream, Pygmalion `inbound/triage.ts`) | "link to an existing thread or open a new one" via a light LLM, a deterministic override that always wins, and a quarantined projection of the message | shipped |
+| A messaging triage (downstream, a private host's `inbound/triage.ts`) | "link to an existing thread or open a new one" via a light LLM, a deterministic override that always wins, and a quarantined projection of the message | shipped |
 
 They converged on the same ideas (typed questions, probabilities, a
 threshold, a cheaper rung first, fail closed on outage) and diverged on

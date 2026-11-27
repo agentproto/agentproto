@@ -38,23 +38,23 @@ metadata:
 ---
 ```
 
-## Server example — Guilde operator (IDE distribution)
+## Server example — Atrium operator (IDE distribution)
 
-`guilde-acp/ACP.md` declares a Guilde-side ACP **server** that wraps
-an AIP-9 operator. A user configures `guilde-acp` as their ACP agent
-in Zed/VSCode, and the editor talks to a Guilde operator transparently.
+`atrium-acp/ACP.md` declares a Atrium-side ACP **server** that wraps
+an AIP-9 operator. A user configures `atrium-acp` as their ACP agent
+in Zed/VSCode, and the editor talks to a Atrium operator transparently.
 
 ```yaml
 ---
-name: guilde-acp
-id: guilde-acp
-description: Guilde operator exposed as an ACP server for IDE clients. Wraps a running AIP-9 operator (selected at boot from the user's guild), bridges ACP turns to operator lifecycle, mirrors tool calls into the operator's AIP-7 audit log.
+name: atrium-acp
+id: atrium-acp
+description: Atrium operator exposed as an ACP server for IDE clients. Wraps a running AIP-9 operator (selected at boot from the user's guild), bridges ACP turns to operator lifecycle, mirrors tool calls into the operator's AIP-7 audit log.
 version: 0.1.0
 kind: server
 transport:
   - stdio
   - websocket
-tags: [guilde, agentproto, acp, ide]
+tags: [atrium, agentproto, acp, ide]
 metadata:
   aip44:
     acp_rev: "abc1234"

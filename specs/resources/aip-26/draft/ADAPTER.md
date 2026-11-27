@@ -244,10 +244,10 @@ cold-start a sandbox for a bundle that fails materialization.
 
 ## Reference implementation pointers
 
-For Guilde's host implementation:
+For one production host implementation:
 
 - Mirror + recursive walk:
-  `apps/guilde/api/src/services/workspace-tools/mirror.ts`
+  the workspace-tools `mirror.ts` module
 - Tarball production: `tarballMirror()` in the same file (shells out to system
   `tar`)
 - Github fetch + cache: TODO (Phase 3 — uses the existing oauth GitHub

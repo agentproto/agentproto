@@ -605,15 +605,15 @@ setup:
     options:
       - { value: none, label: "None", description: "Everything stays on this machine." }
       - { value: e2b, label: "E2B", description: "Bring your own E2B account." }
-      - { value: pygmalion-cloud, label: "PygmalionCloud", description: "Managed cloud computer." }
-    default: pygmalion-cloud
+      - { value: muse-cloud, label: "MuseCloud", description: "Managed cloud computer." }
+    default: muse-cloud
     persist: { answer: cloud.provider }
   - id: e2b-api-key
     kind: prompt
     type: secret
     prompt: "E2B API key"
     when: { step: cloud-computer, equals: e2b }
-    persist: { secret_slug: pygmalion/e2b-api-key }
+    persist: { secret_slug: muse/e2b-api-key }
 ```
 
 #### Step kinds
@@ -999,9 +999,9 @@ so the key is not the raw id. It is `app.<a>.<s>.<h>`:
 
 The result always matches `^[a-z0-9][a-z0-9._-]{0,62}$`, the narrowest
 key alphabet of the reference provisioner, and `<h>` keeps apart two
-apps whose ids reduce to the same `<a>`. For `@agentik/pygmalion` and
+apps whose ids reduce to the same `<a>`. For `@agentik/muse` and
 `telegram-miniapp` the key is
-`app.agentik-pygmalion.telegram-miniapp.f29069fe`. A host MUST derive the key exactly this way,
+`app.agentik-muse.telegram-miniapp.00d726eb`. A host MUST derive the key exactly this way,
 so that another host of the same user finds the same tunnel.
 
 `auth: service` is for a service that has its own authentication on

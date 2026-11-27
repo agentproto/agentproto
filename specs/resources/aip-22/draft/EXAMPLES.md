@@ -692,7 +692,7 @@ operator defined in the founder's own tree.
 acme/                      WORKSPACE.md (tree root, type company)
 ├── OFFICE.md              the only workspace-root office
 ├── items/role/*.md        the seats
-└── simone/                WORKSPACE.md (node @acme/simone, type guild)
+└── nova/                WORKSPACE.md (node @acme/nova, type guild)
     └── OFFICE.md          view: extends ../OFFICE.md
 ```
 
@@ -730,33 +730,33 @@ orgTree:
 ---
 ```
 
-`acme/simone/OFFICE.md` (a view: it holds no items, it rebinds nothing here
+`acme/nova/OFFICE.md` (a view: it holds no items, it rebinds nothing here
 and takes the root's `executor`):
 
 ```yaml
 ---
 schema: office.workspace/v1
-name: acme-simone
-title: Acme, Simone guild
-description: The lens of the Simone guild on the Acme office.
+name: acme-nova
+title: Acme, Nova guild
+description: The lens of the Nova guild on the Acme office.
 version: 1.0.0
 
 extends: ../OFFICE.md
 ---
 ```
 
-`acme/items/role/pm-simone.md` (attached to the Simone view, reports to the
+`acme/items/role/pm-nova.md` (attached to the Nova view, reports to the
 coo seat at the root, so the report is intra-office):
 
 ```yaml
 ---
 schema: collection.item/v1
 collection: role
-id: ROLE-pm-simone
-title: PM Simone
-parent: workspace:@acme/simone
+id: ROLE-pm-nova
+title: PM Nova
+parent: workspace:@acme/nova
 reportsTo: ROLE-coo
-holder: operator:pm-simone
+holder: operator:pm-nova
 ---
 ```
 
@@ -773,8 +773,8 @@ holder: operator:chief-of-staff@jeremy/root
 ---
 ```
 
-**Result.** A session started through `ROLE-pm-simone` is scoped to
-`@acme/simone`; one started through `ROLE-chief-of-staff` is scoped to the company
+**Result.** A session started through `ROLE-pm-nova` is scoped to
+`@acme/nova`; one started through `ROLE-chief-of-staff` is scoped to the company
 node, under that node's policy chain. Neither seat opens the founder's tree to the
 office or the office to the founder's tree. A seat with
 `parent: workspace:@other/guild` fails with `office_seat_parent_outside`, and a

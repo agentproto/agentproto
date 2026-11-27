@@ -87,7 +87,7 @@ contents or the complete new ones — never a partial file. `.json` paths
 are pretty-printed on write and parsed on read (raw text fallback when
 the bytes do not parse).
 
-## 5. Setup steps: Pygmalion as the reference app
+## 5. Setup steps: an example app (Muse)
 
 An app that needs a model login, a Telegram bot paired to the user, and a
 choice of cloud computer. Order matters: the choice comes first so later
@@ -97,26 +97,26 @@ so the app is `ready` without them.
 ```md
 ---
 schema: app/v1
-id: '@pygmalion/app'
-name: Pygmalion
+id: '@muse/app'
+name: Muse
 version: 0.4.0
 agents: []
 ui:
   path: .agentproto/ui/index.html
-  title: Pygmalion
+  title: Muse
   tools: []
 setup:
   - id: auth-profile
     kind: auth-profile
     title: A model subscription
-    description: Pygmalion bills its own work against one login profile.
+    description: Muse bills its own work against one login profile.
     min: 1
   - id: telegram-bot-token
     kind: prompt
     type: secret
     optional: true
     prompt: Telegram bot token (create one with @BotFather)
-    persist: { secret_slug: pygmalion/telegram-bot-token }
+    persist: { secret_slug: muse/telegram-bot-token }
   - id: telegram-pairing
     kind: pairing
     channel: telegram
@@ -130,19 +130,19 @@ setup:
     options:
       - { value: none, label: None, description: Everything runs on this machine. }
       - { value: e2b, label: E2B, description: Use your own E2B account. }
-      - { value: pygmalion-cloud, label: PygmalionCloud, description: Managed cloud computer. }
-    default: pygmalion-cloud
+      - { value: muse-cloud, label: MuseCloud, description: Managed cloud computer. }
+    default: muse-cloud
     persist: { answer: cloud.provider }
   - id: e2b-api-key
     kind: prompt
     type: secret
     prompt: E2B API key
     when: { step: cloud-computer, equals: e2b }
-    persist: { secret_slug: pygmalion/e2b-api-key }
-  - id: pygmalion-cloud-login
+    persist: { secret_slug: muse/e2b-api-key }
+  - id: muse-cloud-login
     kind: oauth
-    secret_slug: pygmalion/cloud-token
-    when: { step: cloud-computer, equals: pygmalion-cloud }
+    secret_slug: muse/cloud-token
+    when: { step: cloud-computer, equals: muse-cloud }
   - id: bot-ready
     kind: check
     severity: warn
@@ -151,27 +151,27 @@ setup:
       tool: { id: telegram_bot_token_status, expect: { configured: true } }
 ---
 
-Pygmalion's configuration surface.
+Muse's configuration surface.
 ```
 
 What a conforming host does:
 
-- `agentproto app install @pygmalion/app` records the install, then
+- `agentproto app install @muse/app` records the install, then
   reports `setupState: "required"` with `auth-profile` and `cloud-computer`
   pending (the two Telegram steps are `optional`; `e2b-api-key` /
-  `pygmalion-cloud-login` are not applicable until `cloud-computer` is
+  `muse-cloud-login` are not applicable until `cloud-computer` is
   answered). `app_run` is refused with `setup_required` until those two
   are complete.
 - Interactively, the host walks the steps in order. With `--yes`, it
-  answers `cloud-computer` with its `default` (`pygmalion-cloud`), cannot
+  answers `cloud-computer` with its `default` (`muse-cloud`), cannot
   answer the `auth-profile` or `oauth` steps without a human, and stops
   with `setup_required` and the pending list. It never hangs.
 - No `cmd` step is present, so no `--allow-setup-cmd` consent is needed.
-- Choosing `e2b` instead makes `pygmalion-cloud-login` `not-applicable`
+- Choosing `e2b` instead makes `muse-cloud-login` `not-applicable`
   and `e2b-api-key` pending. The answer is recorded as
   `answers.cloud.provider = "e2b"`; the key lands in the secret slot and
   never in the ledger.
-- `agentproto app setup @pygmalion/app --only cloud-computer --force`
+- `agentproto app setup @muse/app --only cloud-computer --force`
   changes the choice later; steps depending on it are re-evaluated.
 - Releasing 0.5.0 with one new step re-asks only that step (its
   fingerprint is new); every step the user already completed stays done.

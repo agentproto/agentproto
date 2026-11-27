@@ -30,7 +30,7 @@ inputs:
     required: true
     description:
       One sentence describing what the user wants the manifest to capture (e.g.
-      "a 5-mentor council for a Simone-shaped agent", "a small voting board for
+      "a 5-mentor council for a Nova-shaped agent", "a small voting board for
       executive proposals", "a creative-critique peer panel", "an engineering
       review hierarchy", "a stricter per-operator view extending the org
       council"). The skill picks workspace-root vs view based on this and on
@@ -68,13 +68,13 @@ inputs:
 examples:
   - input:
       intent:
-        A 5-mentor council in advisory mode for a Simone-shaped agent —
+        A 5-mentor council in advisory mode for a Nova-shaped agent —
         therapist, stoic, elder, critic, sentinel — with the
-        SIMONE_LOCKED_TRAITS floor and Simone's four synthesis rules.
-      workspaceDir: /repo/assemblies/simone-council
+        NOVA_LOCKED_TRAITS floor and Nova's four synthesis rules.
+      workspaceDir: /repo/assemblies/nova-council
       mode: advisory
     output:
-      - /repo/assemblies/simone-council/ASSEMBLY.md (created, workspace root,
+      - /repo/assemblies/nova-council/ASSEMBLY.md (created, workspace root,
         mode=advisory)
   - input:
       intent:
@@ -359,7 +359,7 @@ matchMode: substring # default; rarely changed
 ```
 
 For a workspace-root, pick traits that, if eroded, would make the underlying
-agent a different agent rather than a slightly-tuned one. Simone's six
+agent a different agent rather than a slightly-tuned one. The working Council's six
 (`warmth`, `honest`, `voice register`, `refuse harm`, `kindness`,
 `core persona`) are a reasonable starter for an advisory council on a
 companion-shaped agent.
@@ -404,12 +404,12 @@ executor: ws://operators/<slug> # AIP-9
 ```
 
 `executor` is the runtime that executes the assembly. For single-agent shaped
-assemblies (Simone Council), it's the agent's own operator. For org-shaped
+assemblies (Nova Council), it's the agent's own operator. For org-shaped
 assemblies (voting board, hierarchy), it's typically a clerk operator.
 
 `identity` is the base identity the assembly modulates (advisory) or attributes
-to (voting / peer / hierarchy). For a Simone-shaped council, it's
-`ws://identities/simone`.
+to (voting / peer / hierarchy). For a Nova-shaped council, it's
+`ws://identities/nova`.
 
 `governance` and `work` are optional but conventional. Bind to a governance
 policy when signing or approval gates apply; bind to a work workspace when the
@@ -435,7 +435,7 @@ Pick `defaultGrouping` by what makes sense for the mode:
 
 For `defaults.triggerHeuristic`, pick by mode:
 
-- `every-n-messages` — advisory (Simone Council on conversation flow)
+- `every-n-messages` — advisory (Nova Council on conversation flow)
 - `manual` — voting (proposals submitted explicitly)
 - `on-mode-change` — peer (kicks in when a campaign state changes)
 - `manual` — hierarchy (review cycles)

@@ -34,8 +34,8 @@ doctype — `assembly.workspace/v1`, written as `ASSEMBLY.md` — for
 **multi-agent collectives**. An assembly is a named group of agent
 roles that operate together under one of four collaboration
 patterns: **advisory** (silent overlay producing persona
-fragments — the implemented anchor, exemplified by Simone's
-Council of Mentors), **voting** (quorum decision body where
+fragments — the implemented anchor, exemplified by a companion
+app's Council of Mentors), **voting** (quorum decision body where
 members cast votes on proposals), **peer** (network of equals
 exchanging messages on a topology), and **hierarchy** (reporting
 tree where outputs cascade bottom-up). The `mode:` field selects
@@ -60,9 +60,9 @@ the assembly with role-specific configuration layered on top.
 ## Motivation
 
 Multi-agent collectives are showing up across the agentproto
-family — Simone's Council of Mentors quietly modulates Simone's
-persona to defend against drift; a future Guilde might run a small
-voting board to approve high-cost actions; a Katchy creative
+family — a companion app's Council of Mentors quietly modulates the
+app's persona to defend against drift; an operator platform might run a small
+voting board to approve high-cost actions; a creative-tool
 workflow might use a peer-network of style critics to debate a
 campaign before publish; an org-tree workflow under
 [AIP-22](/docs/aip-22) might run a reporting-tree assembly where
@@ -93,7 +93,7 @@ collapsed item-schema variants under `collection.schema/v1`.
 The **persona vs mentor** distinction matters. A persona
 ([AIP-25](/docs/aip-25)) is a reusable agent definition — system
 prompt, voice register, personality fragments, evidence-gathering
-defaults. A mentor in Simone's Council is a *persona in a role*:
+defaults. A mentor in that Council is a *persona in a role*:
 the Therapist mentor IS a persona authored once, the Sentinel
 mentor IS a persona authored once, and the Council manifest binds
 each persona to a phase, a gather strategy, and a synthesis weight.
@@ -106,8 +106,8 @@ anti-pattern — duplicates content that belongs in
 assemblies, and forces the assembly schema to absorb the entire
 persona shape. Membership is BY REFERENCE.
 
-Anti-poisoning is **first-class**. Simone's working Council ships a
-`SIMONE_LOCKED_TRAITS` constant (`warmth`, `honest`, `voice
+Anti-poisoning is **first-class**. The working Council ships a
+locked-traits constant (`warmth`, `honest`, `voice
 register`, `refuse harm`, `kindness`, `core persona`) — a list of
 substrings that overlay fragments are checked against at write
 time, and any fragment matching a lock is dropped silently with a
@@ -218,7 +218,7 @@ lockedTraits:                                # array; merged with parent (UNION,
   - warmth
   - honesty
   - <custom>
-matchMode: substring | regex | semantic      # default substring (matches Simone v1)
+matchMode: substring | regex | semantic      # default substring (matches the first implementation)
 
 # Persistence policy (audit)
 audit:
@@ -280,7 +280,7 @@ synthesis rules in declaration order, lock-checks the resulting
 fragments against `lockedTraits`, and writes the surviving
 fragments as overlay records with TTL. The agent's persona builder
 weaves the active overlays into its instructions transparently; the
-member outputs themselves never reach the user. Simone's Council is
+member outputs themselves never reach the user. The companion app's Council is
 the canonical realisation. Synthesis rules typical of advisory
 mode: `terminal` (the Sentinel always wins), `priority` (the Critic
 forces sycophancy through), `aggregate` (modest moderation for the
@@ -339,7 +339,7 @@ members.
 
 | Kind | Mode affinity | Semantics |
 |---|---|---|
-| `terminal` | advisory, voting | If the matched member's output crosses a threshold (`params.triggerSeverity` for advisory, `params.triggerVote` for voting), short-circuit: emit only this member's contribution, mark `terminal: true`, skip remaining rules. The Simone Sentinel rule is the canonical realisation. |
+| `terminal` | advisory, voting | If the matched member's output crosses a threshold (`params.triggerSeverity` for advisory, `params.triggerVote` for voting), short-circuit: emit only this member's contribution, mark `terminal: true`, skip remaining rules. The working Council's Sentinel rule is the canonical realisation. |
 | `priority` | advisory | Force the matched member's suggestion through as a high-priority overlay fragment whenever a kind-specific predicate fires (`params.triggerKind: sycophancy` matches when the member's concern mentions "sycoph", "pleas", "agree", "validat"). |
 | `aggregate` | advisory, peer | Collect outputs from `appliesTo` members; emit them as overlay fragments (advisory) or as a message-log entry (peer). Sort by severity desc, evidence count desc, take top N (`params.topN`). |
 | `quorum` | voting | Tally votes from `appliesTo` members weighted by `weight:`; if the sum of `yes` weights divided by the sum of all weights ≥ `params.threshold`, the proposal passes. |
@@ -440,7 +440,7 @@ and why. Violations surface as `assembly_overlay_lock_violation`
 
 `matchMode` selects the algorithm:
 - `substring` — case-insensitive substring match. Cheap, robust,
-  matches Simone v1.
+  matches the first implementation.
 - `regex` — RFC 3987-ish regex, anchored or not per the rule.
   Useful when the trait is a phrase ("voice register") whose
   variants must all be caught.
@@ -486,7 +486,7 @@ descendants MUST NOT downgrade — violations refuse with
 The runtime tables (the consultations table, the overlay
 fragments table, the decisions table, the message log table) are
 host-side data, not spec-level doctypes. AIP-24 declares the
-*policy* for those tables; the *shape* is a host concern. (Simone's
+*policy* for those tables; the *shape* is a host concern. (The
 working implementation persists `council_consultations` and
 `persona_overlays` tables; AIP-24 does NOT prescribe those names.)
 
@@ -715,15 +715,15 @@ audit harder — a persona-level threat (drift, poisoning) needs a
 persona-level audit trail, which only works if the persona is its
 own authored artifact. The `members[].persona` ref is the bridge.
 
-**Why advisory mode is the implemented anchor.** Simone's Council
+**Why advisory mode is the implemented anchor.** The companion app's Council
 of Mentors is the realised advisory implementation: five mentors
 (Therapist, Stoic, Elder, Critic, Sentinel), three phases (session
 / standing / sentinel), four synthesis rules (sentinel-wins,
 critic-sycophancy-forced, severity-eight-unilateral,
 moderate-aggregation), six locked traits (warmth, honest, voice
 register, refuse harm, kindness, core persona). The codified
-behavior in `packages/agent-framework/src/council/` and
-`packages/simone/src/council/` is the spec's truth. Voting, peer,
+behavior in framework and app `council/` modules of that private
+implementation is the spec's truth. Voting, peer,
 and hierarchy modes are NEW under this AIP — they are designed by
 analogy to the advisory pattern (the synthesis rule shape, the
 lock-check, the audit pipeline are the same), but they are not yet
@@ -732,7 +732,7 @@ implementations SHOULD ship advisory first, then layer voting /
 peer / hierarchy on the same substrate.
 
 **Why audit is mandatory.** Multi-agent collectives are by their
-nature opaque. A user interacting with Simone does not see the
+nature opaque. A user interacting with the companion app does not see the
 Council deliberating; a board member voting on a proposal sees
 their own vote, not the others'; a peer in a network sees only
 the messages addressed to them. Without audit, a third party
@@ -755,7 +755,7 @@ different domain-specific defaults — an advisory council's mentors
 are nothing like a voting board's voters, are nothing like a peer
 critique's peers, are nothing like a hierarchy's reporting tree.
 Shipping a starter for any one mode would either (a) bake in
-domain-specific assumptions (Simone-flavored mentors as the
+domain-specific assumptions (companion-app mentors as the
 "default" council) that don't generalise, or (b) ship four
 parallel starters that authors would still have to fork. The
 example assemblies in
@@ -778,9 +778,9 @@ implementation should mirror:
   application algorithm), `persona-overlay.ts` (the lock-check
   implementation and overlay eviction planner), `triggers.ts` (the
   trigger heuristics).
-- Simone's `council/` module:
-  Simone's app-specific realisation: five mentors, four synthesis
-  rules, the `SIMONE_LOCKED_TRAITS` constant, the
+- the companion app's `council/` module:
+  its app-specific realisation: five mentors, four synthesis
+  rules, the locked-traits constant, the
   sentinel-prefilter for early-exit on safety patterns. The
   database schema (`council_consultations`, `persona_overlays`)
   in `council/schema.ts` is the
@@ -793,14 +793,14 @@ Draft → Review.
 
 ## Backwards Compatibility
 
-n/a — AIP-24 is a new spec. The Simone Council was implemented
+n/a — AIP-24 is a new spec. The companion app's Council was implemented
 ahead of any AIP and will be retro-fitted to `agentassembly/v1`
 once the spec reaches Final. The migration path is mechanically
-trivial: the existing `SimoneCouncilConfig` becomes an
+trivial: the existing council config object becomes an
 `ASSEMBLY.md` workspace-root manifest with `mode: advisory`, the
 five `createXxxMentor` calls become five `members[].persona` refs
-to AIP-25 personas, the `simoneSynthesisRules` array becomes the
-manifest's `synthesis.rules` entries, the `SIMONE_LOCKED_TRAITS`
+to AIP-25 personas, the synthesis-rules array becomes the
+manifest's `synthesis.rules` entries, the locked-traits
 constant becomes the manifest's `lockedTraits` array. The
 `council_consultations` and `persona_overlays` tables remain
 host-side runtime data unchanged.

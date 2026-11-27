@@ -148,5 +148,4 @@ questions that get asked in reviews, the mental models the team adopts.
 
 - [AIP-23 — agentidentity/v1 spec](/docs/aip-23)
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18)
-- The reference implementation's
-  [`mind` preset](https://github.com/agentik-net/agentik-studio/blob/main/packages/core/src/domain/identity/presets/mind.ts)
+- The `mind` preset of the private reference implementation (not linked)

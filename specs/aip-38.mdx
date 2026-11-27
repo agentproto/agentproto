@@ -490,12 +490,12 @@ daemon built-in tool uses the server `agentproto`. `tool:invoke`
 defines no typed scope form (rule 3): its scopes are plain names,
 matched by rules 1, 2 and 5 only.
 
-- **Exact name.** `pygmalion/cron_create` matches that one tool and no
+- **Exact name.** `muse/cron_create` matches that one tool and no
   other. The comparison is on the whole string and is case-sensitive.
 - **A whole server, or a family of names.** Rule 2 already gives these
   forms, so there is no new syntax: `agentproto/*` matches every tool
-  of the server `agentproto`, and `pygmalion/cron_*` matches every tool
-  of `pygmalion` whose name begins with `cron_`. A server name cannot
+  of the server `agentproto`, and `muse/cron_*` matches every tool
+  of `muse` whose name begins with `cron_`. A server name cannot
   contain `/`, so `<server>/*` never reaches another server. A scope
   such as `agentproto*` is a valid rule 2 prefix but also reaches a
   server named `agentproto-extra`, so authors SHOULD write
@@ -517,20 +517,20 @@ matched by rules 1, 2 and 5 only.
 
 ```yaml
 grants:
-  - principal: "operator://pm-katchy"
+  - principal: "operator://pm-prism"
     effect: deny
     actions:
-      - { action: "tool:invoke", scope: "pygmalion/cron_create" }
-      - { action: "tool:invoke", scope: "pygmalion/cron_*" }
-  - principal: "operator://pm-katchy"
+      - { action: "tool:invoke", scope: "muse/cron_create" }
+      - { action: "tool:invoke", scope: "muse/cron_*" }
+  - principal: "operator://pm-prism"
     actions:
-      - { action: "tool:invoke", scope: "katchy/*" }
+      - { action: "tool:invoke", scope: "prism/*" }
 ```
 
 The deny wins over any allow (§Explicit deny), including an allow that
 another composed policy grants on `tool:invoke` with a wider scope. An
 [AIP-42](/docs/aip-42) `tools` entry with `deny: [cron_create]` on the
-server `pygmalion` is the AGENT-level projection of the first scope
+server `muse` is the AGENT-level projection of the first scope
 above.
 
 ### Delegation ceiling (added 2026-10-23)
