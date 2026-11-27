@@ -5,7 +5,7 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-11-08
+updated: 2026-11-27
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42, 73]
 resources: ./resources/aip-53/draft
@@ -281,8 +281,22 @@ interface AppUiDefinition {
     connectDomains?:  string[]
     resourceDomains?: string[]
   }
+  install?:      AppUiInstall                // how the UI installs as a web app, see "Installable UI"
 }
-```
+
+interface AppUiInstall {
+  shortName?:       string                    // 1..12 characters, label under an icon
+  themeColor?:      string                    // #rgb or #rrggbb
+  backgroundColor?: string                    // #rgb or #rrggbb, the splash colour
+  display?:         "standalone" | "minimal-ui" | "browser"   // default "standalone"
+  icons?:           AppUiInstallIcon[]        // 1..8 entries
+}
+
+interface AppUiInstallIcon {
+  path:     string                            // relative to the app dir, png | svg | webp
+  sizes?:   string                            // "192x192", "512x512", or "any" (svg)
+  purpose?: "any" | "maskable" | "monochrome" // default "any"
+}
 
 `agents` MUST be a non-empty array UNLESS `ui` is present, in which case
 it MAY be empty or omitted entirely — a **UI-only app** ships a `ui`
@@ -444,6 +458,21 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     [Session boundaries](#session-boundaries-boundaries), including its
     gaps between the schema and the reference loader).
 
+14. **`ui.install` is closed and its icons stay inside the app.** When
+    `ui.install` is present it MUST be an object with no key besides
+    `shortName`, `themeColor`, `backgroundColor`, `display` and `icons`.
+    `shortName`, when set, MUST be 1 to 12 characters; `themeColor` and
+    `backgroundColor` MUST each match `^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`;
+    `display` MUST be `standalone`, `minimal-ui` or `browser`; `icons`
+    MUST hold 1 to 8 entries, each with no key besides `path`, `sizes`
+    and `purpose`. An icon `path` MUST be relative, MUST NOT contain a
+    `..` segment and MUST end in `.png`, `.svg` or `.webp`; `sizes`, when
+    set, MUST be `any` or a space-separated list of `<w>x<h>` pairs;
+    `purpose` MUST be `any`, `maskable` or `monochrome`. `defineApp` and
+    the loader MUST refuse a definition that violates any of these. That
+    the file exists and is an image is the host's check, made when it
+    serves the icon (see [Installable UI](#installable-ui)).
+
 ### Emitted layout
 
 `emit(dir)` (equivalently, a conforming host's install/write path) MUST
@@ -497,6 +526,7 @@ ui:                                 # only when `ui` is set
   tools: [tool_id, ...]
   port: 4173
   csp: { connectDomains: [...], resourceDomains: [...] }
+  install: { shortName: "…", themeColor: "#…", backgroundColor: "#…", display: standalone, icons: [{ path: "…", sizes: "…" }] }   # only when `ui.install` is set
 artifact: { path: .agentproto/artifact/index.html, title: "…", description: "…" }
 skill: { path: .agentproto/skill, title: "…", description: "…" }
 artifacts: [{ type: "…", description: "…" }]
@@ -1838,6 +1868,54 @@ A UI surface is a static file tree rooted at `.agentproto/ui/`, with
    emitted `.agentproto/ui/` — see
    [The `ui/` source-project convention](#the-ui-source-project-convention).
 
+### Installable UI
+
+A host that serves a UI surface over HTTP MUST also serve it as an
+installable web app, so a browser can offer to install it (Chrome
+"Install", Safari "Add to Dock"). The app's author writes no manifest
+file: the host derives it from `APP.md`. `ui.install` only refines the
+result and is OPTIONAL; an app without it is installable too.
+
+1. **One manifest per app.** The host MUST serve a
+   [Web Application Manifest](https://www.w3.org/TR/appmanifest/) for each
+   app with a `ui`, as `application/manifest+json`, at a URL that sits
+   beside the UI's own (the reference host: `/apps/<id>/manifest.webmanifest`
+   next to `/apps/<id>/ui`). It MUST NOT require credentials the page itself
+   does not require, since a browser fetches it without them.
+2. **Derived members.** `name` is the `APP.md` `name`, falling back to
+   `ui.title`, then to the app `id`. `short_name` is `ui.install.shortName`,
+   falling back to `name` cut to 12 characters. `id`, `start_url` and
+   `scope` MUST be URLs relative to the manifest that resolve to the UI
+   document and the directory that holds it, so the installed app follows
+   the host's origin and path, whatever port or tunnel the host runs on.
+   `display` is `ui.install.display`, default `standalone`. `theme_color`
+   and `background_color` are the `ui.install` colours; absent, the host
+   picks a colour of its own and does not leave the member out.
+3. **Icons.** `icons` lists `ui.install.icons`, each served by the host at a
+   URL of its own. A host MUST serve an icon only from inside the app
+   directory, MUST check by content that it is an image (never by extension
+   alone), and MUST refuse it otherwise. With no usable icon declared, the
+   host MAY use a store listing icon of its own catalog, and MUST otherwise
+   generate one (the app's initials on the theme colour), so that every
+   app has at least one icon. An app that wants the best result on Apple
+   platforms declares a PNG of at least 180x180: Safari ignores SVG for
+   the home screen and Dock icon.
+4. **Injection.** When it serves the UI document, the host MUST add
+   `<link rel="manifest">`, `<meta name="theme-color">` and
+   `<link rel="apple-touch-icon">` to its `<head>`, and
+   `<meta name="apple-mobile-web-app-title">`, unless the document already
+   declares a manifest link, in which case it adds none of the four and
+   still serves its own manifest. Every URL it writes is relative to
+   the UI document, as rule 2 of [Static layout](#static-layout) requires
+   of the app.
+5. **Nothing native.** Installing grants the page nothing a tab does not
+   have. The manifest carries no member that widens the UI's tools
+   allowlist or its CSP; those stay the ones the `ui` block declares.
+
+The installed window is the same page in a standalone window. It needs the
+host to be running, which is why `start_url` points at the host and not at a
+copy of the files.
+
 ### The `window.McpApp` bridge
 
 A conforming host that renders a UI surface — embedding it in a panel,
@@ -2247,6 +2325,14 @@ to protect.
 
 ## Backward compatibility
 
+**`ui.install` amendment (2026-11-27).** Purely additive: `ui.install` is
+a new OPTIONAL key of the `ui` block, and a `ui` block without it keeps
+its meaning. The rule that a host serves a manifest for every app with a
+`ui` adds a response and three `<head>` elements to a served document,
+and changes no existing one. A host built against the earlier schema
+rejects an `APP.md` carrying `ui.install`, since `ui` is closed; the
+schema string `app/v1` is unchanged.
+
 **`requires` object form and `requires.apps[].tools` amendment
 (2026-11-08).** Purely additive: an `APP.md` whose `requires` is a list of
 app ids is unaffected and keeps its meaning, a dependency only with
@@ -2462,6 +2548,15 @@ supersede.
   provider's exposed surface through the host, but it does not pull in or
   execute the provider's code inside the consumer. There is therefore no
   parent-SHA-pinning concern analogous to AIP-42's for apps in v1.
+
+**Installable UI icons.** The icon `path` is app-controlled input that the
+host turns into bytes on an HTTP response. Rule 14 refuses a `..` segment
+and an absolute path in the manifest, and the host MUST still resolve the
+real path of the file and refuse one that leaves the app directory
+(a symlink), so an icon cannot read a file the app does not ship. The
+host checks the file's bytes are an image and serves it with that type, so an
+HTML file renamed `icon.png` is not served as a page. The manifest is public
+metadata (the app's name and icons) and carries no secret.
 
 ## Open questions
 
