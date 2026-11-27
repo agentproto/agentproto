@@ -171,13 +171,29 @@ the shared factory (so capabilities reflect the caller's actual surface):
 - `supportedVersions`: `advertisedVersions` (`["2026-07-28", "2025-11-25"]` on
   `/mcp`).
 - `capabilities`: the server's capabilities with the removed `logging` key
-  stripped, plus `extensions` when at least one modern extension is enabled
-  (omitted or empty when none are enabled).
+  stripped and `listChanged` withdrawn from `tools`, `resources` and
+  `prompts` (list-change notifications travel over `subscriptions/listen`,
+  which this gateway does not serve), plus `extensions` when at least one
+  modern extension is enabled (omitted or empty when none are enabled).
 - `_meta["io.modelcontextprotocol/serverInfo"]`: `{ name, version }`.
 - `ttlMs` and `cacheScope`: required on `server/discover` and the other five
   cacheable operations (`tools/list`, `prompts/list`, `resources/list`,
   `resources/templates/list`, `resources/read`), defaulting to
   `{ ttlMs: 0, cacheScope: "private" }` when no host cache policy is supplied.
+
+### Per-request SSE responses
+
+A modern request is normally answered with one `application/json` body. A
+method whose answer is a run of messages (today only `events/stream`, see
+[AIP-76](/docs/aip-76)) is answered with a `text/event-stream` response owned
+by that request: one `data: <json>` frame per JSON-RPC message, no `id:`
+line, no SSE comment, closed when the method ends or the client goes away.
+The modern core answers such a method itself, before the in-process server
+bridge opens (the bridge only keeps replies to its own requests), and does
+not decorate its final frame with `ttlMs`, `cacheScope` or `serverInfo`.
+Validation errors are still plain JSON errors, and the method is in the
+allowed set only while its extension is enabled (else `-32601`, HTTP 404).
+There is no shared, session-wide SSE stream in the modern era.
 
 ### Error mapping
 

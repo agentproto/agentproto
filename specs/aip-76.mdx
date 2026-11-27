@@ -1,6 +1,6 @@
 ---
 title: "AIP-76: EVENT (event/v1): host event subscriptions and signed webhook delivery, with the mcp-events/v1 binding"
-description: "Fixes how an agentproto host lets an external client watch it: event definitions (name, description, delivery, inputSchema, payloadSchema), subscription identity (RFC 8785 JCS-deterministic sub_<hex32>, idempotent subscribe/refresh/unsubscribe, ttlMs 60s..30d default 7d), the signed callback challenge (type:verification, single-use 64-hex) that must pass before any mutation, the {eventId, name, timestamp, data, cursor} wire envelope, webhook delivery as Standard Webhooks (whsec_ secrets 24-64 bytes, v1 signatures, 10-minute dual-sign rotation window), the delivery guarantees (one event per POST, 256 KiB clamp to {summary, subject}, 2xx = ack, exponential backoff bounded to 5 attempts, never retry 410/413), and the durable outbox that makes delivery at-least-once across restarts. EVENT is transport-neutral; this AIP also fixes its first binding, mcp-events/v1: three native JSON-RPC methods (events/list, events/subscribe, events/unsubscribe) on the authenticated MCP endpoint, the events:{} capability at initialize, and a public MCP 2026-07-28 events origin (POST /mcp/events/<secret>). It fills AIP-60's frozen webhook target kind with its delivery contract and does not touch the inbound inbox path. There is no EVENT.md file."
+description: "Fixes how an agentproto host lets an external client watch it: event definitions (name, description, delivery, inputSchema, payloadSchema), subscription identity (RFC 8785 JCS-deterministic sub_<hex32>, idempotent subscribe/refresh/unsubscribe, ttlMs 60s..30d default 7d), the signed callback challenge (type:verification, single-use 64-hex) that must pass before any mutation, the {eventId, name, timestamp, data, cursor} wire envelope, webhook delivery as Standard Webhooks (whsec_ secrets 24-64 bytes, v1 signatures, 10-minute dual-sign rotation window), the delivery guarantees (one event per POST, 256 KiB clamp to {summary, subject}, 2xx = ack, exponential backoff bounded to 5 attempts, never retry 410/413), and the durable outbox that makes delivery at-least-once across restarts. EVENT is transport-neutral; this AIP also fixes its first binding, mcp-events/v1: three native JSON-RPC methods (events/list, events/subscribe, events/unsubscribe) on the authenticated MCP endpoint, the events:{} capability at initialize, and a public MCP 2026-07-28 events origin (POST /mcp/events/<secret>). The binding also carries the MCP Events extension (io.modelcontextprotocol/events, protocol 2026-07-28): events/poll over a durable journal, events/stream (SSE push with notifications/events/*), the official -32023..-32027 error codes and the Mcp-Name header. It fills AIP-60's frozen webhook target kind with its delivery contract and does not touch the inbound inbox path. There is no EVENT.md file."
 aip: 76
 status: Draft
 type: Schema
@@ -24,7 +24,7 @@ layer: host
 | Bindings | `mcp-events/v1` (this AIP, §Binding: mcp-events/v1). Other transports are future bindings of the same contract. |
 | Created | 2026-11-21 |
 | Packages (ref-impl) | `@agentproto/mcp-server` (native method dispatch), `@agentproto/runtime` (`mcp-events` adapter, `webhook-egress`, events origin), `@agentproto/sentinel` (store, outbox) |
-| Prior art | OpenAI, "MCP Events – plugins" (developers.openai.com/plugins/build/mcp-events); Standard Webhooks 1.0; MCP HTTP-Streamable 2025-11-25 / MCP 2026-07-28 `server/discover` |
+| Prior art | OpenAI, "MCP Events – plugins" (developers.openai.com/plugins/build/mcp-events); MCP Events extension, SEP-3415 (github.com/modelcontextprotocol/ext-events, `specification/beta/events/events.mdx`); Standard Webhooks 1.0; MCP HTTP-Streamable 2025-11-25 / MCP 2026-07-28 `server/discover` |
 
 ## Abstract
 
@@ -120,10 +120,15 @@ payloadSchema}`. The list operation returns pages of definitions plus
 `nextCursor: string | null`; it never returns payloads. Definitions are
 registered per subject scheme (GitHub in v1) and carry an authorization gate
 per principal (see §Known deviations for the v1 single-tenant gate).
+`delivery` is the array of modes the host actually offers for that
+definition on the surface that answers: a subset of `"poll"`, `"push"`,
+`"webhook"` (§Binding: mcp-events/v1 fixes which surface offers which).
 
 ```
-list result: { events: EventDefinition[], nextCursor: string | null }
+list result: { events: EventDefinition[], nextCursor?: string }
 ```
+
+`nextCursor` is omitted on the last page; it is never `null`.
 
 ### Subscribe (and renewal by the same operation)
 
@@ -132,10 +137,12 @@ subscribe params: {
   name: string,
   arguments: object,                  // validated against inputSchema
   delivery: { mode: "webhook", url: string, secret: string },
-  ttlMs?: number | null              // omitted → default 7d; null → no expiry
+  ttlMs?: number | null,             // omitted → default 7d; null → no expiry
+  cursor?: string | null,            // a cursor from a pull read (§Pull and push reads)
+  maxAgeMs?: number
 }
 subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
-                    cursor: null, truncated: false }
+                    cursor: null, truncated: boolean }
 ```
 
 1. **Secret** MUST be `whsec_` + standard base64 decoding to 24..64 bytes
@@ -157,8 +164,19 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
    backing remote FIRST (`provider.renew`); only then rotates the stored
    secret if the submitted one differs and moves the local TTL. A renewal
    failure raises `BackingSubscriptionError` and leaves the previous grant
-   fully intact (state, TTL, secret): local never outlives remote. A
-   submitted `cursor` is ignored: v1 events are non-replayable.
+   fully intact (state, TTL, secret): local never outlives remote.
+6. **Cursor on subscribe**: a submitted `cursor` is decoded exactly like a
+   pull-read cursor (unreadable: invalid params `invalid_cursor`; issued to
+   another principal: forbidden `cursor_principal_mismatch`). Webhook
+   delivery never replays past events in v1, so a non-null cursor makes the
+   result carry `truncated: true` (on create and on refresh): the single
+   signal that delivery starts later than the position the client
+   supplied. Without a cursor, `truncated` is `false`. The result `cursor`
+   stays `null` (§Known deviations).
+7. **Callback URL shape**: a `delivery.url` that is not an absolute
+   `https:` URL is rejected as invalid params (`invalid_callback_url`)
+   before any network call. Unsubscribe does not apply this check, so a
+   subscription created with any URL can always be removed.
 5. **Verify before mutate**: the callback challenge (next section) MUST pass
    before any store mutation. The verification cache is keyed on
    sha256(secret), so a new secret always forces a fresh challenge.
@@ -172,9 +190,17 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
    `X-MCP-Subscription-Id: <id>`.
 2. The receiver MUST answer 2xx with JSON echoing the challenge; the echo
    comparison is constant-time. A failed fetch, status or shape is a
-   `CallbackEndpointError` with a mapped `reason` (`non_https`,
-   `challenge_failed`, `ssrf_blocked`, `timeout`, `non_2xx`: the exact v1
-   enum).
+   `CallbackEndpointError`. Its `reason` is one of the six `lastError`
+   categories of the MCP Events extension: `connection_refused`, `timeout`,
+   `tls_error`, `http_4xx`, `http_5xx`, `challenge_failed`. An SSRF refusal
+   (private target, redirect) is reported as `connection_refused`, so the
+   error never tells the client why a URL was refused. The error message is
+   a fixed sentence per category: it never repeats the endpoint's host,
+   address, status or response text, so the challenge is not an oracle on
+   the endpoint. (The internal challenge outcome keeps a finer vocabulary,
+   `non_https`, `challenge_failed`, `ssrf_blocked`, `timeout`, `non_2xx`,
+   used by the host's own sentinel webhook surface; a binding translates it
+   at its boundary.)
 3. A successful verification is cached (10 minutes, bounded cache, keyed on
    the secret hash, per callback URL) so subsequent subscribes to the same
    (principal, url, secret) skip the POST. A rotating secret invalidates it.
@@ -190,9 +216,10 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
 
 1. Wire shape is upstream-verbatim: `eventId` (the `webhook-id` header
    carries it, so a receiver's dedup key is free), `name`, `timestamp`,
-   `data`, `cursor`. v1 events are non-replayable: `cursor` is `null`
-   everywhere and the `gap`/`terminated` control notifications of the
-   upstream sketch are never sent.
+   `data`, `cursor`. Webhook delivery is non-replayable in v1: `cursor` is
+   `null` in every delivered webhook envelope, and the `gap`/`terminated`
+   control envelopes are never sent over the webhook. Pull and push reads
+   (§Pull and push reads) carry real cursors.
 2. **256 KiB clamp**: if the serialized envelope exceeds 262 144 bytes,
    `data` is replaced by `{summary, subject}` and the envelope gains the
    extension field `truncated: true` (§Known deviations for why this is an
@@ -250,6 +277,42 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
    subscription to `expired` (cancels the provider side); a gone
    subscription's pending rows go `dead` with a reason.
 
+### Pull and push reads (the journal)
+
+Besides webhook delivery, a host MAY offer two reads of the same events:
+**pull** (the client asks for what happened after a cursor) and **push**
+(the host keeps one response open and writes events as they land). Both
+read one **journal**, and neither is a new source of events.
+
+1. **Journal**: one append-only journal per `(name, arguments)` key, fed by
+   a shared provider watch (a **lease**). Each entry has a monotonic
+   sequence number; an event already journaled is never journaled twice
+   (dedup on `eventId`). When the host cannot prove continuity (a new watch
+   after a restart, a provider gap), it journals a **gap** entry.
+2. **Lease**: the first read of a key opens the provider watch; later reads
+   reuse it. A lease nobody reads is released after an idle TTL, so an
+   abandoned key never leaves an orphan watch. An open push read **holds**
+   its lease: a held lease is never released for idleness.
+3. **Retention**: entries older than the retention window, and journals no
+   lease feeds any more, are purged periodically, not only at host start.
+4. **Cursor**: opaque to the client, bound to the principal that received
+   it (a cursor presented by another principal is forbidden), and
+   interchangeable between pull and push: a pull cursor resumes a push
+   read and the reverse.
+5. **`truncated`**: a read that starts later than the cursor it was given
+   (retention, `maxAgeMs`, a gap, a replaced journal) says
+   `truncated: true` and returns what remains; it is never an error.
+6. **Push framing** (protocol-level details in the binding): the first
+   message confirms the read and states the granted heartbeat; then one
+   message per event, each with the cursor positioned after it; a
+   heartbeat with the head cursor after every silence of the heartbeat
+   interval; a gap mid-read re-confirms with `truncated: true` and the read
+   goes on; a provider failure is reported as a category (never the
+   provider's raw message) and the read stays open. Every validation error
+   is answered before the first message, as an ordinary error. A client
+   that goes away is the end of the read: the host releases the hold and
+   writes nothing more.
+
 ### Unsubscribe
 
 1. Unsubscribe recomputes the same identity (minus the secret) and is
@@ -263,8 +326,12 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
 
 | Error | `reason` (examples) |
 |---|---|
-| Invalid params | `unknown_event`, `invalid_arguments`, `invalid_secret`, `invalid_ttl`, `unauthorized`, `identity_conflict` |
-| CallbackEndpointError | `non_https`, `challenge_failed`, `ssrf_blocked`, `timeout`, `non_2xx` |
+| Invalid params | `invalid_arguments`, `invalid_secret`, `invalid_ttl`, `invalid_cursor`, `invalid_callback_url`, `identity_conflict` |
+| NotFound | `unknown_event` (with `kind: "event"`) |
+| Forbidden | `unauthorized`, `cursor_principal_mismatch` |
+| ResourceExhausted | `poll_watch_quota` (with `limit`, `max`); the stream cap (with `limit: "streams"`, `max`) |
+| Unsupported | `unsupported_delivery_mode` (with `feature: "deliveryMode"`, `value`), `provider_unavailable` |
+| CallbackEndpointError | `connection_refused`, `timeout`, `tls_error`, `http_4xx`, `http_5xx`, `challenge_failed` |
 | BackingSubscriptionError | `backing_renew_failed`, `backing_subscription_expired` |
 
 A binding MUST map each error to a distinct transport error and carry the
@@ -277,17 +344,19 @@ OpenAI "MCP Events" plugin contract consumes.
 
 ### Surfaces and origins
 
-1. **Authenticated `/mcp` endpoint** (Streamable HTTP / MCP 2025-11-25): the
-   host mounts `events/list`, `events/subscribe`, `events/unsubscribe` as
-   native JSON-RPC request handlers (not `tools/call`) and announces
-   `events: {}` in capabilities at `initialize` (a compliant client may read
-   capabilities from either `initialize` or `server/discover`).
+1. **Authenticated `/mcp` endpoint**, both eras of [AIP-77](/docs/aip-77):
+   the host mounts `events/list`, `events/subscribe`, `events/unsubscribe`
+   and, when the extension is on, `events/poll` as native JSON-RPC request
+   handlers (not `tools/call`), and announces `events: {}` in capabilities
+   at `initialize` (2025-11-25) and in `server/discover` (2026-07-28).
+   `events/stream` is served on the 2026-07-28 era only.
 2. **Public events origin** `POST /mcp/events/<secret>`: mounted only when a
    secret of ≥ 32 characters is configured; it serves the MCP 2026-07-28 era
    (`server/discover` with `supportedVersions` and `events:{}`, stateless
    result `resultType: "complete"`), mounts **only** the events surface (no
    tools, resources, or prompts without a security review), and gates
-   subscribe against an optional repo allowlist.
+   subscribe, poll and stream against an optional repo allowlist
+   (`-32024`, checked before any watch or stream is opened).
 3. The two origins are alternates for the same contract; a client uses
    either.
 
@@ -297,17 +366,93 @@ OpenAI "MCP Events" plugin contract consumes.
 |---|---|---|
 | list | `events/list` | §Event definitions and list |
 | subscribe | `events/subscribe` | §Subscribe |
-| unsubscribe | `events/unsubscribe` | §Unsubscribe; result `{}` |
+| unsubscribe | `events/unsubscribe` | §Unsubscribe; result `{}`. `delivery.mode` may be omitted. |
+| pull read | `events/poll` | `{name, arguments, cursor?, maxAgeMs?, maxEvents?}` → `{events, cursor, truncated, hasMore, nextPollMs}` |
+| push read | `events/stream` | §events/stream |
+
+### Extension advertisement
+
+When the extension is on (`mcp.eventsExtension`, default on), the host
+declares `capabilities.extensions["io.modelcontextprotocol/events"] =
+{ listChanged: false }` **alongside** `events: {}`: same methods, two ways
+for a client to find them. The event registry is static, so no
+`notifications/events/list_changed` is ever sent and `subscriptions/listen`
+is not served. For the same reason the 2026-07-28 `server/discover` does not
+advertise `listChanged` on `tools`, `resources` or `prompts`.
+
+`delivery` in `events/list` names what the answering surface serves:
+`["poll", "push", "webhook"]` on the 2026-07-28 era while `events/stream` is
+served, `["poll", "webhook"]` on 2025-11-25 and when the stream is switched
+off (`mcp.eventsStream: false`), `["webhook"]` when the extension is off.
+
+### Headers (2026-07-28 era)
+
+`events/subscribe`, `events/unsubscribe`, `events/poll` and `events/stream`
+carry `Mcp-Name` equal to `params.name`; a missing or different value is
+`-32020` (HTTP 400). `events/list` carries none.
+
+### events/stream
+
+```
+request   events/stream { name, arguments, cursor?: string | null, maxAgeMs?, heartbeatMs? }
+headers   Mcp-Method: events/stream ; Mcp-Name: <params.name> ;
+          Accept: application/json, text/event-stream
+response  Content-Type: text/event-stream ; one "data: <json>" frame per JSON-RPC message ;
+          no "id:" line, no SSE comment
+messages  notifications/events/active      { cursor, truncated, heartbeatMs }   first, and after a gap
+          notifications/events/event       { eventId, name, timestamp, data, cursor }
+          notifications/events/heartbeat   { cursor }
+          notifications/events/error       { error: { code, message, data? } }   stream stays open
+          notifications/events/terminated  { error: { code, message, data? } }   stream ends
+final     { jsonrpc, id, result: { resultType: "complete", _meta } }   only when the host closes
+```
+
+1. Every message carries `params._meta["io.modelcontextprotocol/subscriptionId"]`
+   = the JSON-RPC `id` of the request, unchanged (string or number).
+2. `heartbeatMs` defaults to 30 000 and is clamped to [5 000, 60 000]; the
+   granted value is the one in `active`. The heartbeat is a
+   `notifications/events/heartbeat` frame carrying the head cursor, not an
+   SSE comment (a comment cannot carry the cursor).
+3. `Accept` MUST allow `text/event-stream` (`*/*` and `text/*` do), else
+   HTTP 406. Every validation error (`-32602`, `-32023`, `-32024`,
+   `-32025`, `-32026`) is a plain `application/json` JSON-RPC error and no
+   stream is opened.
+4. A type whose `delivery` lacks `"push"` is `-32026` with
+   `data: { feature: "deliveryMode", value: "push" }`.
+5. At most 32 streams are open at once (`-32025`,
+   `data: { limit: "streams", max: 32 }`); no general cap on concurrent
+   requests applies to streams. When the shared watch pool is full the
+   answer is the same as `events/poll`: `-32025`,
+   `data: { reason: "poll_watch_quota", limit: "pollWatches", max }`.
+6. A provider failure is `notifications/events/error` with `code: -32603`,
+   `message: "UpstreamError"`, `data.reason` a category; the stream stays
+   open.
+7. `notifications/events/terminated` ends the stream when its type leaves
+   the registry or the principal is no longer authorized at a periodic
+   re-check, then the final frame is sent. With the static registry and
+   the single-tenant `authorize` of v1 it does not fire in practice.
+8. Client abort (closing the HTTP response) ends the stream with no result
+   frame; host shutdown writes the final frame, then closes. A write that
+   does not drain within 10 s closes the stream; the client resumes from
+   its cursor.
+9. The response is not decorated: the final frame carries no `ttlMs`,
+   `cacheScope` or `serverInfo`.
 
 ### Error mapping
 
 | EVENT error | JSON-RPC code | Carried as |
 |---|---|---|
 | Invalid params | `-32602` | `data.reason` |
-| CallbackEndpointError | `-32015` | `data.reason` |
-| BackingSubscriptionError | `-32016` | `data.reason` |
+| NotFound | `-32023` | `data.reason`, `data.kind` |
+| Forbidden | `-32024` | `data.reason` |
+| ResourceExhausted | `-32025` | `data.reason`, `data.limit`, `data.max` |
+| Unsupported | `-32026` | `data.reason`, `data.feature`, `data.value` |
+| CallbackEndpointError | `-32027` | `data.reason` (the six categories), `data.legacyReason` and `data.legacyCode: -32015` for one release |
+| BackingSubscriptionError | `-32603` | `data.kind: "backing_subscription"`, `data.reason`, `data.legacyCode: -32016` for one release |
 
-The transport surfaces adapter errors verbatim (code + data).
+The transport surfaces adapter errors verbatim (code + data). `-32015` and
+`-32016` were the pre-standard codes of this binding; they survive only as
+`data.legacyCode`.
 
 ## Known deviations (v1, deliberate, listed here so they are not lost)
 
@@ -328,15 +473,32 @@ The transport surfaces adapter errors verbatim (code + data).
    results, not on the event envelope. Low risk (tolerant receivers), but
    strictly spec-shaped receivers may reject it; keep it in mind on strict
    conformance testing.
-4. **No `server/discover` on the root `/mcp`** (`mcp-events/v1`).
-   Deliberate: advertising the modern era there made era-2025-11-25-only
-   transports coerce (a client regression where tools came back invalid).
-   The modern origin (public events origin) serves `server/discover`; a
-   client pointed at `/mcp` is expected to go through `initialize` (the
-   other branch upstream accepts). The code documents the re-enable
-   condition.
-5. **Polling/streaming transport for subscriptions**: not provided; v1 is
-   webhook-delivery only (upstream does not rely on polling either).
+4. **`initialize` never advertises the 2026-07-28 era** on `/mcp`.
+   Deliberate: advertising it there made 2025-11-25-only clients switch eras
+   and fail. The 2026-07-28 era of `/mcp` is selected per request
+   ([AIP-77](/docs/aip-77) routing: the `MCP-Protocol-Version` header or the
+   body `_meta` protocol version), and that era serves `server/discover`.
+5. **Webhook `cursor` is always `null`** (envelope and subscribe result),
+   and a webhook subscription never replays past events: a supplied cursor
+   only yields `truncated: true`. The MCP Events extension asks a type that
+   ever returns a non-null cursor to always do so; pull and push reads do,
+   webhook does not yet.
+6. **Unsubscribe is idempotent**: an unsubscribe with no matching
+   subscription returns `{}`, not `-32023` NotFound. The extension lists
+   NotFound for this case without a MUST and calls unsubscribe an eager
+   cleanup; this AIP keeps idempotence (§Unsubscribe).
+7. **No `deliveryStatus`** in the subscribe/refresh result (optional in the
+   extension), and no `gap`/`terminated` control envelopes over the
+   webhook.
+8. **`tls_error` is never emitted**: the egress gate does not tell a TLS
+   failure apart from a refused connection, so both are
+   `connection_refused`.
+9. **`events/stream` is served over Streamable HTTP only** (no stdio
+   transport, hence no `notifications/cancelled` handling), on the
+   2026-07-28 era only. Behind a tunnel that buffers a streamed response
+   until it ends, push delivers nothing; use `events/poll` there.
+10. **`subscriptions/listen` is not served**, so no list-change
+    notification exists (`listChanged: false` everywhere).
 
 ## Rationale
 
@@ -405,6 +567,25 @@ covered; deviations listed above).
 | End-to-end tests | `packages/runtime/src/__tests__/mcp-events-e2e.test.ts`, `mcp-events-principal.test.ts`, `mcp-events-route.test.ts`, `mcp-events-surface.test.ts`, `sentinel-delivery-apply.test.ts`, `external-sentinel-delivery.test.ts`; `packages/mcp-server/src/__tests__/events-methods.test.ts` |
 | Conformance suite | `scripts/mcp-events-conformance/` (36 PASS / 0 FAIL at `765660d`) |
 
+The rows above are the 2026-11-21 audit at `765660d`. The MCP Events
+extension (pull and push reads, official codes, `Mcp-Name`) landed later;
+the rows below cite `agentproto/ts` @ `9449f6362` (the head of
+agentproto/ts#2891, which contains agentproto/ts#2887).
+
+| Concern | Source (in `agentproto/ts`) |
+|---|---|
+| Extension advertised alongside `events:{}`, `events/poll` registered | `packages/mcp-server/src/events-methods.ts:55` (`io.modelcontextprotocol/events`), `:88-91` (capabilities), `:114` (`events/poll` handler) |
+| Official codes, `data` discriminants, `-32027` categories and fixed messages | `packages/runtime/src/mcp-events/adapter.ts:101` (`EVENTS_ERR`), `:117-144` (NotFound `kind`, ResourceExhausted `limit`/`max`, Unsupported `feature`/`value`), `:175-205` (`callbackEndpointReason`, `callbackEndpointError`, `legacyReason`, `legacyCode`), `:209` (`https` check on subscribe) |
+| `nextCursor` omitted on the last page; `delivery` filtered per surface | `packages/runtime/src/mcp-events/adapter.ts:383-401` (`eventsList`, `pollEnabled`, `pushEnabled`); `packages/runtime/src/mcp-events/events-registry.ts:264` (`["poll", "push", "webhook"]`) |
+| Cursor on subscribe (`truncated: true`), unsubscribe without `mode` | `packages/runtime/src/mcp-events/adapter.ts:438` (`truncated`), `:495`, `:513` (results), `:529` (`modeOptional`) |
+| Pull read and cursor | `packages/runtime/src/mcp-events/adapter.ts:601-602` (`maxEvents` 100 / 1000), `:619-625` (result), `:632-659` (cursor bound to the principal), `:667` (`eventsPoll`) |
+| Journal and lease | `packages/runtime/src/mcp-events/poll-journal.ts:42-43` (24 h, 5000 entries), `:230` (`subscribe`, wake on append and gap); `packages/runtime/src/mcp-events/poll-lease.ts:27-31` (idle TTL 5 min, pump 15 s, 64 leases, purge every 10 min), `:222` (`retain`), `:239` (`onPumpError`), `:258` (a held lease is never swept) |
+| Push read engine | `packages/runtime/src/mcp-events/stream.ts:24-33` (subscription id key, heartbeat bounds, 32 streams, 10 s back-pressure, re-check), `:138` (`openEventsStream`) |
+| `events/stream` answered before the in-process bridge; SSE writer | `packages/runtime/src/mcp-modern/index.ts:358` (branch before `openBridge`), `:204-210` (`listChanged` withdrawn from `server/discover`); `packages/runtime/src/mcp-modern/validate.ts:59` (`Accept`), `:169-171` (`Mcp-Name`); `packages/runtime/src/http-server.ts:3110` (`writeModernResponse`), `:3133` (one `data:` frame per message), `:6661` (final frame on shutdown) |
+| Allowlist on the public origin | `packages/runtime/src/mcp-events-surface.ts:21` (`isSubscriptionPermitted`), `:42`, `:50` (subscribe, poll), `:63` (`guardEventsStream`) |
+| Switches | `packages/runtime/src/mcp-config.ts:17-18` (`mcp.eventsExtension`, `mcp.eventsStream`, both default on) |
+| Tests | `packages/runtime/src/__tests__/mcp-events-poll.test.ts`, `mcp-events-codes.test.ts`, `mcp-events-stream.test.ts`, `mcp-events-stream-http.test.ts`, `mcp-events-surface.test.ts`, `mcp-modern-contract-live.test.ts`; fixtures `__tests__/fixtures/mcp-2026-07-28/events-*.json` (copied from the extension text) |
+
 ## Backwards Compatibility
 
 Additive everywhere. A host that does not mount an events surface exposes
@@ -468,6 +649,15 @@ advertised at `initialize`, and `events/list`, `events/subscribe`,
 `events/unsubscribe` are native JSON-RPC methods on the same authenticated
 endpoint as tools, with the error codes of §Error mapping.
 
+A host that declares the `io.modelcontextprotocol/events` extension is
+additionally conformant when: `events/poll` and `events/stream` read one
+journal with interchangeable, principal-bound cursors; `truncated: true`
+marks every read that starts later than its cursor; `events/stream` sends
+`notifications/events/active` first, answers every validation error before
+any frame, keeps a heartbeat frame carrying the cursor, and releases its
+watch on client abort; `delivery` lists only the modes the answering
+surface serves; and `Mcp-Name` is enforced on the four named methods.
+
 A named deviation (`truncated` top-level, single-tenant authorize, no read
 tool, no `server/discover` on the root) is conformant **only if** listed in
 the implementation's deviation list.
@@ -490,8 +680,11 @@ the implementation's deviation list.
    PR, or stay prose-only like AIP-75. This PR ships prose only.
 5. **Second binding**: which transport earns the next binding of the
    EVENT contract (plain HTTP for non-MCP clients, A2A, a session tool
-   surface over AIP-46), and whether polling/streaming delivery is worth
-   designing for a client that cannot receive webhooks.
+   surface over AIP-46). Pull and push reads now exist in `mcp-events/v1`;
+   whether they belong in the transport-neutral contract as MUSTs is open.
+7. **Webhook replay**: replaying a webhook subscription from its cursor
+   (and returning a safe watermark as the subscribe `cursor`) would close
+   §Known deviations 5; it needs the webhook path to hold a journal lease.
 6. **Second implementer**: the 2-implementer rule for Final. The
    conformance suite in the reference implementation is the starting
    point; extracting a portable one is a blocker on the path from Draft to
