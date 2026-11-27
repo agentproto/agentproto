@@ -5,6 +5,7 @@ aip: 59
 status: Review
 type: Core
 created: 2026-09-26
+updated: 2026-11-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1]
 discussions-to: https://github.com/agentproto/agentproto/discussions/59
@@ -530,6 +531,77 @@ refused, not downgraded), `pair.subsession.revoke` (revoking a session or
 the device refuses its tokens at once) and `pair.subsession.secrecy` (the
 store and the logs never contain a token).
 
+### 9. HTTP binding (device access)
+
+The channel of §2 to §6 is end-to-end encrypted and is the target. Many clients
+cannot hold a pair root yet: a native phone app that only needs to open a few
+apps served by the daemon. This section defines a simpler binding, over a TLS
+connection to the daemon, with the same ceremony: an offer that proves nothing
+alone, a confirmation by a human, and a revocable credential. A daemon MAY
+implement it; one that does MUST follow this section, and the channel of §3 MUST
+remain able to replace it without changing the model of §9.1 and §9.2.
+
+9.1. **Three separate things.** An **offer** is a single-use code, valid for at
+most 60 minutes (10 by default), that carries a **grant**. A **request** is what
+a client does with an offer. A **device** exists only after a human confirmed a
+request. The grant belongs to the device, not to its credential: changing what a
+device may open MUST NOT require a new credential.
+
+9.2. **Grant.** A grant is `{ apps, sessionsRead }`. `apps` is `"*"` (every app
+the daemon serves with a UI) or the exact list of app identifiers. `sessionsRead`
+allows the read routes of the daemon's session API. Control of the whole daemon
+is not a grant of this binding and MUST NOT be given by it. A daemon MUST refuse,
+with status 403 and the error `grant_out_of_scope`, any request by a device for an
+app outside its grant, and any use of a credential on a route this section does
+not name. A daemon MUST NOT let a device reach an app whose own manifest says it
+is not to be opened from another device (AIP-53 `access.remote: false`).
+
+9.3. **One link.** An offer is carried as `https://<host>/pair#o=<code>`, the code
+being 16 Crockford base32 characters, shown in groups of four. The code is in the
+fragment, so no server and no log sees it. A QR code is this same link. A
+custom-scheme fallback `agentapp://pair?h=<host>&o=<code>` MAY be offered for
+clients that cannot register the https link. The page served at `/pair` MUST NOT
+load any external resource or send the code anywhere, and MUST set
+`Referrer-Policy: no-referrer`. No introduction (a link, a QR code, a typed code)
+grants access by itself.
+
+9.4. **Request.** The client sends `POST /device-pair/request` with
+`{ offer, deviceName, platform }`. The offer is consumed at that moment. The
+response carries `requestId`, a `pollSecret`, an `expiresAt` (10 minutes) and a
+**number** of two digits. The client MUST show that number. A daemon MUST refuse
+the request (503) when it has no way to ask a human to confirm. After eight wrong
+offers in a minute the daemon MUST refuse all requests for a minute and drop
+the offers still pending.
+
+9.5. **Confirmation.** The daemon asks a human, on a channel already tied to it
+(a chat message with buttons, an approval page), to confirm. The message MUST name
+the device, its platform and what it asks to open, and MUST repeat the number, so
+that a request made by someone else with a forwarded link is recognised. Only that
+channel decides: no tool callable by a model, and no request from the device,
+can confirm. An offer relayed by a machine the human already trusts is the only
+case in which a daemon MAY skip the confirmation.
+
+9.6. **Credential.** The client polls `GET /device-pair/request/<requestId>` with
+the header `X-Poll-Secret`. The answer is `pending`, `denied`, `expired` or
+`approved`. The first read after the approval returns the credential, a token of
+the form `dvt_` followed by 43 URL-safe characters, and no later read does (410).
+The daemon stores only a digest of the credential, of the poll secret and of the
+code. A client presents the credential as `Authorization: Bearer <token>`, or,
+in a browser context, as an HttpOnly, SameSite=Strict cookie, in which case the
+daemon MUST refuse a request that carries another origin.
+
+9.7. **Lifetime and revocation.** A device loses its access after 90 days
+without use; each use renews that period. Revocation takes effect on the next
+request: a revoked credential gets 401 with the error `access_revoked`, so the
+client can say that access was withdrawn instead of that the machine is off.
+Devices are listed, renamed and revoked with the daemon's other devices; removing
+an app from the daemon removes it from every grant.
+
+9.8. **Identity of the machine.** `GET /device/me` with the credential returns
+the device, the machine's name and the apps its grant opens, each with its
+identifier, name and the path of its UI. A client shell shows that list; an app
+added later appears in it without any update of the shell.
+
 ## Threat model
 
 | Adversary | Capability | Outcome |
@@ -593,6 +665,10 @@ change what a conforming host or client MUST do.
   files written before the feature load unchanged.
 
 ## Backwards Compatibility
+
+Device access over HTTP (§9, added 2026-11-28) is optional and additive. A
+daemon that does not implement it, and a client that does not use it, behave as
+before. It does not change `pair/v2`.
 
 Sub-session tokens (§8, added 2026-11) are optional and additive: a host
 that does not mint them, and a device that never asks, behave as before.

@@ -90,6 +90,12 @@
         }
       ]
     },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "remote": { "type": "boolean", "description": "false: never listed to, nor callable from, a paired device." } },
+      "description": "Who may open the app from another device."
+    },
     "ui": {
       "type": "object",
       "required": ["path"],
