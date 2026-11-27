@@ -1885,8 +1885,8 @@ result and is OPTIONAL; an app without it is installable too.
 2. **Derived members.** `name` is the `APP.md` `name`, falling back to
    `ui.title`, then to the app `id`. `short_name` is `ui.install.shortName`,
    falling back to `name` cut to 12 characters. `id`, `start_url` and
-   `scope` MUST be URLs relative to the manifest that resolve to the UI
-   document and the directory that holds it, so the installed app follows
+   `scope` MUST be URLs with no scheme and no host (a path, relative or
+   absolute) that resolve to the UI document and the directory that holds it, so the installed app follows
    the host's origin and path, whatever port or tunnel the host runs on.
    `display` is `ui.install.display`, default `standalone`. `theme_color`
    and `background_color` are the `ui.install` colours; absent, the host
