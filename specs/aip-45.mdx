@@ -508,8 +508,9 @@ prompt and its answer are written. An `agent-prompt` always travels as
 approvals.
 
 **Tool permission and plan approval.** The form has a required
-`decision` property (`oneOf` `approve` / `deny`) and, only when an
-`allow_always` option is offered, a `scope` property (`oneOf` `once` /
+`decision` property (`oneOf` `approve` / `deny`) and, except for a
+`plan-approval` (see below), only when an `allow_always` option is
+offered, a `scope` property (`oneOf` `once` /
 `always`, default `once`). The message is `text`, prefixed with
 `[toolName]` when the tool name is known. `approve` resolves the prompt
 with an `allow_*` option (`allow_always` when `scope` is `always`),
@@ -1040,12 +1041,14 @@ The MCP transport of a question is implemented by the agentproto daemon
 in `@agentproto/runtime`, `src/mcp-modern/human-gate.ts`
 (`buildPermissionElicitation`, `projectQuestionField`,
 `buildQuestionAnswerElicitation`, `planApprovalIds`,
-`applyOnePermissionResponse`), since
-[agentproto/ts#2899](https://github.com/agentproto/ts/pull/2899) for a
-question without `fields` and a plan approval named by id. One point is
-not met yet: the secret check does not catch the spaced spelling of a
-two-word term (for example `API key` or `access token`, while `api_key`
-and `access-token` are caught).
+`applyOnePermissionResponse`). A question without `fields` and a plan
+approval named by id are handled as above since
+[agentproto/ts#2899](https://github.com/agentproto/ts/pull/2899). One
+point is not met yet: the secret check does not catch the spaced
+spelling of a two-word term (for example `API key` or `access token`,
+while `api_key` and `access-token` are caught). The same gap bears on
+[AIP-77](/docs/aip-77) conformance item 8 ("a form never carries a
+secret field").
 
 ## Backward compatibility
 
