@@ -1043,18 +1043,14 @@ in `@agentproto/runtime`, `src/mcp-modern/human-gate.ts`
 `buildQuestionAnswerElicitation`, `planApprovalIds`,
 `applyOnePermissionResponse`). A question without `fields` and a plan
 approval named by id are handled as above since
-[agentproto/ts#2899](https://github.com/agentproto/ts/pull/2899), and a
-two-word secret term written with spaces (for example `API key` or
-`access token`) is caught since
-[agentproto/ts#2902](https://github.com/agentproto/ts/pull/2902). One
-point is not met yet, and it concerns single-word and two-word terms
-alike: the secret check does not catch the plural of a term it lists
-only in the singular (for example `passwords`, `secrets`, `API keys` or
-`access tokens`, while `password`, `secret`, `API key` and
-`access token` are caught); `credentials` is caught, because the check
-lists both forms. The same gap bears on
-[AIP-77](/docs/aip-77) conformance item 8 ("a form never carries a
-secret field").
+[agentproto/ts#2899](https://github.com/agentproto/ts/pull/2899). The
+secret check catches a two-word term written with spaces (for example
+`API key` or `access token`) since
+[agentproto/ts#2902](https://github.com/agentproto/ts/pull/2902), and the
+plural of every term (for example `passwords`, `secrets`, `API keys` or
+`access tokens`) since
+[agentproto/ts#2905](https://github.com/agentproto/ts/pull/2905). No
+point of the subsection is known to be unmet.
 
 ## Backward compatibility
 
