@@ -201,6 +201,8 @@ interface AppDefinition {
   setup?:        AppSetupStep[]                       // post-install configuration pipeline — see "Setup steps"
   services?:     AppService[]                          // long-running processes the host starts with the app, see "Services"
   exposes?:      AppExposes                            // agents, workflows, MCP tools and ui:// views offered outside the app, see "Exposed tools and resources"
+  boundaries?:   AppBoundaries                         // filesystem zones of the sessions the app spawns, see "Session boundaries"
+  externalReadRoots?: string[]                         // host dirs outside the app dir, absolute or ~-relative, read-only
 }
 
 interface AgentEntry {
@@ -260,6 +262,15 @@ interface AppExposedTool {
   approvalArg?: string              // only with access: "approve"
 }
 
+/**
+ * Filesystem policy for the sessions the app spawns (see
+ * [Session boundaries](#session-boundaries-boundaries)).
+ */
+interface AppBoundaries {
+  enforce?:   "required" | "best-effort"   // default "best-effort"
+  hostReads?: string[]                     // at most 64, relative to the host repo root, read-only
+}
+
 interface AppUiDefinition {
   html:          string                    // the full document — required
   title?:        string
@@ -289,7 +300,7 @@ frontmatter is `.strict()` and carries no `systemPrompt` field, so the
 free-text prompt only ever lives in an `AGENT.md` body.
 
 `workflows`, `attach`, `ui`, `artifact`, `skill`, `artifacts`, `dev`,
-`data`, `category`, `setup`, `services`, `exposes`, `requires`, and `workspace` are all optional. An app with agents
+`data`, `category`, `setup`, `services`, `exposes`, `requires`, `boundaries`, `externalReadRoots`, and `workspace` are all optional. An app with agents
 and nothing else is still a conforming app, as is a UI-only app with an
 empty `agents` array.
 
@@ -420,6 +431,18 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     that need the installed provider (every `tools` name exposed by it)
     belong to the host and run when it installs or reloads the app (see
     [Requirements](#requirements-requires)).
+
+14. **`boundaries` is closed and checked at load.** When `boundaries` is
+    present it MUST be an object with no key besides `enforce` and
+    `hostReads`. `enforce` MUST be `required` or `best-effort`.
+    `hostReads` MUST be an array of at most 64 strings, each relative to
+    the host repo root, not blank, not absolute, with no `..` segment,
+    not the repo root (`.`, `./`), with no surrounding whitespace and no
+    line terminator. `defineApp` and the loader MUST refuse a definition
+    that violates any of these. Resolving the entries against the host
+    repo belongs to the host and runs at spawn time (see
+    [Session boundaries](#session-boundaries-boundaries), including its
+    gaps between the schema and the reference loader).
 
 ### Emitted layout
 
@@ -1604,6 +1627,114 @@ by it, every `workflows` id in its `exposes.workflows`, the version
 satisfied) or two `apps` entries with the same `id`. The host is the
 authority on those (conformance rule 13).
 
+### Session boundaries (`boundaries`)
+
+The sessions an app spawns (`app_run`, workflow agent steps) run inside
+filesystem zones the host builds from the installed app:
+
+| Zone | What | Access |
+| --- | --- | --- |
+| app | the installed app dir | read |
+| writable | the app's data dir and the run workspace | read + write |
+| hidden | the host's own workspace, and the git repo whose working tree holds the app dir (the **host repo**) | denied |
+| host repo config | `.git`, `.gitignore`, `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md` at the host repo root | read |
+| declared host reads | `boundaries.hostReads` | read |
+
+`boundaries` is a closed object with two optional fields:
+
+```yaml
+boundaries:
+  enforce: best-effort            # or "required"
+  hostReads:
+    - packages/other-tool/packages/cli/dist
+    - apps/_shared
+```
+
+- **`enforce`.** `"required"` makes the host refuse the spawn when the
+  zones cannot be enforced on the chosen harness or platform;
+  `"best-effort"` (the default) spawns with an explicit warning.
+- **`hostReads`.** Paths in the host repo, relative to its root, that the
+  app's sessions may read: a sibling package's built CLI, a shared
+  folder. Each entry is read-only: no `hostReads` entry, and nothing the
+  host repo config opens, is ever writable. The writable zone is the
+  data dir and the run workspace only; the data dir defaults to
+  `<appDir>/data`, which sits inside the host repo when the app dir does.
+
+#### What a loader accepts
+
+A loader MUST reject the manifest when `boundaries` is not an object, has
+a field other than `enforce` and `hostReads`, has an `enforce` other than
+the two values, or has a `hostReads` that is not an array, holds more than
+64 entries, or holds an entry that is not a string or that:
+
+- is empty or blank;
+- starts with `/` (absolute);
+- has a `..` segment anywhere (`..`, `../x`, `a/../b`, `a/..`);
+- is `.` or `.` followed only by slashes (`./`, `.//`), the repo root;
+- has leading or trailing whitespace;
+- holds a line terminator (`\n`, `\r`, U+2028, U+2029).
+
+Everything else passes: `./packages/foo`, `a/b/`, `.hidden`, `..foo`,
+`a/..b/c`, `dir with space/x`. `defineApp` applies the same check and
+throws. A string-level check cannot see every spelling of the repo root
+(`./.` passes it); the host's resolution step below refuses those.
+
+#### What the host does with them
+
+The host repo is the git toplevel of the app dir. When the app dir is not
+inside a git repo, or is itself the repo root, there is no hidden host
+repo: the host adds no host repo config and ignores `hostReads`.
+Otherwise the host MUST:
+
+1. Open each host repo config entry that exists read-only, after the
+   same resolution as a `hostReads` entry. When `.git` is a file (a linked
+   worktree), also open the git dir it points at and that dir's
+   `commondir`, read-only. These are what git, rg and the harnesses walk
+   up to the repo root to load; an unreadable settings file makes a
+   harness start without the project's hooks and permission rules.
+2. Resolve each `hostReads` entry against the host repo root, follow
+   symlinks, and refuse, with a logged warning and without failing the
+   spawn, an entry that does not exist, whose real path lands outside the
+   host repo, that resolves to the repo root itself, or that has a path
+   component named like a secret file. An accepted entry joins the
+   read-only zone.
+3. Scan every opened entry other than the git dirs for conventionally
+   named secrets and mask, for read and write, what the scan finds:
+   files named `.env` or `.env.*` (other than templates such as
+   `.env.example`), `.netrc`, `.npmrc`, `.git-credentials`,
+   `credentials`, `credentials.json`, `id_rsa`, `id_dsa`, `id_ecdsa`,
+   `id_ed25519`, or ending in `.pem`, `.key`, `.p12`, `.pfx`; and
+   credentials directories named `.ssh`, `.aws`, `.gnupg`, `.kube`,
+   `.docker`, `.config`, `.agentproto`, `.password-store` or
+   `Keychains`, masked whole. The scan is name-based and bounded, so the
+   masking is best-effort: the reference host stops at depth 12 or 50,000
+   entries, does not descend into `node_modules`, `.git`, `.next`,
+   `.turbo`, `dist` or `.venv`, and does not follow symlinks. A secret
+   past those bounds stays readable (`hostReads: [packages]` leaves
+   `packages/x/dist/.env` readable). An app author SHOULD name the
+   narrowest entry that serves, and an operator SHOULD NOT rely on the
+   scan to keep a secret inside a declared entry hidden.
+4. Mask a git dir's `config` when it embeds credentials: an `http(s)` URL
+   with userinfo, or an `extraheader` line. git then fails in that repo
+   from the session, and the host logs a warning. `ssh://git@host` and
+   `git@host:` remotes carry no secret and are left readable.
+
+`hostReads` never names a path outside the host repo; read access
+elsewhere on the machine is `externalReadRoots`.
+
+#### Gaps between the schema and the reference loader
+
+- `APP.schema.json` sets `uniqueItems` on `hostReads`; the reference
+  loader does not reject duplicates, and the host opens a duplicated path
+  once.
+- The pattern in `APP.schema.json` rejects an entry holding a line
+  terminator; the reference loader and `defineApp` accept it (their
+  unanchored check lets `a\nb` through), and the host then resolves it
+  like any other path. A manifest the loader accepts can therefore fail
+  schema validation.
+- Steps 2 to 4 need the filesystem at spawn time, so no schema expresses
+  them. The host is the authority on them.
+
 ## The `.agentapp` package format (`agentapp/v1`)
 
 An emitted app directory is the *installed* form. `.agentapp` is the
@@ -2305,6 +2436,24 @@ supersede.
   when it starts the session from one of the consumer's AGENT.md files;
   a host MUST NOT accept an app id a caller supplies about itself as the
   basis of a grant.
+
+- **The hidden host repo hides its working tree, not its history.**
+  Because `.git` is readable for every app installed inside a repo (see
+  [Session boundaries](#session-boundaries-boundaries)), a session can
+  read everything committed to the host repo through git (`git show
+  HEAD:<path>`, `git cat-file`), including paths no `hostReads` entry
+  names. Only untracked files that were never staged stay hidden:
+  content staged in the index but not committed, and every stash, are
+  git objects in the readable `.git` and are reachable through git
+  (`git ls-files -s`, `git cat-file -p <sha>`, `git stash show -p`). The
+  boundary
+  does not keep committed content of a host repo confidential from an
+  app installed inside it. Git credentials belong in a credential helper:
+  a repo config that embeds them is masked, and git stops working in that
+  repo from the session. `hostReads` is a declaration by the app's
+  author, not an operator grant: a host SHOULD show an app's
+  `hostReads` before installing it. The reference host does not (its
+  install preview shows no manifest field), a gap.
 
 - **`extends`-style cross-app trust is out of scope for v1.** Unlike
   [AGENT.md's `extends`](/docs/aip-42#conformance-rules), an app has no
