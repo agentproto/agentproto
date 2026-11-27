@@ -622,6 +622,7 @@ interface Observer<H extends VoiceHook = VoiceHook> {
   readonly kind: "observer"
   readonly name: string
   readonly hook: H
+  readonly queueMax?: number    // size of its queue (Processors rule 6)
   observe(input: Readonly<HookItems[H]>, ctx: CallContext<H> & { publish(data: Record<string, unknown>): void }): void | Promise<void>
 }
 
@@ -676,7 +677,9 @@ processor that needs one checks that it is present.
 `TextChunk.end` is true on the last chunk of the brain's reply for a turn;
 the engine sets it, and a transformer that holds text MUST release it with the
 chunk that carries `end`. The engine does not complete a turn from the `end` a
-transformer returns: completion follows rule 12.
+transformer returns: when a turn completes follows rule 1 of VoiceSession, and
+rule 12 below fixes how many `responseComplete` and `interrupt` events it
+gets.
 
 Rules:
 
@@ -709,7 +712,11 @@ Rules:
    byte length, a finite `sampleRate`, a numeric `sequenceNumber`); an array
    containing one item of the wrong shape is wholly invalid. A failure of
    `onProcessorEvent`, thrown or rejected, is a hook failure (rule 4 of
-   VoiceSession); the engine does not wait for it.
+   VoiceSession); the engine does not wait for it. (Informative: the reference
+   package types `onProcessorEvent` as returning `void` and absorbs only a
+   synchronous throw; a rejected promise it returns is not caught yet. Until
+   the reference is aligned, a host SHOULD NOT return a promise that can
+   reject.)
 5. **Budget.** Each transformer has a time budget per item: its `budgetMs`, or,
    when it has none, the default of its hook in the implementation, which MAY
    be none; `0` disables it. A `budgetMs` that is negative or not finite is
@@ -722,7 +729,8 @@ Rules:
    `budgetMs`) and `budgetMs`.
 6. **Observers never block.** The engine does not wait for an observer, and
    an observer's slowness or failure changes nothing on the path. Each observer
-   has a bounded queue (the reference default is 64 items); when it is full the
+   has a bounded queue of `queueMax` items when it sets one, otherwise of the
+   implementation's default (the reference default is 64); when it is full the
    oldest item is dropped, and the engine sends one `dropped` event per burst
    with `data: { count }`, the number of items dropped since the last event. An
    observer failure is an `error` event. A `publish` call after the observer
