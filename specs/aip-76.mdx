@@ -165,6 +165,9 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
    secret if the submitted one differs and moves the local TTL. A renewal
    failure raises `BackingSubscriptionError` and leaves the previous grant
    fully intact (state, TTL, secret): local never outlives remote.
+5. **Verify before mutate**: the callback challenge (next section) MUST pass
+   before any store mutation. The verification cache is keyed on
+   sha256(secret), so a new secret always forces a fresh challenge.
 6. **Cursor on subscribe**: a submitted `cursor` is decoded exactly like a
    pull-read cursor (unreadable: invalid params `invalid_cursor`; issued to
    another principal: forbidden `cursor_principal_mismatch`). Webhook
@@ -177,9 +180,6 @@ subscribe result: { id: "sub_<hex32>", refreshBefore: string | null,
    `https:` URL is rejected as invalid params (`invalid_callback_url`)
    before any network call. Unsubscribe does not apply this check, so a
    subscription created with any URL can always be removed.
-5. **Verify before mutate**: the callback challenge (next section) MUST pass
-   before any store mutation. The verification cache is keyed on
-   sha256(secret), so a new secret always forces a fresh challenge.
 
 ### Callback verification (the challenge)
 
@@ -414,9 +414,15 @@ final     { jsonrpc, id, result: { resultType: "complete", _meta } }   only when
    `notifications/events/heartbeat` frame carrying the head cursor, not an
    SSE comment (a comment cannot carry the cursor).
 3. `Accept` MUST allow `text/event-stream` (`*/*` and `text/*` do), else
-   HTTP 406. Every validation error (`-32602`, `-32023`, `-32024`,
-   `-32025`, `-32026`) is a plain `application/json` JSON-RPC error and no
-   stream is opened.
+   HTTP 406. Every validation error of the request itself (`-32602`,
+   `-32023`, `-32024`, `-32025`, `-32026`, raised while opening the
+   stream) is a plain `application/json` JSON-RPC error with HTTP status
+   `200`, and no stream is opened: these are handler errors in the sense of
+   [AIP-77](/docs/aip-77) §Error mapping, like the same codes on
+   `events/poll`. Protocol-level rejections keep their AIP-77 status:
+   header mismatch (`-32020`) is `400`, an unaccepted `Accept` is `406`,
+   `events/stream` while the stream is switched off is `-32601` `404`, and
+   an uncaught failure is `-32603` `500`.
 4. A type whose `delivery` lacks `"push"` is `-32026` with
    `data: { feature: "deliveryMode", value: "push" }`.
 5. At most 32 streams are open at once (`-32025`,
@@ -567,10 +573,12 @@ covered; deviations listed above).
 | End-to-end tests | `packages/runtime/src/__tests__/mcp-events-e2e.test.ts`, `mcp-events-principal.test.ts`, `mcp-events-route.test.ts`, `mcp-events-surface.test.ts`, `sentinel-delivery-apply.test.ts`, `external-sentinel-delivery.test.ts`; `packages/mcp-server/src/__tests__/events-methods.test.ts` |
 | Conformance suite | `scripts/mcp-events-conformance/` (36 PASS / 0 FAIL at `765660d`) |
 
-The rows above are the 2026-11-21 audit at `765660d`. The MCP Events
-extension (pull and push reads, official codes, `Mcp-Name`) landed later;
-the rows below cite `agentproto/ts` @ `9449f6362` (the head of
-agentproto/ts#2891, which contains agentproto/ts#2887).
+The rows above are the 2026-11-21 audit at `765660d`; their line numbers
+are exact at that commit and drift on later ones. On current `main`, use
+the table below. The MCP Events extension (pull and push reads, official
+codes, `Mcp-Name`) landed later; the rows below cite `agentproto/ts` @
+`ac2fe639a` (agentproto/ts#2891 merged, after agentproto/ts#2887). The
+cited files are unchanged from that commit to `3eb5bd1bd`.
 
 | Concern | Source (in `agentproto/ts`) |
 |---|---|
@@ -682,10 +690,10 @@ the implementation's deviation list.
    EVENT contract (plain HTTP for non-MCP clients, A2A, a session tool
    surface over AIP-46). Pull and push reads now exist in `mcp-events/v1`;
    whether they belong in the transport-neutral contract as MUSTs is open.
-7. **Webhook replay**: replaying a webhook subscription from its cursor
+6. **Webhook replay**: replaying a webhook subscription from its cursor
    (and returning a safe watermark as the subscribe `cursor`) would close
    §Known deviations 5; it needs the webhook path to hold a journal lease.
-6. **Second implementer**: the 2-implementer rule for Final. The
+7. **Second implementer**: the 2-implementer rule for Final. The
    conformance suite in the reference implementation is the starting
    point; extracting a portable one is a blocker on the path from Draft to
    Final, not to Draft.
