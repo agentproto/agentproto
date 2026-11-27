@@ -5,7 +5,7 @@ aip: 53
 status: Review
 type: Schema
 created: 2026-08-13
-updated: 2026-11-08
+updated: 2026-11-28
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 14, 15, 34, 42, 73]
 resources: ./resources/aip-53/draft
@@ -198,11 +198,16 @@ interface AppDefinition {
   dev?:          AppDevDefinition
   data?:         AppDataDefinition                   // default data-dir hint for the app_data_* plane
   category?:     string                               // coarse grouping surfaced in catalogs/trees
+  access?:       AppAccess                             // who may open the app from another device, see "Remote access"
   setup?:        AppSetupStep[]                       // post-install configuration pipeline — see "Setup steps"
   services?:     AppService[]                          // long-running processes the host starts with the app, see "Services"
   exposes?:      AppExposes                            // agents, workflows, MCP tools and ui:// views offered outside the app, see "Exposed tools and resources"
   boundaries?:   AppBoundaries                         // filesystem zones of the sessions the app spawns, see "Session boundaries"
   externalReadRoots?: string[]                         // host dirs outside the app dir, absolute or ~-relative, read-only
+}
+
+interface AppAccess {
+  remote?: boolean   // false: the app is never listed to, nor callable from, a paired device
 }
 
 interface AgentEntry {
@@ -443,6 +448,10 @@ schema release. Both are carried verbatim into `APP.md` frontmatter by
     repo belongs to the host and runs at spawn time (see
     [Session boundaries](#session-boundaries-boundaries), including its
     gaps between the schema and the reference loader).
+
+14. **`access` is closed.** When `access` is present it MUST be an object with no
+    key besides `remote`, and `remote` MUST be a boolean. `defineApp` and the
+    loader MUST refuse a definition that violates this.
 
 ### Emitted layout
 
@@ -1838,6 +1847,15 @@ A UI surface is a static file tree rooted at `.agentproto/ui/`, with
    emitted `.agentproto/ui/` — see
    [The `ui/` source-project convention](#the-ui-source-project-convention).
 
+### Remote access
+
+`access.remote: false` is the app's own statement that it is not to be opened
+from another device. A host that lets other devices open apps (AIP-59 §9) MUST
+NOT list such an app to a device, and MUST refuse a tool call for it from a device
+whatever the device's grant. Absent, or `true`, leaves the decision to the grant. A
+host MAY change that default for apps that declare nothing; the reference host
+keeps them open while it is used among trusted devices only.
+
 ### The `window.McpApp` bridge
 
 A conforming host that renders a UI surface — embedding it in a panel,
@@ -2246,6 +2264,8 @@ read a token would hand a compromised page the credentials setup exists
 to protect.
 
 ## Backward compatibility
+
+**`access` amendment (2026-11-28).** Purely additive: `access` is a new OPTIONAL frontmatter field; an `APP.md` without it is unaffected. A host built against the earlier schema rejects an `APP.md` that carries it, since the manifest is closed.
 
 **`requires` object form and `requires.apps[].tools` amendment
 (2026-11-08).** Purely additive: an `APP.md` whose `requires` is a list of
