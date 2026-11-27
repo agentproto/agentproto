@@ -238,6 +238,11 @@ parser, file-tree source, DB-backed source, and library tooling. The
 implementation is the source of truth for the schema during the Draft
 phase.
 
+Serving skills over MCP does not change this format. A host delivers skills to a
+session at spawn by default; it MAY also serve the skills it holds over MCP
+through the Skills binding of [AIP-77](/docs/aip-77), which carries this file
+and its companions unchanged.
+
 ## Backwards Compatibility
 
 Not applicable — this AIP introduces a new spec.

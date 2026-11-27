@@ -1,6 +1,6 @@
 ---
 title: "AIP-77: MCP-GATEWAY (mcp-gateway/v1): dual-era MCP host gateway, server/discover, and extension negotiation"
-description: "Specifies how an agentproto host serves its authenticated MCP gateway (/mcp) across both the legacy 2025-11-25 Streamable HTTP era and the stateless 2026-07-28 modern era: authentication-first dispatch, header and single-read body era routing, strict separation of accepted vs advertised protocol versions, server/discover and capabilities.extensions, error status mapping including -32021 (HTTP 400), shared tool-factory discovery modes (deferredTools/tool_search), unified session observability, and configuration rollback. Scope v1 covers /mcp only; /mcp/orchestrator and /mcp/imported/<id> stay on 2025-11-25. Host primitives remain specified by their existing AIPs."
+description: "Specifies how an agentproto host serves its authenticated MCP gateway (/mcp) across both the legacy 2025-11-25 Streamable HTTP era and the stateless 2026-07-28 modern era: authentication-first dispatch, header and single-read body era routing, strict separation of accepted vs advertised protocol versions, server/discover and capabilities.extensions, error status mapping including -32021 (HTTP 400), shared tool-factory discovery modes (deferredTools/tool_search), unified session observability, and configuration rollback. Scope v1 covers /mcp only; /mcp/orchestrator and /mcp/imported/<id> stay on 2025-11-25. It also binds the beta MCP Skills extension (skills/list, skills/get, skill:// resources) and the transport of human input (permissions, questions, approvals, runs) as MRTR elicitation. Host primitives remain specified by their existing AIPs."
 aip: 77
 status: Draft
 type: Schema
@@ -41,6 +41,11 @@ accepted and advertised protocol versions, the `server/discover` payload, error
 status mapping, shared discovery filtering (`deferredTools` / `tool_search`),
 unified observability, and the configuration switch to disable modern-era
 routing.
+
+It also binds two features served on that era: the MCP Skills extension, which
+serves the host's skills ([AIP-3](/docs/aip-3)), and the transport of human
+input requests as multi-round tool results (`InputRequiredResult` with
+`elicitation/create`).
 
 ## Motivation
 
@@ -216,6 +221,109 @@ When set to `false`, `/mcp` bypasses the modern dispatch path completely and
 serves all requests through the `2025-11-25` transport, including legacy version
 header coercion.
 
+### Skills binding
+
+This section binds the MCP Skills extension (`io.modelcontextprotocol/skills`,
+beta) to the host. The skill format itself stays [AIP-3](/docs/aip-3); this
+binding only says how skills the host already holds are served over the modern
+era of `/mcp`.
+
+- **Declaration.** When the binding is enabled, the host announces
+  `capabilities.extensions["io.modelcontextprotocol/skills"] = {}` in
+  `server/discover` and also declares `resources` (files are read through
+  `resources/read`). The optional `directoryRead` capability is not declared, and
+  `resources/directory/read` is not served.
+- **Source.** Only the host's imported-skills registry is served. Files are
+  read from the host's durable copy of each skill, not from the original source
+  folder. Skills a host delivers to a session at spawn are unaffected by this
+  binding.
+- **`skills/list`** returns `{ skills, nextCursor? }`. Each entry is
+  `{ uri, frontmatter, resources }`: `uri` is `skill://<name>/SKILL.md`,
+  `frontmatter` is the frontmatter of `SKILL.md` as written (every key kept, no
+  normalization), and `resources` lists every file of the skill as
+  `{ uri, digest, size }`. The cursor is opaque.
+- **`skills/get`** takes `{ uri: "skill://<name>/SKILL.md" }` and returns
+  `{ skill }` with the same entry shape. Any other path is `-32602`.
+- **Files.** `skill://<name>/<path>` is read through `resources/read`, as
+  `text` when the bytes are valid UTF-8 without a NUL byte, otherwise as a
+  base64 `blob`.
+- **Caching hints.** `skills/list` and `skills/get` carry `ttlMs` and
+  `cacheScope`, like the other cacheable operations. `skills/get` requires no
+  `Mcp-Name` header; `resources/read` keeps its `uri` one.
+- **Naming.** The `<name>` segment is the skill's frontmatter `name` (its
+  registry id), never a display alias. A skill whose frontmatter `name` or
+  `description` does not match its registry entry is not served.
+- **Manifest and digests.** `digest` is `sha256:<hex>` over the raw bytes of
+  the file. It lets a client detect drift; it is not a trust anchor (it is
+  unsigned and comes from the same server). A file whose bytes no longer match
+  the manifest is re-checked against a rebuilt manifest before it is served.
+- **Ceilings.** A skill of more than 512 files or more than 16 MiB is not
+  served, and `skills/get` says why.
+- **Path confinement.** A `skill://` path is split without URL normalization;
+  empty, `.`, `..`, or encoded separator segments are `-32602`. A file that is
+  not in the manifest is `-32602`. The real path of every file is checked to
+  stay inside the skill folder before any byte is read, so a symbolic link that
+  leaves the folder is neither listed nor readable.
+- **Rollback.** The binding has its own switch, `mcp.extensions.skills`
+  (default `true`); `false` stops announcing and serving it.
+
+### Human input over MRTR
+
+A host that already parks work on a human (an [AIP-45](/docs/aip-45)
+permission or question, an [AIP-7](/docs/aip-7) approval, an
+[AIP-58](/docs/aip-58) run waiting for input) MAY expose that request to a
+`2026-07-28` client as an `InputRequiredResult` (`resultType:
+"input_required"`) carrying one `elicitation/create` request. This is only a
+transport: the existing judge of each primitive still decides, and an
+elicitation never replaces it.
+
+The host projects four surfaces:
+
+| Surface | Observed on | Elicitation mode | Who is asked |
+|---|---|---|---|
+| Held permission | `permissions_list`, `session_monitor`, `tasks/get` of the session's turn ([AIP-78](/docs/aip-78)) | `form` | the operator, or a session resolving one of its own descendants |
+| Session question | same as above | `form` | same as above |
+| Pending approval | `approval_get`, `approval_wait` | `url` | the caller of `approval_get` / `approval_wait` |
+| Run waiting for input | `workflow_status` | `form` | the operator only |
+
+Rules:
+
+- **Capability first.** A surface is projected only to a client that declared
+  the matching elicitation mode. A client that declared neither mode, or a
+  surface that cannot be expressed, gets the tool's ordinary result. Nothing is
+  ever lost: the primitive stays answerable through its own tools.
+- **Flat forms, no secrets.** A `form` is only produced from the flat
+  `requestedSchema` subset. A field whose key or prompt points at a secret, a
+  credential or payment data is never put in a form; such a request is not
+  projected.
+- **Approvals.** The `url` is the host's configured approval page plus the
+  approval id. Without a configured page, no approval elicitation is produced.
+  A base that could carry a credential (userinfo, fragment, credential-like
+  query key) is refused. An `accept` from the client only records that the page
+  was shown: it neither decides nor consumes the approval.
+- **No self-resolution.** A session is never asked to resolve its own
+  permission or question, and a spawned session can only resolve requests of
+  sessions in its own subtree. Runs are observed by the operator only.
+- **Replay token.** The `requestState` is signed by the host and binds the
+  caller, the tool, a hash of the original arguments (without `_meta`,
+  `requestState` and `inputResponses`), the entity kind and id, an expiry and a
+  single-use 128-bit nonce. A retry whose token is altered, expired, already
+  used, issued to another caller, for another tool or for other arguments, or
+  that names an unknown kind is rejected with `-32602`. A missing or incomplete
+  answer produces a fresh `InputRequiredResult`, not an error.
+- **Durability.** Approval and run tokens stay verifiable across a host
+  restart (the signing key and the consumed nonces are stored). Permission and
+  question tokens are bound to the host's boot and fail after a restart.
+- **Not projected.** A run waiting on an `escalate` policy (it carries neither a
+  question nor a schema); a run whose input schema is not flat (no console page
+  exists to send it to); `workflow_run_file` and `approval_request`
+  (`workflow_status` and `approval_get` are the observers). A `form` for a
+  single choice that also allows free text loses its `choices`, because the
+  flat subset cannot express both.
+- **Rollback.** `mcp.humanGate` (default `true`) switches every surface off;
+  `mcp.humanGateApprovals` and `mcp.humanGateRuns` (default `true`) switch the
+  approval and run surfaces off on their own.
+
 ## Security considerations
 
 - **No auth bypass.** Modern routing happens strictly after `authorizeMcp`,
@@ -245,10 +353,30 @@ A host conforms to `mcp-gateway/v1` when:
 5. Modern `server/discover`, `tools/list`, and HTTP errors update the host's
    session observation store.
 6. Setting `mcp.modernEra` to `false` restores pure legacy routing on `/mcp`.
+7. With the Skills binding enabled, `server/discover` announces the extension
+   and `resources`; `skills/list`, `skills/get` and `resources/read` on
+   `skill://` serve only registry skills under their `name`, with digests over
+   raw bytes and `ttlMs` / `cacheScope` on both methods; a traversal segment or
+   a file outside the manifest is `-32602`; a skill above 512 files or 16 MiB is
+   not served.
+8. With the human gate enabled, a held permission, a session question, a
+   pending approval (`url`, only with a configured page) and a run waiting for
+   input (operator only) are projected as `InputRequiredResult` to a client that
+   declared the matching elicitation mode, and to no other client; a form never
+   carries a secret field; an approval `accept` neither decides nor consumes;
+   a session never resolves its own request; an altered, expired, replayed or
+   foreign replay token is `-32602`.
 
 ## See also
 
 - [AIP-1](/docs/aip-1): process and RFC 2119 terminology
+- [AIP-3](/docs/aip-3): SKILL, the format of the skills served by the Skills
+  binding
+- [AIP-7](/docs/aip-7), [AIP-45](/docs/aip-45), [AIP-58](/docs/aip-58): the
+  approvals, permissions and questions, and runs whose human input is carried
+  over MRTR
 - [AIP-46](/docs/aip-46): SESSION, whose MCP tools are exposed through this
   gateway
+- [AIP-78](/docs/aip-78): TURN-TASK, whose `tasks/get` also carries a session's
+  pending input
 - [AIP-76](/docs/aip-76): EVENT and the `mcp-events/v1` public origin
