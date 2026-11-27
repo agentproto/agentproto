@@ -37,7 +37,7 @@ Approve, done.
 ## Procurement
 
 If the automated flow fails, generate a personal API key at
-https://app.atrium.example/settings/api-keys and use `bureau login --token gld_...`.
+https://app.atrium.example/settings/api-keys and use `bureau login --token atm_...`.
 ---
 ```
 

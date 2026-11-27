@@ -138,7 +138,7 @@ selection if no participant matches.
 
 ## 5. Server-side autonomous loop (forward-looking)
 
-A runtime hosted inside a Atrium server process — no CLI involvement. Same
+A runtime hosted inside an Atrium server process — no CLI involvement. Same
 manifest shape, different adapter wiring.
 
 ```yaml

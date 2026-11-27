@@ -40,9 +40,9 @@ metadata:
 
 ## Server example — Atrium operator (IDE distribution)
 
-`atrium-acp/ACP.md` declares a Atrium-side ACP **server** that wraps
+`atrium-acp/ACP.md` declares an Atrium-side ACP **server** that wraps
 an AIP-9 operator. A user configures `atrium-acp` as their ACP agent
-in Zed/VSCode, and the editor talks to a Atrium operator transparently.
+in Zed/VSCode, and the editor talks to an Atrium operator transparently.
 
 ```yaml
 ---
