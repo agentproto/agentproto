@@ -58,7 +58,7 @@ Agent runtimes shipped as CLIs are a fast-growing category:
 Today every product wires each one bespoke: invoke it as a subprocess,
 parse its prompt / output / streaming events, manage its lifecycle,
 hand it secrets, route tool calls. The cost compounds across products —
-Guilde, Katchy, Simone, dev tooling — and across platforms (macOS,
+an operator platform, a creative tool, a companion app, dev tooling — and across platforms (macOS,
 Linux, headless servers, Modal/Daytona sandboxes).
 
 AIP-45 factors the integration shape into a single declarative file
@@ -968,8 +968,8 @@ Hermes (multimodal) or Goose (text-only)?" — without spawning every
 candidate. Manifest-declared capabilities give pre-flight visibility;
 runtime negotiation is the verification step.
 
-**Why stream events are normalised.** A consumer (Guilde Shell view,
-Katchy workflow runner) doesn't care that Hermes uses ACP and Goose
+**Why stream events are normalised.** A consumer (an operator platform's shell view,
+a creative tool's workflow runner) doesn't care that Hermes uses ACP and Goose
 uses MCP — it cares that both produce `text-delta` and `tool-call`
 events. Normalising at the protocol-arm boundary lets every consumer
 ship one renderer.

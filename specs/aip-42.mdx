@@ -288,9 +288,9 @@ optionally narrowed:
 
 ```yaml
 tools:
-  - { kind: mcp, server: katchy }                              # every tool katchy exposes
+  - { kind: mcp, server: prism }                              # every tool prism exposes
   - { kind: mcp, server: agentproto, allow: [session_list] }  # only these
-  - { kind: mcp, server: pygmalion, deny: [cron_create] }     # all but these
+  - { kind: mcp, server: muse, deny: [cron_create] }     # all but these
 ```
 
 | Field | Type | Req | Description |

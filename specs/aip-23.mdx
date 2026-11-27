@@ -651,8 +651,8 @@ binding:
 | `skill` | An [AIP-3](/docs/aip-3) skill. | `ws://skills/<slug>` |
 
 Workspaces narrow the vocabulary to fit their domain. A
-companion-app identity (Simone-style) typically allows
-`[user, persona]`. An operator-fleet identity (Guilde-style)
+companion-app identity typically allows
+`[user, persona]`. An operator-fleet identity
 typically allows `[operator, company]`.
 
 **`exclusivity: per-entity-and-layer`** (the only currently
@@ -834,7 +834,7 @@ identity` shows the model in production: 8 starter layers
 (soul / mind / body / voice / world / shadow / personality /
 role-context / emotional-bond), composed via `composeIdentity
 Prompt(layerSets, artifacts)`, deployed across two products
-(Simone, Guilde) with different layer subsets per product.
+(a companion app and an operator platform) with different layer subsets per product.
 
 **Why per-layer typed schemas (AIP-18 collections).** Once
 identity is layered, the question is whether the layer schemas
@@ -938,7 +938,7 @@ in *bearer*.
 
 A public reference implementation is **TBD** — pending extraction into
 `agentproto/ts`. A working private implementation runs in production
-across two products (Simone, Guilde) and was the basis for this AIP;
+across two products (a companion app and an operator platform) and was the basis for this AIP;
 the file names below describe its shape so any conforming
 implementation can mirror it:
 
@@ -958,17 +958,17 @@ implementation can mirror it:
 - `presets/`:
   the eight preset layer definitions (`soul`, `mind`, `body`,
   `voice`, `world`, `shadow`, plus extensions in app packages).
-- Simone's `domain/identity/layers.ts`:
-  Simone's `emotional-bond` layer (the canonical temporal-layered
+- the companion app's `domain/identity/layers.ts`:
+  its `emotional-bond` layer (the canonical temporal-layered
   example).
-- Guilde's `domain/identity/layers.ts`:
-  Guilde's `personality` and `role-context` layers.
+- the operator platform's `domain/identity/layers.ts`:
+  its `personality` and `role-context` layers.
 - `identity-ingestion.service.ts`:
   the ingestion service that extracts confidence-scored signals
   from conversation messages.
 
 The implementation has been in production across two products
-(Simone, Guilde) for several months. AIP-23 codifies the
+(a companion app and an operator platform) for several months. AIP-23 codifies the
 filesystem-portable form of the same model. The DB schema
 (`identity_layers`, `identity_artifacts`, `identity_temporal`)
 maps onto AIP-18 ITEM.md records under their respective layer
@@ -1127,7 +1127,7 @@ and other composable blocks in the series.
 # Form A — inline (the simple case)
 identity:
   name: "Bob"
-  email: "bob@guilde.work"
+  email: "bob@atrium.example"
   gpg_key: "..."        # optional
 
 # Form B — ref to a host scheme (the most common case)

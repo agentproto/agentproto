@@ -7,7 +7,7 @@ pattern and edit fields rather than draft from scratch.
 
 ## Patterns covered
 
-1. [Council (advisory mode) — Simone-flavored 5-mentor council](#example-1--council-advisory-mode)
+1. [Council (advisory mode) — Nova-flavored 5-mentor council](#example-1--council-advisory-mode)
 2. [Voting (decision body) — small board with quorum and weighted votes](#example-2--voting-decision-body)
 3. [Peer (network) — 4 peers exchanging messages on a fully-connected topology](#example-3--peer-network)
 4. [Hierarchy (reporting tree) — 3-level tree with bottom-up severity aggregation](#example-4--hierarchy-reporting-tree)
@@ -17,29 +17,29 @@ pattern and edit fields rather than draft from scratch.
 
 ## Example 1 — Council (advisory mode)
 
-The canonical realisation: Simone's 5-mentor Council. Five members referenced by
+The canonical realisation: Nova's 5-mentor Council. Five members referenced by
 persona, three phases (`session`, `standing`, `sentinel`), four synthesis rules
 (sentinel-wins, critic-sycophancy- forced, severity-eight-unilateral,
 moderate-aggregation), six locked traits matching the working
-`SIMONE_LOCKED_TRAITS` constant.
+`NOVA_LOCKED_TRAITS` constant.
 
 ```yaml
 ---
 schema: assembly.workspace/v1
-name: simone-council
-title: Simone Council of Mentors
+name: nova-council
+title: Nova Council of Mentors
 description: |
-  Five-mentor advisory assembly defending Simone's persona against
+  Five-mentor advisory assembly defending Nova's persona against
   drift, sycophancy, and safety-relevant pattern matches. Mentors
   produce structured guidance; the synthesizer's hard rules pick
-  fragments to weave into Simone's instructions; the locked-trait
-  floor prevents the council from eroding Simone's voice.
+  fragments to weave into Nova's instructions; the locked-trait
+  floor prevents the council from eroding Nova's voice.
 version: 1.0.0
 
 mode: advisory
 
 members:
-  - persona: ws://personas/simone-therapist
+  - persona: ws://personas/nova-therapist
     id: therapist
     role: Therapist
     phase: session
@@ -48,7 +48,7 @@ members:
     gatherInput:
       strategy: working-memory
 
-  - persona: ws://personas/simone-stoic
+  - persona: ws://personas/nova-stoic
     id: stoic
     role: Stoic
     phase: session
@@ -57,7 +57,7 @@ members:
     gatherInput:
       strategy: working-memory
 
-  - persona: ws://personas/simone-elder
+  - persona: ws://personas/nova-elder
     id: elder
     role: Elder
     phase: standing
@@ -67,7 +67,7 @@ members:
       strategy: digest
       params: { window_days: 7 }
 
-  - persona: ws://personas/simone-critic
+  - persona: ws://personas/nova-critic
     id: critic
     role: Critic (anti-sycophancy)
     phase: session
@@ -77,7 +77,7 @@ members:
       strategy: recent-messages
       params: { limit: 12 }
 
-  - persona: ws://personas/simone-sentinel
+  - persona: ws://personas/nova-sentinel
     id: sentinel
     role: Sentinel (safety pre-filter)
     phase: sentinel
@@ -140,9 +140,9 @@ audit:
     defaultTtl: P14D
   signing: optional
 
-identity: ws://identities/simone
-governance: ../policies/simone-council-governance.yaml
-executor: ws://operators/simone
+identity: ws://identities/nova
+governance: ../policies/nova-council-governance.yaml
+executor: ws://operators/nova
 
 defaults:
   triggerHeuristic: every-n-messages
@@ -152,23 +152,23 @@ display:
 
 metadata:
   agentik:
-    workingImplementation: packages/simone/src/council
+    workingImplementation: packages/nova/src/council
 ---
 
-# Simone Council of Mentors
+# Nova Council of Mentors
 
 ## Purpose
 
-The Council protects Simone's persona from drift, sycophancy, and
+The Council protects Nova's persona from drift, sycophancy, and
 safety-relevant pattern matches. It runs alongside conversations,
 producing structured guidance that the persona builder weaves into
 instructions transparently. Users never see the Council; they
-experience Simone behaving more cautiously, less sycophantically,
+experience Nova behaving more cautiously, less sycophantically,
 or handing off to a human when the Sentinel fires.
 
 ## Mode rationale
 
-Advisory is the right pattern. Voting on Simone's persona would
+Advisory is the right pattern. Voting on Nova's persona would
 make every reply slow and dilute the loudest signals (sentinel,
 critic) by averaging them with quieter ones (therapist, stoic).
 Peer would over-engineer the council into a debate club. Hierarchy
@@ -184,7 +184,7 @@ Rules apply in declaration order, the loudest signal first:
    short-circuits everything else with priority 100 and a 3-day TTL.
    Crisis situations resolve on a timescale of days, not weeks.
 2. **Critic sycophancy** — sycophancy is the failure mode where
-   Simone is being harmful by being too pleasing. The Critic's
+   Nova is being harmful by being too pleasing. The Critic's
    sycophancy concerns are forced through with priority 80
    regardless of what the others said.
 3. **Severity-eight unilateral** — any mentor at severity ≥ 8
@@ -195,7 +195,7 @@ Rules apply in declaration order, the loudest signal first:
 
 ## Threat model
 
-`lockedTraits` defends against the council eroding Simone's core
+`lockedTraits` defends against the council eroding Nova's core
 identity over time. A Critic could nudge "be more terse" until
 warmth is gone; a Sentinel could nudge "be more cautious" until
 honesty is gone. The substring lock catches fragments mentioning
@@ -204,7 +204,7 @@ the synthesis trail.
 
 ## When to extend vs replace
 
-Extend this manifest when the consumer is a Simone-shaped agent
+Extend this manifest when the consumer is a Nova-shaped agent
 needing the same council semantics with adjusted triggers, locked
 traits, or audit posture. Replace it when the agent is a
 fundamentally different shape (a customer-support bot doesn't

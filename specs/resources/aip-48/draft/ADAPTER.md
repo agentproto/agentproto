@@ -33,7 +33,7 @@ A Substrate is **append-only**. Implementations MAY garbage-collect
 historical turns, but `read` SHOULD return a consistent window each call.
 
 `TurnId` values are opaque to the kernel; the substrate decides their form
-(content hash for `file`, UUID for `guilde-mcp`). When `since` is provided,
+(content hash for `file`, UUID for `atrium-mcp`). When `since` is provided,
 the substrate returns turns strictly newer than that id; when `since` is
 unknown to the substrate (drift, GC, restart), behaviour SHOULD fall back to
 "return everything you have."
@@ -69,10 +69,10 @@ Required behaviour:
   the same cycle.
 - Returning `[]` is normal — the runtime goes idle, lifecycle.onIdle fires.
 
-The reference `mention` dispatcher matches Guilde's server-side parser
+The reference `mention` dispatcher matches Atrium's server-side parser
 byte-for-byte: literal `@<displayName>` substring (case-sensitive) plus
 `@<firstName>` with a word boundary for multi-word names (case-insensitive).
-Any adapter that intends to interoperate with a Guilde substrate MUST match
+Any adapter that intends to interoperate with an Atrium substrate MUST match
 this behaviour or substrate-side and dispatcher-side parsing will disagree.
 
 ## Participant adapters (executors)
@@ -168,7 +168,7 @@ file trees with per-file merge strategies (`overwrite`, `preserve`,
 `merge-json-deep`, `append`) and a setup ledger so re-runs detect drift.
 
 Future strategies:
-- `guilde-sync` — pull the user's per-guild profile from a Guilde HTTP
+- `atrium-sync` — pull the user's per-guild profile from an Atrium HTTP
   endpoint after `agentproto auth login`. Personalisation lives server-side.
 - `mcp-self-action` — agents call an MCP tool that triggers
   `agentproto install` on the connected CLI session. Agent-initiated

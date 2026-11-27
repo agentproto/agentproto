@@ -237,7 +237,7 @@ these. Aim for 4–6 tags covering:
 
 - The **role** (`mentor`, `helper`, `voice`, `analyst`).
 - The **domain** (`brand`, `fiction`, `research`, `support`).
-- The **product or world** (`indigo`, `holdfast`, `simone`).
+- The **product or world** (`indigo`, `holdfast`, `nova`).
 - The **archetype family** (`craftsman`, `sentinel`).
 
 Avoid stop-word tags (`general`, `useful`, `agent`). They never help the catalog

@@ -8,8 +8,8 @@ description: |
   *within an organisation* — distinct from `personality` (how
   they show up) and `mind` (how they think). Ships in the
   identitykit-compagnon starter library; corresponds to the
-  `role-context` layer in the Guilde reference implementation
-  (packages/guilde/src/domain/identity/layers.ts).
+  `role-context` layer of a production operator-platform
+  implementation (private).
 version: 1.0.0
 fields:
   - name: roleType
@@ -90,8 +90,8 @@ line. Where `mind` is how they think and `personality` is how they show up,
 role-context is _what they do at work_.
 
 This collection is part of the **identitykit-compagnon** starter library. It is
-a faithful translation of the Guilde reference implementation's `role-context`
-layer (packages/guilde/src/domain/identity/layers.ts).
+a faithful translation of the `role-context` layer of a production operator-platform
+implementation (private).
 
 ## Conventions
 
@@ -154,5 +154,5 @@ reporting line external counterparties expect.
 - [AIP-22 — agentoffice/v1](/docs/aip-22) — authoritative org-tree reporting
   graph
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18)
-- The Guilde reference implementation's
-  [`role-context` layer](https://github.com/agentik-net/agentik-studio/blob/main/packages/guilde/src/domain/identity/layers.ts)
+- The `role-context` layer of a production operator-platform implementation
+  (private, not linked)

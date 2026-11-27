@@ -20,7 +20,7 @@ The `@agentproto/corpus` reference composition stashes all four under `metadata.
 ## Evidence of pain
 
 - **Marketing preset** (`projects/agentproto/ts/packages/corpus-presets/marketing/`): 5 seed playbooks use `metadata.corpus.shadowMetrics`, `metadata.corpus.shadowTrafficPct`, `metadata.corpus.autoPromote`, and `metadata.corpus.archiveReason`. Validated by AIP-12's schema today because `metadata.corpus.*` is `additionalProperties: true`.
-- **Curator UI** (`projects/guilde/apps/web/src/components/corpus/CorpusPage.tsx`): the playbooks panel reads these fields to render the "shadow metrics" card and the activate/archive controls. Each consumer would have to know to look inside `metadata.corpus` until the hoist lands.
+- **Curator UI** (a host's corpus page): the playbooks panel reads these fields to render the "shadow metrics" card and the activate/archive controls. Each consumer would have to know to look inside `metadata.corpus` until the hoist lands.
 - **Promotion gate** (`projects/agentproto/ts/packages/corpus/src/playbooks/lifecycle.ts`): the activation path consults `metadata.corpus.autoPromote.threshold` and `metadata.corpus.shadowMetrics.winRateVsBaseline` to decide whether `lc.activate()` is even legal. With the hoist, the runtime can validate the gate structure statically.
 
 ## Proposed amendment

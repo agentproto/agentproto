@@ -107,7 +107,7 @@ kpis:
 strengths:
   - Knows our voice deeply — never breaks tone
 metadata:
-  guilde:
+  atrium:
     visibility: org
     organizationId: org_a1b2c3
     modelTier: standard
@@ -188,7 +188,7 @@ tags:
   - operations
   - chief-of-staff
 metadata:
-  guilde:
+  atrium:
     visibility: public
     modelTier: premium
 ---
@@ -252,30 +252,30 @@ Two operators hold this one role. Each fills the slots in its AIP-9 `role`
 binding; the rest of the operator is instance prose.
 
 ```yaml
-# operators/pm-katchy/OPERATOR.md (frontmatter excerpt)
+# operators/pm-prism/OPERATOR.md (frontmatter excerpt)
 role:
   ref: ws://roles/pm
   bind:
-    board:         ws://collections/katchy-board
-    objective:     ws://collections/katchy-relaunch
-    product_tools: { kind: mcp, server: katchy }
+    board:         ws://collections/prism-board
+    objective:     ws://collections/prism-relaunch
+    product_tools: { kind: mcp, server: prism }
   with: { language: fr }
 policy: ws://policies/no-cron          # bound on the operator, not taken from the role
 ```
 
 ```yaml
-# operators/pm-lawhub/OPERATOR.md (frontmatter excerpt)
+# operators/pm-legaldesk/OPERATOR.md (frontmatter excerpt)
 role:
   ref: ws://roles/pm
   bind:
-    board:         ws://collections/lawhub-board
-    objective:     ws://collections/lawhub-q4
+    board:         ws://collections/legaldesk-board
+    objective:     ws://collections/legaldesk-q4
 policy: ws://policies/no-cron
 ```
 
 Validation (AIP-47 §Slots) on these bindings:
 
-- `pm-lawhub` leaves `product_tools` (optional) and `language` (default
+- `pm-legaldesk` leaves `product_tools` (optional) and `language` (default
   `fr`) unbound: valid.
 - A `bind` with `colour: red` fails with `role_slot_unknown`; a `bind` that
   omits `board` fails with `role_slot_unbound`; `board: ws://skills/triage`

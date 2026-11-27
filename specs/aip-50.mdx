@@ -47,7 +47,7 @@ Provision recipes ([AIP-19](/docs/aip-19)) tell a CLI tool *what credential to
 install* and *where it lives locally*. They say nothing about *how to obtain a
 valid bearer token to make the install call in the first place*. Today this is
 solved ad-hoc: bureaus and CLI tools require users to paste personal API keys
-(`gld_*`, `sk-*`, …) fetched manually from a web UI.
+(`atm_*`, `sk-*`, …) fetched manually from a web UI.
 
 The WorkOS auth.md protocol offers the right abstraction here: a server hosts
 an `auth.md` file describing its supported registration flows, and clients
@@ -384,7 +384,7 @@ device authorization without adopting the auth.md claim ceremony at all.
 assertion → exchange for access_token on demand) produces tokens that are
 short-lived (≤1h), revocable at the registration layer, and stateless on the
 server side. The assertion acts as a capability certificate; the access_token
-is ephemeral. This is strictly better than storing a `gld_*` PAT forever.
+is ephemeral. This is strictly better than storing a `atm_*` PAT forever.
 
 **`service-auth` grant URN, not RFC 8628 `device_code`**: Using a
 profile-specific URN prevents collision now that the same token endpoint

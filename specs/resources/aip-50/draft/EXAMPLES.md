@@ -4,28 +4,28 @@ Example `AUTH.md` manifests for the `defineAuthProvider` TS-literal and `.md` fi
 
 ---
 
-## Example 1 — Guilde (service-auth, full)
+## Example 1 — Atrium (service-auth, full)
 
 ```yaml
 ---
-id: guilde
-description: Guilde AI company platform — authenticate via the service_auth claim ceremony to obtain a scoped OAuth access token.
-apiBase: https://api.guilde.work
+id: atrium
+description: Atrium AI company platform — authenticate via the service_auth claim ceremony to obtain a scoped OAuth access token.
+apiBase: https://api.atrium.example
 auth:
   flow: service-auth
   clientId: agentproto-cli
   tokenStore:
-    keychain: bureau-guilde
+    keychain: bureau-atrium
     account: "{server}"
 install:
-  sealKey: /guilde/api/v1/connectors/seal-key
-  secretBacked: /guilde/api/v1/guilds/{guildId}/connectors/secret-backed
+  sealKey: /atrium/api/v1/connectors/seal-key
+  secretBacked: /atrium/api/v1/guilds/{guildId}/connectors/secret-backed
 ---
 
 ## Overview
 
-Guilde is the AI company platform. This manifest authenticates the bureau CLI
-or any agentproto tool to Guilde's API via the standard auth.md service_auth
+Atrium is the AI company platform. This manifest authenticates the bureau CLI
+or any agentproto tool to Atrium's API via the standard auth.md service_auth
 claim ceremony. No personal API key is required — open your browser, click
 Approve, done.
 
@@ -37,7 +37,7 @@ Approve, done.
 ## Procurement
 
 If the automated flow fails, generate a personal API key at
-https://app.guilde.work/settings/api-keys and use `bureau login --token gld_...`.
+https://app.atrium.example/settings/api-keys and use `bureau login --token atm_...`.
 ---
 ```
 
@@ -72,21 +72,21 @@ the login flow prompts.
 ```typescript
 import { defineAuthProvider } from "@agentproto/auth"
 
-export const GUILDE_AUTH_PROVIDER = defineAuthProvider({
-  id: "guilde",
-  description: "Guilde AI company platform",
-  apiBase: "https://api.guilde.work",
+export const ATRIUM_AUTH_PROVIDER = defineAuthProvider({
+  id: "atrium",
+  description: "Atrium AI company platform",
+  apiBase: "https://api.atrium.example",
   auth: {
     flow: "service-auth",
     clientId: "agentproto-cli",
     tokenStore: {
-      keychain: "bureau-guilde",
+      keychain: "bureau-atrium",
       account: "{server}",
     },
   },
   install: {
-    sealKey: "/guilde/api/v1/connectors/seal-key",
-    secretBacked: "/guilde/api/v1/guilds/{guildId}/connectors/secret-backed",
+    sealKey: "/atrium/api/v1/connectors/seal-key",
+    secretBacked: "/atrium/api/v1/guilds/{guildId}/connectors/secret-backed",
   },
 })
 ```

@@ -164,8 +164,8 @@ function autopick(needs) {
 }
 ```
 
-The registry doc lists candidate templates; for the Guilde reference impl see
-`packages/mcp/core/src/sandbox/registry.ts`.
+The registry doc lists candidate templates; one production host keeps them in
+its sandbox registry module.
 
 ## Needs handling
 

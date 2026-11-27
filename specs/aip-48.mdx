@@ -1,6 +1,6 @@
 ---
 title: "AIP-48: RUNTIME (runtime/v1): composable multi-agent execution kernel"
-description: A declarative manifest format and reference kernel for multi-agent runtimes — seven swappable ports (participants, substrate, dispatcher, lifecycle, state, effectors, provisioning) composed under a single manifest. One declarative kit produces both a private local-journal swarm and a Guilde-bridged conversation participant, with no kernel changes. Sibling to AIP-9 OPERATOR (which describes one participant) — AIP-48 describes how participants execute together.
+description: A declarative manifest format and reference kernel for multi-agent runtimes — seven swappable ports (participants, substrate, dispatcher, lifecycle, state, effectors, provisioning) composed under a single manifest. One declarative kit produces both a private local-journal swarm and an Atrium-bridged conversation participant, with no kernel changes. Sibling to AIP-9 OPERATOR (which describes one participant) — AIP-48 describes how participants execute together.
 aip: 48
 status: Review
 type: Core
@@ -38,7 +38,7 @@ coordinated conversation.
 The seven ports are the AIP's *only* primitive. Every concrete runtime is one
 choice of adapter per port, expressed declaratively in a manifest. The same
 participants run over a private append-only file journal (CLI-first mode) or
-over a live Guilde conversation thread (conversation-first mode) by swapping
+over a live Atrium conversation thread (conversation-first mode) by swapping
 nothing but the `substrate:` adapter — the kernel never branches on
 mode. Dispatchers, lifecycle hooks, and participant executors are written once
 and reused across both compositions.
@@ -65,7 +65,7 @@ Multi-agent systems today fragment along three vectors:
    kernel.
 3. **By scope.** A *local swarm* (one developer's sub-agents coordinating in a
    repo) and a *cloud-hosted team* (humans + Mastra operators + CLI sessions
-   in one Guilde conversation) are usually different products built by
+   in one Atrium conversation) are usually different products built by
    different teams, even when the underlying dispatch + turn-taking shape is
    identical.
 
@@ -80,7 +80,7 @@ AIP-48 collapses these vectors onto one manifest:
 
 The reference kernel (`@agentproto/agent-runtime`) is a thin orchestration
 loop over the port interfaces; the reference adapters (`substrate-file`,
-`substrate-guilde-mcp`, `dispatcher-mention`, `state-fs`,
+`substrate-atrium-mcp`, `dispatcher-mention`, `state-fs`,
 `participant-agent-cli`) implement the most common composition. Future
 adapters (LLM router, capability-match dispatcher, MCP-kv state, real-operator
 participant) plug in without altering the kernel.
@@ -105,7 +105,7 @@ participants:                         # 1..n
     role: <path-or-ref>               # AIP-47 role manifest path, or inline
     meta: { ... }                     # adapter-specific extras
 substrate:
-  kind: <substrate-kind>              # e.g. "file" | "guilde-mcp"
+  kind: <substrate-kind>              # e.g. "file" | "atrium-mcp"
   # ...adapter-specific fields
 dispatcher:
   kind: <dispatcher-kind>             # e.g. "mention" | "llm-router"
@@ -152,7 +152,7 @@ interface Substrate {
 
 Reference adapters:
 - `file` — append-only markdown journal with content-hashed turn ids.
-- `guilde-mcp` — wraps Guilde MCP `post_message` + `get_messages`; declares
+- `atrium-mcp` — wraps Atrium MCP `post_message` + `get_messages`; declares
   `mentions`, `reactions`, `visibility`, `identity`, `multi-writer`,
   `ordered`.
 
@@ -173,7 +173,7 @@ cycle. The dispatcher MUST NOT re-select the author of the most recent turn
 
 Reference adapter:
 - `mention` — text-based `@<displayName>` parser, byte-for-byte identical
-  to Guilde's server-side parser so behaviour matches across modes.
+  to Atrium's server-side parser so behaviour matches across modes.
 
 #### Participant
 
@@ -299,9 +299,9 @@ The reference compositions:
 - **CLI-first** (local swarm): `participant-agent-cli` + `substrate-file` +
   `dispatcher-mention` + `state-fs`. No network, append-only journal, two
   example sub-agents.
-- **Conversation-first** (Guilde-bridged): `participant-agent-cli` +
-  `substrate-guilde-mcp` + `dispatcher-mention` + `state-fs`. CLI participates
-  in a real Guilde conversation as a first-class operator with
+- **Conversation-first** (Atrium-bridged): `participant-agent-cli` +
+  `substrate-atrium-mcp` + `dispatcher-mention` + `state-fs`. CLI participates
+  in a real Atrium conversation as a first-class operator with
   `runtime.kind = "agent-cli"` + `runtime.ref = "claude-code"`.
 
 The dispatcher and participant adapters are byte-identical between the two
@@ -314,34 +314,34 @@ Since 2026-10-23 ([AIP-70](/docs/aip-70)) the canonical schema id is `runtime/v1
 
 ## Known limitations
 
-### Autonomous-orchestrator coexistence (guilde-mcp substrate)
+### Autonomous-orchestrator coexistence (atrium-mcp substrate)
 
-When the kernel runs against a `guilde-mcp` substrate and Guilde's own
+When the kernel runs against an `atrium-mcp` substrate and Atrium's own
 autonomous orchestrator is also active in the same conversation, both
 can react to the same human `@mention`:
 
 - The kernel's dispatcher reads the message, selects a participant, and
   invokes its executor (e.g. `participant-db-operator` calls
   `run_operator`, which posts the reply).
-- Guilde's autonomous `runConversation` flow reads the same message, runs
+- Atrium's autonomous `runConversation` flow reads the same message, runs
   its own routing, and may post a second reply from the same operator.
 
 This produces a duplicate turn. Two short-term mitigations:
 
 1. **Stay one-sided.** Put all the operators that should respond in the
    conversation on the kernel side (declared as `participants` in the
-   manifest), and don't let Guilde's autonomous routing select them. The
+   manifest), and don't let Atrium's autonomous routing select them. The
    simplest version is to use a dedicated conversation for
    kernel-dispatched mode and not invite the same operators into
-   conversations where Guilde's auto-routing should run.
+   conversations where Atrium's auto-routing should run.
 2. **Use `postReply: false` on db-operator participants.** The reply
-   text comes back to the kernel and the substrate writes it; Guilde
+   text comes back to the kernel and the substrate writes it; Atrium
    never sees a kernel-originated trigger that would re-fan-out. The
    autonomous orchestrator still fires on human messages independently,
    though, so this only narrows the surface.
 
 The proper fix is a conversation-level `disableAutoOrchestration` flag
-that Guilde's autonomous runner consults. Planned for a follow-up AIP
+that Atrium's autonomous runner consults. Planned for a follow-up AIP
 amendment; it requires a single column on `conversations` and a check
 in `runConversation`. The kernel's `participant-db-operator` adapter
 can set the flag implicitly when attached to a conversation.

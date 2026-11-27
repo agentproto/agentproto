@@ -57,7 +57,7 @@ Prior art:
 [ACE](https://arxiv.org/abs/2510.04618),
 [GEPA](https://arxiv.org/abs/2507.19457) (genetic-Pareto prompt
 evolution), the Council-of-Mentors persona overlay system used by
-Simone, and the persona-binding slot defined in
+a companion app, and the persona-binding slot defined in
 [AIP-9](/docs/aip-9).
 
 ## Specification
@@ -216,9 +216,9 @@ The index MUST list every playbook with `slug`, `title`, `targets`,
 ### Vendor extensions
 
 Vendor fields go under `metadata.<vendor>`. The Council-of-Mentors
-system in Simone is the first concrete consumer — its mentor-driven
+system of a companion app is the first concrete consumer — its mentor-driven
 fragments are emitted as `PLAYBOOK.md` files with
-`metadata.simone.mentor` set to the mentor id.
+`metadata.<vendor>.mentor` set to the mentor id.
 
 ## Rationale
 
@@ -258,7 +258,7 @@ ACE-style evolve loop, lock-check enforcement, shadow → active
 promotion gate. The Council framework's `council/` module
 is the first conformant consumer — Council mentors emit
 `PLAYBOOK.md` files instead of in-memory fragments, and the persona
-lock is shared with the Simone base persona definition.
+lock is shared with the companion app's base persona definition.
 
 ## Backwards Compatibility
 

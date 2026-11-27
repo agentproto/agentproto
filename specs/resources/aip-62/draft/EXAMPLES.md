@@ -18,7 +18,7 @@ closest pattern and edit fields rather than draft from scratch.
 
 ## 1. A push gate: advisory command lanes plus one blocking agent review
 
-The manifest the agentik-studio monorepo runs on `git push`. Three command
+The manifest an example monorepo runs on `git push`. Three command
 lanes are advisory (`blocking: false`): they are recorded on the attestation but
 never move the verdict. `gate` is a blocking command lane. `correctness` is a
 blocking agent lane that fails only on a `high` finding, placed in an e2b
@@ -29,8 +29,8 @@ packages. Validates against `REVIEW.schema.json`.
 ```md
 ---
 kind: review
-id: agentik-studio
-name: agentik-studio push gate
+id: example-monorepo
+name: example-monorepo push gate
 description: >-
   What `git push` (scripts/gate.mjs) asks the local agentproto daemon to attest:
   advisory turbo/structure lanes plus one blocking agentic review.
@@ -75,7 +75,7 @@ bindings:
   local: { on: pre-push, checks: [types, test, structure, gate, correctness] }
 ---
 
-# agentik-studio review manifest
+# example-monorepo review manifest
 
 `scripts/gate.mjs` (the pre-push hook, `pnpm gate`, `pnpm gate:push`) is a thin
 client: it resolves the pushed range and calls the daemon's `review_run` with

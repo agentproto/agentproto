@@ -106,7 +106,8 @@ payload and declare `capabilities.typed_prompts: true`, instead of
 naming the kind in a vendor `_meta` key. Keep `options` complete, so a
 caller that ignores `request` can still answer. Field shapes:
 [`STREAM-EVENTS.schema.json`](./STREAM-EVENTS.schema.json).
-Hosts (Guilde Shell view, Katchy workflow runner, Simone) consume the
+Hosts (an operator platform's shell view, a creative tool's workflow
+runner, a companion app) consume the
 canonical taxonomy only.
 
 ## Sandbox + secrets contract

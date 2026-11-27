@@ -8,9 +8,8 @@ description: |
   TEMPORAL — observations are tracked over time via temporal-entry
   companion items rather than as direct mutations on this layer.
   Ships in the identitykit-compagnon starter library;
-  corresponds to the `emotional-bond` layer in the Simone
-  reference implementation
-  (packages/simone/src/domain/identity/layers.ts).
+  corresponds to the `emotional-bond` layer of an earlier
+  companion-app implementation (private).
 version: 1.0.0
 # This collection is TEMPORAL: the workspace's
 # layers.temporal.enabled MUST be true to use this collection,
@@ -100,8 +99,8 @@ walking active temporal-entry observations, not by reading the layer's
 last-written values directly.
 
 This collection is part of the **identitykit-compagnon** starter library. It is
-a faithful translation of the Simone reference implementation's `emotional-bond`
-layer (packages/simone/src/domain/identity/layers.ts) into the AIP-18 collection
+a faithful translation of the `emotional-bond` layer of an earlier companion-app
+implementation (private) into the AIP-18 collection
 form.
 
 ## Conventions
@@ -160,17 +159,17 @@ past; the surviving entries feed into trustLevel aggregation.
 ---
 schema: collection.item/v1
 collection: emotional-bond
-id: BOND-simone-with-jeremy
-title: Simone's bond with Jeremy
+id: BOND-nova-with-jeremy
+title: Nova's bond with Jeremy
 status: active
-bearer: ws://personas/simone
+bearer: ws://personas/nova
 trustLevel: 0.85
 sharedMoments:
   - description: First conversation about the founder's mission
     date: 2026-01-10
     significance: 0.9
   - description: |
-      Disagreed about a hire; Simone held a position, founder
+      Disagreed about a hire; Nova held a position, founder
       changed mind after reflection.
     date: 2026-03-05
     significance: 0.85
@@ -180,16 +179,16 @@ communicationPreferences:
   humor: true
 confidence: 0.9
 ---
-# Simone's bond with Jeremy
+# Nova's bond with Jeremy
 
 The companion's relationship anchor. trustLevel is cached 0.85 from the most
 recent active observation. The full temporal-entry stream lives in
-items/temporal-entry/ under parentLayer = BOND-simone-with-jeremy.
+items/temporal-entry/ under parentLayer = BOND-nova-with-jeremy.
 ```
 
 ## See also
 
 - [AIP-23 — agentidentity/v1 spec](/docs/aip-23) — temporal-entry contract
 - [AIP-18 — COLLECTION.md / ITEM.md](/docs/aip-18)
-- The Simone reference implementation's
-  [`emotional-bond` layer](https://github.com/agentik-net/agentik-studio/blob/main/packages/simone/src/domain/identity/layers.ts)
+- The `emotional-bond` layer of an earlier companion-app implementation
+  (private, not linked)

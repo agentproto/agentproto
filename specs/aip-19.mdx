@@ -169,7 +169,7 @@ access:
     - cap: cap://secret/reveal/stripe-api-key    # capability-URN match (AIP-18)
     - tool: stripe-charge                        # auto-grant when this tool runs
     - workflow: invoice-sync                     # auto-grant when this workflow runs
-    - workspace: "@acme-corp/chatcommerce"       # AIP-34 v2 — a specific workspace node
+    - workspace: "@acme-corp/shopchat"       # AIP-34 v2 — a specific workspace node
   bind:
     - tool: stripe-charge                        # injected into the tool's runtime.env
 ```

@@ -22,7 +22,7 @@ ref-impl: https://github.com/agentproto/ts/tree/main/packages/clerk
 | Doctypes | `agentsteward/v1` (session-triage profile, written as `STEWARD.md`) + `agentsecretary/v1` (memory-secretary profile, written as `SECRETARY.md`) |
 | Requires | [AIP-1](/docs/aip-1), [AIP-2](/docs/aip-2), [AIP-46](/docs/aip-46) (sessions, lifecycle events, outcomes), [AIP-41](/docs/aip-41) (routine trigger), [AIP-58](/docs/aip-58) (run/journal of a clerk pass) |
 | Composes with | [AIP-6](/docs/aip-6) (COMPANY targets), [AIP-10](/docs/aip-10) (KNOWLEDGE targets), [AIP-11](/docs/aip-11) (LESSON.md distillation), [AIP-53](/docs/aip-53) (app-bundled clerks) |
-| Reference Impl | [`@agentproto/clerk`](https://github.com/agentproto/ts/tree/main/packages/clerk) (the AIP-68 clerk pass); [`session-steward` app](https://github.com/agentproto/ts/tree/main/packages/apps/session-steward) (steward, shipped); Pygmalion memory secretary (`projects/pygmalion/packages/core/src/memory/`, agentik-studio) |
+| Reference Impl | [`@agentproto/clerk`](https://github.com/agentproto/ts/tree/main/packages/clerk) (the AIP-68 clerk pass); [`session-steward` app](https://github.com/agentproto/ts/tree/main/packages/apps/session-steward) (steward, shipped); memory secretary in a private production host (not public) |
 
 ## Abstract
 
@@ -75,7 +75,7 @@ Three gaps, one primitive:
 2. **Cold context is paid twice.** When an agent wakes from a new
    session, a compaction, or a crash, its only machine-readable memory
    is its transcript, so it (or its operator) pays to reread the whole
-   thing. The Pygmalion runtime solved this with an out-of-band
+   thing. One production runtime solved this with an out-of-band
    secretary: per-source `offsetLine` cursors, debounced passes, an
    anti-hallucination quote guard on distillation, and a `HANDOFF.md`
    the brain reads FIRST on wake. The machinery is proven but
@@ -132,7 +132,7 @@ id: <kebab-slug>                   # REQUIRED, unique per workspace
 subject:                           # REQUIRED. What this clerk watches.
   sessions:                        # a section, not a boolean
     match:                         # per AIP-46 descriptor field globs
-      origin: ["pygmalion*", "app-service:*"]   # optional
+      origin: ["muse*", "app-service:*"]   # optional
       label: []                   # optional
       cwd: []                     # optional
       model: []                   # optional
@@ -329,7 +329,7 @@ human launch (e.g. `vscode`, `chat-starter`) OR whose root has no
 `origin` and no `parentSessionId` is FLAG-ONLY: every potential close
 is recorded `needs-input` with reason `flag (origin)`. Stamped origins
 are the authorization: `cron`, `routine:*`, `workflow`, `review`,
-`webhook`, `bench`, `pygmalion`, `app-service:*`, and any session with
+`webhook`, `bench`, `muse`, `app-service:*`, and any session with
 a parent. An origin-less root is a legacy-fail-safe, never a license to
 close.
 
@@ -489,13 +489,11 @@ UX on the reference implementation (`agentproto steward`).
   workflows, the `session_wrapup_plan` / `session_wrapup_apply` /
   `session_evidence` tools, the origin policy and rules engine. This
   document is the first spec for the steward behavior.
-- **Secretary:** reference at
-  [`agentik-studio/projects/pygmalion/packages/core/src/memory/`](https://github.com/agentik-studio/agentik-studio/tree/main/projects/pygmalion/packages/core/src/memory)
+- **Secretary:** implemented in a private production host, not public
   (incremental pass `conversation/pass.ts`, triggers
   `conversation/triggers.ts`, lens `conversation/lens.ts`, per-source
   dedup in `conversation/sources.ts`, handoff writer `memory/handoff/`),
-  currently brain-only, generalization planned per the Pygmalion plan
-  `projects/pygmalion/docs/plans/PLAN-SECRETAIRE-AGENTS.md`.
+  currently brain-only, with a generalization to agents planned.
 - **Parser/validator:** to be extracted; the steward app already ships
   zod schemas for verdicts, rules file, and evidence packs.
 
@@ -509,9 +507,9 @@ Not applicable (new spec). Points of graceful coexistence:
 - Existing `agentproto steward` users see their exact behavior now
   spec'd at AIP level; the rules file, verdict vocabulary and CLI stay
   unchanged.
-- The Pygmalion brain secretary keeps its existing on-disk cursor and
+- An existing brain secretary keeps its existing on-disk cursor and
   pass shape, which this AIP re-uses as-is for agents (new dirs
-  `<pygmalion>/memory/agents/<slug>/`; no migration of the brain cursor).
+  `<host>/memory/agents/<slug>/`; no migration of the brain cursor).
 - Unknown frontmatter keys and unknown lens ids warn; they never
   hard-fail a clerk.
 

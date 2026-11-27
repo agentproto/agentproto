@@ -129,13 +129,13 @@ chain is stored at `workspace/audit/audit-log.jsonl` (one entry per line; shown
 formatted here for readability — real lines are unindented).
 
 ```jsonl
-{"$schema":"governance/v1","doctype":"audit-event","seq":40,"ts":"2026-04-28T11:00:00.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.scheduled","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"e5f6...prior-hash...0a","hash":"7c1d...computed...3b","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":40,"ts":"2026-04-28T11:00:00.000Z","actor":{"id":"agent:nova","role":"operator"},"action":"deploy.scheduled","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"e5f6...prior-hash...0a","hash":"7c1d...computed...3b","hashAlg":"sha256"}
 {"$schema":"governance/v1","doctype":"audit-event","seq":41,"ts":"2026-04-28T11:01:30.000Z","actor":{"id":"host:governance","role":"system"},"action":"policy.resolved","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"policy":{"ref":"production-deploy","decision":"require-approval"},"prevHash":"7c1d...3b","hash":"9a4e...computed...d2","hashAlg":"sha256"}
 {"$schema":"governance/v1","doctype":"audit-event","seq":42,"ts":"2026-04-28T11:02:15.000Z","actor":{"id":"morgan@example.com","role":"cfo"},"action":"signature.recorded","subject":{"kind":"signature","path":"./signatures/cfo-2026-04-28T11-02-15Z.signature.json"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/cfo-2026-04-28T11-02-15Z.signature.json"],"prevHash":"9a4e...d2","hash":"b8c1...computed...e7","hashAlg":"sha256"}
 {"$schema":"governance/v1","doctype":"audit-event","seq":43,"ts":"2026-04-28T11:04:02.000Z","actor":{"id":"alex@example.com","role":"security"},"action":"signature.recorded","subject":{"kind":"signature","path":"./signatures/security-2026-04-28T11-04-02Z.signature.json"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/security-2026-04-28T11-04-02Z.signature.json"],"prevHash":"b8c1...e7","hash":"4d2a...computed...f9","hashAlg":"sha256"}
 {"$schema":"governance/v1","doctype":"audit-event","seq":44,"ts":"2026-04-28T11:04:03.000Z","actor":{"id":"host:governance","role":"system"},"action":"approval.released","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"policy":{"ref":"production-deploy","decision":"approve"},"signatures":["./signatures/cfo-2026-04-28T11-02-15Z.signature.json","./signatures/security-2026-04-28T11-04-02Z.signature.json"],"prevHash":"4d2a...f9","hash":"6e8b...computed...a1","hashAlg":"sha256"}
-{"$schema":"governance/v1","doctype":"audit-event","seq":45,"ts":"2026-04-28T11:05:00.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.started","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"6e8b...a1","hash":"3f7c...computed...b4","hashAlg":"sha256"}
-{"$schema":"governance/v1","doctype":"audit-event","seq":46,"ts":"2026-04-28T11:08:42.000Z","actor":{"id":"agent:simone","role":"operator"},"action":"deploy.completed","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"output":{"status":"green","durationMs":222000},"prevHash":"3f7c...b4","hash":"a5d9...computed...c8","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":45,"ts":"2026-04-28T11:05:00.000Z","actor":{"id":"agent:nova","role":"operator"},"action":"deploy.started","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"input":{"environment":"production","commit":"a1b2c3d"},"prevHash":"6e8b...a1","hash":"3f7c...computed...b4","hashAlg":"sha256"}
+{"$schema":"governance/v1","doctype":"audit-event","seq":46,"ts":"2026-04-28T11:08:42.000Z","actor":{"id":"agent:nova","role":"operator"},"action":"deploy.completed","subject":{"kind":"deploy","ref":"deploy-prod-2026-04-28-002"},"output":{"status":"green","durationMs":222000},"prevHash":"3f7c...b4","hash":"a5d9...computed...c8","hashAlg":"sha256"}
 ```
 
 A verifier reading this chain:
@@ -191,9 +191,9 @@ entry's `signatures[]` field cites the signature file.
 
 ## Examples
 
-- `agent:simone` runs `append-to-notes` with `filename: /finance/q2-budget.md` →
+- `agent:nova` runs `append-to-notes` with `filename: /finance/q2-budget.md` →
   policy fires → CFO is paged → approval signature → write proceeds.
-- `agent:guilde-ops` runs `workspace-edit-file` on `/finance/forecast.md` →
+- `agent:atrium-ops` runs `workspace-edit-file` on `/finance/forecast.md` →
   policy fires regardless of the calling tool's own approval class.
 ```
 
