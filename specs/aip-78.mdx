@@ -155,9 +155,11 @@ keep using the session tools (`agent_prompt`, `agent_output`,
 - `taskId` MUST be generated from at least 128 bits of randomness (reference
   format: `task_` followed by 16 random bytes in hex). It MUST NOT be derived
   from a `sessionId`.
-- The ledger keeps per task:
+- The ledger keeps at least, per task:
   `{ taskId, sessionId, promptId, principal, createdAt, ttlMs, pollIntervalMs, lastStatus, lastUpdatedAt, endedAt?, outcome?, result? }`.
-  `principal` is the resolved principal that created the task.
+  `principal` is the resolved principal that created the task. A host MAY keep
+  further fields (for example the boot it was written under, whether the turn
+  started, the last `statusMessage`); this AIP does not require them.
 - Writes MUST be atomic (write to a temporary file in the same directory,
   `fsync`, rename) and the files readable only by the host user (mode `0600`).
   The ledger MUST survive a host restart.
@@ -335,10 +337,16 @@ without result: it ends the task as `session-forgotten` (see the mapping).
 ## Reference Implementation
 
 `@agentproto/runtime` (`packages/runtime/src/mcp-modern`) implements the
-projection, the ledger, the state mapping and the three methods behind the host
-configuration flag `mcp.tasks`. Some points above (prompt tickets, the closed
-turn-outcome set, the per-principal cap, `_meta` on `CreateTaskResult`) are
-specified here ahead of the implementation and are tracked as changes to it.
+projection, the prompt tickets, the ledger, the state mapping and the three
+methods behind the host configuration flag `mcp.tasks`. The host settings the
+text above leaves to the host are `mcp.tasksTools` (`both`, the default,
+`agent_start` or `agent_prompt`), `mcp.tasksTtlMs` and `mcp.tasksMaxTtlMs` (the
+retention default and maximum), `mcp.tasksMaxPerPrincipal` (the cap of
+non-terminal tasks per principal; a call beyond it is refused with a tool error)
+and `mcp.tasksResultMaxChars` (the bound of `TurnResult.text`, cut at the bound).
+That host answers every covered call synchronously for a client that did not
+declare the extension, so it never returns `-32021` from `agent_start` or
+`agent_prompt`.
 
 ## Security considerations
 
