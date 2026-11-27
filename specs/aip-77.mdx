@@ -204,23 +204,26 @@ The modern handler maps protocol errors to HTTP status codes as follows:
 | `-32700` | Parse error | `400` |
 | `-32600` | Invalid request (batch, response body, wrong verb/Accept/Content-Type) | `400` / `405` / `406` / `415` |
 | `-32601` | Method not found (including removed legacy methods such as `initialize`, `ping`, `logging/setLevel`) | `404` |
-| `-32602` | Invalid params raised by the gateway itself: a malformed request (missing required `_meta` fields, `params` not an object, a missing parameter a header must mirror), a refused MRTR retry, a Tasks request, a Skills request | `400` |
+| `-32602` | Invalid params raised by the gateway itself: a malformed request (missing required `_meta` fields, `params` not an object, a missing parameter a header must mirror), a refused MRTR input request (forbidden caller, or an altered, expired, replayed or foreign `requestState`), a Tasks request, a Skills request | `400` |
 | `-32020` | Header mismatch (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) | `400` |
 | `-32021` | Missing required client capability (`error.data.requiredCapabilities`) | `400` |
 | `-32022` | Unsupported protocol version (`error.data.supported`, `error.data.requested`) | `400` |
-| Handler errors | Tool or extension domain errors not listed above, including a `-32602` raised by a tool's own handler (for example invalid arguments to `tools/call`) | `200` |
-| Uncaught internal failure | Internal error (`-32603`) without leaking internal details | `500` |
+| Handler errors | Tool or extension domain errors not listed above, including a `-32602` raised by a tool's own handler (for example an unknown tool or invalid arguments to `tools/call`) and a deliberate `-32603` raised by a handler (for example `tasks/cancel` on a turn the harness cannot cancel, `data.reason: "cancel-unsupported"`) | `200` |
+| Uncaught internal failure | An exception no handler turned into a JSON-RPC error, answered as `-32603` without leaking internal details | `500` |
 
 The `400` for `-32602` follows the MCP specification only where it gives
 one: "A request missing any required field is malformed; the server MUST
 reject it with JSON-RPC error code -32602 (Invalid params). On HTTP, the
 response status MUST be 400 Bad Request." (MCP `2026-07-28`,
 [Base Protocol, Per-request protocol fields](https://modelcontextprotocol.io/specification/2026-07-28/basic/index)).
-The MRTR and Skills pages give the JSON-RPC code without an HTTP status;
-this AIP fixes it at `400` for a refused retry and for a Skills request,
-as for a Tasks request. Every other `-32602`, in particular one raised by
-a tool's handler on `tools/call`, keeps HTTP `200`, as the legacy era
-answers it.
+This AIP reads `params` that is not an object, and a missing parameter
+that a header must mirror, as malformed requests of the same kind. The
+Skills page fixes `-32602` without an HTTP status, and the MRTR page
+names neither a code nor a status (it asks only for "an appropriate
+error code"); this AIP fixes both at `-32602` with `400`, as for a Tasks
+request. Every other `-32602`, in particular one raised by a tool's
+handler on `tools/call` (the Tools page's own example is "Unknown tool:
+invalid_tool_name"), keeps HTTP `200`, as the legacy era answers it.
 
 ### Discovery modes and filtering
 
