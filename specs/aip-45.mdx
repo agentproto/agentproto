@@ -5,7 +5,7 @@ aip: 45
 status: Review
 type: Schema
 created: 2026-05-08
-updated: 2026-11-08
+updated: 2026-11-27
 author: Jeremy André <jeremy@agentik.net>
 requires: [1, 2, 17, 19, 29, 36, 44]
 ref-impl: https://github.com/agentproto/ts/tree/main/packages/harness
@@ -491,8 +491,103 @@ per `single` field, a string array per `multi` field and the typed text
 under the companion property; the skip option becomes `decline` and a
 cancel becomes `cancel`. A client SHOULD advertise
 `elicitation.form` only when someone can answer the prompt: without it
-the harness keeps its own fallback. `mode: "url"` elicitations are out
-of scope here.
+the harness keeps its own fallback. ACP `mode: "url"` elicitations are
+out of scope here. Carrying an `agent-prompt` to an MCP client goes the
+other way (host to client, not agent to host) and is covered by
+[MCP transport of a question](#mcp-transport-of-a-question-2026-11-27).
+
+##### MCP transport of a question (2026-11-27)
+
+A host that relays a parked `agent-prompt` to an MCP `2026-07-28` client
+carries it as one `elicitation/create` request inside an
+`InputRequiredResult` ([AIP-77](/docs/aip-77), Human input over MRTR).
+AIP-77 owns the transport: who may be asked, the replay token, its
+durability and the rollback switches. This subsection fixes how the
+prompt and its answer are written. An `agent-prompt` always travels as
+`mode: "form"`; `mode: "url"` is used only for [AIP-7](/docs/aip-7)
+approvals.
+
+**Tool permission and plan approval.** The form has a required
+`decision` property (`oneOf` `approve` / `deny`) and, only when an
+`allow_always` option is offered, a `scope` property (`oneOf` `once` /
+`always`, default `once`). The message is `text`, prefixed with
+`[toolName]` when the tool name is known. `approve` resolves the prompt
+with an `allow_*` option (`allow_always` when `scope` is `always`),
+`deny` with a `reject_*` option; when no reject option is offered the
+prompt is resolved as `{ cancelled: true }`. For a `plan-approval`,
+`approve` and `deny` MUST select `approveOptionId` and `rejectOptionId`.
+
+**Question with `fields`.** The form has one property per field, keyed
+by the field `id`. `prompt` becomes the property `description`,
+`header` its `title`, and a `required` field is listed in `required`.
+`recommended` becomes the `default` of a `single` property. The message
+is the question `prompt`, or the request `text` when the prompt is
+empty.
+
+| Field | Property |
+|---|---|
+| `single` with `choices`, `allowFreeText` false | `type: "string"`, `oneOf` of `{ const: value, title: label }` |
+| `single` with `allowFreeText` true, or without `choices` | `type: "string"`, no `oneOf` |
+| `multi` with `choices` | `type: "array"`, `items.anyOf` of `{ const: value, title: label }` |
+| `multi` without `choices` | none: the whole prompt is not projected |
+| `text` | `type: "string"` |
+| `boolean` | `type: "boolean"` |
+| `number` | `type: "number"` |
+
+The flat `requestedSchema` subset has no shape for "one of these, or
+any text". A `single` field that allows free text therefore loses its
+`choices` in the form, and a `multi` field loses its free text. A host
+MUST NOT write a free-text `single` field as a closed `oneOf`, which
+would refuse an answer the harness accepts; the answer rules below put
+a typed choice back in `selected`. A choice's `description` and
+`preview` are not carried.
+
+**Answer.** For a question with `fields`, an `accept` is turned into
+`{ answers }`: a `single` string
+equal to a choice `value` becomes `selected`, any other string becomes
+`text`; a `multi` array becomes `selected`; a `text` string becomes
+`text`; a `boolean` or `number` becomes `value`. An absent property or
+an empty string is a skipped field. The rules of
+[Multi-field questions](#multi-field-questions-2026-11-03) still apply
+to the result: the harness rejects an unknown field or value, and text
+on a field that does not allow it. A missing required field, or a
+property of the wrong type, is an incomplete answer: the host sends a
+fresh `InputRequiredResult` for the same prompt, not an error. A
+`decline` resolves the prompt as the skip or reject option does. A
+`cancel` applies nothing; the prompt stays parked and answerable
+through the host's own tools.
+
+**An accept is not a decision.** `action: "accept"` only says that the
+client returned the form. For a tool permission the decision is the
+`decision` property: an `accept` carrying `deny` denies, and an
+`accept` without a valid `decision` is incomplete. For a question the
+answer is the content. A host MUST NOT read `accept` alone as a grant.
+
+**No secret in a form.** A host MUST NOT project a question whose
+prompt, or any field whose `id`, `header` or `prompt`, asks for a
+password or passphrase, a secret, an API key, an access, auth, refresh
+or bearer token, a private key, a credential, OAuth data, or payment or
+card data. Such a prompt is not projected at all (a form with the field
+left out would be a different question), and stays answerable through
+the host's own tools.
+
+**Question without `fields`.** A host MUST NOT carry a `question` that
+has no `fields` as the tool-permission form above: `approve` would pick
+an option the human never saw. It either does not project it, or
+writes it as a form with one property, `answer`: a string with a
+`oneOf` of `{ const: optionId, title: label }` per choice, or a plain
+string when `allowFreeText` is true. Such a prompt is answered as in
+rule 3 of [`agent-prompt` requests](#agent-prompt-requests-added-2026-10-28),
+never with `{ answers }`, which the harness MUST reject on a prompt
+without `fields`. An `answer` equal to a choice `optionId` resolves
+the prompt with `{ optionId }`; any other text, when `allowFreeText`
+is true, resolves it with `{ optionId: freeTextOptionId, feedback }`.
+An empty or absent `answer` is incomplete. `decline` and `cancel` are
+handled as for a question with `fields`.
+
+A host that relays `agent-prompt` over MCP conforms to this
+subsection when it meets every MUST above; this is in addition to
+[AIP-77](/docs/aip-77) conformance item 8, which covers the transport.
 
 ### Lifecycle
 
@@ -939,6 +1034,20 @@ The package exposes `defineHarness` as its canonical entry point; compatibility 
 The reference impl is the source of truth for the schema during the
 Draft phase; spec changes propagate through `scaffold-aip` regen.
 
+The MCP transport of a question is implemented by the agentproto daemon
+in `@agentproto/runtime`, `src/mcp-modern/human-gate.ts`
+(`buildPermissionElicitation`, `projectQuestionField`,
+`applyOnePermissionResponse`). Two points of that subsection are not
+met yet. A `question` without `fields` is still carried as the
+tool-permission form, and `approve` then selects the first `allow_*`
+option. A `plan-approval` selects its options by kind, not by id
+(`selectPermissionOptionId` in `src/sessions.ts`): `approve` takes the
+first `allow_once`, or the first `allow_always` when `scope` is
+`always`, and `deny` takes the first `reject_once`, else any
+`reject_*` or `deny_*` option. That matches `approveOptionId` and
+`rejectOptionId` only when the plan offers no `allow_always` and no
+other option of the kinds it selects.
+
 ## Backward compatibility
 
 Not applicable — first agentproto AIP for interactive harnesses.
@@ -964,6 +1073,13 @@ Additive. `fields` is a new OPTIONAL member of `QuestionRequest` and
 skip option of kind `reject_once`, so a caller that ignores `fields`
 can still answer a lone single-choice question by `optionId`, or skip
 the form.
+
+### The 2026-11-27 MCP transport of a question amendment (draft)
+
+Additive. The subsection describes how a host writes an existing
+`agent-prompt` for an MCP client; it adds no field to any event or
+manifest, and a harness does nothing new. A host that does not relay
+prompts over MCP is unaffected.
 
 ### The 2026-10-23 presentable auth methods amendment (draft)
 
@@ -1033,6 +1149,8 @@ adds the bidirectional-protocol surface.
 
 - [AIP-29 — CLI.md](/docs/aip-29) — tool CLIs (one-shot `cmd → output`); shares install/version/auth blocks via `$ref`
 - [AIP-44 — ACP.md](/docs/aip-44) — wire protocol when `protocol: acp`
+- [AIP-77, MCP-GATEWAY](/docs/aip-77): its Human input over MRTR section carries an `agent-prompt` to an MCP client
+- [AIP-7, GOVERNANCE](/docs/aip-7): approvals, the only human input sent as an MCP `url` elicitation
 - [AIP-9 — OPERATOR.md](/docs/aip-9) — runtime that consumes a harness via the optional `runtime: { kind: "agent-cli" }` binding
 - [AIP-17 — RUNNER.md](/docs/aip-17) — process boundary
 - [AIP-19 — SECRETS.md](/docs/aip-19) — auth surface
