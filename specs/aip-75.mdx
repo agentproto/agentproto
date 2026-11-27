@@ -432,7 +432,9 @@ Rules:
 10. **Usage callback.** When `onUsage` is set, the session calls it
     exactly once with the final `VoiceUsage`, when the session closes for any
     reason (`close()`, a fatal fault under rule 8, the idle close of rule 9),
-    after the record is final; `close()` does not wait for it. The session
+    after the record is final. `close()` MAY wait for it to settle before it
+    resolves (the reference package does); a host MUST NOT rely on either
+    order. The session
     MAY call it earlier with cumulative snapshots; each snapshot supersedes
     the previous one. A rejected or throwing `onUsage` MUST NOT interrupt
     audio or prevent the close.
@@ -1081,9 +1083,11 @@ vendor exchanges; it lives with the reference package.
    before Review.
 6. Credential source. When a session runs with a key the customer owns
    (bring-your-own-key, `byok`), billing must tell it apart from the
-   platform key. Should the usage entry carry an optional `credentialSource`
-   (`platform` or `byok`), or does the host tag the record itself? Revisit
-   before Review.
+   platform key. The reference package already lets the host attach an
+   opaque tag to each usage entry (`credentialSource`, a string it never
+   interprets), outside this contract. Should the contract name that field
+   and fix its values (`platform` or `byok`), or leave the tag to the host?
+   Revisit before Review.
 
 ## Reference Implementation
 
